@@ -1,14 +1,14 @@
 # Email Queue System
 
-Async email delivery with retry, dead-letter queue, and idempotency.
+Async email delivery using Redis with automatic retry.
 
 ## Architecture
 
 ```
-┌─────────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────┐
-│  API Handler    │────▶│ EmailService │────▶│  email_jobs  │◀────│Worker│────▶ SMTP
-│ (register, etc) │     │  (enqueue)   │     │   (table)    │     │      │
-└─────────────────┘     └──────────────┘     └──────────────┘     └──────┘
+┌─────────────────┐     ┌──────────────┐     ┌─────────────┐     ┌────────┐
+│  API Handler    │────>│ EmailService │────>│ Redis Queue │<────│ Worker │───> SMTP
+│ (register, etc) │     │  (enqueue)   │     │ (LPUSH)     │     │ (BRPOP)│
+└─────────────────┘     └──────────────┘     └─────────────┘     └────────┘
 ```
 
 ## Components
@@ -16,54 +16,58 @@ Async email delivery with retry, dead-letter queue, and idempotency.
 | Component | Location | Purpose |
 |-----------|----------|---------|
 | `EmailService` | `services/email.rs` | High-level API for sending emails |
-| `EmailQueue` | `queues/email.rs` | Enqueues jobs to database |
+| `RedisEmailQueue` | `queues/redis_email.rs` | Enqueues jobs to Redis |
 | `EmailWorker` | `workers/email.rs` | Background processor |
-| `email_jobs` | `models/email_jobs.rs` | Database model |
 | Templates | `templates/email/` | HTML/text email templates |
 
 ## Folder Structure
 
 ```
 backend/src/
-├── queues/           # Job queues
+├── queues/
 │   ├── mod.rs
-│   └── email.rs      # Email queue
-├── workers/          # Background workers
+│   └── redis_email.rs    # Redis queue (LPUSH/BRPOP)
+├── workers/
 │   ├── mod.rs
-│   └── email.rs      # Email worker
+│   └── email.rs          # Email worker
 ├── services/
-│   └── email.rs      # EmailService (uses queue)
-├── models/
-│   └── email_jobs.rs # Database entity
+│   └── email.rs          # EmailService (uses queue)
 └── templates/
-    └── email/        # Email templates
+    └── email/
+        ├── mod.rs
+        ├── base.rs           # Base template wrapper
+        ├── verification.rs   # Email verification
+        ├── password_reset.rs # Password reset
+        ├── welcome.rs        # Welcome email
+        └── notification.rs   # Generic notifications
 ```
 
 ## Usage
 
-### Sending an Email (from handler)
+### Sending an Email
+
+Emails are queued to Redis, not sent immediately:
 
 ```rust
-// Emails are queued, not sent immediately
 let job_id = state.email_service
-    .send_verification_email(&email, &username, &token)
+    .send_verification_email(&email, &username, &code)
     .await?;
 ```
 
 ### Available Methods
 
 ```rust
-// Verification email
-send_verification_email(to_email, username, token) -> Uuid
+// Verification email (with 6-digit code)
+send_verification_email(to_email, username, verification_code) -> Uuid
 
-// Password reset
-send_password_reset_email(to_email, username, token) -> Uuid
+// Password reset (with 6-digit code)
+send_password_reset_email(to_email, username, reset_code) -> Uuid
 
 // Welcome email (after verification)
 send_welcome_email(to_email, username) -> Uuid
 
 // Generic notification
-send_notification_email(to_email, username, subject, message, notification_id) -> Uuid
+send_notification_email(to_email, username, subject, message) -> Uuid
 ```
 
 ## Adding a New Email Type
@@ -73,7 +77,7 @@ send_notification_email(to_email, username, subject, message, notification_id) -
 Create `backend/src/templates/email/my_email.rs`:
 
 ```rust
-use super::base::{button, wrap_html, wrap_text};
+use super::base::{wrap_html, wrap_text};
 use super::EmailTemplate;
 
 pub fn my_email(username: &str, data: &str) -> EmailTemplate {
@@ -112,218 +116,137 @@ pub async fn send_my_email(
     to_email: &str,
     username: &str,
     data: &str,
-    unique_id: &str,  // For idempotency
 ) -> ApiResult<Uuid> {
     let template = my_email(username, data);
 
-    // Idempotency key prevents duplicate sends
-    let idempotency_key = format!("my_email:{}:{}", to_email, unique_id);
-
-    self.queue.enqueue(
-        &idempotency_key,
-        to_email,
-        Some(username),
-        "Subject Line",
-        &template.html,
-        &template.text,
-    ).await
+    self.queue
+        .enqueue(
+            to_email,
+            Some(username),
+            "Subject Line",
+            &template.html,
+            &template.text,
+        )
+        .await
 }
 ```
 
 ## Job Lifecycle
 
 ```
-┌─────────┐     ┌────────────┐     ┌──────┐
-│ PENDING │────▶│ PROCESSING │────▶│ SENT │
-└─────────┘     └────────────┘     └──────┘
-                      │
-                      ▼ (on failure)
-                ┌────────┐
-                │ FAILED │──────┐
-                └────────┘      │ (retry with backoff)
-                      ▲         │
-                      └─────────┘
-                      │
-                      ▼ (max retries exceeded)
-               ┌─────────────┐
-               │ DEAD_LETTER │
-               └─────────────┘
+┌─────────┐          ┌──────┐
+│ QUEUED  │─────────>│ SENT │
+└─────────┘          └──────┘
+     │
+     │ (on failure)
+     ▼
+┌─────────┐
+│ RETRY   │──────┐
+└─────────┘      │ (re-queue)
+     ▲           │
+     └───────────┘
+     │
+     ▼ (max retries = 3)
+┌─────────┐
+│ DROPPED │
+└─────────┘
 ```
 
-## Retry & Backoff
+## Retry Mechanism
 
-- **Max retries**: 3 (configurable per job)
-- **Backoff formula**: `60 * 2^retry_count` seconds
-  - Retry 1: 2 minutes
-  - Retry 2: 4 minutes
-  - Retry 3: 8 minutes (then dead-letter)
+- **Max retries**: 3
+- Failed jobs are immediately re-queued with incremented retry count
+- After 3 failures, job is dropped and logged
 
-## Idempotency
+## Redis Queue Details
 
-Each email type generates a unique `idempotency_key`:
+| Key | Type | Purpose |
+|-----|------|---------|
+| `email:queue` | List | Job queue (LPUSH to add, BRPOP to pop) |
 
-| Email Type | Key Format | Duplicates Prevented |
-|------------|------------|---------------------|
-| Verification | `verification:{email}:{token}` | Per token |
-| Password Reset | `password_reset:{email}:{token}` | Per token |
-| Welcome | `welcome:{email}` | One per user ever |
-| Notification | `notification:{email}:{id}` | Per notification |
+### Job Structure
 
-If a job with the same key exists, `enqueue()` returns the existing job ID.
-
-## Database Schema
-
-```sql
-CREATE TABLE email_jobs (
-    id UUID PRIMARY KEY,
-    idempotency_key VARCHAR(255) UNIQUE NOT NULL,
-    to_email VARCHAR(255) NOT NULL,
-    to_name VARCHAR(255),
-    subject VARCHAR(500) NOT NULL,
-    html_body TEXT NOT NULL,
-    text_body TEXT NOT NULL,
-    status email_job_status NOT NULL DEFAULT 'pending',
-    retry_count INTEGER NOT NULL DEFAULT 0,
-    max_retries INTEGER NOT NULL DEFAULT 3,
-    next_retry_at TIMESTAMP,
-    last_error TEXT,
-    created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL,
-    sent_at TIMESTAMP
-);
-
--- Indexes
-CREATE INDEX idx_email_jobs_status_next_retry ON email_jobs(status, next_retry_at);
-CREATE INDEX idx_email_jobs_idempotency_key ON email_jobs(idempotency_key);
+```json
+{
+  "id": "uuid",
+  "to_email": "user@example.com",
+  "to_name": "Username",
+  "subject": "Email Subject",
+  "html_body": "<html>...</html>",
+  "text_body": "Plain text...",
+  "retry_count": 0
+}
 ```
 
 ## Configuration
 
-Required environment variables for email sending:
+Required environment variables:
 
 ```env
+# SMTP Settings
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USERNAME=your-email@gmail.com
 SMTP_PASSWORD=your-app-password
 SMTP_FROM_EMAIL=noreply@cosmicforge.com
-SMTP_FROM_NAME=CosmicForge
+SMTP_FROM_NAME=CosmicForge HealthNet
+
+# Redis
+REDIS_URL=redis://127.0.0.1:6379
+
+# App URL (for email links)
 APP_URL=https://yourapp.com
 ```
 
-**Note**: If SMTP is not configured:
-- Emails will still be queued to the database
-- Worker will not start
-- Jobs remain in `pending` status
+**Note**: If SMTP is not configured, emails will still be queued but the worker won't start.
 
-## Worker Configuration
+## Worker Behavior
 
-In `workers/email.rs`:
+- Uses blocking pop (`BRPOP`) with 5-second timeout
+- Processes one job at a time
+- Supports graceful shutdown via watch channel
+- Logs all send successes and failures
 
-```rust
-const POLL_INTERVAL_SECS: u64 = 5;   // Check for jobs every 5 seconds
-const BATCH_SIZE: u64 = 10;           // Process up to 10 jobs per batch
-const BASE_BACKOFF_SECS: i64 = 60;    // Base retry delay
+## Monitoring
+
+### Check queue length
+
+```bash
+redis-cli LLEN email:queue
 ```
 
-Also mention:  
-- These constants control polling, batch size, and retry backoff.
-- Can be changed for tuning performance.
+### View queued jobs
 
----
-
-### Concurrency
-
-Email jobs are processed concurrently with a limit of 3 jobs per batch:
-
-```rust
-iter(jobs)
-    .for_each_concurrent(3, |job| async move { worker.process_job(job).await })
-    .await;
-
-- **Backoff formula**: `BASE_BACKOFF_SECS * 2^retry_count` seconds
-  - Retry 1: 2 minutes
-  - Retry 2: 4 minutes
-  - Retry 3: 8 minutes (then dead-letter)
-
-
-
-## MonitoringPENDING -> PROCESSING -> SENT
-                  |
-                  ▼ (on failure)
-                FAILED -> (retry with exponential backoff)
-                  |
-                  ▼ (max retries exceeded)
-               DEAD_LETTER
-
-## Idempotency
-
-Each email type generates a unique `idempotency_key`:
-
-| Email Type    | Key Format                  | Prevents Duplicates          |
-|---------------|----------------------------|------------------------------|
-| Verification  | verification:{email}:{token} | Per token                    |
-| Password Reset| password_reset:{email}:{token} | Per token                   |
-| Welcome       | welcome:{email}             | One per user ever            |
-| Notification  | notification:{email}:{id}  | Per notification             |
-
-### Sending an Email
-
-Emails are queued, not sent immediately:
-
-```rust
-let job_id = state.email_service
-    .send_verification_email(&email, &username, &token)
-    .await?;
-
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USERNAME=your-email@gmail.com
-SMTP_PASSWORD=your-app-password
-SMTP_FROM_EMAIL=noreply@cosmicforge.com
-SMTP_FROM_NAME=CosmicForge
-APP_URL=https://yourapp.com
-
-
-### Check pending jobs
-
-```sql
-SELECT COUNT(*) FROM email_jobs WHERE status = 'pending';
+```bash
+redis-cli LRANGE email:queue 0 -1
 ```
 
-### Check failed jobs
+### Clear the queue
 
-```sql
-SELECT * FROM email_jobs
-WHERE status = 'failed'
-ORDER BY updated_at DESC;
-```
-
-### Check dead-letter queue
-
-```sql
-SELECT * FROM email_jobs
-WHERE status = 'dead_letter'
-ORDER BY updated_at DESC;
-```
-
-### Retry a dead-letter job
-
-```sql
-UPDATE email_jobs
-SET status = 'pending',
-    retry_count = 0,
-    next_retry_at = NOW()
-WHERE id = 'job-uuid-here';
+```bash
+redis-cli DEL email:queue
 ```
 
 ## Testing
 
-Without SMTP configured, emails queue but don't send. Check the database:
+Without SMTP configured, emails queue but don't send. Check Redis:
 
-```sql
-SELECT id, to_email, subject, status, created_at
-FROM email_jobs
-ORDER BY created_at DESC
-LIMIT 10;
+```bash
+# Connect to Redis
+docker-compose exec redis redis-cli
+
+# Check queue length
+LLEN email:queue
+
+# View jobs
+LRANGE email:queue 0 -1
 ```
+
+## SMTP Port Configuration
+
+| Port | Protocol | Usage |
+|------|----------|-------|
+| 587 | STARTTLS | Default, most providers |
+| 465 | SSL/TLS | Direct SSL connection |
+
+The worker automatically selects the correct protocol based on the port.
