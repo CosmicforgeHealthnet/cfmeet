@@ -1,33 +1,35 @@
 version: "3.8"
 
+# =============================================================================
+# Usage:
+#   Development:  docker-compose up -d postgres redis
+#   Production:   docker-compose up -d
+# =============================================================================
+
 services:
-  # PostgreSQL Database (Local Development Only)
-  # For production, use Aiven Cloud PostgreSQL or external database
   postgres:
     image: postgres:15-alpine
     container_name: cosmicforge-db
-    environment:
-      POSTGRES_USER: cosmicforge
-      POSTGRES_PASSWORD: cosmicforge123
-      POSTGRES_DB: cosmicforge_rtc
+    env_file:
+      - .env
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cosmicforge"]
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
       - cosmicforge-network
+    restart: unless-stopped
 
-  # Redis Cache (for OTP, sessions, rate limiting, email queue)
   redis:
     image: redis:7-alpine
     container_name: cosmicforge-redis
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
@@ -38,24 +40,21 @@ services:
       retries: 5
     networks:
       - cosmicforge-network
+    restart: unless-stopped
 
-  # Backend Service
   backend:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: cosmicforge-backend
     ports:
-      - "8080:8080"
+      - "${PORT:-8080}:8080"
     env_file:
       - .env
     environment:
-      # Override DATABASE_URL for local development with Docker PostgreSQL
-      # Comment this out if using external database (e.g., Aiven Cloud)
-      DATABASE_URL: postgresql://cosmicforge:cosmicforge123@postgres:5432/cosmicforge_rtc
-      REDIS_URL: redis://redis:6379
       HOST: 0.0.0.0
-      PORT: 8080
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-rtc}
+      REDIS_URL: redis://redis:6379
     depends_on:
       postgres:
         condition: service_healthy

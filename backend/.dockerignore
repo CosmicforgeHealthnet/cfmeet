@@ -1,6 +1,7 @@
 target/
 **/*.rs.bk
 .env
+.env.prod
 .env.*
 !.env.example
 .git/

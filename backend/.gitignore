@@ -21,5 +21,6 @@ target
 #.idea/
 
 .env
+.env.*
 *.log
 denv.txt

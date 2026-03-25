@@ -1,6 +1,6 @@
 # Backend Docker Testing Guide
 
-This guide will help you test the CosmicForge RTC backend using Docker and Docker Compose.
+This guide covers running the CosmicForge RTC backend using Docker.
 
 ## Prerequisites
 
@@ -9,140 +9,157 @@ This guide will help you test the CosmicForge RTC backend using Docker and Docke
 
 ## Environment Setup
 
-Ensure your `.env` file in the `backend/` directory contains all required configuration:
+Your `.env` file should contain:
 
 ```bash
-# Database Configuration
-# For local Docker testing, this will be overridden by docker-compose.yml
-DATABASE_URL=postgresql://cosmicforge:cosmicforge123@postgres:5432/cosmicforge_rtc
+# =============================================================================
+# APP ENVIRONMENT
+# =============================================================================
+APP_ENV=dev  # Change to "production" for prod
 
-# Server Configuration
-HOST=0.0.0.0
+# =============================================================================
+# DATABASE
+# =============================================================================
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=password
+POSTGRES_DB=rtc
+
+# For local development (cargo run)
+DATABASE_URL=postgresql://postgres:password@localhost:5432/rtc
+
+# =============================================================================
+# REDIS
+# =============================================================================
+REDIS_URL=redis://127.0.0.1:6379
+REDIS_POOL_SIZE=10
+REDIS_TIMEOUT_SECS=5
+
+# =============================================================================
+# SERVER
+# =============================================================================
+HOST=localhost
 PORT=8080
 
-# Application URL (Frontend on Vercel)
-APP_URL=https://your-app.vercel.app
+# =============================================================================
+# JWT
+# =============================================================================
+JWT_SECRET=your-secret-key-change-in-production
 
-# JWT Secret
-JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
-
-# Google OAuth
+# =============================================================================
+# GOOGLE OAUTH
+# =============================================================================
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
-GOOGLE_REDIRECT_URL=https://your-backend-domain.com/api/v1/auth/google/callback
+GOOGLE_REDIRECT_URL=http://localhost:8080/api/v1/auth/oauth/google/callback
 
-# Email Configuration
-EMAIL_VERIFICATION_REQUIRED=true
+# =============================================================================
+# EMAIL (SMTP)
+# =============================================================================
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USERNAME=your-email@gmail.com
 SMTP_PASSWORD=your-app-password
-SMTP_FROM_EMAIL=noreply@cosmicforge.com
-SMTP_FROM_NAME=CosmicForge RTC
+SMTP_FROM_EMAIL=your-email@gmail.com
+SMTP_FROM_NAME=CosmicForge
 
-# LiveKit Configuration
-LIVEKIT_URL=wss://your-livekit-server.com
-LIVEKIT_API_KEY=your-livekit-api-key
-LIVEKIT_API_SECRET=your-livekit-api-secret
+# =============================================================================
+# FRONTEND & CORS
+# =============================================================================
+FRONTEND_URLS=http://localhost:3000
+APP_URL=http://localhost:3000
 
-# Application Environment
-APP_ENV=dev
+# =============================================================================
+# LIVEKIT
+# =============================================================================
+LIVEKIT_URL=wss://your-livekit-server.livekit.cloud
+LIVEKIT_API_KEY=your-api-key
+LIVEKIT_API_SECRET=your-api-secret
 
-# Timezone (Optional, defaults to UTC)
-TIMEZONE=Africa/Lagos
+# =============================================================================
+# LOGGING
+# =============================================================================
+RUST_LOG=debug
+# For production: RUST_LOG=backend=info,tower_http=warn
 ```
 
-## Quick Start with Docker Compose
+## Quick Start
 
-### 1. Navigate to Backend Directory
+### Development (databases only)
+
+Run PostgreSQL and Redis, then use `cargo run` for the backend:
 
 ```bash
 cd backend
+
+# Start databases
+docker-compose up -d postgres redis
+
+# Run backend locally
+cargo run
 ```
 
-### 2. Build and Start Services
+### Production (full stack)
+
+Run all services including the backend container:
 
 ```bash
-# Build and start all services (PostgreSQL + Backend)
-docker-compose up --build
+cd backend
 
-# Or run in detached mode (background)
-docker-compose up --build -d
+# Change APP_ENV in .env
+# APP_ENV=production
+
+# Start all services
+docker-compose up -d
+
+# Or build and start
+docker-compose up -d --build
 ```
 
-This will:
-
-- ✅ Start PostgreSQL database container
-- ✅ Wait for database to be healthy
-- ✅ Build the backend Docker image
-- ✅ Run database migrations
-- ✅ Start the backend server
-
-### 3. View Logs
+## View Logs
 
 ```bash
-# View logs from all services
+# All services
 docker-compose logs
 
-# View backend logs only
+# Specific service
 docker-compose logs backend
+docker-compose logs postgres
+docker-compose logs redis
 
-# Follow logs in real-time
+# Follow logs
 docker-compose logs -f backend
 
-# View last 100 lines
+# Last 100 lines
 docker-compose logs --tail=100 backend
 ```
 
-### 4. Check Service Status
+## Check Service Status
 
 ```bash
-# List running containers
-docker-compose ps
-
-# Check if services are healthy
 docker-compose ps
 ```
 
-## Testing the Backend API
+## Testing the API
 
-### Test Root Endpoint
-
-```bash
-curl http://localhost:8080/
-```
-
-**Expected Response:**
-
-```json
-{
-  "message": "CosmicForge RTC API",
-  "version": "1.0.0",
-  "status": "running"
-}
-```
-
-### Test Health Check
+### Health Check
 
 ```bash
 curl http://localhost:8080/health
 ```
 
-### Test Authentication Endpoints
-
-#### Register a New User
+### Register User
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "test@example.com",
-    "password": "TestPassword123!",
-    "full_name": "Test User"
+    "username": "testuser",
+    "password": "TestPassword123!"
   }'
 ```
 
-#### Login
+### Login
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/auth/login \
@@ -153,66 +170,39 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
   }'
 ```
 
-**Save the JWT token from the response for authenticated requests.**
-
-#### Test Protected Endpoint
+### Protected Endpoint
 
 ```bash
-# Replace YOUR_JWT_TOKEN with the token from login response
 curl http://localhost:8080/api/v1/users/me \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
-### Test Meeting Endpoints
-
-#### Create a Meeting
-
-```bash
-curl -X POST http://localhost:8080/api/v1/meetings \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Test Meeting",
-    "description": "Docker test meeting",
-    "scheduled_start": "2026-02-10T14:00:00Z",
-    "scheduled_end": "2026-02-10T15:00:00Z",
-    "is_private": false
-  }'
-```
-
-#### List Meetings
-
-```bash
-curl http://localhost:8080/api/v1/meetings \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN"
-```
-
-## Managing Docker Services
+## Managing Services
 
 ### Stop Services
 
 ```bash
-# Stop all services
+# Stop all
 docker-compose down
 
-# Stop services and remove volumes (delete database data)
+# Stop and remove volumes (delete data)
 docker-compose down -v
 ```
 
 ### Restart Services
 
 ```bash
-# Restart all services
+# Restart all
 docker-compose restart
 
-# Restart backend only
+# Restart specific service
 docker-compose restart backend
 ```
 
 ### Rebuild After Code Changes
 
 ```bash
-# Rebuild and restart
+# Rebuild and start
 docker-compose up --build
 
 # Force rebuild without cache
@@ -220,227 +210,143 @@ docker-compose build --no-cache
 docker-compose up
 ```
 
-## Database Management
-
-### Access PostgreSQL Database
+## Database Access
 
 ```bash
-# Connect to PostgreSQL container
-docker-compose exec postgres psql -U cosmicforge -d cosmicforge_rtc
+# Connect to PostgreSQL
+docker-compose exec postgres psql -U postgres -d rtc
 
-# Inside psql, you can run SQL commands:
-# \dt           - List all tables
+# Inside psql:
+# \dt           - List tables
 # \d users      - Describe users table
 # SELECT * FROM users;
 # \q            - Quit
 ```
 
-### Run Migrations Manually
+## Redis Access
 
 ```bash
-# Access backend container
-docker-compose exec backend bash
+# Connect to Redis CLI
+docker-compose exec redis redis-cli
 
-# Run migrations
-./migration up
-
-# Or rollback
-./migration down
+# Inside redis-cli:
+# KEYS *        - List all keys
+# GET key       - Get value
+# TTL key       - Check TTL
+# QUIT          - Exit
 ```
 
-### Reset Database
+## Reset Everything
 
 ```bash
-# Stop services and remove volumes
+# Stop and remove all data
 docker-compose down -v
 
 # Start fresh
-docker-compose up --build
+docker-compose up -d postgres redis
 ```
 
 ## Troubleshooting
 
-### ✗ Port 8080 Already in Use
+### Port Already in Use
 
 ```bash
-# Find process using port 8080
+# Find process using port
 netstat -ano | findstr :8080
 
-# Kill the process or change the port in docker-compose.yml
-# Modify ports section: - "8081:8080"
+# Or change port in .env
+PORT=8081
 ```
 
-### ✗ Container Exits Immediately
+### Container Exits Immediately
 
 ```bash
-# Check logs for errors
+# Check logs
 docker-compose logs backend
 
-# Run container interactively
+# Run interactively
 docker-compose run --rm backend bash
 ```
 
-### ✗ Database Connection Failed
+### Database Connection Failed
 
 ```bash
-# Check if PostgreSQL is running
+# Check if postgres is running
 docker-compose ps postgres
 
-# Check PostgreSQL logs
+# Check logs
 docker-compose logs postgres
 
-# Verify DATABASE_URL in docker-compose.yml
-# Should be: postgresql://cosmicforge:cosmicforge123@postgres:5432/cosmicforge_rtc
+# Verify connection
+docker-compose exec postgres pg_isready
 ```
 
-### ✗ Environment Variables Not Loading
+### Redis Connection Failed
 
 ```bash
-# Check if .env file exists in backend directory
+# Check if redis is running
+docker-compose ps redis
+
+# Test connection
+docker-compose exec redis redis-cli ping
+```
+
+### Environment Variables Not Loading
+
+```bash
+# Verify .env exists
 ls -la .env
 
-# View environment variables in container
+# Check env in container
 docker-compose exec backend env
 
-# Restart services after .env changes
+# Restart after .env changes
 docker-compose down
-docker-compose up
+docker-compose up -d
 ```
 
-### ✗ Build Fails
+## Production Checklist
+
+Before deploying:
+
+- [ ] Set `APP_ENV=production`
+- [ ] Use strong `JWT_SECRET`
+- [ ] Configure production database credentials
+- [ ] Set production `FRONTEND_URLS` and `APP_URL`
+- [ ] Configure production Google OAuth redirect URL
+- [ ] Set `RUST_LOG=backend=info,tower_http=warn`
+- [ ] Use HTTPS (reverse proxy or load balancer)
+
+## Commands Reference
 
 ```bash
-# Clean build with no cache
-docker-compose build --no-cache
+# Start
+docker-compose up -d                    # All services (background)
+docker-compose up -d postgres redis     # Databases only
+docker-compose up --build               # Rebuild and start
 
-# Remove old images
-docker image prune -a
+# Stop
+docker-compose down                     # Stop containers
+docker-compose down -v                  # Stop and delete data
+docker-compose stop                     # Stop without removing
 
-# Rebuild
-docker-compose up --build
-```
+# Logs
+docker-compose logs                     # All services
+docker-compose logs -f backend          # Follow backend
+docker-compose logs --tail=50           # Last 50 lines
 
-### ✗ Changes Not Reflected
-
-```bash
-# Ensure you rebuild after code changes
-docker-compose up --build
-
-# Or force rebuild
-docker-compose build --no-cache backend
-docker-compose up
-```
-
-## Advanced Usage
-
-### Run Specific Service
-
-```bash
-# Start only PostgreSQL
-docker-compose up postgres
-
-# Start only backend (requires postgres to be running)
-docker-compose up backend
-```
-
-### Execute Commands in Running Container
-
-```bash
-# Access backend shell
-docker-compose exec backend bash
-
-# Run a command without entering the container
-docker-compose exec backend ls -la
-```
-
-### View Resource Usage
-
-```bash
-# Check CPU and memory usage
-docker stats
-```
-
-### Clean Up Everything
-
-```bash
-# Stop all containers and remove everything
-docker-compose down -v --remove-orphans
-
-# Remove all unused Docker resources
-docker system prune -a --volumes
-```
-
-## Production Deployment Differences
-
-When deploying to production:
-
-1. **Use External Database**: Comment out the `DATABASE_URL` override in `docker-compose.yml` and use Aiven Cloud PostgreSQL or other managed database
-2. **Remove PostgreSQL Service**: You don't need the postgres service in production if using a managed database
-3. **Update APP_URL**: Set to your actual frontend URL on Vercel
-4. **Update GOOGLE_REDIRECT_URL**: Use your production backend domain
-5. **Set Strong Secrets**: Use cryptographically secure values for `JWT_SECRET`
-6. **Use Production LiveKit**: Configure production LiveKit credentials
-7. **HTTPS/TLS**: Use a reverse proxy (nginx, Traefik) or cloud load balancer for SSL termination
-
-## Testing Checklist
-
-Before deploying to production:
-
-- [ ] Backend starts without errors
-- [ ] Database migrations run successfully
-- [ ] Root endpoint responds
-- [ ] User registration works
-- [ ] User login returns JWT token
-- [ ] Protected endpoints require authentication
-- [ ] Meeting creation works
-- [ ] Meeting listing works
-- [ ] Email verification emails are sent
-- [ ] Google OAuth callback works
-- [ ] LiveKit token generation works
-- [ ] All environment variables are set correctly
-
-## Next Steps
-
-1. ✅ Test all API endpoints locally
-2. ✅ Verify email functionality
-3. ✅ Test OAuth flows
-4. ✅ Deploy backend to production (Railway, Fly.io, AWS, etc.)
-5. ✅ Deploy frontend to Vercel
-6. ✅ Update frontend environment variables with production backend URL
-7. ✅ Set up monitoring and logging
-
-## Useful Commands Reference
-
-```bash
-# Start services
-docker-compose up                    # Foreground
-docker-compose up -d                 # Background
-docker-compose up --build            # Rebuild and start
-
-# Stop services
-docker-compose down                  # Stop and remove containers
-docker-compose down -v               # Also remove volumes
-docker-compose stop                  # Stop without removing
-
-# View logs
-docker-compose logs                  # All services
-docker-compose logs -f backend       # Follow backend logs
-docker-compose logs --tail=50        # Last 50 lines
-
-# Service management
-docker-compose restart               # Restart all
-docker-compose restart backend       # Restart backend only
-docker-compose ps                    # List services
-
-# Execute commands
-docker-compose exec backend bash     # Access backend shell
-docker-compose exec postgres psql    # Access database
+# Management
+docker-compose restart                  # Restart all
+docker-compose ps                       # List services
+docker-compose exec backend bash        # Shell access
+docker-compose exec postgres psql       # Database access
+docker-compose exec redis redis-cli     # Redis access
 
 # Build
-docker-compose build                 # Build all services
-docker-compose build --no-cache      # Clean build
+docker-compose build                    # Build all
+docker-compose build --no-cache         # Clean build
 
-# Clean up
-docker-compose down --remove-orphans # Remove orphan containers
-docker system prune -a               # Clean everything
+# Cleanup
+docker-compose down -v --remove-orphans
+docker system prune -a --volumes
 ```
