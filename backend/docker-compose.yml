@@ -64,7 +64,28 @@ services:
       - cosmicforge-network
     restart: unless-stopped
 
+  migration:
+    image: rust:1-bookworm
+    container_name: cosmicforge-migration
+    working_dir: /app/migration
+    volumes:
+      - ./migration:/app/migration
+      - ./Cargo.toml:/app/Cargo.toml
+      - ./Cargo.lock:/app/Cargo.lock
+      - ./src:/app/src
+      - cargo_cache:/usr/local/cargo/registry
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-rtc}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - cosmicforge-network
+    profiles:
+      - tools
+
 volumes:
+  cargo_cache:
   postgres_data:
   redis_data:
 

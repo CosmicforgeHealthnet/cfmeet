@@ -94,6 +94,9 @@ cd backend
 # Start databases
 docker-compose up -d postgres redis
 
+# Run migrations
+docker-compose run --rm migration cargo run -- up
+
 # Run backend locally
 cargo run
 ```
@@ -110,6 +113,9 @@ cd backend
 
 # Start all services
 docker-compose up -d
+
+# Run migrations
+docker-compose run --rm migration cargo run -- up
 
 # Or build and start
 docker-compose up -d --build
@@ -210,6 +216,26 @@ docker-compose build --no-cache
 docker-compose up
 ```
 
+## Migrations
+
+Run database migrations using the migration service:
+
+```bash
+# Apply all pending migrations
+docker-compose run --rm migration cargo run -- up
+
+# Check migration status
+docker-compose run --rm migration cargo run -- status
+
+# Rollback last migration
+docker-compose run --rm migration cargo run -- down
+
+# Reset database (DESTROYS ALL DATA)
+docker-compose run --rm migration cargo run -- fresh
+```
+
+**Note**: The migration service uses the `tools` profile, so it won't start with `docker-compose up`. It only runs when explicitly called.
+
 ## Database Access
 
 ```bash
@@ -305,6 +331,19 @@ docker-compose down
 docker-compose up -d
 ```
 
+### Missing Tables / Migration Not Run
+
+```bash
+# Check migration status
+docker-compose run --rm migration cargo run -- status
+
+# Run pending migrations
+docker-compose run --rm migration cargo run -- up
+
+# If still failing, reset and reapply (DESTROYS DATA)
+docker-compose run --rm migration cargo run -- fresh
+```
+
 ## Production Checklist
 
 Before deploying:
@@ -329,6 +368,12 @@ docker-compose up --build               # Rebuild and start
 docker-compose down                     # Stop containers
 docker-compose down -v                  # Stop and delete data
 docker-compose stop                     # Stop without removing
+
+# Migrations
+docker-compose run --rm migration cargo run -- up      # Apply migrations
+docker-compose run --rm migration cargo run -- status  # Check status
+docker-compose run --rm migration cargo run -- down    # Rollback last
+docker-compose run --rm migration cargo run -- fresh   # Reset all
 
 # Logs
 docker-compose logs                     # All services
