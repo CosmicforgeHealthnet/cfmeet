@@ -1,0 +1,1689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CosmicForge RTC - Designer Guide</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            line-height: 1.7;
+            color: #2d3748;
+            background: #ffffff;
+            font-size: 12pt;
+        }
+
+        .page {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 50px 60px;
+            page-break-after: always;
+        }
+
+        .page:last-child {
+            page-break-after: avoid;
+        }
+
+        /* Cover Page */
+        .cover {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            color: white;
+        }
+
+        .cover-logo {
+            font-size: 52px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .cover-tagline {
+            font-size: 18px;
+            font-weight: 300;
+            opacity: 0.9;
+            margin-bottom: 80px;
+        }
+
+        .cover-title {
+            font-size: 32px;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+
+        .cover-subtitle {
+            font-size: 16px;
+            font-weight: 400;
+            opacity: 0.85;
+            max-width: 450px;
+            margin-bottom: 100px;
+        }
+
+        .cover-meta {
+            font-size: 12px;
+            opacity: 0.7;
+        }
+
+        /* Headers */
+        h1 {
+            font-size: 26px;
+            font-weight: 700;
+            color: #6366f1;
+            margin-bottom: 25px;
+            padding-bottom: 12px;
+            border-bottom: 3px solid #6366f1;
+        }
+
+        h2 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1e293b;
+            margin: 35px 0 15px 0;
+            padding-top: 10px;
+        }
+
+        h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #475569;
+            margin: 25px 0 12px 0;
+        }
+
+        p {
+            margin-bottom: 14px;
+            color: #475569;
+        }
+
+        ul {
+            margin: 12px 0 20px 22px;
+            color: #475569;
+        }
+
+        li {
+            margin-bottom: 10px;
+        }
+
+        /* Screen Card */
+        .screen {
+            background: #f8fafc;
+            border-radius: 12px;
+            padding: 25px;
+            margin: 20px 0;
+            border: 1px solid #e2e8f0;
+        }
+
+        .screen-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .screen-number {
+            background: #6366f1;
+            color: white;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .screen-purpose {
+            color: #64748b;
+            font-size: 14px;
+            margin-bottom: 18px;
+            font-style: italic;
+        }
+
+        /* Input Description */
+        .input-item {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 15px 18px;
+            margin: 12px 0;
+        }
+
+        .input-label {
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 6px;
+        }
+
+        .input-desc {
+            font-size: 13px;
+            color: #64748b;
+            margin-bottom: 8px;
+        }
+
+        .input-details {
+            font-size: 12px;
+            color: #94a3b8;
+        }
+
+        .input-details span {
+            display: inline-block;
+            background: #f1f5f9;
+            padding: 3px 10px;
+            border-radius: 4px;
+            margin-right: 8px;
+            margin-top: 5px;
+        }
+
+        /* Reference Box */
+        .reference {
+            background: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 15px 18px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .reference-title {
+            font-weight: 600;
+            color: #92400e;
+            margin-bottom: 5px;
+            font-size: 13px;
+        }
+
+        .reference p {
+            color: #78350f;
+            margin: 0;
+            font-size: 13px;
+        }
+
+        /* Tip Box */
+        .tip {
+            background: #ecfdf5;
+            border-left: 4px solid #10b981;
+            padding: 15px 18px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .tip-title {
+            font-weight: 600;
+            color: #065f46;
+            margin-bottom: 5px;
+            font-size: 13px;
+        }
+
+        .tip p {
+            color: #047857;
+            margin: 0;
+            font-size: 13px;
+        }
+
+        /* Element List */
+        .elements {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 18px;
+            margin: 15px 0;
+        }
+
+        .elements-title {
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+
+        .element {
+            display: flex;
+            padding: 8px 0;
+            border-bottom: 1px dashed #e2e8f0;
+            font-size: 13px;
+        }
+
+        .element:last-child {
+            border-bottom: none;
+        }
+
+        .element-name {
+            font-weight: 500;
+            color: #334155;
+            min-width: 150px;
+        }
+
+        .element-desc {
+            color: #64748b;
+        }
+
+        /* Flow */
+        .flow {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8fafc;
+            border-radius: 8px;
+        }
+
+        .flow-step {
+            background: #6366f1;
+            color: white;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .flow-arrow {
+            color: #6366f1;
+            font-size: 18px;
+        }
+
+        /* Table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 12px;
+        }
+
+        th {
+            background: #6366f1;
+            color: white;
+            padding: 12px 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e2e8f0;
+            color: #475569;
+        }
+
+        tr:nth-child(even) {
+            background: #f8fafc;
+        }
+
+        /* TOC */
+        .toc {
+            background: #f8fafc;
+            padding: 30px;
+            border-radius: 12px;
+        }
+
+        .toc-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px dotted #cbd5e1;
+            font-size: 14px;
+        }
+
+        .toc-item:last-child {
+            border-bottom: none;
+        }
+
+        /* Section Divider */
+        .divider {
+            text-align: center;
+            margin: 40px 0;
+            color: #94a3b8;
+            font-size: 24px;
+        }
+
+        /* Footer */
+        .footer {
+            margin-top: 50px;
+            text-align: center;
+            color: #94a3b8;
+            font-size: 11px;
+            padding-top: 20px;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        @media print {
+            .page {
+                padding: 40px 50px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<!-- COVER PAGE -->
+<div class="page cover">
+    <div class="cover-logo">CosmicForge</div>
+    <div class="cover-tagline">Video Conferencing Platform</div>
+    <div class="cover-title">UI/UX Design Guide</div>
+    <div class="cover-subtitle">
+        A simple guide describing every screen, input, and element for the Figma designer. Colors and layout are your creative choice.
+    </div>
+    <div class="cover-meta">
+        For Figma Designers | Version 1.0 | January 2026
+    </div>
+</div>
+
+<!-- TABLE OF CONTENTS -->
+<div class="page">
+    <h1>Table of Contents</h1>
+    <div class="toc">
+        <div class="toc-item"><span>1. About This Platform</span><span>3</span></div>
+        <div class="toc-item"><span>2. User Types</span><span>4</span></div>
+        <div class="toc-item"><span>3. Landing Page</span><span>5</span></div>
+        <div class="toc-item"><span>4. Sign Up & Login Screens</span><span>6</span></div>
+        <div class="toc-item"><span>5. Email Verification & Password Reset</span><span>8</span></div>
+        <div class="toc-item"><span>6. Dashboard (Home)</span><span>10</span></div>
+        <div class="toc-item"><span>7. Create Meeting</span><span>11</span></div>
+        <div class="toc-item"><span>8. Join Meeting</span><span>12</span></div>
+        <div class="toc-item"><span>9. Pre-Join Screen (Camera Preview)</span><span>13</span></div>
+        <div class="toc-item"><span>10. Waiting Room</span><span>14</span></div>
+        <div class="toc-item"><span>11. Meeting Room</span><span>15</span></div>
+        <div class="toc-item"><span>12. Meeting Ended Screen</span><span>18</span></div>
+        <div class="toc-item"><span>13. Settings & Profile</span><span>19</span></div>
+        <div class="toc-item"><span>14. Developer Portal (API Keys)</span><span>20</span></div>
+    </div>
+</div>
+
+<!-- ABOUT THIS PLATFORM -->
+<div class="page">
+    <h1>1. About This Platform</h1>
+
+    <h2>What is CosmicForge?</h2>
+    <p>CosmicForge is a video meeting platform similar to <strong>Google Meet</strong> and <strong>Zoom</strong>. Users can create video meetings, invite others, and communicate through video, audio, and chat.</p>
+
+    <div class="reference">
+        <div class="reference-title">Design Reference</div>
+        <p>Look at Google Meet and Zoom for inspiration on layout and user experience. CosmicForge should feel modern, clean, and professional - suitable for business use.</p>
+    </div>
+
+    <h2>Key Features</h2>
+    <ul>
+        <li><strong>Create Meetings</strong> - Schedule meetings with a title and time</li>
+        <li><strong>Join Meetings</strong> - Join using a meeting code or link</li>
+        <li><strong>Video & Audio</strong> - Turn camera and microphone on/off</li>
+        <li><strong>Screen Sharing</strong> - Share your screen with others</li>
+        <li><strong>Chat</strong> - Send text messages during meetings</li>
+        <li><strong>Waiting Room</strong> - For private meetings, host approves who joins</li>
+        <li><strong>Participant Management</strong> - Host can mute or remove participants</li>
+    </ul>
+
+    <h2>Design Freedom</h2>
+    <p>This guide describes <strong>what</strong> each screen needs and <strong>what</strong> each input does. You have full creative freedom for:</p>
+    <ul>
+        <li>Color palette and theme</li>
+        <li>Layout and spacing</li>
+        <li>Typography choices</li>
+        <li>Icons and illustrations</li>
+        <li>Animation and transitions</li>
+    </ul>
+
+    <div class="tip">
+        <div class="tip-title">Keep It Simple</div>
+        <p>Video meetings should be easy. Users should be able to create or join a meeting in seconds. Don't overcomplicate the interface.</p>
+    </div>
+</div>
+
+<!-- USER TYPES -->
+<div class="page">
+    <h1>2. User Types</h1>
+
+    <h2>Who Uses This Platform?</h2>
+
+    <div class="screen">
+        <div class="screen-title">Host (Meeting Creator)</div>
+        <p>The person who creates the meeting. They have full control:</p>
+        <ul>
+            <li>Can start and end the meeting</li>
+            <li>Can admit or deny people from waiting room</li>
+            <li>Can remove (kick) participants</li>
+            <li>Can mute other participants</li>
+        </ul>
+    </div>
+
+    <div class="screen">
+        <div class="screen-title">Participant (Invited Person)</div>
+        <p>Someone who joins a meeting created by a host. They can:</p>
+        <ul>
+            <li>Turn their own camera/microphone on or off</li>
+            <li>Share their screen (if allowed)</li>
+            <li>Send chat messages</li>
+            <li>Leave the meeting anytime</li>
+        </ul>
+    </div>
+
+    <div class="screen">
+        <div class="screen-title">Guest (No Account)</div>
+        <p>Someone who joins without creating an account. They have the same abilities as a participant but don't need to sign up. They just enter their name when joining.</p>
+    </div>
+
+    <h2>Meeting Types</h2>
+    <table>
+        <tr>
+            <th>Type</th>
+            <th>How It Works</th>
+        </tr>
+        <tr>
+            <td><strong>Public Meeting</strong></td>
+            <td>Anyone with the meeting code can join immediately</td>
+        </tr>
+        <tr>
+            <td><strong>Private Meeting</strong></td>
+            <td>People must wait in a "waiting room" until the host admits them</td>
+        </tr>
+    </table>
+</div>
+
+<!-- LANDING PAGE -->
+<div class="page">
+    <h1>3. Landing Page</h1>
+
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">1</span>
+            Landing Page (Homepage)
+        </div>
+        <div class="screen-purpose">The first page visitors see. Should convince them to sign up or join a meeting.</div>
+
+        <div class="elements">
+            <div class="elements-title">Elements Needed</div>
+            <div class="element">
+                <span class="element-name">Logo</span>
+                <span class="element-desc">CosmicForge brand logo at the top</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Navigation Menu</span>
+                <span class="element-desc">Links: Features, Pricing (optional), Login, Sign Up</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Hero Section</span>
+                <span class="element-desc">Big headline, short description, main action buttons</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Quick Join Box</span>
+                <span class="element-desc">Input field for meeting code + "Join" button (like Google Meet)</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Feature Highlights</span>
+                <span class="element-desc">3-4 cards showing main features with icons</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Call to Action</span>
+                <span class="element-desc">"Start Free" or "Sign Up" button - prominent</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Footer</span>
+                <span class="element-desc">Links, copyright, social media icons</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">Meeting Code Input (Quick Join)</div>
+            <div class="input-desc">Allows visitors to join a meeting without signing up</div>
+            <div class="input-details">
+                <span>Placeholder: "Enter meeting code"</span>
+                <span>Example: ABCD1234</span>
+                <span>8 characters</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="reference">
+        <div class="reference-title">Look at Google Meet</div>
+        <p>Google Meet's homepage has a clean split: left side shows info/actions, right side shows an illustration. There's a prominent "New meeting" button and a code input field.</p>
+    </div>
+</div>
+
+<!-- SIGN UP & LOGIN -->
+<div class="page">
+    <h1>4. Sign Up & Login Screens</h1>
+
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">2</span>
+            Sign Up Page
+        </div>
+        <div class="screen-purpose">New users create an account here.</div>
+
+        <div class="input-item">
+            <div class="input-label">Username</div>
+            <div class="input-desc">A unique name to identify the user on the platform</div>
+            <div class="input-details">
+                <span>Placeholder: "Choose a username"</span>
+                <span>Required</span>
+                <span>Letters, numbers, underscores only</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">Email Address</div>
+            <div class="input-desc">User's email for login and notifications</div>
+            <div class="input-details">
+                <span>Placeholder: "you@example.com"</span>
+                <span>Required</span>
+                <span>Must be valid email format</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">Password</div>
+            <div class="input-desc">Secret password for account security</div>
+            <div class="input-details">
+                <span>Placeholder: "Create a password"</span>
+                <span>Required</span>
+                <span>Minimum 8 characters</span>
+                <span>Show/Hide toggle icon</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">Confirm Password</div>
+            <div class="input-desc">User types password again to prevent typos</div>
+            <div class="input-details">
+                <span>Placeholder: "Confirm your password"</span>
+                <span>Required</span>
+                <span>Must match password above</span>
+            </div>
+        </div>
+
+        <div class="elements">
+            <div class="elements-title">Other Elements</div>
+            <div class="element">
+                <span class="element-name">Sign Up Button</span>
+                <span class="element-desc">Primary button to submit the form</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Google Sign Up</span>
+                <span class="element-desc">Button: "Sign up with Google" - alternative method</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Terms Checkbox</span>
+                <span class="element-desc">"I agree to the Terms of Service"</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Login Link</span>
+                <span class="element-desc">"Already have an account? Log in"</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- LOGIN PAGE -->
+<div class="page">
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">3</span>
+            Login Page
+        </div>
+        <div class="screen-purpose">Existing users sign into their account.</div>
+
+        <div class="input-item">
+            <div class="input-label">Email Address</div>
+            <div class="input-desc">The email they used to sign up</div>
+            <div class="input-details">
+                <span>Placeholder: "you@example.com"</span>
+                <span>Required</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">Password</div>
+            <div class="input-desc">Their account password</div>
+            <div class="input-details">
+                <span>Placeholder: "Enter your password"</span>
+                <span>Required</span>
+                <span>Show/Hide toggle icon</span>
+            </div>
+        </div>
+
+        <div class="elements">
+            <div class="elements-title">Other Elements</div>
+            <div class="element">
+                <span class="element-name">Login Button</span>
+                <span class="element-desc">Primary button to sign in</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Google Login</span>
+                <span class="element-desc">Button: "Continue with Google"</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Forgot Password Link</span>
+                <span class="element-desc">"Forgot your password?" - leads to reset</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Sign Up Link</span>
+                <span class="element-desc">"Don't have an account? Sign up"</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="tip">
+        <div class="tip-title">Design Tip</div>
+        <p>Keep login and signup forms centered on the page. Use a card/box container. Show only essential fields - don't overwhelm users.</p>
+    </div>
+</div>
+
+<!-- EMAIL VERIFICATION -->
+<div class="page">
+    <h1>5. Email Verification & Password Reset</h1>
+
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">4</span>
+            Email Verification Page
+        </div>
+        <div class="screen-purpose">After signing up, users must verify their email by entering a 6-digit code sent to their inbox.</div>
+
+        <div class="input-item">
+            <div class="input-label">6-Digit Verification Code</div>
+            <div class="input-desc">A code sent to the user's email to confirm they own it</div>
+            <div class="input-details">
+                <span>6 separate input boxes (one per digit)</span>
+                <span>Numbers only</span>
+                <span>Auto-focus next box after typing</span>
+            </div>
+        </div>
+
+        <div class="elements">
+            <div class="elements-title">Other Elements</div>
+            <div class="element">
+                <span class="element-name">Instruction Text</span>
+                <span class="element-desc">"We sent a code to [email]. Enter it below."</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Verify Button</span>
+                <span class="element-desc">Submit the code</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Resend Link</span>
+                <span class="element-desc">"Didn't receive it? Resend code"</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="reference">
+        <div class="reference-title">Visual Reference</div>
+        <p>The 6-digit code input should look like 6 small boxes in a row: [ 1 ] [ 2 ] [ 3 ] [ 4 ] [ 5 ] [ 6 ]. When user types, cursor automatically moves to next box. Similar to 2FA inputs on banking apps.</p>
+    </div>
+
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">5</span>
+            Forgot Password Page
+        </div>
+        <div class="screen-purpose">User requests a password reset link/code.</div>
+
+        <div class="input-item">
+            <div class="input-label">Email Address</div>
+            <div class="input-desc">The email linked to their account</div>
+            <div class="input-details">
+                <span>Placeholder: "Enter your email"</span>
+                <span>Required</span>
+            </div>
+        </div>
+
+        <div class="elements">
+            <div class="elements-title">Other Elements</div>
+            <div class="element">
+                <span class="element-name">Instruction Text</span>
+                <span class="element-desc">"Enter your email and we'll send a reset code"</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Send Code Button</span>
+                <span class="element-desc">Primary action button</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Back to Login Link</span>
+                <span class="element-desc">Return to login page</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- RESET PASSWORD -->
+<div class="page">
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">6</span>
+            Reset Password Page
+        </div>
+        <div class="screen-purpose">User enters the code from email and creates a new password.</div>
+
+        <div class="input-item">
+            <div class="input-label">6-Digit Reset Code</div>
+            <div class="input-desc">Code received via email</div>
+            <div class="input-details">
+                <span>6 separate input boxes</span>
+                <span>Numbers only</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">New Password</div>
+            <div class="input-desc">The new password they want to use</div>
+            <div class="input-details">
+                <span>Placeholder: "Enter new password"</span>
+                <span>Minimum 8 characters</span>
+                <span>Show/Hide toggle</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">Confirm New Password</div>
+            <div class="input-desc">Type it again to confirm</div>
+            <div class="input-details">
+                <span>Placeholder: "Confirm new password"</span>
+                <span>Must match above</span>
+            </div>
+        </div>
+
+        <div class="elements">
+            <div class="elements-title">Other Elements</div>
+            <div class="element">
+                <span class="element-name">Reset Password Button</span>
+                <span class="element-desc">Submit and change password</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Success Message</span>
+                <span class="element-desc">"Password changed! You can now log in."</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="divider">* * *</div>
+
+    <h2>Error Messages to Design</h2>
+    <p>Design how these error states look (red text, icons, etc.):</p>
+    <ul>
+        <li>"Invalid email address"</li>
+        <li>"Password must be at least 8 characters"</li>
+        <li>"Passwords do not match"</li>
+        <li>"Invalid code. Please try again."</li>
+        <li>"Email already registered"</li>
+        <li>"Incorrect email or password"</li>
+    </ul>
+</div>
+
+<!-- DASHBOARD -->
+<div class="page">
+    <h1>6. Dashboard (Home)</h1>
+
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">7</span>
+            Dashboard / Home Page
+        </div>
+        <div class="screen-purpose">The main page after logging in. Users can quickly start or join meetings and see their scheduled meetings.</div>
+
+        <div class="elements">
+            <div class="elements-title">Top Navigation Bar</div>
+            <div class="element">
+                <span class="element-name">Logo</span>
+                <span class="element-desc">CosmicForge logo (links to dashboard)</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Search</span>
+                <span class="element-desc">Search for meetings (optional)</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Notifications Icon</span>
+                <span class="element-desc">Bell icon showing new notifications</span>
+            </div>
+            <div class="element">
+                <span class="element-name">User Avatar/Menu</span>
+                <span class="element-desc">Profile picture, click for dropdown (Settings, Logout)</span>
+            </div>
+        </div>
+
+        <div class="elements">
+            <div class="elements-title">Sidebar Navigation (Optional)</div>
+            <div class="element">
+                <span class="element-name">Home</span>
+                <span class="element-desc">Dashboard</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Meetings</span>
+                <span class="element-desc">List of all meetings</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Settings</span>
+                <span class="element-desc">Account settings</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Developer</span>
+                <span class="element-desc">API Keys (for developers)</span>
+            </div>
+        </div>
+
+        <div class="elements">
+            <div class="elements-title">Main Content Area</div>
+            <div class="element">
+                <span class="element-name">New Meeting Button</span>
+                <span class="element-desc">Big, prominent button: "New Meeting" or "+ Create Meeting"</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Join Meeting Section</span>
+                <span class="element-desc">Input for meeting code + "Join" button</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Upcoming Meetings</span>
+                <span class="element-desc">Cards showing scheduled meetings with title, time, join button</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Recent Meetings</span>
+                <span class="element-desc">List of past meetings (optional)</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="reference">
+        <div class="reference-title">Google Meet Dashboard</div>
+        <p>Google Meet shows "New meeting" and "Enter a code" side by side. Below that, upcoming meetings from Google Calendar appear. Keep it simple like that.</p>
+    </div>
+</div>
+
+<!-- CREATE MEETING -->
+<div class="page">
+    <h1>7. Create Meeting</h1>
+
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">8</span>
+            Create Meeting Form
+        </div>
+        <div class="screen-purpose">User fills out details to schedule a new meeting. Can be a modal popup or a separate page.</div>
+
+        <div class="input-item">
+            <div class="input-label">Meeting Title</div>
+            <div class="input-desc">A name for the meeting so people know what it's about</div>
+            <div class="input-details">
+                <span>Placeholder: "Team Standup" or "Project Review"</span>
+                <span>Required</span>
+                <span>Max 100 characters</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">Start Date & Time</div>
+            <div class="input-desc">When the meeting begins</div>
+            <div class="input-details">
+                <span>Date picker + Time picker</span>
+                <span>Required</span>
+                <span>Must be in the future</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">End Date & Time</div>
+            <div class="input-desc">When the meeting ends (auto-ends at this time)</div>
+            <div class="input-details">
+                <span>Date picker + Time picker</span>
+                <span>Required</span>
+                <span>Must be after start time</span>
+                <span>Maximum 24 hours duration</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">Meeting Privacy Toggle</div>
+            <div class="input-desc">Choose between public or private meeting</div>
+            <div class="input-details">
+                <span>Toggle switch or radio buttons</span>
+                <span>Public = anyone can join</span>
+                <span>Private = waiting room enabled</span>
+            </div>
+        </div>
+
+        <div class="elements">
+            <div class="elements-title">Other Elements</div>
+            <div class="element">
+                <span class="element-name">Create Button</span>
+                <span class="element-desc">Primary button to create the meeting</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Cancel Button</span>
+                <span class="element-desc">Secondary button to close without creating</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="screen">
+        <div class="screen-title">Meeting Created - Success</div>
+        <div class="screen-purpose">Shown after creating a meeting. Displays the meeting link to share.</div>
+
+        <div class="elements">
+            <div class="elements-title">Elements</div>
+            <div class="element">
+                <span class="element-name">Success Message</span>
+                <span class="element-desc">"Meeting created!"</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Meeting Code</span>
+                <span class="element-desc">Display the 8-character code (e.g., ABCD1234)</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Meeting Link</span>
+                <span class="element-desc">Full URL to share</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Copy Button</span>
+                <span class="element-desc">One-click copy link to clipboard</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Start Now Button</span>
+                <span class="element-desc">Join the meeting immediately</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- JOIN MEETING -->
+<div class="page">
+    <h1>8. Join Meeting</h1>
+
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">9</span>
+            Join Meeting Page
+        </div>
+        <div class="screen-purpose">Where users enter a meeting code to join. Can also be accessed via direct link.</div>
+
+        <div class="input-item">
+            <div class="input-label">Meeting Code</div>
+            <div class="input-desc">The 8-character code shared by the host</div>
+            <div class="input-details">
+                <span>Placeholder: "Enter meeting code"</span>
+                <span>Example: ABCD1234</span>
+                <span>8 characters, letters and numbers</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">Your Name (for guests)</div>
+            <div class="input-desc">If user is not logged in, they enter a display name</div>
+            <div class="input-details">
+                <span>Placeholder: "Enter your name"</span>
+                <span>Required for guests</span>
+                <span>This name shows in the meeting</span>
+            </div>
+        </div>
+
+        <div class="elements">
+            <div class="elements-title">Other Elements</div>
+            <div class="element">
+                <span class="element-name">Join Button</span>
+                <span class="element-desc">Primary button to proceed to meeting</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Meeting Info (if available)</span>
+                <span class="element-desc">Show meeting title and host name after entering valid code</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Error State</span>
+                <span class="element-desc">"Meeting not found" if code is invalid</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="tip">
+        <div class="tip-title">User Experience</div>
+        <p>When someone clicks a meeting link (e.g., cosmicforge.com/join/ABCD1234), the code should auto-fill. They just need to click "Join" or enter their name if they're a guest.</p>
+    </div>
+
+    <h2>Join Flow</h2>
+    <div class="flow">
+        <span class="flow-step">Enter Code</span>
+        <span class="flow-arrow">&rarr;</span>
+        <span class="flow-step">Enter Name (guests)</span>
+        <span class="flow-arrow">&rarr;</span>
+        <span class="flow-step">Pre-Join Screen</span>
+        <span class="flow-arrow">&rarr;</span>
+        <span class="flow-step">Meeting Room</span>
+    </div>
+</div>
+
+<!-- PRE-JOIN SCREEN -->
+<div class="page">
+    <h1>9. Pre-Join Screen (Camera Preview)</h1>
+
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">10</span>
+            Pre-Join / Lobby Screen
+        </div>
+        <div class="screen-purpose">Before entering the meeting, users see their camera preview and can adjust settings. Like the screen before joining in Google Meet or Zoom.</div>
+
+        <div class="elements">
+            <div class="elements-title">Main Elements</div>
+            <div class="element">
+                <span class="element-name">Camera Preview</span>
+                <span class="element-desc">Large video showing user's own camera feed</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Camera Toggle Button</span>
+                <span class="element-desc">Turn camera on/off before joining</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Microphone Toggle Button</span>
+                <span class="element-desc">Mute/unmute before joining</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Join Now Button</span>
+                <span class="element-desc">Big primary button to enter the meeting</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">Display Name</div>
+            <div class="input-desc">The name shown to other participants (editable)</div>
+            <div class="input-details">
+                <span>Pre-filled with account name or guest name</span>
+                <span>Can be changed before joining</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">Microphone Selection</div>
+            <div class="input-desc">Dropdown to choose which microphone to use</div>
+            <div class="input-details">
+                <span>Lists all available microphones</span>
+                <span>Shows currently selected device</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">Camera Selection</div>
+            <div class="input-desc">Dropdown to choose which camera to use</div>
+            <div class="input-details">
+                <span>Lists all available cameras</span>
+                <span>Preview updates when selection changes</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">Speaker Selection</div>
+            <div class="input-desc">Dropdown to choose audio output device</div>
+            <div class="input-details">
+                <span>Lists speakers/headphones</span>
+                <span>"Test" button to play a sound</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="reference">
+        <div class="reference-title">Google Meet Pre-Join</div>
+        <p>Shows large camera preview centered, mic/camera buttons below it, device settings in a small panel. "Join now" button is prominent. Meeting title shown at top.</p>
+    </div>
+</div>
+
+<!-- WAITING ROOM -->
+<div class="page">
+    <h1>10. Waiting Room</h1>
+
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">11</span>
+            Waiting Room (For Participants)
+        </div>
+        <div class="screen-purpose">When joining a private meeting, participants wait here until the host admits them.</div>
+
+        <div class="elements">
+            <div class="elements-title">Elements</div>
+            <div class="element">
+                <span class="element-name">Meeting Title</span>
+                <span class="element-desc">Name of the meeting they're trying to join</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Waiting Message</span>
+                <span class="element-desc">"Please wait, the host will let you in soon"</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Loading/Waiting Animation</span>
+                <span class="element-desc">Subtle animation showing they're waiting</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Leave Button</span>
+                <span class="element-desc">Option to leave while waiting</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">12</span>
+            Waiting Room Panel (For Host)
+        </div>
+        <div class="screen-purpose">The host sees this panel inside the meeting room. Shows people waiting to be admitted.</div>
+
+        <div class="elements">
+            <div class="elements-title">Elements</div>
+            <div class="element">
+                <span class="element-name">Waiting Count Badge</span>
+                <span class="element-desc">Number showing how many people are waiting</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Waiting Participant Row</span>
+                <span class="element-desc">Shows name of each waiting person</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Admit Button</span>
+                <span class="element-desc">Green button to let someone in</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Deny Button</span>
+                <span class="element-desc">Red button to reject someone</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Admit All Button</span>
+                <span class="element-desc">Let everyone in at once (optional)</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="tip">
+        <div class="tip-title">Notification</div>
+        <p>When someone enters the waiting room, the host should see a notification or badge on the "Participants" button so they know someone is waiting.</p>
+    </div>
+</div>
+
+<!-- MEETING ROOM -->
+<div class="page">
+    <h1>11. Meeting Room</h1>
+
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">13</span>
+            Meeting Room - Main View
+        </div>
+        <div class="screen-purpose">The main video call screen where the meeting happens. This is the most important screen.</div>
+
+        <div class="elements">
+            <div class="elements-title">Top Bar</div>
+            <div class="element">
+                <span class="element-name">Meeting Title</span>
+                <span class="element-desc">Name of the meeting</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Meeting Timer</span>
+                <span class="element-desc">How long the meeting has been going (00:15:23)</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Meeting Code</span>
+                <span class="element-desc">Small display of code for sharing (optional)</span>
+            </div>
+        </div>
+
+        <div class="elements">
+            <div class="elements-title">Video Area (Center)</div>
+            <div class="element">
+                <span class="element-name">Video Grid</span>
+                <span class="element-desc">Grid of participant video tiles (like Zoom/Google Meet)</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Speaker View</span>
+                <span class="element-desc">Alternative: one large video, small thumbnails for others</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Self View</span>
+                <span class="element-desc">Small preview of your own video (corner or in grid)</span>
+            </div>
+        </div>
+
+        <div class="elements">
+            <div class="elements-title">Video Tile Elements</div>
+            <div class="element">
+                <span class="element-name">Participant Name</span>
+                <span class="element-desc">Name shown at bottom of each video tile</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Mute Icon</span>
+                <span class="element-desc">Microphone icon when person is muted</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Speaking Indicator</span>
+                <span class="element-desc">Border glow or icon when person is talking</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Host Badge</span>
+                <span class="element-desc">Small label showing who is the host</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Avatar Placeholder</span>
+                <span class="element-desc">Shown when camera is off (initials or icon)</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MEETING ROOM CONTINUED -->
+<div class="page">
+    <div class="elements">
+        <div class="elements-title">Bottom Control Bar</div>
+        <div class="element">
+            <span class="element-name">Microphone Button</span>
+            <span class="element-desc">Toggle mute/unmute. Shows red slash when muted.</span>
+        </div>
+        <div class="element">
+            <span class="element-name">Camera Button</span>
+            <span class="element-desc">Toggle video on/off. Shows red slash when off.</span>
+        </div>
+        <div class="element">
+            <span class="element-name">Screen Share Button</span>
+            <span class="element-desc">Start/stop sharing screen. Highlighted when sharing.</span>
+        </div>
+        <div class="element">
+            <span class="element-name">Chat Button</span>
+            <span class="element-desc">Open/close chat panel. Badge shows unread count.</span>
+        </div>
+        <div class="element">
+            <span class="element-name">Participants Button</span>
+            <span class="element-desc">Open/close participant list. Shows participant count.</span>
+        </div>
+        <div class="element">
+            <span class="element-name">More Options Button</span>
+            <span class="element-desc">Three dots menu for additional options</span>
+        </div>
+        <div class="element">
+            <span class="element-name">Leave/End Button</span>
+            <span class="element-desc">Red button to leave meeting. Host sees "End Meeting".</span>
+        </div>
+    </div>
+
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">14</span>
+            Participants Panel (Side Panel)
+        </div>
+        <div class="screen-purpose">List of everyone in the meeting. Opens from the side.</div>
+
+        <div class="elements">
+            <div class="elements-title">Elements</div>
+            <div class="element">
+                <span class="element-name">Panel Header</span>
+                <span class="element-desc">"Participants (5)" - title with count</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Close Button</span>
+                <span class="element-desc">X to close the panel</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Participant Row</span>
+                <span class="element-desc">Avatar, name, role badge (Host), media status icons</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Media Icons</span>
+                <span class="element-desc">Mic/camera icons showing if muted or video off</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Host Actions (3-dot menu)</span>
+                <span class="element-desc">Mute participant, Remove from meeting (host only)</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- CHAT PANEL -->
+<div class="page">
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">15</span>
+            Chat Panel (Side Panel)
+        </div>
+        <div class="screen-purpose">Text chat during the meeting. Messages disappear when meeting ends.</div>
+
+        <div class="elements">
+            <div class="elements-title">Elements</div>
+            <div class="element">
+                <span class="element-name">Panel Header</span>
+                <span class="element-desc">"Chat" title</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Close Button</span>
+                <span class="element-desc">X to close the panel</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Message List</span>
+                <span class="element-desc">Scrollable area showing all messages</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Message Bubble</span>
+                <span class="element-desc">Sender name, time, message text</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Own Messages</span>
+                <span class="element-desc">Style differently (right side or different color)</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">Message Input</div>
+            <div class="input-desc">Text field to type a chat message</div>
+            <div class="input-details">
+                <span>Placeholder: "Type a message..."</span>
+                <span>Send on Enter key</span>
+                <span>Send button (arrow icon)</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">16</span>
+            Screen Share View
+        </div>
+        <div class="screen-purpose">When someone shares their screen, the layout changes.</div>
+
+        <div class="elements">
+            <div class="elements-title">Elements</div>
+            <div class="element">
+                <span class="element-name">Shared Screen (Large)</span>
+                <span class="element-desc">The shared content takes most of the screen</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Participant Strip</span>
+                <span class="element-desc">Small video thumbnails at top or side</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Presenter Label</span>
+                <span class="element-desc">"[Name] is presenting"</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Stop Sharing Button</span>
+                <span class="element-desc">For the presenter: prominent "Stop sharing" button</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="reference">
+        <div class="reference-title">Zoom Screen Share</div>
+        <p>When screen sharing, Zoom shows the shared content large with a strip of participant videos at the top. The presenter sees a floating "Stop Share" button.</p>
+    </div>
+</div>
+
+<!-- MEETING ENDED -->
+<div class="page">
+    <h1>12. Meeting Ended Screen</h1>
+
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">17</span>
+            Meeting Ended Page
+        </div>
+        <div class="screen-purpose">Shown after leaving or when meeting ends. Simple confirmation with next actions.</div>
+
+        <div class="elements">
+            <div class="elements-title">Elements</div>
+            <div class="element">
+                <span class="element-name">Message</span>
+                <span class="element-desc">"You left the meeting" or "The meeting has ended"</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Meeting Summary (optional)</span>
+                <span class="element-desc">Duration, participant count</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Rejoin Button</span>
+                <span class="element-desc">If meeting still active: "Rejoin meeting"</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Return to Home Button</span>
+                <span class="element-desc">"Return to dashboard" or "Go home"</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Feedback (optional)</span>
+                <span class="element-desc">"How was your meeting?" with star rating or thumbs</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="tip">
+        <div class="tip-title">Keep It Simple</div>
+        <p>This screen doesn't need to be complex. A simple message and a button to go back home is enough. Don't force feedback.</p>
+    </div>
+
+    <h2>Meeting States Summary</h2>
+    <table>
+        <tr>
+            <th>State</th>
+            <th>What User Sees</th>
+        </tr>
+        <tr>
+            <td><strong>Scheduled</strong></td>
+            <td>Meeting is set for the future. Shows in "Upcoming" list.</td>
+        </tr>
+        <tr>
+            <td><strong>Ongoing</strong></td>
+            <td>Meeting is happening now. Can be joined.</td>
+        </tr>
+        <tr>
+            <td><strong>Ended</strong></td>
+            <td>Meeting is over. Shows in "Past meetings" list.</td>
+        </tr>
+    </table>
+</div>
+
+<!-- SETTINGS -->
+<div class="page">
+    <h1>13. Settings & Profile</h1>
+
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">18</span>
+            Settings Page
+        </div>
+        <div class="screen-purpose">User manages their account and preferences.</div>
+
+        <h3>Profile Section</h3>
+        <div class="input-item">
+            <div class="input-label">Profile Picture</div>
+            <div class="input-desc">Upload or change avatar image</div>
+            <div class="input-details">
+                <span>Click to upload</span>
+                <span>Shows current image</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">Display Name</div>
+            <div class="input-desc">Name shown in meetings</div>
+            <div class="input-details">
+                <span>Editable text field</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">Email</div>
+            <div class="input-desc">Account email (may be read-only)</div>
+            <div class="input-details">
+                <span>Shows current email</span>
+            </div>
+        </div>
+
+        <h3>Password Section</h3>
+        <div class="input-item">
+            <div class="input-label">Current Password</div>
+            <div class="input-desc">Required to change password</div>
+        </div>
+        <div class="input-item">
+            <div class="input-label">New Password</div>
+            <div class="input-desc">New password to set</div>
+        </div>
+        <div class="input-item">
+            <div class="input-label">Confirm New Password</div>
+            <div class="input-desc">Type new password again</div>
+        </div>
+
+        <h3>Default Meeting Settings (Optional)</h3>
+        <div class="elements">
+            <div class="element">
+                <span class="element-name">Camera Default</span>
+                <span class="element-desc">Toggle: Start meetings with camera on/off</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Microphone Default</span>
+                <span class="element-desc">Toggle: Start meetings muted or unmuted</span>
+            </div>
+        </div>
+
+        <div class="elements">
+            <div class="elements-title">Actions</div>
+            <div class="element">
+                <span class="element-name">Save Changes Button</span>
+                <span class="element-desc">Save profile updates</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Logout Button</span>
+                <span class="element-desc">Sign out of account</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Delete Account</span>
+                <span class="element-desc">Danger action to delete account (with confirmation)</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- DEVELOPER PORTAL -->
+<div class="page">
+    <h1>14. Developer Portal (API Keys)</h1>
+
+    <p>This section is for users who want to connect CosmicForge to other apps. Most regular users won't use this.</p>
+
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">19</span>
+            API Keys List Page
+        </div>
+        <div class="screen-purpose">Shows all API keys the user has created.</div>
+
+        <div class="elements">
+            <div class="elements-title">Elements</div>
+            <div class="element">
+                <span class="element-name">Page Title</span>
+                <span class="element-desc">"API Keys" or "Developer Settings"</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Create Key Button</span>
+                <span class="element-desc">"+ Create API Key"</span>
+            </div>
+            <div class="element">
+                <span class="element-name">API Key Row/Card</span>
+                <span class="element-desc">Shows key name, masked key (****XXXX), status, created date</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Revoke Button</span>
+                <span class="element-desc">Delete/disable a key (red, with confirmation)</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Empty State</span>
+                <span class="element-desc">"No API keys yet. Create one to integrate with other apps."</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="screen">
+        <div class="screen-title">
+            <span class="screen-number">20</span>
+            Create API Key Modal
+        </div>
+        <div class="screen-purpose">Form to create a new API key.</div>
+
+        <div class="input-item">
+            <div class="input-label">Key Name</div>
+            <div class="input-desc">A label to remember what this key is for</div>
+            <div class="input-details">
+                <span>Placeholder: "My App Integration"</span>
+                <span>Required</span>
+            </div>
+        </div>
+
+        <div class="input-item">
+            <div class="input-label">Expiration Date (optional)</div>
+            <div class="input-desc">When this key should stop working</div>
+            <div class="input-details">
+                <span>Date picker</span>
+                <span>Can be left empty for no expiration</span>
+            </div>
+        </div>
+
+        <div class="elements">
+            <div class="elements-title">After Creation</div>
+            <div class="element">
+                <span class="element-name">Key Display</span>
+                <span class="element-desc">Show the full key ONCE (never shown again)</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Copy Button</span>
+                <span class="element-desc">Copy key to clipboard</span>
+            </div>
+            <div class="element">
+                <span class="element-name">Warning Text</span>
+                <span class="element-desc">"Copy this key now. You won't be able to see it again."</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- FINAL PAGE -->
+<div class="page">
+    <h1>Summary: All Screens</h1>
+
+    <table>
+        <tr>
+            <th>#</th>
+            <th>Screen Name</th>
+            <th>Type</th>
+        </tr>
+        <tr><td>1</td><td>Landing Page</td><td>Public</td></tr>
+        <tr><td>2</td><td>Sign Up Page</td><td>Public</td></tr>
+        <tr><td>3</td><td>Login Page</td><td>Public</td></tr>
+        <tr><td>4</td><td>Email Verification</td><td>Public</td></tr>
+        <tr><td>5</td><td>Forgot Password</td><td>Public</td></tr>
+        <tr><td>6</td><td>Reset Password</td><td>Public</td></tr>
+        <tr><td>7</td><td>Dashboard / Home</td><td>Logged In</td></tr>
+        <tr><td>8</td><td>Create Meeting (Modal/Page)</td><td>Logged In</td></tr>
+        <tr><td>9</td><td>Join Meeting Page</td><td>Public / Logged In</td></tr>
+        <tr><td>10</td><td>Pre-Join Screen</td><td>Before Meeting</td></tr>
+        <tr><td>11</td><td>Waiting Room (Participant)</td><td>Meeting</td></tr>
+        <tr><td>12</td><td>Waiting Room Panel (Host)</td><td>Meeting</td></tr>
+        <tr><td>13</td><td>Meeting Room - Main</td><td>Meeting</td></tr>
+        <tr><td>14</td><td>Participants Panel</td><td>Meeting</td></tr>
+        <tr><td>15</td><td>Chat Panel</td><td>Meeting</td></tr>
+        <tr><td>16</td><td>Screen Share View</td><td>Meeting</td></tr>
+        <tr><td>17</td><td>Meeting Ended</td><td>After Meeting</td></tr>
+        <tr><td>18</td><td>Settings Page</td><td>Logged In</td></tr>
+        <tr><td>19</td><td>API Keys List</td><td>Logged In</td></tr>
+        <tr><td>20</td><td>Create API Key Modal</td><td>Logged In</td></tr>
+    </table>
+
+    <div class="tip">
+        <div class="tip-title">Design Priority</div>
+        <p>Focus first on: Landing Page, Login/Signup, Dashboard, Create Meeting, Join Meeting, Pre-Join Screen, and Meeting Room. These are the core user journey.</p>
+    </div>
+
+    <div class="footer">
+        <p>CosmicForge RTC - UI/UX Design Guide</p>
+        <p>For Figma Designers | Version 1.0</p>
+        <p>Colors, layout, and visual style are your creative choice.</p>
+    </div>
+</div>
+
+</body>
+</html>
