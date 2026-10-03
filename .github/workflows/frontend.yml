@@ -1,0 +1,54 @@
+name: Frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend.yml"
+  pull_request:
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: frontend-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  check:
+    name: install / lint / typecheck / build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: npm ci
+        run: npm ci
+
+      # Pre-existing ESLint errors were imported from rtc_frontend unchanged.
+      # Reported but non-blocking until they are fixed in a dedicated change.
+      - name: lint
+        continue-on-error: true
+        run: npm run lint
+
+      - name: typecheck
+        run: npx tsc --noEmit
+
+      - name: build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8080/api/v1
+
+      # No test script is defined in frontend/package.json; add a step here
+      # when one exists.

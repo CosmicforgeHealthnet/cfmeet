@@ -1,0 +1,27 @@
+name: Compose config
+
+on:
+  pull_request:
+    paths:
+      - "docker-compose.yml"
+      - "infra/**"
+      - "backend/Dockerfile"
+      - ".github/workflows/compose.yml"
+  push:
+    branches: [main]
+    paths:
+      - "docker-compose.yml"
+      - "infra/**"
+      - "backend/Dockerfile"
+      - ".github/workflows/compose.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate root docker-compose.yml
+        run: |
+          cp backend/.env.example backend/.env
+          docker compose config --quiet
+          docker compose --profile app config --quiet
