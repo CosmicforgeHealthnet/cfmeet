@@ -1,6 +1,6 @@
 # =============================================================================
 # CF Meet monorepo — root ignore rules
-# backend/.gitignore and frontend/.gitignore keep their app-specific rules.
+# services/core-api/.gitignore and apps/web/.gitignore keep their app-specific rules.
 # =============================================================================
 
 # ---- Rust -------------------------------------------------------------------

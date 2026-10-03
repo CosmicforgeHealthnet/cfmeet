@@ -219,7 +219,7 @@ cargo run -- fresh   # Reset (destroys data)
 
 ### "could not connect to database"
 
-Check `backend/.env` has correct `DATABASE_URL`.
+Check `services/core-api/.env` has correct `DATABASE_URL`.
 
 ### Migration not running
 

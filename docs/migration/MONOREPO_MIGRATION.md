@@ -1,5 +1,10 @@
 # Monorepo migration record
 
+> **Note on paths:** sections 1–7 below describe the original consolidation,
+> when the apps lived in `backend/` and `frontend/`. Those directories have since
+> been renamed to `services/core-api/` and `apps/web/`; see
+> [Platform layout restructure](#platform-layout-restructure) at the end.
+
 **Date:** 2026-10-03
 **Scope:** Repository consolidation only. No application behaviour, API, database,
 LiveKit or authentication changes.
@@ -26,8 +31,8 @@ The source repositories were only read, never written to.
 4. Both rewritten histories were merged into a new root commit with
    `git merge --allow-unrelated-histories --no-ff`.
 
-Old→new SHA mappings: [`migration/commit-map-backend.txt`](migration/commit-map-backend.txt),
-[`migration/commit-map-frontend.txt`](migration/commit-map-frontend.txt).
+Old→new SHA mappings: [`commit-map-backend.txt`](commit-map-backend.txt),
+[`commit-map-frontend.txt`](commit-map-frontend.txt).
 
 Verification:
 
@@ -111,5 +116,54 @@ database, rotate it there. No other credentials were found in either history.
 them only after:
 
 1. this repository is pushed to `CosmicforgeHealthnet/cfmeet` and its CI has run;
-2. Vercel (Root Directory `frontend`) and the backend image build (context `backend/`) have each deployed successfully from it;
+2. Vercel (Root Directory `apps/web`) and the core API image build (context `services/core-api/`) have each deployed successfully from it;
 3. no new commits have landed on either source repository since the import (otherwise re-import them first).
+
+## Platform layout restructure
+
+**Date:** 2026-10-03. **Safety point:** branch `backup/pre-platform-layout` → `300383b`
+(the published consolidation head).
+
+The two applications were renamed in place with `git mv`, as ordinary commits on
+top of the already-published history. History was **not** rewritten and nothing
+was force-pushed.
+
+| Before | After |
+|--------|-------|
+| `backend/` | `services/core-api/` |
+| `frontend/` | `apps/web/` |
+| `docs/DEPLOYMENT.md` | `infra/deployment/README.md` |
+| `docs/MONOREPO_MIGRATION.md` | `docs/migration/MONOREPO_MIGRATION.md` |
+
+New: `packages/contracts/`, `infra/docker/`, `docs/architecture/`, `docs/api/`,
+`docs/decisions/`, `docs/phases/` (documentation and boundaries only, no new code).
+
+History is reachable with `--follow`, for example:
+
+```bash
+git log --follow -- services/core-api/src/main.rs   # → backend/src/main.rs → rtc_backend
+git log --follow -- apps/web/src/utils/timezone.ts  # → frontend/src/utils/timezone.ts → rtc_frontend
+```
+
+Old commits still show their files under `backend/` and `frontend/`. That is expected:
+moving them would mean rewriting published history.
+
+Updated for the new layout: Makefile, `scripts/dev.sh`, root `docker-compose.yml`,
+the three CI workflows, root README, the deployment guide, `.gitignore` and
+`apps/web/.env.example` comments, and the path prefixes in `services/core-api/docs/`.
+
+Left as-is on purpose: Cargo package/binary names (`backend`, `migration`), the npm
+package name (`frontend`), container-internal paths in the Dockerfile
+(`/app/backend`), compose service names (`backend`, `frontend`), the
+`backend/.env` hint in the migration binary's error message (application code), and
+the historical sections of this document.
+
+### Note for existing local checkouts
+
+If you built the backend before pulling this rename, run `cargo clean` once in
+`services/core-api/`. Debug builds of `utoipa-swagger-ui` (via `rust-embed`) serve
+Swagger UI assets from an absolute `target/` path compiled into the binary.
+A `target/` directory carried over from `backend/` keeps pointing at the old
+location, and `/swagger-ui/` returns 404 until a clean rebuild (`/api-docs/openapi.json`
+keeps working). Fresh clones, CI and Docker/release builds are not affected.
+Likewise, delete `apps/web/.next` if it came from the old `frontend/` directory.

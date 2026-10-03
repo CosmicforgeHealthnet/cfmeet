@@ -5,7 +5,7 @@ This guide covers running the CosmicForge RTC backend using Docker.
 ## Prerequisites
 
 - Docker Desktop installed and running
-- `.env` file configured in the `backend/` directory
+- `.env` file configured in the `services/core-api/` directory
 
 ## Environment Setup
 
@@ -89,7 +89,7 @@ RUST_LOG=debug
 Run PostgreSQL and Redis, then use `cargo run` for the backend:
 
 ```bash
-cd backend
+cd services/core-api
 
 # Start databases
 docker-compose up -d postgres redis
@@ -106,7 +106,7 @@ cargo run
 Run all services including the backend container:
 
 ```bash
-cd backend
+cd services/core-api
 
 # Change APP_ENV in .env
 # APP_ENV=production

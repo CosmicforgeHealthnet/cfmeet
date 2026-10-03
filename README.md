@@ -1,42 +1,82 @@
 # CF Meet
 
-**CosmicForge Tech Limited**
+**CosmicForge Tech Limited: unified communications platform**
 
-CF Meet is CosmicForge's real-time video meeting platform. This monorepo contains
-the RTC control-plane API and the web client. They are two separately deployable
-applications that share version control, CI, documentation and local tooling.
+CF Meet started as CosmicForge's real-time video meeting product and is growing into
+the company's **unified communications platform**: meetings and conferencing,
+realtime calling, messaging, Privacy Relay communications, telephony, Digital
+Communications Numbers, enterprise communications and developer communications
+APIs.
+
+This monorepo holds the platform's applications, services, shared contracts,
+infrastructure configuration and documentation.
+
+## Capabilities
+
+| | Capability |
+|---|-----------|
+| **Current** | Video meetings: scheduled and instant meetings, pre-join, LiveKit-based rooms, waiting room / admission, participant list and media state, screen share, in-meeting chat |
+| **Current** | Accounts: email/password with verification, Google OAuth, password reset |
+| **Current** | Developer basics: API keys, external meeting create/join API, webhook registration, OpenAPI/Swagger |
+| Planned | Realtime app-to-app calling |
+| Planned | Unified messaging |
+| Planned | Privacy Relay communications |
+| Planned | SIP/PSTN telephony and Digital Communications Numbers |
+| Planned | Enterprise communications, admin console, developer portal / CPaaS APIs and SDKs |
+| Future | Intelligence: transcription, translation |
+
+Planned items are **not implemented**. See
+[`docs/architecture/platform-overview.md`](docs/architecture/platform-overview.md).
 
 ## Repository layout
 
 ```
 cfmeet/
-├── backend/     Rust/Axum RTC control plane (PostgreSQL, Redis, LiveKit, SeaORM)
-├── frontend/    Next.js CF Meet client (LiveKit Components, React Query)
-├── infra/       deployment/infrastructure configuration (local LiveKit config)
-├── scripts/     repository-wide automation
-├── docs/        technical, architecture and deployment documentation
-├── .github/     path-aware CI workflows
-├── docker-compose.yml   local development dependencies (+ optional full stack)
-└── Makefile     root developer commands
+├── apps/
+│   └── web/              Next.js CF Meet web app                      (current)
+├── services/
+│   └── core-api/         Rust/Axum core API: one deployable modular monolith (current)
+├── packages/
+│   └── contracts/        Shared API / event / webhook contracts (boundary; generation planned)
+├── infra/
+│   ├── livekit/          LiveKit config (local dev)
+│   ├── docker/           Container build & local orchestration notes
+│   └── deployment/       Deployment guide
+├── docs/
+│   ├── architecture/     Platform overview and boundaries
+│   ├── api/              API documentation entry point
+│   ├── decisions/        Architecture decision records (ADRs)
+│   ├── phases/           Per-phase specifications and reports
+│   └── migration/        Monorepo consolidation record
+├── scripts/              Repository-wide automation
+├── .github/workflows/    Path-aware CI
+├── docker-compose.yml    Local dependencies (+ optional full stack)
+└── Makefile              Root developer commands
 ```
 
-| Path | History | Deploys as | Build context |
-|------|---------|------------|---------------|
-| `backend/`  | imported from `CosmicforgeHealthnet/rtc_backend`  | Docker image (`backend/Dockerfile`) | `backend/` |
-| `frontend/` | imported from `CosmicforgeHealthnet/rtc_frontend` | Vercel | Root Directory = `frontend` |
+| Path | Origin | Deploys as | Build root |
+|------|--------|------------|------------|
+| `services/core-api/` | `CosmicforgeHealthnet/rtc_backend` (via `backend/`) | Docker image (`services/core-api/Dockerfile`) | `services/core-api/` |
+| `apps/web/` | `CosmicforgeHealthnet/rtc_frontend` (via `frontend/`) | Vercel | Root Directory = `apps/web` |
 
-The two applications talk to each other only over HTTP (`NEXT_PUBLIC_API_URL` →
-backend `/api/v1`). The frontend never imports backend source, and the backend
-never depends on frontend build output. Keep it that way.
+The web app and the core API communicate **only over HTTP** (`NEXT_PUBLIC_API_URL`
+→ core API `/api/v1`). Neither imports the other's source or build output, and
+each builds and deploys independently. Future services and apps are documented
+in [`docs/architecture/platform-boundaries.md`](docs/architecture/platform-boundaries.md)
+and get created only when real work begins.
 
-Detailed backend documentation lives in [`backend/docs/`](backend/docs/README.md).
-Deployment notes: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
-Migration record: [`docs/MONOREPO_MIGRATION.md`](docs/MONOREPO_MIGRATION.md).
+More docs:
+[core API guides](services/core-api/docs/README.md) ·
+[API](docs/api/README.md) ·
+[deployment](infra/deployment/README.md) ·
+[contracts](packages/contracts/README.md) ·
+[ADRs](docs/decisions/README.md) ·
+[migration record](docs/migration/MONOREPO_MIGRATION.md)
 
 ## Prerequisites
 
 - Rust (stable) with `rustfmt` and `clippy`
-- Node.js 22 and npm (the frontend uses `package-lock.json`)
+- Node.js 22 and npm (`apps/web` uses `package-lock.json`)
 - Docker with Compose v2 (for PostgreSQL, Redis and LiveKit), or local installs of each
 
 ## Environment files
@@ -44,16 +84,16 @@ Migration record: [`docs/MONOREPO_MIGRATION.md`](docs/MONOREPO_MIGRATION.md).
 Secrets are never committed. Copy the examples and fill them in locally:
 
 ```bash
-cp backend/.env.example  backend/.env
-cp frontend/.env.example frontend/.env.local
+cp services/core-api/.env.example services/core-api/.env
+cp apps/web/.env.example          apps/web/.env.local
 ```
 
 | File | Purpose |
 |------|---------|
-| `backend/.env.example`  | `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`, Google OAuth, SMTP, `FRONTEND_URLS` (CORS), `APP_URL` |
-| `frontend/.env.example` | `NEXT_PUBLIC_API_URL` (backend base URL, e.g. `http://localhost:8080/api/v1`) |
+| `services/core-api/.env.example` | `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`, Google OAuth, SMTP, `FRONTEND_URLS` (CORS), `APP_URL` |
+| `apps/web/.env.example` | `NEXT_PUBLIC_API_URL` (core API base URL, e.g. `http://localhost:8080/api/v1`) |
 
-`.env`, `.env.*` and `.env.local` are git-ignored everywhere; only `*.env.example`
+`.env`, `.env.*` and `.env.local` are git-ignored everywhere. Only `*.env.example`
 files are tracked.
 
 ## Local development
@@ -72,7 +112,7 @@ This starts, bound to `127.0.0.1` only:
 | Redis 7 | `localhost:6379` | no auth |
 | LiveKit (dev mode) | `ws://localhost:7880` | key `devkey`, secret `secret` ([`infra/livekit/livekit.dev.yaml`](infra/livekit/livekit.dev.yaml)) |
 
-Matching values for `backend/.env`:
+Matching values for `services/core-api/.env`:
 
 ```dotenv
 DATABASE_URL=postgresql://postgres:password@localhost:5432/cosmicforge_rtc
@@ -84,23 +124,22 @@ FRONTEND_URLS=http://localhost:3000
 APP_URL=http://localhost:3000
 ```
 
-The dev LiveKit key pair is public and for local use only. Use LiveKit Cloud or
-your own LiveKit deployment with real credentials anywhere else.
+The dev LiveKit key pair is public and for local use only.
 
-### 4. Backend
+### 4. Core API (`services/core-api`)
 
 ```bash
-make migrate         # cd backend && cargo run -p migration -- up
-make backend         # cd backend && cargo run --bin backend
+make migrate         # cd services/core-api && cargo run -p migration -- up
+make backend         # cd services/core-api && cargo run --bin backend   (alias: make core-api)
 curl http://localhost:8080/health
 ```
 
-Swagger UI is served at <http://localhost:8080/swagger-ui/>.
+Swagger UI: <http://localhost:8080/swagger-ui/>. OpenAPI: <http://localhost:8080/api-docs/openapi.json>.
 
-### 5. Frontend
+### 5. Web app (`apps/web`)
 
 ```bash
-make frontend        # cd frontend && npm ci (first run) && npm run dev
+make frontend        # cd apps/web && npm ci (first run) && npm run dev   (alias: make web)
 ```
 
 Open <http://localhost:3000>.
@@ -108,13 +147,8 @@ Open <http://localhost:3000>.
 ### Everything at once
 
 ```bash
-make dev             # deps + migrations + backend + frontend (Ctrl+C stops the apps)
-```
-
-Or run the full stack in containers:
-
-```bash
-docker compose --profile app up -d --build
+make dev             # deps + migrations + core API + web app (Ctrl+C stops the apps)
+docker compose --profile app up -d --build   # or: full stack in containers
 ```
 
 ## Root commands
@@ -123,25 +157,26 @@ docker compose --profile app up -d --build
 |---------|--------------|
 | `make help`     | List all targets |
 | `make deps` / `make deps-down` | Start / stop PostgreSQL, Redis, LiveKit |
-| `make migrate`  | Apply backend migrations |
-| `make backend`  | Run the backend API |
-| `make frontend` | Run the Next.js dev server |
-| `make dev`      | Start deps, then backend and frontend together |
-| `make test`     | `cargo test --workspace` + frontend typecheck (no frontend test suite exists yet) |
+| `make migrate`  | Apply core API migrations |
+| `make backend` (`core-api`) | Run the core API |
+| `make frontend` (`web`) | Run the web app dev server |
+| `make dev`      | Start deps, then core API and web app together |
+| `make test`     | `cargo test --workspace` + web typecheck (no web test suite exists yet) |
 | `make lint`     | `cargo fmt --check`, `cargo clippy`, `npm run lint` |
 | `make build`    | `cargo build --workspace` + `next build` |
 
-Each target just runs the app's own toolchain inside `backend/` or `frontend/`, so
-you can always `cd` into either directory and work as before.
+Each target runs the app's own toolchain inside `services/core-api/` or
+`apps/web/`, so you can also `cd` into either directory and work directly.
 
 ## CI
 
 Workflows in [`.github/workflows`](.github/workflows) are path-filtered:
 
-- **Backend** (`backend/**`): `cargo fmt --check`, `cargo clippy`, `cargo test`, `cargo build`, `docker build` with `backend/` as context
-- **Frontend** (`frontend/**`): `npm ci`, `npm run lint`, `tsc --noEmit`, `next build`
-- **Compose config** (`docker-compose.yml`, `infra/**`): `docker compose config`
+- **Backend** (`services/core-api/**`): `cargo fmt --check`, `cargo clippy`, `cargo test`, `cargo build`, `docker build` with `services/core-api/` as context
+- **Frontend** (`apps/web/**`): `npm ci`, `npm run lint`, `tsc --noEmit`, `next build`
+- **Compose config** (`docker-compose.yml`, `infra/**`, core-api Dockerfile): `docker compose config`
 
-`cargo fmt --check` and `npm run lint` currently fail on code imported unchanged
-from the original repositories. They report but don't block until those are cleaned up
-(see [`docs/MONOREPO_MIGRATION.md`](docs/MONOREPO_MIGRATION.md)).
+`packages/contracts/**` will be added to the consuming workflows once something
+consumes it. `cargo fmt --check` and `npm run lint` currently fail on code imported
+unchanged from the original repositories. They report but don't block (see
+[`docs/migration/MONOREPO_MIGRATION.md`](docs/migration/MONOREPO_MIGRATION.md)).
