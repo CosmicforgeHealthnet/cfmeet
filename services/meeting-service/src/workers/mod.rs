@@ -26,6 +26,9 @@ pub mod meeting_auto_end;
 pub mod meeting_auto_start;
 pub mod outbox_relay;
 
+pub use conference_scheduler::{
+    spawn_conference_scheduler, ConferenceScheduler, ConferenceSchedulerHandle,
+};
 pub use email::{spawn_email_worker, EmailWorker, EmailWorkerHandle};
 pub use meeting_auto_end::{
     spawn_meeting_auto_end_worker, MeetingAutoEndWorker, MeetingAutoEndWorkerHandle,
@@ -33,4 +36,3 @@ pub use meeting_auto_end::{
 pub use meeting_auto_start::{
     spawn_meeting_auto_start_worker, MeetingAutoStartWorker, MeetingAutoStartWorkerHandle,
 };
-pub use conference_scheduler::{spawn_conference_scheduler, ConferenceScheduler, ConferenceSchedulerHandle};

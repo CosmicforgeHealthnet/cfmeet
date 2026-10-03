@@ -116,7 +116,10 @@ async fn main() -> anyhow::Result<()> {
     // The outbox relay only runs once the Part E realtime/control-plane consumer exists;
     // until then events stay durably PENDING in PostgreSQL.
     let _outbox_relay = flags.conference_realtime_enabled.then(|| {
-        spawn_outbox_relay(OutboxRelay::new(db.clone(), std::sync::Arc::new(LogPublisher)), 2)
+        spawn_outbox_relay(
+            OutboxRelay::new(db.clone(), std::sync::Arc::new(LogPublisher)),
+            2,
+        )
     });
 
     // Configure CORS - allow frontend(s) to access API

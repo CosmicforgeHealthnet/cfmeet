@@ -34,6 +34,9 @@ pub struct RegisteredActor {
     /// Present only when the email address is verified.
     pub verified_email: Option<String>,
     pub platform_admin: bool,
+    /// Whether the token was checked against the revocation store (Redis). `false`
+    /// means the store was unreachable; strict security profiles then fail closed.
+    pub revocation_checked: bool,
 }
 
 impl RegisteredActor {
@@ -54,6 +57,9 @@ pub enum ActorKind {
     ParticipantCredential(String),
     /// Unauthenticated caller with no credential (new guest / invite holder).
     Anonymous,
+    /// Holder of a server-signed legacy v1 guest JWT (`sub` = legacy participant id).
+    /// Only meaningful to the legacy v1 join; v2 treats it like `Anonymous`.
+    LegacyGuest(Uuid),
     /// Internal scheduler/worker.
     System(&'static str),
 }
@@ -121,6 +127,10 @@ impl ActorContext {
             ActorKind::RegisteredUser(r) => ("USER".into(), Some(format!("user:{}", r.user_id))),
             ActorKind::ParticipantCredential(_) => ("PARTICIPANT".into(), None),
             ActorKind::Anonymous => ("ANONYMOUS".into(), None),
+            ActorKind::LegacyGuest(p) => (
+                "LEGACY_GUEST".into(),
+                Some(format!("legacy_participant:{p}")),
+            ),
             ActorKind::System(name) => ("SYSTEM".into(), Some(format!("system:{name}"))),
         }
     }
@@ -200,19 +210,34 @@ pub async fn resolve_actor(parts: &Parts, state: &AppState) -> ApiResult<ActorCo
                 "Invalid or expired token",
             )
         })?;
-        if claims.role != "guest" {
-            // Revocation lives in Redis. Redis is not identity authority: if it is
-            // unavailable the (short-lived, signature-verified) token is still honoured.
-            match state.token_blacklist.is_blacklisted(&token).await {
-                Ok(true) => {
-                    return Err(ApiError::domain(
-                        ErrorCode::AuthenticationRequired,
-                        "Token has been revoked",
-                    ))
-                }
-                Ok(false) => {}
-                Err(e) => tracing::warn!("token revocation check unavailable (Redis): {e}"),
+        // Per-token revocation (logout) lives ONLY in Redis (`TokenBlacklistService`).
+        // Account deactivation is authoritative in PostgreSQL and checked below on every
+        // request. If Redis is unreachable the token is honoured but marked
+        // `revocation_checked = false`; strict security profiles fail closed on that.
+        let revocation_checked = match state.token_blacklist.is_blacklisted(&token).await {
+            Ok(true) => {
+                return Err(ApiError::domain(
+                    ErrorCode::AuthenticationRequired,
+                    "Token has been revoked",
+                ))
             }
+            Ok(false) => true,
+            Err(e) => {
+                tracing::warn!("token revocation check unavailable (Redis): {e}");
+                false
+            }
+        };
+        if claims.role == "guest" {
+            // Legacy v1 guest JWT: identifies a legacy guest participant only.
+            if let Ok(participant_id) = Uuid::parse_str(&claims.sub) {
+                return Ok(ActorContext {
+                    kind: ActorKind::LegacyGuest(participant_id),
+                    verified_organizations: vec![],
+                    request_id,
+                    client_kind,
+                });
+            }
+        } else {
             let user_id = Uuid::parse_str(&claims.sub).map_err(|_| {
                 ApiError::domain(ErrorCode::AuthenticationRequired, "Invalid token subject")
             })?;
@@ -240,13 +265,13 @@ pub async fn resolve_actor(parts: &Parts, state: &AppState) -> ApiResult<ActorCo
                     display_name: user.username.clone(),
                     verified_email: email_verified.then(|| user.email.to_ascii_lowercase()),
                     platform_admin: user.role == UserRole::Admin,
+                    revocation_checked,
                 }),
                 verified_organizations,
                 request_id,
                 client_kind,
             });
         }
-        // Legacy guest token: ignored by v2 (falls through to credential/anonymous).
     }
 
     if let Some(credential) = parts
@@ -294,6 +319,7 @@ mod tests {
             display_name: "a".into(),
             verified_email: Some("Alice@Example.COM".into()),
             platform_admin: false,
+            revocation_checked: true,
         };
         assert_eq!(actor.verified_domain().as_deref(), Some("example.com"));
         actor.verified_email = None;

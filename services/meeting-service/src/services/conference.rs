@@ -597,6 +597,15 @@ impl ConferenceService {
         am.termination_reason = Set(Some(TerminationReason::Cancelled));
         if conference.recurrence_rule_id.is_some() {
             am.is_exception = Set(true);
+            crate::services::recurrence::record_exception_for_conference(
+                &txn,
+                &conference,
+                crate::domain::RecurrenceExceptionKind::Cancelled,
+                None,
+                None,
+                authority.audit.reference(),
+            )
+            .await?;
         }
         let updated = self.apply(&txn, conference, am).await?;
         self.record(
@@ -644,6 +653,15 @@ impl ConferenceService {
         am.scheduled_end_at = Set(req.scheduled_end_at);
         if conference.recurrence_rule_id.is_some() {
             am.is_exception = Set(true);
+            crate::services::recurrence::record_exception_for_conference(
+                &txn,
+                &conference,
+                crate::domain::RecurrenceExceptionKind::Rescheduled,
+                Some(req.scheduled_start_at),
+                req.scheduled_end_at,
+                authority.audit.reference(),
+            )
+            .await?;
         }
         let updated = self.apply(&txn, conference.clone(), am).await?;
         self.record(

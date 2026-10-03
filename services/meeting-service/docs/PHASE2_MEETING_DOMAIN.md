@@ -98,3 +98,51 @@ Legacy rows are backfilled idempotently (`migration/src/phase2_backfill.rs`). Le
 conferences remain legacy-managed (read-only in v2, refreshed from the legacy row) until
 certification. v2 codes (`xxx-xxxx-xxx`) and legacy codes (8 uppercase) never collide; the
 resolver accepts v2 id, v2 code, legacy id and legacy code.
+
+## A–D closure additions
+
+### Legacy v1 join identity
+`POST /api/v1/meetings/{id}/join` and `/api/v1/meetings/join/{code}` resolve identity through
+`ActorContext`. The body `user_id` is a compatibility claim only: 401 without a bearer token,
+403 if it differs from the authenticated user. Guests resume only with their server-signed guest
+token (`Authorization: Bearer <guest access_token>`); display names are never matched. The
+API-key route joins as the key owner. **Web client follow-up (outside this service):**
+`apps/web/src/services/meeting.service.ts#joinMeeting` must use the authenticated `api` client
+(which sends the stored access/guest token) instead of `publicApi`.
+
+### Organizations (ORGANIZATION_ONLY)
+No organization source existed in the monorepo; the meeting service is the current CF account
+authority, so `organizations` / `organization_memberships` live here behind
+`OrganizationDirectory` (`DbOrganizationDirectory`). Only ACTIVE memberships of ACTIVE
+organizations held by non-deactivated accounts count; membership is re-resolved on every request
+(including reconnect). Management: `POST/PATCH /api/v2/admin/organizations` (platform admins),
+`GET/PUT /api/v2/organizations/{id}/members[/{userId}]` (platform admins, org OWNER/ADMIN within
+grant limits), `GET /api/v2/me/organizations`.
+
+### DOMAIN_RESTRICTED
+Domain = domain of the account email only when verified (Google accounts, or local accounts in
+ACTIVE status when email verification is required). Request-body email/domain are rejected.
+
+### HEALTHCARE_APPOINTMENT
+`AppointmentAuthorizationAdapter::authorize(actor, space, conference, external_context)` →
+Authorized | Denied. `HttpAppointmentAuthorizationAdapter` implements the HealthNet contract
+(see `services/appointment_authorization.rs`) and fails closed on errors, timeouts, malformed or
+inactive appointments; roles are capped below OWNER. **Blocked dependency:** the authoritative
+HealthNet appointment service is not in this repository; until `HEALTHNET_APPOINTMENT_AUTHZ_URL`
+points at it, `UnconfiguredAppointmentAuthorization` denies all appointment joins.
+
+### Token revocation
+Per-token revocation (logout) lives only in Redis (`TokenBlacklistService`); account deactivation
+is authoritative in PostgreSQL and checked on every request. If Redis is unreachable a token is
+honoured with `revocation_checked = false`; spaces with security profile HEALTHCARE or
+HIGH_SECURITY, or `accessConfig.requireVerifiedRevocation = true`, then fail closed with
+`503 REVOCATION_CHECK_UNAVAILABLE` (reads degrade to the SUMMARY view). Redis never holds meeting
+state authority.
+
+### Recurrence exceptions
+`PUT /api/v2/meeting-spaces/{id}/recurrence/exceptions` cancels or reschedules any future
+occurrence (materialized or not), keyed by the original wall-clock start in the series timezone
+(`meeting_recurrence_exceptions`, unique per rule). Idempotent. The materializer applies the
+exception when it generates the occurrence; already-materialized rows are updated immediately.
+Conference-level cancel/reschedule of recurring occurrences record the same exception. Timezone
+re-anchoring keeps exceptions aligned. Materialization stays bounded (30 days / 50 per run).

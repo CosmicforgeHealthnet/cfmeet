@@ -137,19 +137,15 @@ impl SpaceDraft {
         {
             return Err(validation("allowedDomains must be lowercase domain names"));
         }
-        if matches!(
-            self.access_policy,
-            AccessPolicy::HealthcareAppointment | AccessPolicy::Custom
-        ) && self
-            .access_config
-            .adapter_ref
-            .as_deref()
-            .unwrap_or("")
-            .is_empty()
+        if self.access_policy == AccessPolicy::Custom
+            && self
+                .access_config
+                .adapter_ref
+                .as_deref()
+                .unwrap_or("")
+                .is_empty()
         {
-            return Err(validation(
-                "This access policy requires accessConfig.adapterRef",
-            ));
+            return Err(validation("CUSTOM access requires accessConfig.adapterRef"));
         }
         if self.access_policy == AccessPolicy::OrganizationOnly && self.organization_id.is_none() {
             return Err(validation(
@@ -510,7 +506,11 @@ impl MeetingSpaceService {
         ctx: &ActorContext,
         space: meeting_spaces::Model,
     ) -> ApiResult<SpaceView> {
-        let viewer_role = self.viewer_role(&self.core.db, &space, ctx).await?;
+        // An unverifiable session on a strict space only gets the summary view.
+        let viewer_role = match self.viewer_role(&self.core.db, &space, ctx).await {
+            Err(e) if e.code() == Some(ErrorCode::RevocationCheckUnavailable) => None,
+            other => other?,
+        };
         let pctx = PermissionContext::for_space(&space);
         let full = viewer_role
             .map(|r| space_allows(r, SpacePermission::ViewMembers, &pctx))

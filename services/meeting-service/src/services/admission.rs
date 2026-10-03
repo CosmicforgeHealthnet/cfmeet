@@ -478,6 +478,14 @@ impl AdmissionService {
         conference_id: Uuid,
         req: JoinConferenceRequest,
     ) -> ApiResult<JoinOutcome> {
+        if req
+            .external_context
+            .as_ref()
+            .map(|c| c.len() > 512)
+            .unwrap_or(false)
+        {
+            return Err(validation("externalContext must be at most 512 characters"));
+        }
         // 1. Resolve conference / space (fail fast; re-checked under lock below).
         let conference = find_conference(&self.core.db, conference_id).await?;
         Self::ensure_v2(&conference)?;
@@ -524,6 +532,7 @@ impl AdmissionService {
                 existing_participant: existing.as_ref(),
                 invitation,
                 passcode: req.passcode.as_deref(),
+                external_context: req.external_context.as_deref(),
             })
             .await?;
         let display_name = match (&req.display_name, ctx.registered(), &existing) {

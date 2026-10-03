@@ -159,6 +159,8 @@ pub struct DomainCore {
     pub organizations: SharedOrganizationDirectory,
     pub rtc: Arc<dyn RtcProvider>,
     pub adapters: AccessAdapterRegistry,
+    pub appointments:
+        Arc<dyn crate::services::appointment_authorization::AppointmentAuthorizationAdapter>,
     pub passcode_limiter: AttemptLimiter,
 }
 
@@ -303,12 +305,38 @@ pub async fn active_membership<C: ConnectionTrait>(
     Ok(members.into_iter().max_by_key(|m| m.role.rank()))
 }
 
+/// Spaces whose security profile (or explicit configuration) requires that an
+/// access token's revocation status was actually verified. Per-token revocation lives
+/// only in Redis; when it cannot be checked these spaces fail closed. Redis is never
+/// meeting-state authority — this only decides whether an *authenticated identity*
+/// is trustworthy enough for a strict space.
+pub fn requires_verified_revocation(space: &meeting_spaces::Model) -> bool {
+    matches!(
+        space.security_profile,
+        crate::domain::SecurityProfile::Healthcare | crate::domain::SecurityProfile::HighSecurity
+    ) || crate::services::meeting_space::access_config(space).require_verified_revocation
+}
+
+pub fn enforce_revocation_policy(
+    space: &meeting_spaces::Model,
+    actor: &RegisteredActor,
+) -> ApiResult<()> {
+    if !actor.revocation_checked && requires_verified_revocation(space) {
+        return Err(ApiError::domain(
+            ErrorCode::RevocationCheckUnavailable,
+            "Your session cannot be verified right now. Please try again shortly.",
+        ));
+    }
+    Ok(())
+}
+
 /// Persistent (space-level) role of a registered actor: owner, or membership role.
 pub async fn space_role<C: ConnectionTrait>(
     conn: &C,
     space: &meeting_spaces::Model,
     actor: &RegisteredActor,
 ) -> ApiResult<Option<(Role, RoleSource)>> {
+    enforce_revocation_policy(space, actor)?;
     if space.owner_user_id == actor.user_id {
         return Ok(Some((Role::Owner, RoleSource::Owner)));
     }

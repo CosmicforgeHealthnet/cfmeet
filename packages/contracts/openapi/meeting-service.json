@@ -1189,8 +1189,11 @@
           "400": {
             "description": "Validation error - Invalid user_id or display_name"
           },
+          "401": {
+            "description": "user_id supplied without a valid access token (identity comes only from the Authorization header)"
+          },
           "403": {
-            "description": "Private meeting - guests not allowed"
+            "description": "Private meeting - guests not allowed, or user_id does not match the authenticated user"
           },
           "404": {
             "description": "Meeting not found"
@@ -1610,8 +1613,11 @@
           "400": {
             "description": "Validation error - Invalid user_id or display_name"
           },
+          "401": {
+            "description": "user_id supplied without a valid access token (identity comes only from the Authorization header)"
+          },
           "403": {
-            "description": "Private meeting - guests not allowed"
+            "description": "Private meeting - guests not allowed, or user_id does not match the authenticated user"
           },
           "404": {
             "description": "Meeting not found"
@@ -2431,6 +2437,110 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ShadowComparisonResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/organizations": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Create an organization (platform administrators).",
+        "operationId": "v2_create_organization",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrganizationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/organizations/{id}": {
+      "patch": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Suspend or reactivate an organization (platform administrators).",
+        "operationId": "v2_update_organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOrganizationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationResponse"
                 }
               }
             }
@@ -3776,6 +3886,45 @@
         ]
       }
     },
+    "/api/v2/me/organizations": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Organizations the caller verifiably belongs to.",
+        "operationId": "v2_my_organizations",
+        "responses": {
+          "200": {
+            "description": "Organizations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MyOrganizationResponse"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/meeting-spaces": {
       "get": {
         "tags": [
@@ -4846,6 +4995,253 @@
         ]
       }
     },
+    "/api/v2/meeting-spaces/{id}/recurrence/exceptions": {
+      "get": {
+        "tags": [
+          "Scheduling (v2)"
+        ],
+        "summary": "List exceptions of the active series.",
+        "operationId": "v2_list_recurrence_exceptions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Meeting space id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exceptions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RecurrenceExceptionResponse"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Scheduling (v2)"
+        ],
+        "summary": "Cancel or reschedule ONE future occurrence of the series — whether or not it has",
+        "description": "been materialized yet. Idempotent; applied by the scheduler when the occurrence is\ngenerated (or immediately if it already exists).",
+        "operationId": "v2_set_recurrence_exception",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Meeting space id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecurrenceExceptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Exception recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecurrenceExceptionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR (not an occurrence, past, bad window)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_STATE_CONFLICT (occurrence already started)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/members": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "List members (platform admins, organization OWNER/ADMIN).",
+        "operationId": "v2_list_organization_members",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Members",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OrganizationMemberResponse"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/members/{userId}": {
+      "put": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Add or change a membership (platform admins, organization OWNER/ADMIN within limits).",
+        "operationId": "v2_upsert_organization_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertOrganizationMemberRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Membership",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMemberResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/resolve/{identifier}": {
       "get": {
         "tags": [
@@ -4923,7 +5319,7 @@
         "properties": {
           "adapterRef": {
             "type": "string",
-            "description": "HEALTHCARE_APPOINTMENT / CUSTOM: registered server-side access adapter.",
+            "description": "CUSTOM: registered server-side access adapter.",
             "nullable": true
           },
           "allowedDomains": {
@@ -4932,6 +5328,15 @@
               "type": "string"
             },
             "description": "DOMAIN_RESTRICTED / EXTERNAL_ONLY: verified email domains treated as internal."
+          },
+          "appointmentRef": {
+            "type": "string",
+            "description": "HEALTHCARE_APPOINTMENT: optional appointment reference forwarded to the\nappointment authority (which alone decides).",
+            "nullable": true
+          },
+          "requireVerifiedRevocation": {
+            "type": "boolean",
+            "description": "Fail closed when an authenticated session's revocation cannot be verified\n(always on for HEALTHCARE and HIGH_SECURITY security profiles)."
           },
           "waitingRoomAdapterRef": {
             "type": "string",
@@ -6054,6 +6459,28 @@
         },
         "additionalProperties": false
       },
+      "CreateOrganizationRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "slug"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "ownerUserId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "slug": {
+            "type": "string",
+            "description": "Lowercase letters, digits and '-'."
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateWebhookApiResponse": {
         "type": "object",
         "required": [
@@ -6296,7 +6723,8 @@
           "RATE_LIMITED",
           "FEATURE_DISABLED",
           "RTC_PROVIDER_UNAVAILABLE",
-          "RECORDING_NOT_ALLOWED"
+          "RECORDING_NOT_ALLOWED",
+          "REVOCATION_CHECK_UNAVAILABLE"
         ]
       },
       "ErrorEnvelope": {
@@ -6471,6 +6899,11 @@
             "description": "Presentation name only — never identity. Required for guests.",
             "nullable": true
           },
+          "externalContext": {
+            "type": "string",
+            "description": "Opaque context forwarded to a server-side access authority (e.g. a HealthNet\nappointment token). Never treated as proof by the meeting service itself.",
+            "nullable": true
+          },
           "invitationToken": {
             "type": "string",
             "nullable": true
@@ -6590,7 +7023,7 @@
           "user_id": {
             "type": "string",
             "format": "uuid",
-            "description": "Optional user ID for authenticated users (null for guests)",
+            "description": "Optional, compatibility only. Registered identity is taken from the\n`Authorization: Bearer <access token>` header; if present, this value must equal\nthe authenticated user's id (401 without a token, 403 on mismatch). Guests omit it\nand resume with their guest access token.",
             "nullable": true
           }
         }
@@ -7264,6 +7697,113 @@
           }
         }
       },
+      "MyOrganizationResponse": {
+        "type": "object",
+        "required": [
+          "organization",
+          "role"
+        ],
+        "properties": {
+          "organization": {
+            "$ref": "#/components/schemas/OrganizationResponse"
+          },
+          "role": {
+            "$ref": "#/components/schemas/OrganizationRole"
+          }
+        }
+      },
+      "OrganizationMemberResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "organizationId",
+          "userId",
+          "role",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "$ref": "#/components/schemas/OrganizationRole"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrganizationMemberStatus"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "OrganizationMemberStatus": {
+        "type": "string",
+        "enum": [
+          "Active",
+          "Suspended",
+          "Removed"
+        ]
+      },
+      "OrganizationResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "status",
+          "createdAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrganizationStatus"
+          }
+        }
+      },
+      "OrganizationRole": {
+        "type": "string",
+        "enum": [
+          "Owner",
+          "Admin",
+          "Member"
+        ]
+      },
+      "OrganizationStatus": {
+        "type": "string",
+        "enum": [
+          "Active",
+          "Suspended"
+        ]
+      },
       "OutboxStatus": {
         "type": "string",
         "enum": [
@@ -7502,6 +8042,102 @@
           "V2",
           "Legacy"
         ]
+      },
+      "RecurrenceExceptionAction": {
+        "type": "string",
+        "enum": [
+          "CANCEL",
+          "RESCHEDULE"
+        ]
+      },
+      "RecurrenceExceptionKind": {
+        "type": "string",
+        "enum": [
+          "Cancelled",
+          "Rescheduled"
+        ]
+      },
+      "RecurrenceExceptionRequest": {
+        "type": "object",
+        "required": [
+          "originalStartAt",
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/RecurrenceExceptionAction"
+          },
+          "originalStartAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The occurrence's original start (as generated by the series), any distance ahead."
+          },
+          "scheduledEndAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "RESCHEDULE only; defaults to the series duration.",
+            "nullable": true
+          },
+          "scheduledStartAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "RESCHEDULE only.",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "RecurrenceExceptionResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "recurrenceRuleId",
+          "originalStartLocal",
+          "timezone",
+          "kind",
+          "version"
+        ],
+        "properties": {
+          "appliedToConferenceId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Set when the occurrence was already materialized and has been updated.",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RecurrenceExceptionKind"
+          },
+          "newEndAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "newStartAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "originalStartLocal": {
+            "type": "string",
+            "description": "Original wall-clock start in the series timezone (exception key).",
+            "example": "2027-03-29T09:00:00"
+          },
+          "recurrenceRuleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
       },
       "RecurrenceResponse": {
         "type": "object",
@@ -8259,6 +8895,18 @@
         },
         "additionalProperties": false
       },
+      "UpdateOrganizationRequest": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/OrganizationStatus"
+          }
+        },
+        "additionalProperties": false
+      },
       "UpdateVideoRequest": {
         "type": "object",
         "description": "Request to update video state",
@@ -8284,6 +8932,22 @@
             "nullable": true
           }
         }
+      },
+      "UpsertOrganizationMemberRequest": {
+        "type": "object",
+        "required": [
+          "role",
+          "status"
+        ],
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/OrganizationRole"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrganizationMemberStatus"
+          }
+        },
+        "additionalProperties": false
       },
       "UserInfo": {
         "type": "object",
@@ -8630,6 +9294,10 @@
     {
       "name": "Waiting Room (v2)",
       "description": "Waiting is a participant admission state. Access policy is always evaluated first."
+    },
+    {
+      "name": "Organizations (v2)",
+      "description": "Authoritative CF organization membership used by ORGANIZATION_ONLY access. Membership is resolved server-side; clients can never assert it."
     },
     {
       "name": "Compatibility (v2)",

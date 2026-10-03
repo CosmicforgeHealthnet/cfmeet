@@ -8,6 +8,7 @@ pub mod compat;
 pub mod conferences;
 pub mod invitations;
 pub mod members;
+pub mod organizations;
 pub mod participants;
 pub mod spaces;
 pub mod views;

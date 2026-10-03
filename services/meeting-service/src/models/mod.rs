@@ -23,8 +23,11 @@ pub mod meeting_poll_responses;
 pub mod meeting_polls;
 pub mod meeting_question_votes;
 pub mod meeting_questions;
+pub mod meeting_recurrence_exceptions;
 pub mod meeting_recurrence_rules;
 pub mod meeting_spaces;
+pub mod organization_memberships;
+pub mod organizations;
 pub mod outbox_events;
 pub mod participant_sessions;
 

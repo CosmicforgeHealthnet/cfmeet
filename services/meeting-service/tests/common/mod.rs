@@ -28,12 +28,14 @@ use backend::{
     models::users,
     routes,
     services::{
-        actor::StaticOrganizationDirectory,
+        actor::{ActorContext, SharedOrganizationDirectory, StaticOrganizationDirectory},
+        appointment_authorization::{AppointmentAuthorizationAdapter, AppointmentDecision},
         meeting_core::{
             AccessAdapterRegistry, AccessAdapterRequest, AdapterDecision, ExternalAccessAdapter,
         },
         meeting_domain::MeetingDomainDeps,
         meeting_permissions::MediaPermissions,
+        organizations::DbOrganizationDirectory,
         rtc_provider::{
             JoinCredentialRequest, JoinCredentials, RoomInfo, RoomSpec, RtcError, RtcParticipant,
             RtcProvider, RtcResult,
@@ -287,7 +289,7 @@ impl RtcProvider for FakeRtc {
     }
 }
 
-/// Healthcare appointment adapter: allows only listed users.
+/// CUSTOM access adapter: allows only listed users.
 pub struct AllowListAdapter(pub Vec<Uuid>);
 
 #[async_trait]
@@ -300,14 +302,65 @@ impl ExternalAccessAdapter for AllowListAdapter {
     }
 }
 
+/// Appointment authority test double: authorizes listed users only.
+pub struct AllowListAppointments(pub Vec<Uuid>);
+
+#[async_trait]
+impl AppointmentAuthorizationAdapter for AllowListAppointments {
+    async fn authorize(
+        &self,
+        actor: &ActorContext,
+        _space: &backend::models::meeting_spaces::Model,
+        _conference: Option<Uuid>,
+        _external_context: Option<&str>,
+    ) -> AppointmentDecision {
+        match actor.user_id() {
+            Some(u) if self.0.contains(&u) => AppointmentDecision::Authorized { role: None },
+            _ => AppointmentDecision::Denied {
+                reason: "not listed".into(),
+            },
+        }
+    }
+}
+
+/// Database tests that also need a reachable Redis follow the same policy as
+/// `TEST_DATABASE_URL`: fail loudly unless `CFMEET_SKIP_DB_TESTS=1`.
+pub fn require_test_redis() -> bool {
+    if std::env::var("TEST_REDIS_URL")
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    if std::env::var("CFMEET_SKIP_DB_TESTS").as_deref() == Ok("1") {
+        eprintln!("SKIPPED: test requires Redis (TEST_REDIS_URL unset)");
+        return false;
+    }
+    panic!(
+        "TEST_REDIS_URL is required for this test (set CFMEET_SKIP_DB_TESTS=1 to skip explicitly)"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum RedisMode {
+    /// `TEST_REDIS_URL` when set, otherwise unreachable.
+    FromEnv,
+    /// Always unreachable (proves Redis is not meeting authority / tests fail-closed paths).
+    Unreachable,
+}
+
 pub struct TestOptions {
     pub flags: FeatureFlags,
+    /// Non-empty → static directory; empty → the production `DbOrganizationDirectory`.
     pub organizations: HashMap<Uuid, Vec<Uuid>>,
-    pub healthcare_allow: Vec<Uuid>,
+    pub custom_allow: Vec<Uuid>,
+    pub appointments: Option<Arc<dyn AppointmentAuthorizationAdapter>>,
+    pub require_email_verification: bool,
+    pub redis: RedisMode,
 }
 
 impl Default for TestOptions {
@@ -318,7 +371,10 @@ impl Default for TestOptions {
                 ..FeatureFlags::all_v2_enabled()
             },
             organizations: HashMap::new(),
-            healthcare_allow: vec![],
+            custom_allow: vec![],
+            appointments: None,
+            require_email_verification: true,
+            redis: RedisMode::FromEnv,
         }
     }
 }
@@ -364,16 +420,23 @@ impl TestApp {
             google_client_id: String::new(),
             google_client_secret: String::new(),
             google_redirect_url: String::new(),
-            require_email_verification: true,
+            require_email_verification: opts.require_email_verification,
         };
         let livekit = LiveKitConfig {
             url: "wss://rtc.test".into(),
             api_key: "k".into(),
             api_secret: "s".into(),
         };
-        // Redis deliberately unreachable: v2 authority must not depend on it.
+        let unreachable = "redis://127.0.0.1:1".to_string();
+        let redis_url = match opts.redis {
+            RedisMode::FromEnv => std::env::var("TEST_REDIS_URL")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .unwrap_or(unreachable),
+            RedisMode::Unreachable => unreachable,
+        };
         let redis = RedisService::new_lazy(&RedisConfig {
-            url: std::env::var("TEST_REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:1".into()),
+            url: redis_url,
             pool_size: 2,
             timeout_secs: 1,
         })
@@ -381,9 +444,16 @@ impl TestApp {
         let rtc = Arc::new(FakeRtc::default());
         let mut adapters = AccessAdapterRegistry::default();
         adapters.register(
-            "healthnet-appointments",
-            Arc::new(AllowListAdapter(opts.healthcare_allow.clone())),
+            "custom-allowlist",
+            Arc::new(AllowListAdapter(opts.custom_allow.clone())),
         );
+        let organizations: SharedOrganizationDirectory = if opts.organizations.is_empty() {
+            Arc::new(DbOrganizationDirectory::new(db.conn.clone()))
+        } else {
+            Arc::new(StaticOrganizationDirectory {
+                memberships: opts.organizations,
+            })
+        };
         let deps = MeetingDomainDeps {
             flags: opts.flags,
             config: MeetingV2Config {
@@ -391,11 +461,12 @@ impl TestApp {
                 passcode_max_attempts: 5,
                 ..MeetingV2Config::default()
             },
-            organizations: Arc::new(StaticOrganizationDirectory {
-                memberships: opts.organizations,
-            }),
+            organizations,
             rtc: rtc.clone(),
             adapters,
+            appointments: opts.appointments.unwrap_or_else(|| {
+                Arc::new(backend::services::appointment_authorization::UnconfiguredAppointmentAuthorization)
+            }),
         };
         let state = AppState::with_meeting_deps(
             db.conn.clone(),

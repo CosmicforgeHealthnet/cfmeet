@@ -7,13 +7,15 @@ use axum::{
     extract::{Request, State},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{get, patch, post},
+    routing::{get, patch, post, put},
     Router,
 };
 
 use crate::{
     error::{ApiError, ErrorCode},
-    handlers::v2::{compat, conferences, invitations, members, participants, spaces},
+    handlers::v2::{
+        compat, conferences, invitations, members, organizations, participants, spaces,
+    },
     state::AppState,
 };
 
@@ -57,6 +59,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             get(spaces::get_recurrence)
                 .put(spaces::set_recurrence)
                 .delete(spaces::end_recurrence),
+        )
+        .route(
+            "/meeting-spaces/:id/recurrence/exceptions",
+            get(spaces::list_recurrence_exceptions).put(spaces::set_recurrence_exception),
         )
         .route("/instant-meetings", post(spaces::create_instant_meeting))
         .route("/resolve/:identifier", get(spaces::resolve_identifier))
@@ -158,5 +164,23 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             get(compat::shadow_compare),
         )
         .route("/admin/compat/backfill", post(compat::run_backfill))
+        // Organizations
+        .route(
+            "/admin/organizations",
+            post(organizations::create_organization),
+        )
+        .route(
+            "/admin/organizations/:id",
+            patch(organizations::update_organization),
+        )
+        .route(
+            "/organizations/:id/members",
+            get(organizations::list_organization_members),
+        )
+        .route(
+            "/organizations/:id/members/:user_id",
+            put(organizations::upsert_organization_member),
+        )
+        .route("/me/organizations", get(organizations::my_organizations))
         .route_layer(middleware::from_fn_with_state(state, require_meeting_v2))
 }

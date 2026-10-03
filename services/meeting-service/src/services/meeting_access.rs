@@ -9,6 +9,7 @@ use sea_orm::EntityTrait;
 use serde_json::json;
 use uuid::Uuid;
 
+use crate::services::appointment_authorization::AppointmentDecision;
 use crate::{
     domain::{AccessPolicy, AdmissionState, Role},
     error::{ApiError, ApiResult, ErrorCode},
@@ -55,6 +56,8 @@ pub struct AccessRequest<'a> {
     /// Already validated for this space/conference by the invitation service.
     pub invitation: Option<meeting_invitations::Model>,
     pub passcode: Option<&'a str>,
+    /// Opaque context forwarded to external authorities (never proof by itself).
+    pub external_context: Option<&'a str>,
 }
 
 fn denied(message: &str) -> ApiError {
@@ -169,6 +172,7 @@ impl MeetingAccessService {
 
         // Explicit grants.
         if let Some(r) = registered {
+            crate::services::meeting_core::enforce_revocation_policy(space, r)?;
             if space.owner_user_id == r.user_id {
                 return Ok(AccessDecision {
                     is_owner: true,
@@ -241,10 +245,18 @@ impl MeetingAccessService {
             },
             AccessPolicy::InviteOnly => Err(denied("This meeting is invite-only")),
             AccessPolicy::OrganizationOnly => {
+                // Membership comes only from the server-side OrganizationDirectory
+                // (ActorContext.verified_organizations); never from the request.
+                if registered.is_none() {
+                    return Err(ApiError::domain(
+                        ErrorCode::AuthenticationRequired,
+                        "Sign in with your organization account to join this meeting",
+                    ));
+                }
                 let org = space
                     .organization_id
                     .ok_or_else(|| denied("Organization not configured"))?;
-                if registered.is_some() && req.actor.verified_organizations.contains(&org) {
+                if req.actor.verified_organizations.contains(&org) {
                     Ok(base(AccessGrant::Organization))
                 } else {
                     Err(denied("This meeting is restricted to its organization"))
@@ -262,7 +274,33 @@ impl MeetingAccessService {
                     )),
                 }
             }
-            AccessPolicy::HealthcareAppointment | AccessPolicy::Custom => {
+            AccessPolicy::HealthcareAppointment => {
+                // Active appointment authorization is verified server-side by the
+                // appointment authority on every join/reconnect (fail closed).
+                let decision = self
+                    .core
+                    .appointments
+                    .authorize(
+                        req.actor,
+                        space,
+                        Some(req.conference_id),
+                        req.external_context,
+                    )
+                    .await;
+                match decision {
+                    AppointmentDecision::Authorized { role } => Ok(AccessDecision {
+                        adapter_role: role,
+                        ..base(AccessGrant::Adapter)
+                    }),
+                    AppointmentDecision::Denied { reason } => {
+                        tracing::info!(meeting_space_id = %space.id, %reason, "appointment authorization denied");
+                        Err(denied(
+                            "No active appointment authorizes you to join this meeting",
+                        ))
+                    }
+                }
+            }
+            AccessPolicy::Custom => {
                 let role = self.adapter(&req).await?;
                 Ok(AccessDecision {
                     adapter_role: role,

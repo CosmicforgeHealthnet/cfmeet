@@ -252,6 +252,28 @@ text_enum!(OutboxStatus {
     Failed = "FAILED",
 });
 
+text_enum!(OrganizationStatus {
+    Active = "ACTIVE",
+    Suspended = "SUSPENDED",
+});
+
+text_enum!(OrganizationRole {
+    Owner = "OWNER",
+    Admin = "ADMIN",
+    Member = "MEMBER",
+});
+
+text_enum!(OrganizationMemberStatus {
+    Active = "ACTIVE",
+    Suspended = "SUSPENDED",
+    Removed = "REMOVED",
+});
+
+text_enum!(RecurrenceExceptionKind {
+    Cancelled = "CANCELLED",
+    Rescheduled = "RESCHEDULED",
+});
+
 #[cfg(test)]
 mod tests {
     use super::*;

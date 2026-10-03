@@ -56,6 +56,7 @@ pub mod action {
     pub const SPACE_OWNER_TRANSFER: &str = "SPACE_OWNER_TRANSFER";
     pub const RECURRENCE_SET: &str = "RECURRENCE_SET";
     pub const RECURRENCE_END: &str = "RECURRENCE_END";
+    pub const RECURRENCE_EXCEPTION_SET: &str = "RECURRENCE_EXCEPTION_SET";
     pub const MEMBER_ADD: &str = "MEMBER_ADD";
     pub const MEMBER_UPDATE: &str = "MEMBER_UPDATE";
     pub const MEMBER_REVOKE: &str = "MEMBER_REVOKE";

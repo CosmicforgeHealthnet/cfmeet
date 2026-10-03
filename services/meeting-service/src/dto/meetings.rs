@@ -83,7 +83,6 @@ pub struct CreateMeetingRequest {
     pub is_private: Option<bool>,
 
     #[schema(value_type = Option<Object>)]
-
     pub metadata: Option<JsonValue>,
 }
 
@@ -112,7 +111,6 @@ pub struct UpdateMeetingRequest {
     pub is_private: Option<bool>,
 
     #[schema(value_type = Option<Object>)]
-
     pub metadata: Option<JsonValue>,
 }
 
@@ -121,7 +119,10 @@ pub struct UpdateMeetingRequest {
 /// Request to join a meeting
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct JoinMeetingRequest {
-    /// Optional user ID for authenticated users (null for guests)
+    /// Optional, compatibility only. Registered identity is taken from the
+    /// `Authorization: Bearer <access token>` header; if present, this value must equal
+    /// the authenticated user's id (401 without a token, 403 on mismatch). Guests omit it
+    /// and resume with their guest access token.
     pub user_id: Option<Uuid>,
 
     #[validate(length(

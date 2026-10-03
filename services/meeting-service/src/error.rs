@@ -37,6 +37,7 @@ pub enum ErrorCode {
     FeatureDisabled,
     RtcProviderUnavailable,
     RecordingNotAllowed,
+    RevocationCheckUnavailable,
 }
 
 impl ErrorCode {
@@ -65,6 +66,7 @@ impl ErrorCode {
             ErrorCode::FeatureDisabled => "FEATURE_DISABLED",
             ErrorCode::RtcProviderUnavailable => "RTC_PROVIDER_UNAVAILABLE",
             ErrorCode::RecordingNotAllowed => "RECORDING_NOT_ALLOWED",
+            ErrorCode::RevocationCheckUnavailable => "REVOCATION_CHECK_UNAVAILABLE",
         }
     }
 
@@ -91,7 +93,9 @@ impl ErrorCode {
             | ErrorCode::MeetingCapacityReached => StatusCode::CONFLICT,
             ErrorCode::ValidationError => StatusCode::BAD_REQUEST,
             ErrorCode::RateLimited => StatusCode::TOO_MANY_REQUESTS,
-            ErrorCode::RtcProviderUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::RtcProviderUnavailable | ErrorCode::RevocationCheckUnavailable => {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
         }
     }
 }

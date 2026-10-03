@@ -2,10 +2,10 @@ use sea_orm::DatabaseConnection;
 use std::sync::Arc;
 
 use crate::config::{AppConfig, EmailConfig, LiveKitConfig};
+use crate::services::actor::SharedOrganizationDirectory;
 use crate::services::auth::JwtService;
 use crate::services::email::EmailService;
 use crate::services::livekit::LiveKitService;
-use crate::services::actor::SharedOrganizationDirectory;
 use crate::services::meeting_domain::{MeetingDomain, MeetingDomainDeps};
 use crate::services::{OtpService, RateLimiterService, RedisService, TokenBlacklistService};
 
@@ -43,7 +43,7 @@ impl AppState {
         email_config: &EmailConfig,
         livekit_config: &LiveKitConfig,
     ) -> Self {
-        let deps = MeetingDomainDeps::from_env(livekit_config);
+        let deps = MeetingDomainDeps::from_env(&db, livekit_config);
         Self::with_meeting_deps(db, redis, app_config, email_config, livekit_config, deps)
     }
 

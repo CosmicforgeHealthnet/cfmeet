@@ -293,3 +293,77 @@ pub async fn end_recurrence(
     state.meeting.recurrence.end(&actor, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+fn exception_view(
+    e: &crate::models::meeting_recurrence_exceptions::Model,
+    timezone: String,
+    applied: Option<Uuid>,
+) -> RecurrenceExceptionResponse {
+    RecurrenceExceptionResponse {
+        id: e.id,
+        recurrence_rule_id: e.recurrence_rule_id,
+        original_start_local: e.original_start_local,
+        timezone,
+        kind: e.kind,
+        new_start_at: e.new_start_at,
+        new_end_at: e.new_end_at,
+        version: e.version,
+        applied_to_conference_id: applied,
+    }
+}
+
+/// Cancel or reschedule ONE future occurrence of the series — whether or not it has
+/// been materialized yet. Idempotent; applied by the scheduler when the occurrence is
+/// generated (or immediately if it already exists).
+#[utoipa::path(
+    put, path = "/api/v2/meeting-spaces/{id}/recurrence/exceptions", tag = "Scheduling (v2)", operation_id = "v2_set_recurrence_exception",
+    params(("id" = Uuid, Path, description = "Meeting space id")),
+    request_body = RecurrenceExceptionRequest,
+    responses(
+        (status = 200, description = "Exception recorded", body = RecurrenceExceptionResponse),
+        (status = 400, description = "VALIDATION_ERROR (not an occurrence, past, bad window)", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 409, description = "CONFERENCE_STATE_CONFLICT (occurrence already started)", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn set_recurrence_exception(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(id): V2Path<Uuid>,
+    V2Json(req): V2Json<RecurrenceExceptionRequest>,
+) -> ApiResult<Json<RecurrenceExceptionResponse>> {
+    let (e, applied) = state
+        .meeting
+        .recurrence
+        .set_exception(&actor, id, req)
+        .await?;
+    let tz = state
+        .meeting
+        .recurrence
+        .get(&actor, id)
+        .await?
+        .map(|r| r.timezone)
+        .unwrap_or_default();
+    Ok(Json(exception_view(&e, tz, applied)))
+}
+
+/// List exceptions of the active series.
+#[utoipa::path(
+    get, path = "/api/v2/meeting-spaces/{id}/recurrence/exceptions", tag = "Scheduling (v2)", operation_id = "v2_list_recurrence_exceptions",
+    params(("id" = Uuid, Path, description = "Meeting space id")),
+    responses((status = 200, description = "Exceptions", body = [RecurrenceExceptionResponse]), (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope)),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_recurrence_exceptions(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(id): V2Path<Uuid>,
+) -> ApiResult<Json<Vec<RecurrenceExceptionResponse>>> {
+    let list = state.meeting.recurrence.list_exceptions(&actor, id).await?;
+    Ok(Json(
+        list.into_iter()
+            .map(|(e, tz)| exception_view(&e, tz, None))
+            .collect(),
+    ))
+}

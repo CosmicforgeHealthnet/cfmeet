@@ -17,6 +17,8 @@ mod m20260206_000001_add_media_toggle_event_type;
 mod m20260323_000001_migrate_to_redis;
 mod m20261003_000001_phase2_meeting_domain;
 mod m20261003_000002_phase2_legacy_backfill;
+mod m20261004_000001_organizations;
+mod m20261004_000002_recurrence_exceptions;
 
 pub mod phase2_backfill;
 
@@ -42,6 +44,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260323_000001_migrate_to_redis::Migration),
             Box::new(m20261003_000001_phase2_meeting_domain::Migration),
             Box::new(m20261003_000002_phase2_legacy_backfill::Migration),
+            Box::new(m20261004_000001_organizations::Migration),
+            Box::new(m20261004_000002_recurrence_exceptions::Migration),
         ]
     }
 }

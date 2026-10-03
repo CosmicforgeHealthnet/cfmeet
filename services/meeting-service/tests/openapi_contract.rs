@@ -88,6 +88,13 @@ fn every_v2_route_is_documented() {
         ),
         ("get", "/api/v2/admin/compat/legacy-meetings/{id}/shadow"),
         ("post", "/api/v2/admin/compat/backfill"),
+        ("put", "/api/v2/meeting-spaces/{id}/recurrence/exceptions"),
+        ("get", "/api/v2/meeting-spaces/{id}/recurrence/exceptions"),
+        ("post", "/api/v2/admin/organizations"),
+        ("patch", "/api/v2/admin/organizations/{id}"),
+        ("get", "/api/v2/organizations/{id}/members"),
+        ("put", "/api/v2/organizations/{id}/members/{userId}"),
+        ("get", "/api/v2/me/organizations"),
     ];
     for (method, path) in expected {
         assert!(
@@ -159,6 +166,7 @@ fn public_error_codes_are_published() {
         "CONFERENCE_STATE_CONFLICT",
         "RTC_PROVIDER_UNAVAILABLE",
         "RECORDING_NOT_ALLOWED",
+        "REVOCATION_CHECK_UNAVAILABLE",
     ] {
         assert!(codes.contains(&required), "{required} missing");
     }

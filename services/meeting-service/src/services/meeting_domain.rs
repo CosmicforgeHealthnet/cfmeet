@@ -7,8 +7,12 @@ use sea_orm::DatabaseConnection;
 use crate::{
     config::{FeatureFlags, LiveKitConfig, MeetingV2Config},
     services::{
-        actor::{NoOrganizationDirectory, SharedOrganizationDirectory},
+        actor::SharedOrganizationDirectory,
         admission::AdmissionService,
+        appointment_authorization::{
+            AppointmentAuthorizationAdapter, HttpAppointmentAuthorizationAdapter,
+            UnconfiguredAppointmentAuthorization,
+        },
         compat::CompatService,
         conference::ConferenceService,
         invitations::InvitationService,
@@ -16,6 +20,7 @@ use crate::{
         meeting_core::{AccessAdapterRegistry, AttemptLimiter, Core, DomainCore},
         meeting_space::MeetingSpaceService,
         membership::MembershipService,
+        organizations::{DbOrganizationDirectory, OrganizationService},
         recurrence::RecurrenceService,
         rtc_provider::{LiveKitProvider, RtcProvider},
         RedisService,
@@ -29,16 +34,22 @@ pub struct MeetingDomainDeps {
     pub organizations: SharedOrganizationDirectory,
     pub rtc: Arc<dyn RtcProvider>,
     pub adapters: AccessAdapterRegistry,
+    /// HEALTHCARE_APPOINTMENT authority (denies everything until configured).
+    pub appointments: Arc<dyn AppointmentAuthorizationAdapter>,
 }
 
 impl MeetingDomainDeps {
-    pub fn from_env(livekit: &LiveKitConfig) -> Self {
+    pub fn from_env(db: &DatabaseConnection, livekit: &LiveKitConfig) -> Self {
         Self {
             flags: FeatureFlags::from_env(),
             config: MeetingV2Config::from_env(),
-            organizations: Arc::new(NoOrganizationDirectory),
+            organizations: Arc::new(DbOrganizationDirectory::new(db.clone())),
             rtc: Arc::new(LiveKitProvider::new(livekit)),
             adapters: AccessAdapterRegistry::default(),
+            appointments: match HttpAppointmentAuthorizationAdapter::from_env() {
+                Some(a) => Arc::new(a),
+                None => Arc::new(UnconfiguredAppointmentAuthorization),
+            },
         }
     }
 }
@@ -53,6 +64,7 @@ pub struct MeetingDomain {
     pub members: MembershipService,
     pub invitations: InvitationService,
     pub compat: CompatService,
+    pub organizations: OrganizationService,
 }
 
 impl MeetingDomain {
@@ -73,6 +85,7 @@ impl MeetingDomain {
             organizations: deps.organizations,
             rtc: deps.rtc,
             adapters: deps.adapters,
+            appointments: deps.appointments,
             passcode_limiter,
         });
         Self {
@@ -84,6 +97,7 @@ impl MeetingDomain {
             members: MembershipService::new(core.clone()),
             invitations: InvitationService::new(core.clone()),
             compat: CompatService::new(core.clone()),
+            organizations: OrganizationService::new(core.clone()),
             core,
         }
     }

@@ -2,8 +2,6 @@
 
 mod common;
 
-use std::collections::HashMap;
-
 use axum::http::StatusCode;
 use backend::domain::Role;
 use common::*;
@@ -838,12 +836,10 @@ async fn s19_ended_cannot_join() {
 #[tokio::test]
 async fn s20_private_access_modes() {
     let org = Uuid::new_v4();
-    let mut opts = TestOptions::default();
-    // Users are created after the app; register directory entries via fixed ids below.
     let owner_id = Uuid::new_v4();
     let insider_id = Uuid::new_v4();
-    opts.organizations = HashMap::from([(owner_id, vec![org]), (insider_id, vec![org])]);
-    let app = app!(opts);
+    // Production DbOrganizationDirectory: membership rows are the authority.
+    let app = app!();
     let mk = |id: Uuid, name: &str, email: &str| {
         let app = &app;
         let name = name.to_string();
@@ -870,6 +866,15 @@ async fn s20_private_access_modes() {
     let owner = mk(owner_id, "org-owner", "owner@acme.io").await;
     let insider = mk(insider_id, "insider", "insider@acme.io").await;
     let outsider = app.user_with_email("outsider", "outsider@evil.io").await;
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "INSERT INTO organizations (id, name, slug) VALUES ('{org}', 'Acme', 'acme-s20'); \
+             INSERT INTO organization_memberships (id, organization_id, user_id, role) VALUES \
+               (gen_random_uuid(), '{org}', '{owner_id}', 'OWNER'), (gen_random_uuid(), '{org}', '{insider_id}', 'MEMBER')"
+        ))
+        .await
+        .unwrap();
     let (_, org_conf) = app
         .live_conference(
             &owner,
@@ -889,11 +894,13 @@ async fn s20_private_access_modes() {
         (s, code(&v)),
         (StatusCode::FORBIDDEN, "MEETING_ACCESS_DENIED")
     );
+    let (s, v) = app
+        .join(org_conf, Auth::None, json!({ "displayName": "g" }))
+        .await;
     assert_eq!(
-        app.join(org_conf, Auth::None, json!({ "displayName": "g" }))
-            .await
-            .0,
-        StatusCode::FORBIDDEN
+        (s, code(&v)),
+        (StatusCode::UNAUTHORIZED, "AUTHENTICATION_REQUIRED"),
+        "ORGANIZATION_ONLY requires an authenticated identity"
     );
 
     let (_, dom_conf) = app
@@ -930,9 +937,13 @@ async fn s20_private_access_modes() {
 /// 20b. Healthcare appointment access goes through the server-side adapter only.
 #[tokio::test]
 async fn s20b_healthcare_adapter() {
+    // HEALTHCARE profile fails closed without a verifiable revocation store.
+    if !require_test_redis() {
+        return;
+    }
     let patient_id = Uuid::new_v4();
     let opts = TestOptions {
-        healthcare_allow: vec![patient_id],
+        appointments: Some(std::sync::Arc::new(AllowListAppointments(vec![patient_id]))),
         ..TestOptions::default()
     };
     let app = app!(opts);
@@ -951,7 +962,7 @@ async fn s20b_healthcare_adapter() {
     let (_, cid) = app
         .live_conference(
             &clinician,
-            json!({ "title": "Consult", "meetingType": "HEALTHCARE", "securityProfile": "HEALTHCARE", "accessPolicy": "HEALTHCARE_APPOINTMENT", "accessConfig": { "adapterRef": "healthnet-appointments" } }),
+            json!({ "title": "Consult", "meetingType": "HEALTHCARE", "securityProfile": "HEALTHCARE", "accessPolicy": "HEALTHCARE_APPOINTMENT" }),
         )
         .await;
     assert_eq!(
