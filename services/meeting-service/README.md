@@ -1,34 +1,46 @@
-# CosmicForge RTC Backend
+# CF Meet Meeting Service
 
-Real-time communication backend built with Rust, Axum, and SeaORM.
+The Rust/Axum control-plane service for the **CF Meet Meeting & Conference Platform**.
 
-## Quick Start
+This service owns the current meeting-domain backend: authentication required by meetings, meeting lifecycle, participants, waiting room/admission, in-meeting chat, API keys, webhook registration, workers, LiveKit integration and related persistence.
 
-### Development (Local)
+It is intentionally named `meeting-service` because it is **not** the backend for every future CF Meet communications capability. Calling, Privacy Relay, messaging, telephony and numbering will receive their own service boundaries when those phases begin.
+
+During Phase 2 this service remains **one deployable modular monolith**. Do not split meetings, participants, permissions, waiting room or scheduling into separate deployed microservices unless a later architecture decision explicitly requires it.
+
+## Quick start
+
 ```bash
-# Start databases
-docker-compose up -d postgres redis
-
-# Run backend
-cargo run
+# From the monorepo root
+make deps
+make migrate
+make meeting-service
 ```
 
-### Production (Docker)
+Or from this directory:
+
 ```bash
-docker-compose up -d --build
+cargo run -p migration -- up
+cargo run --bin backend
 ```
 
-### Health Check
+Health check:
+
 ```bash
 curl http://localhost:8080/health
 ```
 
+## Phase 2
+
+Phase 2 — Meeting & Conference Platform — backend work is implemented here.
+The corresponding web experience lives in `apps/web/`, shared contracts in `packages/contracts/`, LiveKit infrastructure in `infra/livekit/`, and the implementation specification/acceptance evidence in `docs/phases/phase-02/`.
+
 ## Documentation
 
-See the [docs/](docs/) folder for detailed guides:
+See [`docs/`](docs/) for detailed guides:
 
 | Guide | Description |
-|-------|-------------|
+|---|---|
 | [Quick Start](docs/QUICK_START.md) | Get up and running |
 | [Docker Testing](docs/DOCKER_TESTING_GUIDE.md) | Docker setup and commands |
 | [Database Schema](docs/DATABASE_SCHEMA.md) | Database structure |
@@ -43,11 +55,10 @@ See the [docs/](docs/) folder for detailed guides:
 | [Email Queue](docs/EMAIL_QUEUE.md) | Email processing |
 | [Logging](docs/LOGGING.md) | Logging configuration |
 
-## Tech Stack
+## Tech stack
 
-- **Framework**: Axum
-- **ORM**: SeaORM
-- **Database**: PostgreSQL
-- **Cache**: Redis
-- **WebRTC**: LiveKit
-- **Auth**: JWT + Google OAuth
+- Rust / Axum
+- SeaORM / PostgreSQL
+- Redis
+- LiveKit
+- JWT + Google OAuth
