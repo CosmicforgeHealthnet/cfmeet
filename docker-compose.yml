@@ -4,12 +4,12 @@
 # Dependencies only (default):
 #   docker compose up -d                 # postgres, redis, livekit
 #
-# Full stack (also builds services/core-api/Dockerfile and runs the apps/web dev server):
+# Full stack (also builds services/meeting-service/Dockerfile and runs the apps/web dev server):
 #   docker compose --profile app up -d --build
 #
 # All ports are bound to 127.0.0.1 so nothing is exposed beyond this machine.
 # This file is for local development only; it does not describe production.
-# services/core-api/docker-compose.yml is kept unchanged for core-api-only workflows.
+# services/meeting-service/docker-compose.yml is kept for meeting-service-only workflows.
 # LiveKit dev config: infra/livekit/. More on local Docker usage: infra/docker/README.md.
 # =============================================================================
 
@@ -58,19 +58,18 @@ services:
   # ---------------------------------------------------------------------------
   # Applications (opt-in with --profile app)
   # ---------------------------------------------------------------------------
-  backend:
+  meeting-service:
     profiles: ["app"]
     build:
-      context: ./services/core-api
+      context: ./services/meeting-service
       dockerfile: Dockerfile
     env_file:
-      - ./services/core-api/.env
+      - ./services/meeting-service/.env
     environment:
       HOST: 0.0.0.0
       PORT: 8080
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-cosmicforge_rtc}
       REDIS_URL: redis://redis:6379
-    # Apply migrations, then start the API server.
     command: ["sh", "-c", "./migration up && ./server"]
     ports:
       - "127.0.0.1:8080:8080"
@@ -88,7 +87,6 @@ services:
     working_dir: /app
     command: sh -c "npm ci && npm run dev -- --hostname 0.0.0.0"
     environment:
-      # Browser-side URL: the browser talks to the backend through localhost.
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080/api/v1}
     volumes:
       - ./apps/web:/app
@@ -97,7 +95,7 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
-      - backend
+      - meeting-service
 
 volumes:
   postgres_data:
