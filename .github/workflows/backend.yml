@@ -1,15 +1,21 @@
 name: Backend
 
+# services/core-api — the Rust/Axum core API (one deployable modular monolith).
+
 on:
   push:
     branches: [main]
     paths:
-      - "backend/**"
+      - "services/core-api/**"
       - ".github/workflows/backend.yml"
+      # Once core-api generates or consumes packages/contracts, add:
+      # - "packages/contracts/**"
   pull_request:
     paths:
-      - "backend/**"
+      - "services/core-api/**"
       - ".github/workflows/backend.yml"
+      # Once core-api generates or consumes packages/contracts, add:
+      # - "packages/contracts/**"
   workflow_dispatch:
 
 concurrency:
@@ -18,7 +24,7 @@ concurrency:
 
 defaults:
   run:
-    working-directory: backend
+    working-directory: services/core-api
 
 env:
   CARGO_TERM_COLOR: always
@@ -36,7 +42,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: backend -> target
+          workspaces: services/core-api -> target
 
       # Pre-existing formatting drift was imported from rtc_backend unchanged.
       # Reported but non-blocking until a dedicated `cargo fmt` commit lands.
@@ -54,7 +60,7 @@ jobs:
         run: cargo build --workspace
 
   docker:
-    name: Docker image (backend/ context)
+    name: Docker image (services/core-api/ context)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

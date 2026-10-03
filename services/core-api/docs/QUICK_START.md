@@ -13,7 +13,7 @@
 1. **Navigate to backend**:
 
    ```bash
-   cd backend
+   cd services/core-api
    ```
 
 2. **Configure environment variables**:
@@ -111,7 +111,7 @@ cargo run -- fresh
 ## Project Structure
 
 ```
-backend/
+services/core-api/
 ├── src/
 │   ├── config/           # Configuration (app, email)
 │   │   ├── mod.rs

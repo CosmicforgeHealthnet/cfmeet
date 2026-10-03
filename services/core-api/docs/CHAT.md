@@ -96,7 +96,7 @@ Real-time in-meeting chat with hybrid architecture using LiveKit Data Channels f
 ## Folder Structure
 
 ```
-backend/src/
+services/core-api/src/
 ├── handlers/
 │   ├── chat.rs              # Send and get messages
 │   └── meetings.rs          # Message cleanup on end_meeting

@@ -52,7 +52,7 @@ Complete participant control system with listing, kicking, waiting room manageme
 ## Folder Structure
 
 ```
-backend/src/
+services/core-api/src/
 ├── handlers/
 │   └── participants.rs     # Participant management + media control
 ├── routes/

@@ -1,18 +1,19 @@
 name: Compose config
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - "docker-compose.yml"
       - "infra/**"
-      - "backend/Dockerfile"
+      - "services/core-api/Dockerfile"
       - ".github/workflows/compose.yml"
   push:
     branches: [main]
     paths:
       - "docker-compose.yml"
       - "infra/**"
-      - "backend/Dockerfile"
+      - "services/core-api/Dockerfile"
       - ".github/workflows/compose.yml"
 
 jobs:
@@ -22,6 +23,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate root docker-compose.yml
         run: |
-          cp backend/.env.example backend/.env
+          cp services/core-api/.env.example services/core-api/.env
           docker compose config --quiet
           docker compose --profile app config --quiet

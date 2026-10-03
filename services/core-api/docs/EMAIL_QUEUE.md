@@ -23,7 +23,7 @@ Async email delivery using Redis with automatic retry.
 ## Folder Structure
 
 ```
-backend/src/
+services/core-api/src/
 ├── queues/
 │   ├── mod.rs
 │   └── redis_email.rs    # Redis queue (LPUSH/BRPOP)
@@ -74,7 +74,7 @@ send_notification_email(to_email, username, subject, message) -> Uuid
 
 ### 1. Create Template
 
-Create `backend/src/templates/email/my_email.rs`:
+Create `services/core-api/src/templates/email/my_email.rs`:
 
 ```rust
 use super::base::{wrap_html, wrap_text};

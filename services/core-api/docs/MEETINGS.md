@@ -66,7 +66,7 @@ Complete meeting lifecycle management with scheduling, real-time sessions, parti
 ## Folder Structure
 
 ```
-backend/src/
+services/core-api/src/
 ├── handlers/
 │   └── meetings.rs          # Meeting CRUD + join/end
 ├── routes/

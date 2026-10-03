@@ -1,8 +1,11 @@
 # CF Meet — root developer commands.
-# Each target delegates to the app's own toolchain; backend/ and frontend/
-# remain independently buildable and deployable.
+# Each target delegates to the app's own toolchain. services/core-api/ and
+# apps/web/ remain independently buildable and deployable.
 
-.PHONY: help deps deps-down backend frontend migrate dev test lint build \
+CORE_API := services/core-api
+WEB      := apps/web
+
+.PHONY: help deps deps-down backend frontend core-api web migrate dev test lint build \
         backend-test backend-lint backend-build frontend-test frontend-lint frontend-build \
         frontend-install
 
@@ -15,16 +18,20 @@ deps: ## Start local PostgreSQL, Redis and LiveKit (docker compose)
 deps-down: ## Stop local dependencies
 	docker compose down
 
-migrate: ## Apply backend database migrations
-	cd backend && cargo run -p migration -- up
+migrate: ## Apply core-api database migrations
+	cd $(CORE_API) && cargo run -p migration -- up
 
-backend: ## Run the backend API (cargo run)
-	cd backend && cargo run --bin backend
+backend: ## Run the core API (services/core-api)
+	cd $(CORE_API) && cargo run --bin backend
 
-frontend: frontend-install ## Run the frontend dev server
-	cd frontend && npm run dev
+core-api: backend ## Alias for `make backend`
 
-dev: ## Start deps, then backend + frontend together (Ctrl+C stops both)
+frontend: frontend-install ## Run the web app dev server (apps/web)
+	cd $(WEB) && npm run dev
+
+web: frontend ## Alias for `make frontend`
+
+dev: ## Start deps, then core API + web app together (Ctrl+C stops both)
 	./scripts/dev.sh
 
 test: backend-test frontend-test ## Run all tests
@@ -34,24 +41,24 @@ lint: backend-lint frontend-lint ## Run all linters
 build: backend-build frontend-build ## Build both applications
 
 backend-test:
-	cd backend && cargo test --workspace
+	cd $(CORE_API) && cargo test --workspace
 
 backend-lint:
-	cd backend && cargo fmt --all -- --check
-	cd backend && cargo clippy --workspace --all-targets
+	cd $(CORE_API) && cargo fmt --all -- --check
+	cd $(CORE_API) && cargo clippy --workspace --all-targets
 
 backend-build:
-	cd backend && cargo build --workspace
+	cd $(CORE_API) && cargo build --workspace
 
 frontend-install:
-	@test -d frontend/node_modules || (cd frontend && npm ci)
+	@test -d $(WEB)/node_modules || (cd $(WEB) && npm ci)
 
 frontend-test: frontend-install
-	@echo "frontend: no test suite configured; running typecheck"
-	cd frontend && npx tsc --noEmit
+	@echo "apps/web: no test suite configured; running typecheck"
+	cd $(WEB) && npx tsc --noEmit
 
 frontend-lint: frontend-install
-	cd frontend && npm run lint
+	cd $(WEB) && npm run lint
 
 frontend-build: frontend-install
-	cd frontend && npm run build
+	cd $(WEB) && npm run build

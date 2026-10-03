@@ -13,7 +13,7 @@ Google OAuth allows users to sign in with their Google account. The flow works a
 
 ## Environment Variables
 
-### Backend (`backend/.env`)
+### Backend (`services/core-api/.env`)
 
 ```env
 # Google OAuth
@@ -25,7 +25,7 @@ GOOGLE_REDIRECT_URL=http://localhost:8080/api/v1/auth/oauth/google/callback
 APP_URL=http://localhost:3000
 ```
 
-### Frontend (`frontend/.env.local`)
+### Frontend (`apps/web/.env.local`)
 
 ```env
 # Must point to the backend, NOT the frontend
@@ -51,7 +51,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8080/api/v1
 
 ### 2. Configure Environment Variables
 
-Add the credentials to `backend/.env`:
+Add the credentials to `services/core-api/.env`:
 
 ```env
 GOOGLE_CLIENT_ID=466386896934-xxxxx.apps.googleusercontent.com
@@ -60,7 +60,7 @@ GOOGLE_REDIRECT_URL=http://localhost:8080/api/v1/auth/oauth/google/callback
 APP_URL=http://localhost:3000
 ```
 
-Ensure `frontend/.env.local` points to the backend:
+Ensure `apps/web/.env.local` points to the backend:
 
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:8080/api/v1
@@ -71,7 +71,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8080/api/v1
 The `oauth_states` table must exist. Run the migration:
 
 ```powershell
-cd backend/migration
+cd services/core-api/migration
 cargo run -- up
 ```
 
@@ -114,7 +114,7 @@ const handleGoogleLogin = () => {
 
 ### Callback Page (`/auth/google/callback`)
 
-Located at `frontend/src/app/auth/google/callback/page.tsx`. This page:
+Located at `apps/web/src/app/auth/google/callback/page.tsx`. This page:
 
 1. Reads `access_token`, `refresh_token`, `user_id`, `username`, `role` from URL query params
 2. Stores tokens via `cookieStore.setTokens()` and user info via `storageStore.setUser()`
@@ -125,13 +125,13 @@ Located at `frontend/src/app/auth/google/callback/page.tsx`. This page:
 
 1. Start the backend:
    ```powershell
-   cd backend
+   cd services/core-api
    cargo run
    ```
 
 2. Start the frontend:
    ```powershell
-   cd frontend
+   cd apps/web
    npm run dev
    ```
 
@@ -172,7 +172,7 @@ Located at `frontend/src/app/auth/google/callback/page.tsx`. This page:
 
 | Issue | Cause | Fix |
 |-------|-------|-----|
-| `relation "oauth_states" does not exist` | Migration not run | Run `cd backend/migration && cargo run -- up` |
+| `relation "oauth_states" does not exist` | Migration not run | Run `cd services/core-api/migration && cargo run -- up` |
 | Google button goes to `localhost:3000` | Wrong `NEXT_PUBLIC_API_URL` | Set to `http://localhost:8080/api/v1` (no trailing slash), restart Next.js |
 | `redirect_uri_mismatch` from Google | `GOOGLE_REDIRECT_URL` doesn't match Google Console | Ensure both use exactly `http://localhost:8080/api/v1/auth/oauth/google/callback` |
 | `Invalid or expired state` | State expired or was already used | Try again; state tokens are single-use and expire in 10 min |

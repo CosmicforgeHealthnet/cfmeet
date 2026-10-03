@@ -45,7 +45,7 @@ Real-time video/audio communication using LiveKit for WebRTC media handling.
 ## Folder Structure
 
 ```
-backend/src/
+services/core-api/src/
 ├── config/
 │   ├── mod.rs           # Exports LiveKitConfig
 │   └── livekit.rs       # LiveKit configuration

@@ -159,7 +159,7 @@ The schema includes 9 tables:
 ## Project Structure
 
 ```
-backend/
+services/core-api/
 ├── src/
 │   ├── config/         # App, email, and LiveKit configuration
 │   ├── dto/            # Request/Response DTOs

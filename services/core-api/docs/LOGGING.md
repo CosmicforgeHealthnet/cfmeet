@@ -27,7 +27,7 @@ Dual-output logging with terminal pretty-printing and JSON file rotation.
 ## Folder Structure
 
 ```
-backend/
+services/core-api/
 ├── src/
 │   └── config/
 │       ├── mod.rs
