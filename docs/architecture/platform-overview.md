@@ -2,90 +2,113 @@
 
 **CF Meet, CosmicForge Tech Limited**
 
-CF Meet is growing from a video-meeting application into CosmicForge's
-**unified communications platform**. This document describes the target shape of
-the platform and, just as importantly, what exists **today**.
+CF Meet is growing from a video-meeting application into CosmicForge's unified communications platform. This document distinguishes what exists today from the planned platform boundaries.
 
 > **Only two components currently contain working application code:**
-> `apps/web` (Next.js web client) and `services/core-api` (Rust/Axum API).
-> Every other component below is an **architectural target**, not an implemented service.
+> `apps/web` (Next.js web client) and `services/meeting-service` (Rust/Axum Meeting & Conference Platform service).
+> Every other service/app boundary below is planned until implementation begins.
 
-## The four layers
+## Four platform layers
 
+```text
+APPLICATION SURFACES
+  apps/web ✅
+  apps/mobile ◻  apps/admin ◻  apps/developer-portal ◻
+
+PLATFORM SERVICES
+  services/meeting-service ✅
+  services/calling ◻
+  services/privacy-relay ◻
+  services/messaging ◻
+  services/telephony ◻
+  services/numbering ◻
+  developer infrastructure ◻
+
+SHARED CONTRACTS
+  packages/contracts ◐
+
+INFRASTRUCTURE
+  PostgreSQL ✅  Redis ✅  LiveKit ✅
+  telecom interconnects ◻  observability ◻
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│ APPLICATION SURFACES                                                     │
-│   apps/web  ✅      apps/mobile ◻    apps/admin ◻    apps/developer-portal ◻ │
-├──────────────────────────────────────────────────────────────────────────┤
-│ PLATFORM SERVICES                                                        │
-│   services/core-api ✅  (auth, users, meetings, participants, waiting room,│
-│                          chat, API keys, webhooks, workers, admin)       │
-│   calling ◻  privacy-relay ◻  messaging ◻  telephony ◻  numbering ◻       │
-│   developer infrastructure ◻ (webhook-delivery, CPaaS APIs, SDKs)        │
-├──────────────────────────────────────────────────────────────────────────┤
-│ SHARED PLATFORM CONTRACTS  — packages/contracts (boundary established)   │
-│   API contracts · event contracts · webhook contracts · SDK definitions  │
-├──────────────────────────────────────────────────────────────────────────┤
-│ INFRASTRUCTURE                                                           │
-│   PostgreSQL ✅  Redis ✅  LiveKit ✅ (self-hosted target)                 │
-│   telecom interconnects ◻  observability ◻  deployment (infra/) ✅/◻       │
-└──────────────────────────────────────────────────────────────────────────┘
-✅ implemented today   ◻ planned / architectural target only
-```
 
-### 1. Application surfaces
+✅ implemented today   ◐ boundary established   ◻ planned
+
+## Application surfaces
 
 | Surface | Path | Status |
-|---------|------|--------|
+|---|---|---|
 | CF Meet web app | `apps/web` | **Current.** Auth, dashboard, scheduling, pre-join, LiveKit room, waiting room, participants, chat, API keys and webhooks UI |
 | Mobile apps | `apps/mobile` | Planned |
 | Admin console | `apps/admin` | Planned |
-| Developer portal | `apps/developer-portal` | Planned (CPaaS docs, keys, usage) |
+| Developer portal | `apps/developer-portal` | Planned |
 
-### 2. Platform services
+## Platform services
 
-| Service | Path | Status |
-|---------|------|--------|
-| Core API | `services/core-api` | **Current.** One deployable modular monolith (see [ADR 0001](../decisions/0001-platform-monorepo-layout.md)) |
+| Service | Path | Status / responsibility |
+|---|---|---|
+| Meeting & Conference Platform | `services/meeting-service` | **Current.** Meeting-domain control plane and Phase 2 backend. One deployable modular monolith during Phase 2. |
 | Realtime app-to-app calling | `services/calling` | Planned |
 | Privacy Relay communications | `services/privacy-relay` | Planned |
 | Unified messaging | `services/messaging` | Planned |
 | SIP/PSTN telephony | `services/telephony` | Planned |
 | Digital Communications Numbers | `services/numbering` | Planned |
-| Developer infrastructure | `services/webhook-delivery`, `services/workers` | Planned, extracted from core-api only if needed |
-| Intelligence (transcription, translation) | n/a | Future |
+| Webhook delivery / workers | future service if extracted | Planned only when operationally justified |
+| Communications intelligence | future | Transcription, translation and assistance |
 
-Service boundaries and the rules for extracting a service are in
-[platform-boundaries.md](platform-boundaries.md).
+The meeting service currently contains some cross-cutting functionality inherited from the original RTC backend—such as auth, users, admin, API keys, webhook registration and email workers. Those capabilities stay inside the meeting service for Phase 2 unless a later ADR establishes a real extraction boundary.
 
-### 3. Shared platform contracts
+The service is named by its **primary domain responsibility**, not `core-api`, so developers do not mistake it for the permanent backend of calling, messaging, telephony, numbering or Privacy Relay.
 
-`packages/contracts` holds the contracts more than one component (or an external
-integrator) depends on: API contracts, event and webhook schemas, permission
-identifiers, shared enums and SDK generation sources. Today the HTTP API contract
-comes from core-api's utoipa annotations (`/api-docs/openapi.json`).
-See [`packages/contracts/README.md`](../../packages/contracts/README.md).
+## Phase 2 architecture
 
-### 4. Infrastructure
+Phase 2 — Meeting & Conference Platform — uses:
+
+```text
+apps/web
+   │ HTTP/realtime control APIs
+   ▼
+services/meeting-service
+   ├── PostgreSQL
+   ├── Redis
+   └── LiveKit control/token integration
+          │
+          ▼
+     LiveKit media plane
+```
+
+Shared contracts belong in `packages/contracts`; media infrastructure/configuration belongs in `infra/livekit`; Phase 2 specifications and closure evidence belong in `docs/phases/phase-02/`.
+
+## Shared contracts
+
+`packages/contracts` is the home for contracts shared across services/apps or exposed externally: API contracts, event schemas, webhook schemas, permission identifiers, shared enums and SDK generation inputs.
+
+Today, the meeting HTTP API authority is the utoipa/OpenAPI definition generated by `services/meeting-service`. The web application still contains hand-written TypeScript mirrors; replacing those with generated contracts is tracked as platform technical debt.
+
+## Infrastructure
 
 | Component | Status | Where |
-|-----------|--------|-------|
-| PostgreSQL (SeaORM, migrations in `services/core-api/migration`) | Current | `DATABASE_URL` |
-| Redis (OTP, rate limiting, token blacklist, email queue) | Current | `REDIS_URL` |
-| LiveKit SFU (token signing in core-api) | Current | `LIVEKIT_*`, dev config `infra/livekit/` |
+|---|---|---|
+| PostgreSQL / SeaORM | Current | meeting-service database/migrations |
+| Redis | Current | meeting-service runtime dependencies |
+| LiveKit | Current | meeting media plane; config in `infra/livekit/` |
 | Local orchestration | Current | root `docker-compose.yml`, `infra/docker/` |
-| Deployment (Vercel for web, Docker image for core-api) | Current | `infra/deployment/` |
-| Telecom interconnects (SIP trunks, carriers) | Planned | n/a |
-| Observability (metrics, tracing, alerting) | Planned. Today: structured `tracing` logs only | n/a |
+| Web deployment | Current | Vercel, root `apps/web` |
+| Meeting-service deployment | Current | Docker context `services/meeting-service/` |
+| Telecom interconnect | Planned | future telephony/numbering services |
+| Observability platform | Planned | future cross-platform infrastructure |
 
 ## Current request flow
 
-```
-Browser (apps/web) ──HTTPS /api/v1──► services/core-api ──► PostgreSQL
-       │                                   │       └──────► Redis
-       │                                   └─ signs LiveKit join token
-       └──────────── WebRTC (LiveKit URL from join response) ─────► LiveKit SFU
+```text
+Browser (apps/web)
+      │ HTTPS /api/v1
+      ▼
+services/meeting-service ──► PostgreSQL
+      │              └─────► Redis
+      │ signs/enforces LiveKit access
+      ▼
+LiveKit media plane
 ```
 
-The web app and the core API are coupled **only over HTTP**. They are built,
-tested and deployed independently.
+The web app and meeting service are independently buildable/deployable and communicate over published APIs rather than source imports.

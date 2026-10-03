@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start local dependencies, then run the core API and the web app side by side.
+# Start local dependencies, then run the meeting service and the web app side by side.
 # Ctrl+C stops both application processes (dependencies keep running;
 # stop them with `make deps-down`).
 set -euo pipefail
@@ -7,11 +7,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-CORE_API=services/core-api
+MEETING_SERVICE=services/meeting-service
 WEB=apps/web
 
-if [[ ! -f "$CORE_API/.env" ]]; then
-  echo "$CORE_API/.env not found. Copy $CORE_API/.env.example and fill it in." >&2
+if [[ ! -f "$MEETING_SERVICE/.env" ]]; then
+  echo "$MEETING_SERVICE/.env not found. Copy $MEETING_SERVICE/.env.example and fill it in." >&2
   exit 1
 fi
 if [[ ! -f "$WEB/.env.local" && ! -f "$WEB/.env" ]]; then
@@ -30,7 +30,7 @@ pids=()
 cleanup() { kill "${pids[@]}" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
-(cd "$CORE_API" && cargo run -p migration -- up && cargo run --bin backend) &
+(cd "$MEETING_SERVICE" && cargo run -p migration -- up && cargo run --bin backend) &
 pids+=($!)
 (cd "$WEB" && npm run dev) &
 pids+=($!)

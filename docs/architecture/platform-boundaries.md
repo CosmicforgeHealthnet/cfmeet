@@ -1,102 +1,102 @@
 # Platform boundaries
 
-This document defines where code for each platform capability lives, now and
-later. Anything marked *planned* is a target boundary only: **no code, no
-placeholder project and no deployable unit exists for it yet**. Do not create
-empty services or apps to "reserve" these paths. Create them when real work
-starts.
+This document defines where each CF Meet capability belongs. Anything marked *planned* is a target boundary only: no placeholder project or deployable unit should be created until real implementation work begins.
 
 ## Services (`services/`)
 
-```
+```text
 services/
-├── core-api/           ✅ current Rust/Axum backend (modular monolith)
-├── calling/            ◻ planned: realtime app-to-app calling
-├── privacy-relay/      ◻ planned: Privacy Relay (masked-identity) communications
-├── messaging/          ◻ planned: unified messaging
-├── telephony/          ◻ planned: SIP/PSTN telephony
-├── numbering/          ◻ planned: Digital Communications Numbers
-├── webhook-delivery/   ◻ only if extracted from core-api
-└── workers/            ◻ only if extracted from core-api
+├── meeting-service/     ✅ current Meeting & Conference Platform backend
+├── calling/             ◻ planned: realtime app-to-app calling
+├── privacy-relay/       ◻ planned: masked/private transaction communications
+├── messaging/           ◻ planned: unified messaging
+├── telephony/           ◻ planned: SIP/PSTN telephony
+├── numbering/           ◻ planned: Digital Communications Numbers
+├── webhook-delivery/    ◻ future extraction if needed
+└── workers/             ◻ future extraction if needed
 ```
 
-### core-api is a modular monolith
+## Meeting service
 
-`services/core-api` stays **one deployable application**. Its domains are internal
-modules (see `src/handlers`, `src/routes`, `src/services`, `src/models`,
-`src/workers`):
+`services/meeting-service` is the current Rust/Axum backend imported from the original RTC project and is the primary backend implementation home for **Phase 2 — Meeting & Conference Platform**.
 
-| Domain | Lives in core-api today |
-|--------|-------------------------|
-| Auth (JWT, Google OAuth, OTP, password reset) | ✅ |
-| Users / admin | ✅ |
-| Meetings (scheduled, instant, auto-start/end workers) | ✅ |
-| Participants, waiting room, media state, screen share | ✅ |
-| Chat | ✅ |
-| API keys and external `/api/v1/api` endpoints | ✅ |
-| Webhooks (registration) | ✅ |
-| Email queue worker | ✅ |
+During Phase 2 it remains **one deployable modular monolith**. Its current internal domains include:
 
-Do **not** split these into separate deployed services
-(meeting-service, participant-service, auth-service, permission-service,
-organization-service, …) at this stage. New domains (for example organizations
-or permissions) start as modules inside core-api.
+| Domain | Current location |
+|---|---|
+| Meeting authentication/account flows used by the product | meeting-service |
+| Meetings and scheduling | meeting-service |
+| Participants and participant state | meeting-service |
+| Waiting room/admission | meeting-service |
+| In-meeting chat | meeting-service |
+| LiveKit integration | meeting-service |
+| API keys / external meeting API | meeting-service |
+| Webhook registration | meeting-service |
+| Admin/user functionality inherited from RTC backend | meeting-service |
+| Email and meeting lifecycle workers | meeting-service |
 
-### When to extract a service
+Phase 2 may add internal modules for Meeting Spaces, Conference Sessions, memberships/invitations, roles/permissions, scheduling/recurrence, recording orchestration, breakouts, polls, Q&A, webinar controls, attendance, realtime event delivery and related meeting features. These remain modules of `meeting-service` unless an explicit later ADR approves extraction.
 
-Extract a module into its own `services/<name>/` only when a concrete reason exists:
+The name **meeting-service** is deliberate. This service is not the universal backend for future calling, Privacy Relay, messaging, telephony or numbering. Those domains receive their own services when their implementation phases begin.
 
-1. **Scaling:** its load profile differs sharply (for example media/telephony signalling or webhook fan-out).
-2. **Security / isolation:** it handles regulated data or credentials that need a smaller blast radius (telephony credentials, number inventory, Privacy Relay identity mapping).
-3. **Deployment cadence or runtime:** it needs a different release cycle, language or runtime (for example a SIP stack).
-4. **Failure isolation:** its failure must not take down meetings.
+## When to create or extract another service
 
-Record each extraction as an ADR in `docs/decisions/`, and define its API and
-event contracts in `packages/contracts` **before** the split.
+Create a separate `services/<name>/` only when a concrete domain/operational reason exists:
 
-Expected early candidates: `telephony` and `numbering` (carrier integrations,
-compliance), `privacy-relay` (identity isolation), and `webhook-delivery`
-(retry/fan-out load).
+1. **Distinct business/domain responsibility** — e.g. public telephony, number lifecycle or unified messaging.
+2. **Scaling** — the load profile differs materially from meetings.
+3. **Security/isolation** — credentials or regulated identity mappings need a smaller blast radius.
+4. **Runtime/protocol** — the capability requires a different runtime or network stack, such as SIP/PSTN integration.
+5. **Failure isolation** — its outage must not take meetings down.
+6. **Deployment cadence** — independent releases provide real operational value.
+
+Record significant extractions in `docs/decisions/` and define cross-service contracts in `packages/contracts`.
 
 ## Application surfaces (`apps/`)
 
-```
+```text
 apps/
-├── web/                ✅ current CF Meet web app (Next.js)
-├── admin/              ◻ planned: internal administration console
-├── developer-portal/   ◻ planned: CPaaS developer portal
-└── mobile/             ◻ planned: mobile clients
+├── web/                 ✅ current CF Meet web app
+├── admin/               ◻ planned
+├── developer-portal/    ◻ planned
+└── mobile/              ◻ planned
 ```
 
-No placeholder Next.js or mobile projects are generated. Each app talks to
-platform services over their published APIs only, and must never import service
-source code.
+Applications communicate with services through published HTTP/WebSocket/event contracts. They do not import service source code.
 
 ## Shared packages (`packages/`)
 
-```
+```text
 packages/
-└── contracts/          ◐ boundary established; generation strategy documented
+└── contracts/           ◐ shared contract boundary established
 ```
 
-See [`packages/contracts/README.md`](../../packages/contracts/README.md). Additional
-shared packages (UI kit, client SDKs) get added only when there are at least two
-real consumers.
+`packages/contracts` is the source/artefact home for APIs, event schemas, webhook schemas, permission identifiers and future SDK generation inputs that cross component boundaries.
 
 ## Dependency rules
 
 | From → To | Allowed? |
-|-----------|----------|
-| apps/* → services/* (source) | ❌ Never. HTTP/WebSocket APIs only |
-| services/* → apps/* (source or build output) | ❌ Never |
-| services/* → services/* (source) | ❌ Never. APIs or events only |
-| apps/*, services/* → packages/contracts (generated types) | ✅ That is its purpose |
-| packages/contracts → apps/* or services/* | ❌ Never. Contracts depend on nothing |
+|---|---|
+| apps/* → services/* source code | ❌ Never; use APIs/realtime protocols |
+| services/* → apps/* source/build output | ❌ Never |
+| service → service source import | ❌ Avoid; use APIs/events/contracts |
+| apps/services → generated shared contracts | ✅ |
+| contracts → application/service implementation | ❌ Never |
 
 ## Infrastructure (`infra/`)
 
-| Path | Contents |
-|------|----------|
-| `infra/livekit/` | LiveKit configuration (local dev today) |
-| `infra/docker/` | Container build / local orchestration notes |
-| `infra/deployment/` | Deployment guide (Vercel root `apps/web`, image context `services/core-api`) |
+| Path | Responsibility |
+|---|---|
+| `infra/livekit/` | LiveKit/media-plane configuration |
+| `infra/docker/` | local/container orchestration guidance |
+| `infra/deployment/` | deployment guidance; web root `apps/web`, meeting-service context `services/meeting-service/` |
+
+## Phase 2 ownership map
+
+| Phase 2 concern | Primary location |
+|---|---|
+| Backend/control plane | `services/meeting-service/` |
+| Meeting UI | `apps/web/` |
+| Shared API/event/permission contracts | `packages/contracts/` |
+| LiveKit/media configuration | `infra/livekit/` |
+| Specification and acceptance evidence | `docs/phases/phase-02/` |
