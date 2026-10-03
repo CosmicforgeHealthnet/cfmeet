@@ -11,7 +11,11 @@ use backend::{
     services::RedisService,
     state::AppState,
     swagger,
-    workers::{spawn_email_worker, spawn_meeting_auto_end_worker, spawn_meeting_auto_start_worker},
+    workers::{
+        outbox_relay::{spawn_outbox_relay, LogPublisher, OutboxRelay},
+        spawn_conference_scheduler, spawn_email_worker, spawn_meeting_auto_end_worker,
+        spawn_meeting_auto_start_worker,
+    },
 };
 
 #[tokio::main]
@@ -96,6 +100,25 @@ async fn main() -> anyhow::Result<()> {
     let _meeting_auto_start_worker = spawn_meeting_auto_start_worker(db.clone());
     tracing::info!("✅ Meeting auto-start worker started");
 
+    // Phase 2 meeting domain workers (v2 conferences only; legacy workers above keep
+    // serving legacy meetings).
+    let flags = state.meeting.core.flags.clone();
+    tracing::info!(
+        "Meeting v2: enabled={} waiting_room_v2={} rtc_provider_control_v2={} legacy_write_disabled={}",
+        flags.meeting_v2_enabled,
+        flags.waiting_room_v2_enabled,
+        flags.rtc_provider_control_v2,
+        flags.legacy_meeting_write_disabled
+    );
+    let _conference_scheduler = flags
+        .meeting_v2_enabled
+        .then(|| spawn_conference_scheduler(state.meeting.clone()));
+    // The outbox relay only runs once the Part E realtime/control-plane consumer exists;
+    // until then events stay durably PENDING in PostgreSQL.
+    let _outbox_relay = flags.conference_realtime_enabled.then(|| {
+        spawn_outbox_relay(OutboxRelay::new(db.clone(), std::sync::Arc::new(LogPublisher)), 2)
+    });
+
     // Configure CORS - allow frontend(s) to access API
     let allowed_origins: Vec<axum::http::HeaderValue> = app_config
         .frontend_urls
@@ -124,7 +147,11 @@ async fn main() -> anyhow::Result<()> {
             header::CONTENT_TYPE,
             header::ACCEPT,
             header::ORIGIN,
+            header::HeaderName::from_static("x-participant-token"),
+            header::HeaderName::from_static("x-request-id"),
+            header::HeaderName::from_static("x-client-kind"),
         ])
+        .expose_headers([header::HeaderName::from_static("x-request-id")])
         .allow_credentials(true);
 
     // Start server

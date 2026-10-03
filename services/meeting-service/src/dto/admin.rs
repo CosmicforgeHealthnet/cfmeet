@@ -123,6 +123,7 @@ pub struct AdminLogResponse {
     pub event_type: String,
     pub event_time: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
     pub metadata: Option<JsonValue>,
 }
 

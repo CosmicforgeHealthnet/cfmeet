@@ -297,6 +297,8 @@ pub async fn admit_participant(
 
     // Find participant
     let participant = Participants::find_by_id(participant_id)
+        // Scope to this meeting: a host of meeting A must not act on meeting B.
+        .filter(participants::Column::MeetingId.eq(meeting_id))
         .one(&state.db)
         .await?
         .ok_or_else(|| ApiError::NotFound("Participant not found".to_string()))?;
@@ -376,6 +378,8 @@ pub async fn deny_participant(
 
     // Find participant
     let participant = Participants::find_by_id(participant_id)
+        // Scope to this meeting: a host of meeting A must not act on meeting B.
+        .filter(participants::Column::MeetingId.eq(meeting_id))
         .one(&state.db)
         .await?
         .ok_or_else(|| ApiError::NotFound("Participant not found".to_string()))?;

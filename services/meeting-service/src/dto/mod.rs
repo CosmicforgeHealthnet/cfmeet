@@ -4,6 +4,7 @@ pub mod auth;
 pub mod common;
 pub mod meetings;
 pub mod users;
+pub mod v2;
 pub mod webhooks;
 
 // Re-export for convenience

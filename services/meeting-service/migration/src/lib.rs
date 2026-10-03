@@ -15,6 +15,10 @@ mod m20260127_000001_create_oauth_states;
 mod m20260205_110126_m20260205_000001_add_guest_role;
 mod m20260206_000001_add_media_toggle_event_type;
 mod m20260323_000001_migrate_to_redis;
+mod m20261003_000001_phase2_meeting_domain;
+mod m20261003_000002_phase2_legacy_backfill;
+
+pub mod phase2_backfill;
 
 pub struct Migrator;
 
@@ -36,6 +40,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260205_110126_m20260205_000001_add_guest_role::Migration),
             Box::new(m20260206_000001_add_media_toggle_event_type::Migration),
             Box::new(m20260323_000001_migrate_to_redis::Migration),
+            Box::new(m20261003_000001_phase2_meeting_domain::Migration),
+            Box::new(m20261003_000002_phase2_legacy_backfill::Migration),
         ]
     }
 }

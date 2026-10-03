@@ -82,6 +82,8 @@ pub struct CreateMeetingRequest {
     #[serde(default)]
     pub is_private: Option<bool>,
 
+    #[schema(value_type = Option<Object>)]
+
     pub metadata: Option<JsonValue>,
 }
 
@@ -108,6 +110,8 @@ pub struct UpdateMeetingRequest {
     pub timezone: Option<String>,
 
     pub is_private: Option<bool>,
+
+    #[schema(value_type = Option<Object>)]
 
     pub metadata: Option<JsonValue>,
 }
@@ -136,6 +140,7 @@ pub struct MeetingResponse {
     pub host_id: Uuid,
     pub title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
     pub metadata: Option<JsonValue>,
     pub is_private: bool,
     /// Start time in UTC. Format: "2026-01-25T14:00:00Z"

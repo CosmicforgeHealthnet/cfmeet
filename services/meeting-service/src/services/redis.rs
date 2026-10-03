@@ -50,6 +50,23 @@ impl RedisService {
         Ok(Self { pool })
     }
 
+    /// Create a pool without an initial PING. Connections are established on first use
+    /// and fail fast (bounded timeouts), so Redis loss degrades instead of blocking.
+    pub fn new_lazy(config: &RedisConfig) -> ApiResult<Self> {
+        let timeout = Some(std::time::Duration::from_secs(config.timeout_secs.max(1)));
+        let pool = Config::from_url(&config.url)
+            .builder()
+            .map_err(|e| ApiError::InternalError(format!("Redis pool builder error: {}", e)))?
+            .max_size(config.pool_size)
+            .runtime(Runtime::Tokio1)
+            .wait_timeout(timeout)
+            .create_timeout(timeout)
+            .recycle_timeout(timeout)
+            .build()
+            .map_err(|e| ApiError::InternalError(format!("Redis pool creation error: {}", e)))?;
+        Ok(Self { pool })
+    }
+
     /// Get a connection from the pool
     pub async fn get_conn(&self) -> ApiResult<deadpool_redis::Connection> {
         self.pool

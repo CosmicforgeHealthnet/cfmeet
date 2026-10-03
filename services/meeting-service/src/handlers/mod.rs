@@ -6,4 +6,5 @@ pub mod meetings;
 pub mod participants;
 pub mod root;
 pub mod users;
+pub mod v2;
 pub mod webhooks;

@@ -5,6 +5,7 @@ pub mod auth;
 pub mod meetings;
 pub mod participants;
 pub mod users;
+pub mod v2;
 pub mod webhooks;
 
 use crate::{handlers, state::AppState};
@@ -31,5 +32,9 @@ pub fn create_routes(state: AppState) -> Router {
             webhooks::webhook_routes(state.clone()),
         )
         .nest("/api/v1/admin", admin::admin_routes(state.clone()))
+        .nest("/api/v2", v2::v2_routes(state.clone()))
+        .layer(axum::middleware::from_fn(
+            crate::middleware::request_id::request_id_middleware,
+        ))
         .with_state(state)
 }

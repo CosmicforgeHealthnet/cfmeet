@@ -414,6 +414,13 @@ pub async fn get_meeting(
         .await?
         .ok_or_else(|| ApiError::NotFound("Meeting not found".to_string()))?;
 
+    // Phase 2 dual-read shadow comparison: logs legacy/v2 drift, never alters this response.
+    if state.meeting.core.flags.meeting_v2_shadow_read {
+        let meeting_domain = state.meeting.clone();
+        let legacy_id = meeting.id;
+        tokio::spawn(async move { meeting_domain.compat.shadow_log(legacy_id).await });
+    }
+
     let response = MeetingResponse {
         id: meeting.id,
         meeting_identifier: meeting.meeting_identifier.clone(),

@@ -8,6 +8,8 @@
 //! - `email` - Processes queued email jobs
 //! - `meeting_auto_end` - Auto-ends meetings at scheduled end time
 //! - `meeting_auto_start` - Auto-starts meetings at scheduled start time
+//! - `conference_scheduler` - Phase 2: recurrence materialization + scheduled end (v2)
+//! - `outbox_relay` - Phase 2: transactional outbox delivery (enabled with Part E)
 //!
 //! ## Adding a New Worker
 //!
@@ -18,9 +20,11 @@
 //!
 //! See `/docs/EMAIL_QUEUE.md` for the email worker example.
 
+pub mod conference_scheduler;
 pub mod email;
 pub mod meeting_auto_end;
 pub mod meeting_auto_start;
+pub mod outbox_relay;
 
 pub use email::{spawn_email_worker, EmailWorker, EmailWorkerHandle};
 pub use meeting_auto_end::{
@@ -29,3 +33,4 @@ pub use meeting_auto_end::{
 pub use meeting_auto_start::{
     spawn_meeting_auto_start_worker, MeetingAutoStartWorker, MeetingAutoStartWorkerHandle,
 };
+pub use conference_scheduler::{spawn_conference_scheduler, ConferenceScheduler, ConferenceSchedulerHandle};

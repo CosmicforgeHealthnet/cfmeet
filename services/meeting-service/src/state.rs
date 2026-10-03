@@ -5,6 +5,8 @@ use crate::config::{AppConfig, EmailConfig, LiveKitConfig};
 use crate::services::auth::JwtService;
 use crate::services::email::EmailService;
 use crate::services::livekit::LiveKitService;
+use crate::services::actor::SharedOrganizationDirectory;
+use crate::services::meeting_domain::{MeetingDomain, MeetingDomainDeps};
 use crate::services::{OtpService, RateLimiterService, RedisService, TokenBlacklistService};
 
 #[derive(Clone)]
@@ -27,6 +29,10 @@ pub struct AppState {
     pub google_redirect_url: String,
     /// Require email verification before login
     pub require_email_verification: bool,
+    /// Phase 2 meeting domain services (MeetingSpace / Conference / Admission …)
+    pub meeting: Arc<MeetingDomain>,
+    /// Verified organization membership source (shared with the meeting domain)
+    pub organization_directory: SharedOrganizationDirectory,
 }
 
 impl AppState {
@@ -37,7 +43,23 @@ impl AppState {
         email_config: &EmailConfig,
         livekit_config: &LiveKitConfig,
     ) -> Self {
+        let deps = MeetingDomainDeps::from_env(livekit_config);
+        Self::with_meeting_deps(db, redis, app_config, email_config, livekit_config, deps)
+    }
+
+    /// Construct with explicit meeting-domain dependencies (feature flags, RTC provider,
+    /// organization directory, access adapters).
+    pub fn with_meeting_deps(
+        db: DatabaseConnection,
+        redis: RedisService,
+        app_config: &AppConfig,
+        email_config: &EmailConfig,
+        livekit_config: &LiveKitConfig,
+        deps: MeetingDomainDeps,
+    ) -> Self {
         let redis = Arc::new(redis);
+        let organization_directory = deps.organizations.clone();
+        let meeting = Arc::new(MeetingDomain::new(db.clone(), Some(redis.clone()), deps));
         let otp_service = Arc::new(OtpService::new(redis.clone()));
         let token_blacklist = Arc::new(TokenBlacklistService::new(redis.clone()));
         let rate_limiter = Arc::new(RateLimiterService::new(redis.clone()));
@@ -56,6 +78,8 @@ impl AppState {
             google_client_secret: app_config.google_client_secret.clone(),
             google_redirect_url: app_config.google_redirect_url.clone(),
             require_email_verification: app_config.require_email_verification,
+            meeting,
+            organization_directory,
         }
     }
 
