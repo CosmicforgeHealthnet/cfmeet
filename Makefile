@@ -1,11 +1,11 @@
 # CF Meet — root developer commands.
-# Each target delegates to the app's own toolchain. services/core-api/ and
-# apps/web/ remain independently buildable and deployable.
+# Each target delegates to the app/service's own toolchain. services/meeting-service/
+# and apps/web/ remain independently buildable and deployable.
 
-CORE_API := services/core-api
-WEB      := apps/web
+MEETING_SERVICE := services/meeting-service
+WEB             := apps/web
 
-.PHONY: help deps deps-down backend frontend core-api web migrate dev test lint build \
+.PHONY: help deps deps-down meeting-service backend frontend web migrate dev test lint build \
         backend-test backend-lint backend-build frontend-test frontend-lint frontend-build \
         frontend-install
 
@@ -18,20 +18,20 @@ deps: ## Start local PostgreSQL, Redis and LiveKit (docker compose)
 deps-down: ## Stop local dependencies
 	docker compose down
 
-migrate: ## Apply core-api database migrations
-	cd $(CORE_API) && cargo run -p migration -- up
+migrate: ## Apply meeting-service database migrations
+	cd $(MEETING_SERVICE) && cargo run -p migration -- up
 
-backend: ## Run the core API (services/core-api)
-	cd $(CORE_API) && cargo run --bin backend
+meeting-service: ## Run the Meeting & Conference Platform service
+	cd $(MEETING_SERVICE) && cargo run --bin backend
 
-core-api: backend ## Alias for `make backend`
+backend: meeting-service ## Legacy alias for `make meeting-service`
 
 frontend: frontend-install ## Run the web app dev server (apps/web)
 	cd $(WEB) && npm run dev
 
 web: frontend ## Alias for `make frontend`
 
-dev: ## Start deps, then core API + web app together (Ctrl+C stops both)
+dev: ## Start deps, then meeting service + web app together (Ctrl+C stops both)
 	./scripts/dev.sh
 
 test: backend-test frontend-test ## Run all tests
@@ -41,14 +41,14 @@ lint: backend-lint frontend-lint ## Run all linters
 build: backend-build frontend-build ## Build both applications
 
 backend-test:
-	cd $(CORE_API) && cargo test --workspace
+	cd $(MEETING_SERVICE) && cargo test --workspace
 
 backend-lint:
-	cd $(CORE_API) && cargo fmt --all -- --check
-	cd $(CORE_API) && cargo clippy --workspace --all-targets
+	cd $(MEETING_SERVICE) && cargo fmt --all -- --check
+	cd $(MEETING_SERVICE) && cargo clippy --workspace --all-targets
 
 backend-build:
-	cd $(CORE_API) && cargo build --workspace
+	cd $(MEETING_SERVICE) && cargo build --workspace
 
 frontend-install:
 	@test -d $(WEB)/node_modules || (cd $(WEB) && npm ci)
