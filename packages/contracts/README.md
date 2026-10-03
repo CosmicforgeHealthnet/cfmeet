@@ -2,70 +2,56 @@
 
 **Status: boundary established. No generated artefacts yet.**
 
-This package is the permanent home for the **shared, externally visible contracts**
-of the CF Meet platform. Anything that more than one application or service
-has to agree on, or that external integrators depend on, belongs here
-instead of being hand-copied between codebases.
+This package is the permanent home for shared, externally visible contracts across the CF Meet platform. Anything multiple services/apps or external integrators must agree on belongs here rather than being hand-copied between codebases.
 
 ## Responsibilities
 
 | Contract type | Examples | Status |
-|---------------|----------|--------|
-| HTTP API contracts | OpenAPI document for `services/core-api` | Source exists in core-api (see below); not exported here yet |
-| Event schemas | meeting/participant/chat lifecycle events | Planned |
-| Webhook event definitions | payloads delivered to customer webhook endpoints | Planned (today: `WebhookEventType` in core-api) |
-| Permission identifiers | role/permission keys shared by API and UI | Planned |
-| Shared enums | meeting status, participant role, media kinds | Planned |
+|---|---|---|
+| HTTP API contracts | Meeting Service OpenAPI | Source exists in meeting-service; export not yet automated |
+| Event schemas | meeting/participant/session lifecycle events | Planned |
+| Webhook definitions | payloads delivered to customer webhooks | Planned |
+| Permission identifiers | role/permission keys shared by service and UI | Planned |
+| Shared enums | meeting/session/participant states | Planned |
 | External protocol definitions | published signalling/control formats | Planned |
-| SDK generation sources | inputs for future client SDKs (CPaaS / developer APIs) | Planned |
+| SDK generation sources | future client SDK inputs | Planned |
 
-## Single source of truth
+## Current authority
 
-There must be **one** authority per contract. Do **not** hand-write a second copy of
-a Rust DTO in TypeScript (or the other way round) and try to keep them in sync.
+The current Meeting Service HTTP API contract is defined in Rust using `utoipa` annotations and collected in:
 
-**Current authority (today):** the HTTP API contract is defined in Rust by
-[`utoipa`](https://docs.rs/utoipa) annotations on the core-api handlers and DTOs, and
-collected in `services/core-api/src/swagger/mod.rs` (`#[derive(OpenApi)]`). The
-running service publishes it at:
+`services/meeting-service/src/swagger/mod.rs`
 
-- `GET /api-docs/openapi.json`: OpenAPI 3.0 document
-- `GET /swagger-ui/`: interactive explorer
+A running service publishes:
 
-The web app's TypeScript types in `apps/web/src/types/` are currently
-**hand-written** mirrors of those DTOs. That is existing technical debt, not the
-target model.
+- `GET /api-docs/openapi.json`
+- `GET /swagger-ui/`
+
+The TypeScript types in `apps/web/src/types/` are currently hand-written mirrors. That is existing technical debt, not the target architecture.
 
 ## Intended generation strategy
 
-```
-services/core-api (Rust DTOs + utoipa annotations)      ← authority for HTTP API
-        │  export (CI / script)
+```text
+services/meeting-service (Rust DTOs + utoipa)   ← authority for meeting HTTP API
+        │ export
         ▼
-packages/contracts/openapi/core-api.json                ← committed, reviewed artefact
-        │  codegen
-        ├──► packages/contracts/ts/    → consumed by apps/web (and future apps)
-        └──► SDK generators            → future developer SDKs
+packages/contracts/openapi/meeting-service.json
+        │ codegen
+        ├──► generated TS contracts → apps/web
+        └──► future public SDK generators
 
-packages/contracts/events/*.schema.json                 ← authority for events/webhooks
-        │  codegen
-        ├──► Rust types consumed by core-api / future services
-        └──► TS types consumed by apps
+packages/contracts/events/*.schema.json
+        │ codegen
+        ├──► Rust consumers
+        └──► TypeScript consumers
 ```
 
 Rules:
 
-1. **HTTP API:** Rust stays the authority. The OpenAPI document gets exported into
-   this package (for example via a `dump-openapi` binary or by fetching
-   `/api-docs/openapi.json` in CI), and TypeScript types are generated from it.
-2. **Events and webhooks:** they are not owned by a single service, so the schema
-   lives here (JSON Schema) and Rust/TS types are generated from it.
-3. **Generated output is never edited by hand.** CI checks that committed
-   artefacts match a fresh export.
-4. Once anything consumes this package, add `packages/contracts/**` to the
-   path filters of the consuming workflows (see the comments in
-   `.github/workflows/backend.yml` and `frontend.yml`).
+1. Each contract has one authority.
+2. Generated code is not manually edited.
+3. Cross-service event/webhook schemas live here when they become shared platform contracts.
+4. Once consumers are wired to this package, `packages/contracts/**` must trigger the relevant CI workflows.
+5. Phase 2 meeting-specific contracts should be introduced here only when they cross the Meeting Service/Web boundary or become externally published contracts; internal Rust implementation types remain inside `services/meeting-service`.
 
-Choosing the exporter and codegen tools, and replacing the hand-written TS types,
-is implementation work for a later phase. It is intentionally **not** done in the
-layout restructure.
+Future calling, Privacy Relay, messaging, telephony and numbering services will add their own externally shared contracts here without turning `meeting-service` into a universal platform API.
