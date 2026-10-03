@@ -1,0 +1,94 @@
+version: "3.8"
+
+# =============================================================================
+# Usage:
+#   Development:  docker-compose up -d postgres redis
+#   Production:   docker-compose up -d
+# =============================================================================
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: cosmicforge-db
+    env_file:
+      - .env
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cosmicforge-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: cosmicforge-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cosmicforge-network
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cosmicforge-backend
+    ports:
+      - "${PORT:-8080}:8080"
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-rtc}
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - cosmicforge-network
+    restart: unless-stopped
+
+  migration:
+    image: rust:1-bookworm
+    container_name: cosmicforge-migration
+    working_dir: /app/migration
+    volumes:
+      - ./migration:/app/migration
+      - ./Cargo.toml:/app/Cargo.toml
+      - ./Cargo.lock:/app/Cargo.lock
+      - ./src:/app/src
+      - cargo_cache:/usr/local/cargo/registry
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-rtc}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - cosmicforge-network
+    profiles:
+      - tools
+
+volumes:
+  cargo_cache:
+  postgres_data:
+  redis_data:
+
+networks:
+  cosmicforge-network:
+    driver: bridge
