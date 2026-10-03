@@ -1,65 +1,48 @@
 # Deployment
 
-Each application deploys on its own from its own subdirectory. Neither
-deployment builds or needs the other.
-
-> **Layout change:** before the platform layout restructure, these roots were
-> `frontend/` and `backend/`. They are now `apps/web` and `services/core-api`.
-> Update the Vercel Root Directory and the image build context accordingly.
+Each application/service deploys independently from its own subdirectory.
 
 ## Web app: `apps/web` (Vercel)
 
 | Setting | Value |
-|---------|-------|
+|---|---|
 | Git repository | `CosmicforgeHealthnet/cfmeet` |
-| **Root Directory** | **`apps/web`** |
-| Framework preset | Next.js (auto-detected from `apps/web/package.json`) |
-| Install command | default (`npm install`, using `apps/web/package-lock.json`) |
-| Build command | default (`next build`) |
-| Environment variables | `NEXT_PUBLIC_API_URL` = public core API base URL, e.g. `https://<api-host>/api/v1` |
+| Root Directory | `apps/web` |
+| Framework | Next.js |
+| Environment | `NEXT_PUBLIC_API_URL` = public Meeting Service API base URL, e.g. `https://<api-host>/api/v1` |
 
-Optional: to skip web deployments when only other directories change, set
-*Ignored Build Step* to `git diff --quiet HEAD^ HEAD -- .` (it runs inside
-`apps/web/`). Once `apps/web` consumes `packages/contracts`, also include that path.
+## Meeting service: `services/meeting-service` (Docker)
 
-The web build never compiles or needs the Rust core API.
-
-## Core API: `services/core-api` (Docker)
-
-The image is built from `services/core-api/Dockerfile` with **`services/core-api/` as the build context**:
+The image is built from `services/meeting-service/Dockerfile` with **`services/meeting-service/` as the build context**:
 
 ```bash
-docker build -t cfmeet-core-api ./services/core-api
+docker build -t cfmeet-meeting-service ./services/meeting-service
 # or
-cd services/core-api && docker build -t cfmeet-core-api .
+cd services/meeting-service && docker build -t cfmeet-meeting-service .
 ```
 
-The image contains two binaries: `./server` (API, default `CMD`) and
-`./migration` (SeaORM migrator: `./migration up`). Supply configuration at runtime
-(`--env-file`, orchestrator secrets) as before; see `services/core-api/.env.example`.
+The image contains the API server and SeaORM migration binary. Runtime configuration remains environment-driven; see `services/meeting-service/.env.example`.
 
-`services/core-api/docker-compose.yml` (unchanged from `rtc_backend`) still works when run
-from inside `services/core-api/`. The root `docker-compose.yml` is for local development
-only.
+`services/meeting-service/docker-compose.yml` remains available for service-local workflows. The root `docker-compose.yml` is the preferred local platform orchestration file.
 
-## Environment-driven URLs
+## Environment-driven configuration
 
-No URLs are hardcoded by the migration. Before switching any deployment over to
-this repository, check that these values are unchanged:
+| Variable | Component | Notes |
+|---|---|---|
+| `DATABASE_URL` | meeting-service | PostgreSQL |
+| `REDIS_URL` | meeting-service | Redis |
+| `LIVEKIT_URL` | meeting-service | LiveKit URL returned/used for meeting media |
+| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | meeting-service | LiveKit token/control credentials |
+| `FRONTEND_URLS` | meeting-service | CORS allow-list |
+| `APP_URL` | meeting-service | App/join URLs used by backend flows |
+| `GOOGLE_REDIRECT_URL` | meeting-service | OAuth callback |
+| `NEXT_PUBLIC_API_URL` | web | Meeting Service API base URL including `/api/v1` |
 
-| Variable | App | Notes |
-|----------|-----|-------|
-| `DATABASE_URL` | core-api | PostgreSQL |
-| `REDIS_URL` | core-api | Redis |
-| `LIVEKIT_URL` | core-api | Returned to clients in join responses, so it must be reachable from browsers |
-| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | core-api | Used to sign LiveKit join tokens |
-| `FRONTEND_URLS` | core-api | CORS allow-list (comma-separated) |
-| `APP_URL` | core-api | Links in emails / join URLs |
-| `GOOGLE_REDIRECT_URL` | core-api | Must match Google Cloud Console |
-| `NEXT_PUBLIC_API_URL` | web | Core API base URL including `/api/v1` |
+## Monorepo deployment roots
 
-## Switching deployments to the monorepo
+- Web: `apps/web`
+- Meeting Service: `services/meeting-service/`
 
-1. Vercel: point the project at `CosmicforgeHealthnet/cfmeet`, set Root Directory = `apps/web`, keep the existing environment variables.
-2. Core API host / registry: change the build source to `CosmicforgeHealthnet/cfmeet` with context `services/core-api/` (Dockerfile path `services/core-api/Dockerfile`).
-3. Deploy once from the monorepo and confirm `/health` plus a full meeting join before retiring the old repositories.
+The earlier `services/core-api/` name was replaced before Phase 2 so the service's domain responsibility is explicit.
+
+Before retiring the legacy `rtc_backend` / `rtc_frontend` repositories, deploy both the web app and meeting service successfully from `cfmeet` and verify `/health` plus a full meeting join.
