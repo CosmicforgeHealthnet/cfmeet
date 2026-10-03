@@ -157,3 +157,13 @@ package name (`frontend`), container-internal paths in the Dockerfile
 (`/app/backend`), compose service names (`backend`, `frontend`), the
 `backend/.env` hint in the migration binary's error message (application code), and
 the historical sections of this document.
+
+### Note for existing local checkouts
+
+If you built the backend before pulling this rename, run `cargo clean` once in
+`services/core-api/`. Debug builds of `utoipa-swagger-ui` (via `rust-embed`) serve
+Swagger UI assets from an absolute `target/` path compiled into the binary.
+A `target/` directory carried over from `backend/` keeps pointing at the old
+location, and `/swagger-ui/` returns 404 until a clean rebuild (`/api-docs/openapi.json`
+keeps working). Fresh clones, CI and Docker/release builds are not affected.
+Likewise, delete `apps/web/.next` if it came from the old `frontend/` directory.
