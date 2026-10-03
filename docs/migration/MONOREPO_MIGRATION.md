@@ -1,169 +1,130 @@
 # Monorepo migration record
 
-> **Note on paths:** sections 1–7 below describe the original consolidation,
-> when the apps lived in `backend/` and `frontend/`. Those directories have since
-> been renamed to `services/core-api/` and `apps/web/`; see
-> [Platform layout restructure](#platform-layout-restructure) at the end.
+> **Current paths:** `apps/web/` and `services/meeting-service/`.
+> The historical sections below intentionally retain the directory names that existed at each migration stage (`backend/`, `frontend/`, then `services/core-api/`). See the final section for the pre-Phase-2 service rename.
 
 **Date:** 2026-10-03
-**Scope:** Repository consolidation only. No application behaviour, API, database,
-LiveKit or authentication changes.
+**Scope:** Repository consolidation and repository-layout naming only. No application behaviour, API, database, LiveKit or authentication changes were intended.
 
 ## Sources
 
 | Source repository | Branch / commit imported | Commits | Imported under |
-|-------------------|--------------------------|---------|----------------|
-| `CosmicforgeHealthnet/rtc_backend`  | `main` @ `05836e3` | 6 (incl. 1 merge) | `backend/`  |
+|---|---|---:|---|
+| `CosmicforgeHealthnet/rtc_backend` | `main` @ `05836e3` | 6 (incl. 1 merge) | `backend/` |
 | `CosmicforgeHealthnet/rtc_frontend` | `main` @ `d5637b1` | 3 | `frontend/` |
 
-Neither source repository had tags, so no tag namespacing was needed. Any future
-tags imported from them should use the `backend-` / `frontend-` prefixes.
-The source repositories were only read, never written to.
+The source repositories were read only and remain legacy recovery sources until deployments from `cfmeet` are certified.
 
-## Method
+## Original consolidation method
 
-1. Fresh clone of each repository.
-2. `git filter-repo --to-subdirectory-filter backend` (and `frontend`). Every
-   commit keeps its original author, committer, dates and message. Only the
-   paths, and therefore the SHAs, change.
-3. For the frontend, `--path rtc_frontend --invert-paths` also drops the stale
-   gitlink described below.
-4. Both rewritten histories were merged into a new root commit with
-   `git merge --allow-unrelated-histories --no-ff`.
+1. Fresh clone of each source repository.
+2. `git filter-repo --to-subdirectory-filter backend` and `frontend` to preserve historical commits under monorepo prefixes.
+3. The stale frontend gitlink was removed during the history rewrite because it had no `.gitmodules` entry or reachable source commit.
+4. The two rewritten histories were merged into the new monorepo without squashing.
 
-Old→new SHA mappings: [`commit-map-backend.txt`](commit-map-backend.txt),
-[`commit-map-frontend.txt`](commit-map-frontend.txt).
+Old→new SHA maps remain in `commit-map-backend.txt` and `commit-map-frontend.txt`.
 
-Verification:
+## Stale `rtc_frontend` gitlink
 
-- `git rev-parse HEAD:backend` right after the import equals the tree of
-  `rtc_backend@05836e3` (`6609e12…`), so the content is byte-identical.
-- `frontend/` right after the import is identical to `rtc_frontend@d5637b1`
-  minus the `rtc_frontend` gitlink.
-- `git log -- backend/` shows all 6 original backend commits, and
-  `git log -- frontend/` shows all 3 original frontend commits.
+The original frontend contained a mode-160000 entry named `rtc_frontend` with no `.gitmodules` definition and no reachable source commit. It contained no source code and was intentionally excluded from the monorepo import.
 
-## The `rtc_frontend` gitlink
+## Pre-existing issues imported unchanged
 
-`rtc_frontend` contained a mode-160000 entry named `rtc_frontend`
-(→ `1f659c4ef4b8…`), added in the initial commit `ea86461`. Findings:
-
-- There is no `.gitmodules`, so the entry has no URL and can't be checked out as a submodule.
-- Commit `1f659c4` does not exist in `rtc_frontend`.
-- On disk it is an empty directory, and nothing references it.
-
-This is the classic result of running `git add .` while a nested `.git`
-directory was present. It held no source code, so it was removed from every
-historical commit and **not** carried into the monorepo.
-
-## Changes made for the new layout
-
-| File | Change | Why |
-|------|--------|-----|
-| `frontend/.gitignore` | added `!.env.example` | `.env*` would otherwise ignore the new `frontend/.env.example` |
-| `frontend/.env.example` | new | documents `NEXT_PUBLIC_API_URL`; no secrets |
-| root `.gitignore`, `.editorconfig` | new | monorepo-wide rules (both app `.gitignore` files kept as-is) |
-| root `docker-compose.yml` | new | local deps (postgres, redis, livekit) + optional `app` profile; all ports on 127.0.0.1 |
-| `infra/livekit/livekit.dev.yaml` | new | local LiveKit dev config (public dev key pair) |
-| `Makefile`, `scripts/dev.sh` | new | root developer commands |
-| `.github/workflows/*.yml` | new | path-aware CI (neither source repo had CI) |
-
-**No changes were needed** in `backend/Dockerfile`, `backend/docker-compose.yml`,
-`backend/.dockerignore`, Cargo manifests, migration paths, `next.config.ts`,
-`tsconfig.json` or package scripts. They all use paths relative to their own
-application root, which `backend/` and `frontend/` keep. The backend docs
-already used `cd backend` / `cd frontend`, which now match the real layout.
-
-## Not migrated
-
-- The `rtc_frontend` gitlink (see above).
-- The `claude/focused-wright-qpidr6` branch of `rtc_backend`, which was identical to `main`.
-- Build output and dependencies (`target/`, `node_modules/`, `.next/`). None were tracked.
-
-Kept intentionally: `backend/.claude/` and `frontend/.claude/` (local
-assistant permission files that were tracked in the source repos),
-`backend/DOCS_CLEANUP_SUMMARY.md` and `frontend/docs/*.html`.
-
-## Pre-existing issues (imported unchanged)
-
-These reproduce identically on the original repositories and are **not**
-caused by the migration:
+These issues predate the monorepo work:
 
 | Check | Result |
-|-------|--------|
-| `cargo fmt --check` | fails: formatting drift in ~30 files |
-| `cargo clippy` | passes with warnings (16 backend, 2 migration) |
-| `npm run lint` | fails: 3 errors / 7 warnings (`docs/generate-pdf.js` `require()`, `setState` in effect in `src/app/(room)/[id]/page.tsx`) |
-| Browser console | hydration mismatch in `DashboardLayout`; `TypeError … endsWith` in `ensureUtc` (`src/utils/timezone.ts`) on the dashboard |
-| Frontend default API URL | `src/services/api.ts` falls back to `http://localhost:3001/api/v1`, but the backend defaults to `:8080`, so set `NEXT_PUBLIC_API_URL` |
-
-CI reports `cargo fmt --check` and `npm run lint` without failing the build until
-dedicated fix commits land.
+|---|---|
+| `cargo fmt --check` | formatting drift in imported Rust code |
+| `cargo clippy` | warnings in backend and migration crates |
+| `npm run lint` | existing frontend lint errors/warnings |
+| Browser console | existing hydration mismatch and `ensureUtc … endsWith` TypeError |
+| Frontend fallback API URL | fallback port differs from backend default; set `NEXT_PUBLIC_API_URL` |
 
 ## Security note
 
-`rtc_backend` history (commits `d7cdfde`, `ac4b09d`, now `519fb5e`, `e09db94`)
-contains a docker-compose Postgres password for the local dev container
-(`POSTGRES_PASSWORD` / `DATABASE_URL` in `docker-compose.yml` and
-`docs/DOCKER_TESTING_GUIDE.md`). It was removed in `4925158`. It is a
-local-container default, not a cloud credential. It is preserved in history
-exactly as it is in `rtc_backend`. If that value was ever reused on a real
-database, rotate it there. No other credentials were found in either history.
+The imported backend history contains an old local-development PostgreSQL password that had already been removed from current code. It was preserved with history. If it was ever reused on a real environment, rotate it there.
 
-## Retiring the source repositories
+## First platform layout restructure
 
-`rtc_backend` and `rtc_frontend` are now legacy source repositories. Archive
-them only after:
+**Safety point:** `backup/pre-platform-layout` → `300383b`.
 
-1. this repository is pushed to `CosmicforgeHealthnet/cfmeet` and its CI has run;
-2. Vercel (Root Directory `apps/web`) and the core API image build (context `services/core-api/`) have each deployed successfully from it;
-3. no new commits have landed on either source repository since the import (otherwise re-import them first).
+The published consolidation initially used `backend/` and `frontend/`. A normal, non-force Git restructure then changed the layout to:
 
-## Platform layout restructure
-
-**Date:** 2026-10-03. **Safety point:** branch `backup/pre-platform-layout` → `300383b`
-(the published consolidation head).
-
-The two applications were renamed in place with `git mv`, as ordinary commits on
-top of the already-published history. History was **not** rewritten and nothing
-was force-pushed.
-
-| Before | After |
-|--------|-------|
+| Before | After at that stage |
+|---|---|
 | `backend/` | `services/core-api/` |
 | `frontend/` | `apps/web/` |
 | `docs/DEPLOYMENT.md` | `infra/deployment/README.md` |
 | `docs/MONOREPO_MIGRATION.md` | `docs/migration/MONOREPO_MIGRATION.md` |
 
-New: `packages/contracts/`, `infra/docker/`, `docs/architecture/`, `docs/api/`,
-`docs/decisions/`, `docs/phases/` (documentation and boundaries only, no new code).
+This also established `packages/contracts/`, `infra/docker/`, `docs/architecture/`, `docs/api/`, `docs/decisions/` and `docs/phases/` as platform boundaries/documentation areas.
 
-History is reachable with `--follow`, for example:
+Historical commits still show the paths that existed when those commits were created. That is expected and preserves normal Git history.
 
-```bash
-git log --follow -- services/core-api/src/main.rs   # → backend/src/main.rs → rtc_backend
-git log --follow -- apps/web/src/utils/timezone.ts  # → frontend/src/utils/timezone.ts → rtc_frontend
+## Pre-Phase-2 domain rename: `core-api` → `meeting-service`
+
+Before any Phase 2 implementation began, the service name was corrected to reflect its actual domain responsibility:
+
+```text
+services/core-api/
+        ↓ normal Git rename
+services/meeting-service/
 ```
 
-Old commits still show their files under `backend/` and `frontend/`. That is expected:
-moving them would mean rewriting published history.
+Reason: the imported Rust backend is the control plane for the Meeting & Conference Platform and is the implementation base for Phase 2. Calling it `core-api` incorrectly suggested that future calling, messaging, Privacy Relay, telephony and numbering capabilities should all live in that service.
 
-Updated for the new layout: Makefile, `scripts/dev.sh`, root `docker-compose.yml`,
-the three CI workflows, root README, the deployment guide, `.gitignore` and
-`apps/web/.env.example` comments, and the path prefixes in `services/core-api/docs/`.
+The rename is architectural naming only. No meeting business behaviour is intentionally changed by it.
 
-Left as-is on purpose: Cargo package/binary names (`backend`, `migration`), the npm
-package name (`frontend`), container-internal paths in the Dockerfile
-(`/app/backend`), compose service names (`backend`, `frontend`), the
-`backend/.env` hint in the migration binary's error message (application code), and
-the historical sections of this document.
+The current Phase 2 ownership is:
 
-### Note for existing local checkouts
+- backend/control plane: `services/meeting-service/`
+- web UI: `apps/web/`
+- shared contracts: `packages/contracts/`
+- media infrastructure: `infra/livekit/`
+- specification and closure evidence: `docs/phases/phase-02/`
 
-If you built the backend before pulling this rename, run `cargo clean` once in
-`services/core-api/`. Debug builds of `utoipa-swagger-ui` (via `rust-embed`) serve
-Swagger UI assets from an absolute `target/` path compiled into the binary.
-A `target/` directory carried over from `backend/` keeps pointing at the old
-location, and `/swagger-ui/` returns 404 until a clean rebuild (`/api-docs/openapi.json`
-keeps working). Fresh clones, CI and Docker/release builds are not affected.
-Likewise, delete `apps/web/.next` if it came from the old `frontend/` directory.
+See ADR 0002: `docs/decisions/0002-meeting-service-domain-name.md`.
+
+### History verification
+
+Use `--follow` across both normal rename steps, for example:
+
+```bash
+git log --follow -- services/meeting-service/src/main.rs
+git log --follow -- apps/web/src/utils/timezone.ts
+```
+
+The backend history therefore naturally reads:
+
+```text
+rtc_backend → backend/ → services/core-api/ → services/meeting-service/
+```
+
+No published history is rewritten.
+
+### Existing local checkouts
+
+If an existing checkout was built before either backend-directory rename, run:
+
+```bash
+cd services/meeting-service
+cargo clean
+```
+
+This clears Rust/Swagger debug artefacts that may contain absolute paths to an older `target/` location. Fresh clones, CI and Docker/release builds are not affected.
+
+## Deployment roots after the final rename
+
+- Vercel Root Directory: `apps/web`
+- Meeting Service Docker build context: `services/meeting-service/`
+- Meeting Service Dockerfile: `services/meeting-service/Dockerfile`
+
+## Retiring the source repositories
+
+Archive `rtc_backend` and `rtc_frontend` only after:
+
+1. CI is green on the final `cfmeet` main branch;
+2. the web app has deployed successfully from `apps/web`;
+3. the Meeting Service has deployed successfully from `services/meeting-service/`;
+4. `/health` and a full meeting join have been validated from the monorepo deployment; and
+5. no newer commits need to be reconciled from the legacy repositories.
