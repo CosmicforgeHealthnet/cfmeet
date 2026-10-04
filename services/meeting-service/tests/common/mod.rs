@@ -7,6 +7,7 @@
 //! SKIPPED line (never a silent pass).
 #![allow(dead_code)]
 
+pub mod collab;
 pub mod livekit_mock;
 pub mod rtc;
 
@@ -467,6 +468,21 @@ impl TestApp {
         .await
     }
 
+    /// Mock-LiveKit app with Part E realtime + Part F collaboration enabled.
+    pub async fn collab() -> Option<Self> {
+        Self::with(TestOptions {
+            rtc: RtcMode::LiveKitMock,
+            flags: FeatureFlags {
+                rtc_provider_control_v2: true,
+                conference_realtime_enabled: true,
+                collaboration_v2_enabled: true,
+                ..FeatureFlags::all_v2_enabled()
+            },
+            ..TestOptions::default()
+        })
+        .await
+    }
+
     pub fn on(db: TestDb, opts: TestOptions) -> Self {
         Self::on_with_lk(db, opts, None)
     }
@@ -717,16 +733,55 @@ impl TestApp {
         (status, value)
     }
 
-    pub async fn get(&self, uri: &str, auth: Auth<'_>) -> (StatusCode, Value) {
-        self.call(Method::GET, uri, auth, None).await
+    pub async fn get(&self, uri: impl AsRef<str>, auth: Auth<'_>) -> (StatusCode, Value) {
+        self.call(Method::GET, uri.as_ref(), auth, None).await
     }
 
-    pub async fn post(&self, uri: &str, auth: Auth<'_>, body: Value) -> (StatusCode, Value) {
-        self.call(Method::POST, uri, auth, Some(body)).await
+    pub async fn post(
+        &self,
+        uri: impl AsRef<str>,
+        auth: Auth<'_>,
+        body: Value,
+    ) -> (StatusCode, Value) {
+        self.call(Method::POST, uri.as_ref(), auth, Some(body))
+            .await
     }
 
-    pub async fn patch(&self, uri: &str, auth: Auth<'_>, body: Value) -> (StatusCode, Value) {
-        self.call(Method::PATCH, uri, auth, Some(body)).await
+    pub async fn patch(
+        &self,
+        uri: impl AsRef<str>,
+        auth: Auth<'_>,
+        body: Value,
+    ) -> (StatusCode, Value) {
+        self.call(Method::PATCH, uri.as_ref(), auth, Some(body))
+            .await
+    }
+
+    pub async fn delete(&self, uri: impl AsRef<str>, auth: Auth<'_>) -> (StatusCode, Value) {
+        self.call(Method::DELETE, uri.as_ref(), auth, None).await
+    }
+
+    /// POST with a raw (possibly malformed) body.
+    pub async fn post_raw(&self, uri: &str, auth: Auth<'_>, raw: &str) -> (StatusCode, Value) {
+        let mut req = Request::builder().method(Method::POST).uri(uri);
+        match auth {
+            Auth::None => {}
+            Auth::Bearer(t) => req = req.header("authorization", format!("Bearer {t}")),
+            Auth::Participant(t) => req = req.header("x-participant-token", t),
+        }
+        let req = req
+            .header("content-type", "application/json")
+            .body(Body::from(raw.to_string()))
+            .unwrap();
+        let resp = self.router.clone().oneshot(req).await.unwrap();
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
     }
 
     // -- scenario helpers -----------------------------------------------------

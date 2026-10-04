@@ -22,7 +22,7 @@ use uuid::Uuid;
 use crate::{
     domain::{
         AdmissionState, BanScope, BanSubjectType, ConferenceStatus, IdentityType,
-        MediaCapturePolicy, RecordOrigin, Role, RoleSource, SessionState, SpaceStatus,
+        MediaCapturePolicy, MeetingType, RecordOrigin, Role, RoleSource, SessionState, SpaceStatus,
         WaitingRoomPolicy,
     },
     dto::v2::{BanParticipantRequest, DenyRequest, JoinConferenceRequest, RoleChangeRequest},
@@ -142,6 +142,8 @@ pub struct JoinOutcome {
     pub participant_token: Option<String>,
     pub rtc: RtcOutcome,
     pub permissions: MediaPermissions,
+    /// Part F: the media context the credential was issued for.
+    pub media_context: crate::services::collaboration::breakouts::MediaContext,
     pub recording_active: bool,
     pub transcription_active: bool,
 }
@@ -484,6 +486,8 @@ impl AdmissionService {
             legacy_participant_id: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
+            screen_share_started_at: Set(None),
+            screen_share_track_ref: Set(None),
         }
         .insert(txn)
         .await?)
@@ -553,7 +557,16 @@ impl AdmissionService {
                 external_context: req.external_context.as_deref(),
             })
             .await?;
+        let collab = self.core.flags.collaboration_v2_enabled;
+        // Part F §18: a display name is presentation only; registered users in sensitive
+        // meetings always present under their profile name.
+        let profile_locked = collab
+            && !crate::services::collaboration::prejoin::display_name_editable(
+                ctx,
+                space.security_profile,
+            );
         let display_name = match (&req.display_name, ctx.registered(), &existing) {
+            (_, Some(r), _) if profile_locked => r.display_name.chars().take(100).collect(),
             (Some(n), _, _) => sanitize_display_name(n)?,
             (None, Some(r), _) => r.display_name.chars().take(100).collect(),
             (None, None, Some(p)) => p.display_name.clone(),
@@ -561,6 +574,49 @@ impl AdmissionService {
                 return Err(validation("displayName is required to join as a guest"))
             }
         };
+
+        // Part F §19: explicit consents required by policy must exist before admission.
+        let consent_policy = if collab {
+            let c = find_conference(&self.core.db, conference_id).await?;
+            Some(crate::services::collaboration::effective_policy(&space, &c))
+        } else {
+            None
+        };
+        let mut consents_to_record = vec![];
+        if let Some(policy) = consent_policy
+            .as_ref()
+            .filter(|p| !p.required_consents.is_empty())
+        {
+            let already = match &existing {
+                Some(p) => {
+                    crate::services::collaboration::prejoin::granted_consents(
+                        &self.core.db,
+                        p.id,
+                        &policy.consent_version,
+                    )
+                    .await?
+                }
+                None => vec![],
+            };
+            let request = req.consents.clone().unwrap_or_default();
+            let missing = crate::services::collaboration::prejoin::missing_consents(
+                &policy.required_consents,
+                &policy.consent_version,
+                &already,
+                &request,
+            );
+            if !missing.is_empty() {
+                return Err(
+                    crate::services::collaboration::prejoin::consent_required_error(&missing),
+                );
+            }
+            consents_to_record = policy
+                .required_consents
+                .iter()
+                .copied()
+                .filter(|k| !already.contains(k))
+                .collect();
+        }
 
         let txn = self.core.db.begin().await?;
         let conference = lock_conference(&txn, conference_id).await?;
@@ -579,6 +635,16 @@ impl AdmissionService {
 
         // 10. Role (authoritative sources only). Live-assigned roles survive reconnect.
         let (mut role, mut role_source) = resolve_role(&decision, space.default_role);
+        // Part F §53: webinar attendees (default role) are subscribe-only.
+        if collab
+            && role_source == RoleSource::Default
+            && matches!(
+                space.meeting_type,
+                MeetingType::Webinar | MeetingType::TownHall
+            )
+        {
+            role = Role::Viewer;
+        }
         if let Some(p) = &existing {
             if !decision.is_owner {
                 match p.role_source {
@@ -768,6 +834,20 @@ impl AdmissionService {
                     created_at: Set(now),
                     updated_at: Set(now),
                     version: Set(1),
+                    audio_locked_at: Set(None),
+                    audio_locked_by: Set(None),
+                    video_locked_at: Set(None),
+                    video_locked_by: Set(None),
+                    screen_share_locked_at: Set(None),
+                    screen_share_locked_by: Set(None),
+                    chat_restricted_at: Set(None),
+                    chat_restricted_by: Set(None),
+                    hand_raised_at: Set(None),
+                    hand_lowered_at: Set(None),
+                    spotlighted_at: Set(None),
+                    spotlighted_by: Set(None),
+                    breakout_visit_room_id: Set(None),
+                    collab_version: Set(1),
                 }
                 .insert(&txn)
                 .await?
@@ -821,6 +901,20 @@ impl AdmissionService {
             emit(&txn, participant_event(space.id, &participant, e)).await?;
         }
 
+        if let Some(policy) = &consent_policy {
+            if !consents_to_record.is_empty() {
+                crate::services::collaboration::prejoin::record_consents(
+                    &txn,
+                    space.id,
+                    conference_id,
+                    participant.id,
+                    &consents_to_record,
+                    &policy.consent_version,
+                )
+                .await?;
+            }
+        }
+
         // 13. Device session only for an ADMITTED participant.
         let session = if participant.admission_state == AdmissionState::Admitted {
             Some(
@@ -837,12 +931,24 @@ impl AdmissionService {
         };
         txn.commit().await?;
 
-        // 14. RTC credentials only after the authoritative state committed.
+        // 14. RTC credentials only after the authoritative state committed. Part F: the
+        // effective projection (role ∧ policy ∧ locks) for the current media context.
         let permissions = if participant.admission_state == AdmissionState::Admitted {
-            pctx.media(participant.role)
+            crate::services::collaboration::media::effective_media_for(
+                &self.core.db,
+                &conference,
+                &participant,
+            )
+            .await?
         } else {
             MediaPermissions::none()
         };
+        let media_context = crate::services::collaboration::breakouts::media_context(
+            &self.core.db,
+            &conference,
+            &participant,
+        )
+        .await?;
         let rtc = match &session {
             None => RtcOutcome::NotIssuedWaiting,
             Some(_) if !self.core.flags.rtc_provider_control_v2 => {
@@ -851,7 +957,14 @@ impl AdmissionService {
             Some(s) => {
                 // Part E: a credential is only minted for a room the provider confirms now.
                 if self.rtc.room_control() {
-                    if let Err(e) = self.rtc.verify_room_for_join(conference_id).await {
+                    if let Err(e) = crate::services::collaboration::breakouts::ensure_context_room(
+                        &self.core,
+                        &self.rtc,
+                        &conference,
+                        &media_context,
+                    )
+                    .await
+                    {
                         inc(&M.credentials_refused);
                         self.close_session(
                             s.id,
@@ -876,7 +989,10 @@ impl AdmissionService {
                     .core
                     .rtc
                     .issue_join_credentials(&JoinCredentialRequest {
-                        participant: RtcParticipantRef::new(&conference, s),
+                        participant: RtcParticipantRef {
+                            room_name: media_context.room_name(&conference),
+                            ..RtcParticipantRef::new(&conference, s)
+                        },
                         display_name: participant.display_name.clone(),
                         permissions,
                         ttl,
@@ -926,6 +1042,7 @@ impl AdmissionService {
             RtcOutcome::NotIssuedWaiting
         };
         Ok(JoinOutcome {
+            media_context,
             recording_active: conference.recording_state != "OFF"
                 && space.recording_policy != MediaCapturePolicy::Disabled,
             transcription_active: conference.transcription_state != "OFF",
@@ -1462,7 +1579,18 @@ impl AdmissionService {
             participant_event(space.id, &updated, event::PARTICIPANT_ROLE_CHANGED),
         )
         .await?;
-        let (before, after) = (pctx.media(previous), pctx.media(req.role));
+        // Part F: compare the effective projections (role ∧ policy ∧ locks).
+        let collab_policy = crate::services::collaboration::effective_policy(&space, &conference);
+        let restrictions = crate::services::collaboration::media::MediaRestrictions::of(&updated);
+        let project = |role| {
+            crate::services::collaboration::media::effective_media(
+                &pctx,
+                &collab_policy,
+                role,
+                restrictions,
+            )
+        };
+        let (before, after) = (project(previous), project(req.role));
         if before != after {
             let mut payload = participant_payload(&updated);
             payload["mediaPermissions"] = json!(after);
@@ -1493,7 +1621,7 @@ impl AdmissionService {
                         "conferenceId": conference.id,
                         "participantId": target.id,
                         "mediaIdentities": sessions.iter().map(|s| s.media_identity.clone()).collect::<Vec<_>>(),
-                        "permissions": pctx.media(req.role),
+                        "permissions": after,
                     }),
                 },
             )
@@ -1873,6 +2001,8 @@ mod tests {
             legacy_participant_id: None,
             created_at: base,
             updated_at: base,
+            screen_share_started_at: None,
+            screen_share_track_ref: None,
         }
     }
 

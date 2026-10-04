@@ -71,6 +71,14 @@ pub struct MeetingDomain {
     pub rtc: RtcControl,
     /// Part E provider webhook processing.
     pub rtc_webhooks: RtcWebhookService,
+    // Part F — media controls & collaboration (internal services).
+    pub media: crate::services::collaboration::media::MediaControlService,
+    pub messaging: crate::services::collaboration::messaging::MeetingMessagingService,
+    pub engagement: crate::services::collaboration::engagement::EngagementService,
+    pub breakouts: crate::services::collaboration::breakouts::BreakoutService,
+    pub polls: crate::services::collaboration::polls::PollService,
+    pub questions: crate::services::collaboration::questions::QuestionService,
+    pub prejoin: crate::services::collaboration::prejoin::PreJoinService,
 }
 
 impl MeetingDomain {
@@ -80,7 +88,7 @@ impl MeetingDomain {
         deps: MeetingDomainDeps,
     ) -> Self {
         let passcode_limiter = AttemptLimiter::new(
-            redis,
+            redis.clone(),
             deps.config.passcode_max_attempts,
             deps.config.passcode_window_secs,
         );
@@ -93,6 +101,8 @@ impl MeetingDomain {
             adapters: deps.adapters,
             appointments: deps.appointments,
             passcode_limiter,
+            collab_limiter: crate::services::collaboration::CollabLimiter::new(redis.clone()),
+            redis,
         });
         Self {
             spaces: MeetingSpaceService::new(core.clone()),
@@ -106,6 +116,21 @@ impl MeetingDomain {
             organizations: OrganizationService::new(core.clone()),
             rtc: RtcControl::new(core.clone()),
             rtc_webhooks: RtcWebhookService::new(core.clone()),
+            media: crate::services::collaboration::media::MediaControlService::new(core.clone()),
+            messaging: crate::services::collaboration::messaging::MeetingMessagingService::new(
+                core.clone(),
+            ),
+            engagement: crate::services::collaboration::engagement::EngagementService::new(
+                core.clone(),
+            ),
+            breakouts: crate::services::collaboration::breakouts::BreakoutService::new(
+                core.clone(),
+            ),
+            polls: crate::services::collaboration::polls::PollService::new(core.clone()),
+            questions: crate::services::collaboration::questions::QuestionService::new(
+                core.clone(),
+            ),
+            prejoin: crate::services::collaboration::prejoin::PreJoinService::new(core.clone()),
             core,
         }
     }

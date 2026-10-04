@@ -589,3 +589,59 @@ pub fn webhook_body(
     }
     v.to_string()
 }
+
+/// Track webhook (`track_published` / `track_unpublished`) as livekit-server sends it.
+pub fn track_webhook_body(
+    event: &str,
+    id: &str,
+    room: &str,
+    identity: &str,
+    track_sid: &str,
+    source: &str,
+) -> String {
+    let mut v: serde_json::Value =
+        serde_json::from_str(&webhook_body(event, id, room, None, Some(identity))).unwrap();
+    let kind = if source == "MICROPHONE" || source == "SCREEN_SHARE_AUDIO" {
+        "AUDIO"
+    } else {
+        "VIDEO"
+    };
+    v["track"] = json!({ "sid": track_sid, "source": source, "type": kind });
+    v.to_string()
+}
+
+impl MockLiveKit {
+    /// Simulated client unpublish (no admin call).
+    pub fn unpublish(&self, room: &str, identity: &str, sid: &str) -> bool {
+        let mut rooms = self.rooms.lock().unwrap();
+        match rooms
+            .get_mut(room)
+            .and_then(|r| r.participants.get_mut(identity))
+        {
+            Some(p) => {
+                let before = p.tracks.len();
+                p.tracks.retain(|t| t.sid != sid);
+                before != p.tracks.len()
+            }
+            None => false,
+        }
+    }
+
+    /// Tracks of `source` currently published (and whether muted).
+    pub fn tracks_of(
+        &self,
+        room: &str,
+        identity: &str,
+        source: proto::TrackSource,
+    ) -> Vec<(String, bool)> {
+        self.participant(room, identity)
+            .map(|p| {
+                p.tracks
+                    .iter()
+                    .filter(|t| t.source == source as i32)
+                    .map(|t| (t.sid.clone(), t.muted))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}

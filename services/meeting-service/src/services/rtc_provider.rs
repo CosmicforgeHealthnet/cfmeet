@@ -233,12 +233,15 @@ pub struct RtcRoomSnapshot {
 }
 
 /// Provider-neutral, verified provider callback.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderEventKind {
     RoomStarted,
     RoomFinished,
     ParticipantJoined,
     ParticipantLeft,
+    /// Part F: a track was published / unpublished (screen-share evidence).
+    TrackPublished,
+    TrackUnpublished,
     Other,
 }
 
@@ -252,6 +255,9 @@ pub struct ProviderEvent {
     pub room_id: Option<String>,
     pub media_identity: Option<String>,
     pub occurred_at: Option<DateTime<Utc>>,
+    /// Part F: provider track reference (internal, never projected).
+    pub track_id: Option<String>,
+    pub track_kind: Option<TrackKind>,
 }
 
 #[async_trait]
@@ -710,6 +716,8 @@ impl RtcProvider for LiveKitProvider {
             "participant_left" | "participant_connection_aborted" => {
                 ProviderEventKind::ParticipantLeft
             }
+            "track_published" => ProviderEventKind::TrackPublished,
+            "track_unpublished" => ProviderEventKind::TrackUnpublished,
             _ => ProviderEventKind::Other,
         };
         let id = if event.id.is_empty() {
@@ -738,6 +746,19 @@ impl RtcProvider for LiveKitProvider {
             occurred_at: (event.created_at > 0)
                 .then(|| Utc.timestamp_opt(event.created_at, 0).single())
                 .flatten(),
+            track_id: event
+                .track
+                .as_ref()
+                .filter(|t| !t.sid.is_empty())
+                .map(|t| t.sid.chars().take(160).collect()),
+            // Screen-share evidence counts the video track only (a share's optional
+            // audio track must not end or duplicate the share).
+            track_kind: event.track.as_ref().and_then(|t| {
+                match proto::TrackSource::try_from(t.source).ok() {
+                    Some(proto::TrackSource::ScreenShareAudio) => None,
+                    _ => Self::track_kind(t),
+                }
+            }),
         })
     }
 }

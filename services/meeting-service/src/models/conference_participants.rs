@@ -38,6 +38,22 @@ pub struct Model {
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
     pub version: i32,
+    // Part F — authoritative media restrictions and collaboration state.
+    pub audio_locked_at: Option<DateTimeUtc>,
+    pub audio_locked_by: Option<String>,
+    pub video_locked_at: Option<DateTimeUtc>,
+    pub video_locked_by: Option<String>,
+    pub screen_share_locked_at: Option<DateTimeUtc>,
+    pub screen_share_locked_by: Option<String>,
+    pub chat_restricted_at: Option<DateTimeUtc>,
+    pub chat_restricted_by: Option<String>,
+    pub hand_raised_at: Option<DateTimeUtc>,
+    pub hand_lowered_at: Option<DateTimeUtc>,
+    pub spotlighted_at: Option<DateTimeUtc>,
+    pub spotlighted_by: Option<String>,
+    /// Privileged host/co-host breakout visit (not an assignment).
+    pub breakout_visit_room_id: Option<Uuid>,
+    pub collab_version: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

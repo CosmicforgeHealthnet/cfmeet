@@ -52,6 +52,11 @@ pub fn space(view: &SpaceView) -> MeetingSpaceResponse {
         access_config: full.then(|| access_config(s)),
         role_policy: full.then(|| RolePolicy::from_json(&s.role_policy)),
         schedule_policy: full.then(|| schedule_policy(s)),
+        collaboration_policy: full.then(|| {
+            crate::services::collaboration::policy::CollaborationPolicyPatch::from_json(
+                &s.collaboration_policy,
+            )
+        }),
         created_at: full.then_some(s.created_at),
         updated_at: full.then_some(s.updated_at),
         archived_at: full.then_some(s.archived_at).flatten(),

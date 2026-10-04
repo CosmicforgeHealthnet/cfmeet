@@ -112,6 +112,8 @@ pub struct CreateMeetingSpaceRequest {
     pub access_config: Option<AccessConfig>,
     pub role_policy: Option<RolePolicy>,
     pub schedule_policy: Option<SchedulePolicy>,
+    /// Part F: sparse collaboration policy defaults for this space.
+    pub collaboration_policy: Option<CollaborationPolicyPatch>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
@@ -138,6 +140,8 @@ pub struct UpdateMeetingSpaceRequest {
     pub access_config: Option<AccessConfig>,
     pub role_policy: Option<RolePolicy>,
     pub schedule_policy: Option<SchedulePolicy>,
+    /// Part F: replaces the space's collaboration policy overrides.
+    pub collaboration_policy: Option<CollaborationPolicyPatch>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
@@ -231,6 +235,9 @@ pub struct MeetingSpaceResponse {
     pub role_policy: Option<RolePolicy>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schedule_policy: Option<SchedulePolicy>,
+    /// Part F: space-level collaboration overrides (full view only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collaboration_policy: Option<CollaborationPolicyPatch>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -488,6 +495,8 @@ pub struct JoinConferenceRequest {
     /// Opaque context forwarded to a server-side access authority (e.g. a HealthNet
     /// appointment token). Never treated as proof by the meeting service itself.
     pub external_context: Option<String>,
+    /// Part F: explicit consents granted before admission (see the pre-join contract).
+    pub consents: Option<Vec<ConsentGrant>>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -588,6 +597,8 @@ pub struct JoinConferenceResponse {
     pub rtc_status: RtcStatus,
     pub permissions: JoinPermissions,
     pub policy: JoinPolicy,
+    /// Part F: the media context (main room or breakout) the credential targets.
+    pub media_context: MediaContextView,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
@@ -875,3 +886,5 @@ pub struct EventReplayResponse {
     pub resync_required: bool,
     pub canonical: String,
 }
+
+pub use super::v2_collab::*;

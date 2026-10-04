@@ -144,6 +144,8 @@ pub async fn insert_conference<C: ConnectionTrait>(
         event_seq: Set(0),
         rtc_room_ready_at: Set(None),
         rtc_room_terminated_at: Set(None),
+        collaboration_policy: Set(json!({})),
+        collaboration_version: Set(1),
     };
     let conference = model.insert(conn).await.map_err(|e| {
         if is_unique_violation(&e) {
@@ -968,6 +970,8 @@ mod tests {
             event_seq: 0,
             rtc_room_ready_at: None,
             rtc_room_terminated_at: None,
+            collaboration_policy: serde_json::json!({}),
+            collaboration_version: 1,
         }
     }
 

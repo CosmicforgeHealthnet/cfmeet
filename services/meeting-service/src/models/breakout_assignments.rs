@@ -16,6 +16,7 @@ pub struct Model {
     pub assigned_by: Option<String>,
     pub assigned_at: DateTimeUtc,
     pub unassigned_at: Option<DateTimeUtc>,
+    pub mode: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

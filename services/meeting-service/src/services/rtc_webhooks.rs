@@ -29,11 +29,12 @@ use crate::{
     error::ApiResult,
     models::{conference_participants, conference_sessions, participant_sessions},
     services::{
+        collaboration::{breakouts, media, media::queue_permission_sync},
         meeting_core::{lock_conference, Core},
         meeting_events::{action, audit, emit, event, AuditActor, AuditRecord, OutboxRecord},
         rtc_control::{record_room_terminated, RtcControl},
         rtc_metrics::{inc, RTC_METRICS as M},
-        rtc_provider::{ProviderEvent, ProviderEventKind},
+        rtc_provider::{ProviderEvent, ProviderEventKind, TrackKind},
     },
 };
 
@@ -119,12 +120,27 @@ impl RtcWebhookService {
             return Ok(WebhookOutcome::Duplicate);
         }
         // Map provider room → ConferenceSession (opaque mapping, never client input).
+        // Part F: a breakout room maps to its parent conference.
+        let mut breakout = None;
         let conference = match &e.room_name {
             Some(name) => {
-                conference_sessions::Entity::find()
+                match conference_sessions::Entity::find()
                     .filter(conference_sessions::Column::RtcRoomName.eq(name.clone()))
                     .one(&txn)
                     .await?
+                {
+                    Some(c) => Some(c),
+                    None => match breakouts::breakout_by_room(&txn, name).await? {
+                        Some(room) => {
+                            let c = conference_sessions::Entity::find_by_id(room.conference_id)
+                                .one(&txn)
+                                .await?;
+                            breakout = Some(room);
+                            c
+                        }
+                        None => None,
+                    },
+                }
             }
             None => None,
         };
@@ -138,8 +154,15 @@ impl RtcWebhookService {
         };
         // Lock order: conference first (same as every business transaction).
         let conference = lock_conference(&txn, conference.id).await?;
-        let outcome = match e.kind {
-            ProviderEventKind::RoomStarted => {
+        let outcome = match (e.kind, &breakout) {
+            // Breakout room lifecycle callbacks never touch the parent conference.
+            (
+                ProviderEventKind::RoomStarted
+                | ProviderEventKind::RoomFinished
+                | ProviderEventKind::Other,
+                Some(_),
+            ) => WebhookOutcome::Ignored,
+            (ProviderEventKind::RoomStarted, None) => {
                 if conference.rtc_room_id.is_none() {
                     if let Some(sid) = &e.room_id {
                         let mut am: conference_sessions::ActiveModel = conference.clone().into();
@@ -150,16 +173,19 @@ impl RtcWebhookService {
                 }
                 WebhookOutcome::Applied
             }
-            ProviderEventKind::RoomFinished => {
+            (ProviderEventKind::RoomFinished, None) => {
                 self.room_finished(&txn, conference.clone(), e).await?
             }
-            ProviderEventKind::ParticipantJoined => {
+            (ProviderEventKind::ParticipantJoined, _) => {
                 self.participant_joined(&txn, &conference, e).await?
             }
-            ProviderEventKind::ParticipantLeft => {
+            (ProviderEventKind::ParticipantLeft, _) => {
                 self.participant_left(&txn, &conference, e).await?
             }
-            ProviderEventKind::Other => WebhookOutcome::Ignored,
+            (ProviderEventKind::TrackPublished | ProviderEventKind::TrackUnpublished, _) => {
+                self.track_event(&txn, &conference, e).await?
+            }
+            (ProviderEventKind::Other, None) => WebhookOutcome::Ignored,
         };
         self.finish(&txn, e, Some(conference.id), outcome).await?;
         txn.commit().await?;
@@ -271,6 +297,21 @@ impl RtcWebhookService {
         identity: &str,
         reason: &str,
     ) -> ApiResult<()> {
+        self.evict_from(txn, conference, session, identity, reason, None)
+            .await
+    }
+
+    /// Evict a provider identity; `room` restricts the eviction to one room (Part F
+    /// context enforcement), otherwise every room of the conference.
+    async fn evict_from(
+        &self,
+        txn: &sea_orm::DatabaseTransaction,
+        conference: &conference_sessions::Model,
+        session: Option<&participant_sessions::Model>,
+        identity: &str,
+        reason: &str,
+        room: Option<&str>,
+    ) -> ApiResult<()> {
         emit(
             txn,
             OutboxRecord {
@@ -284,6 +325,7 @@ impl RtcWebhookService {
                     "participantSessionId": session.map(|s| s.id),
                     "mediaIdentity": identity,
                     "reason": reason,
+                    "roomName": room,
                 }),
             },
         )
@@ -341,7 +383,28 @@ impl RtcWebhookService {
             return Ok(WebhookOutcome::StaleSessionEvicted);
         }
         let participant = participant.expect("checked above");
+        // Part F: the provider room must be the participant's current media context
+        // (main or assigned/visited breakout). Anything else is a stale credential.
+        let expected = breakouts::media_context(txn, conference, &participant)
+            .await?
+            .room_name(conference);
+        if e.room_name.as_deref() != Some(expected.as_str()) {
+            self.evict_from(
+                txn,
+                conference,
+                Some(&session),
+                identity,
+                "STALE_MEDIA_CONTEXT",
+                e.room_name.as_deref(),
+            )
+            .await?;
+            return Ok(WebhookOutcome::StaleSessionEvicted);
+        }
         if session.state == SessionState::Connected {
+            // Context switch (reroute) or duplicate: grants are re-asserted for the room.
+            if self.control.participant_control() {
+                queue_permission_sync(txn, conference, participant.id).await?;
+            }
             return Ok(WebhookOutcome::Applied);
         }
         let now = Utc::now();
@@ -402,6 +465,20 @@ impl RtcWebhookService {
             conference_participants::Entity::find_by_id(session.conference_participant_id)
                 .one(txn)
                 .await?;
+        // Part F: leaving a room that is no longer the current context (rerouted into a
+        // breakout or back to main) does not disconnect the session.
+        if let Some(p) = &participant {
+            let expected = breakouts::media_context(txn, conference, p)
+                .await?
+                .room_name(conference);
+            if e.room_name
+                .as_deref()
+                .map(|r| r != expected)
+                .unwrap_or(false)
+            {
+                return Ok(WebhookOutcome::Ignored);
+            }
+        }
         let now = Utc::now();
         let mut am: participant_sessions::ActiveModel = session.clone().into();
         am.state = Set(SessionState::Disconnected);
@@ -427,5 +504,54 @@ impl RtcWebhookService {
             .await?;
         }
         Ok(WebhookOutcome::Applied)
+    }
+
+    /// Part F: screen-share track evidence (verified provider callback).
+    async fn track_event(
+        &self,
+        txn: &sea_orm::DatabaseTransaction,
+        conference: &conference_sessions::Model,
+        e: &ProviderEvent,
+    ) -> ApiResult<WebhookOutcome> {
+        if e.track_kind != Some(TrackKind::ScreenShare)
+            || conference.status != ConferenceStatus::Live
+        {
+            return Ok(WebhookOutcome::Ignored);
+        }
+        let Some(identity) = e.media_identity.as_deref().filter(|i| !i.is_empty()) else {
+            return Ok(WebhookOutcome::Ignored);
+        };
+        let Some(session) = self.find_session(txn, conference, identity).await? else {
+            // Unknown identity in this conference: never creates state.
+            return Ok(WebhookOutcome::Ignored);
+        };
+        let Some(participant) =
+            conference_participants::Entity::find_by_id(session.conference_participant_id)
+                .filter(conference_participants::Column::ConferenceId.eq(conference.id))
+                .one(txn)
+                .await?
+        else {
+            return Ok(WebhookOutcome::Ignored);
+        };
+        let published = e.kind == ProviderEventKind::TrackPublished;
+        if published
+            && (participant.admission_state != AdmissionState::Admitted
+                || !session.state.is_active())
+        {
+            return Ok(WebhookOutcome::Ignored);
+        }
+        let result = media::on_screen_share_track(
+            txn,
+            conference,
+            &participant,
+            &session,
+            published,
+            e.track_id.as_deref(),
+        )
+        .await?;
+        Ok(match result {
+            "APPLIED" | "REVOKED" => WebhookOutcome::Applied,
+            _ => WebhookOutcome::Ignored,
+        })
     }
 }

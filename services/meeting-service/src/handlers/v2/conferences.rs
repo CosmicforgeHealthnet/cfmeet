@@ -293,6 +293,7 @@ pub async fn join_conference(
             recording_active: o.recording_active,
             transcription_active: o.transcription_active,
         },
+        media_context: (&o.media_context).into(),
     }))
 }
 

@@ -20,6 +20,12 @@ pub struct Model {
     pub upvote_count: i32,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
+    pub pinned_at: Option<DateTimeUtc>,
+    pub pinned_by: Option<String>,
+    pub answered_at: Option<DateTimeUtc>,
+    pub dismissed_at: Option<DateTimeUtc>,
+    pub archived_at: Option<DateTimeUtc>,
+    pub version: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

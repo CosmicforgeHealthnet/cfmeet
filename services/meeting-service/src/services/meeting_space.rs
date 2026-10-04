@@ -24,6 +24,7 @@ use crate::{
     models::{conference_sessions, meeting_members, meeting_spaces, users},
     services::{
         actor::{ActorContext, RegisteredActor},
+        collaboration::policy::CollaborationPolicyPatch,
         conference::{insert_conference, NewConference},
         meeting_core::{
             find_space, is_unique_violation, lock_space, permission_denied, space_role,
@@ -56,6 +57,8 @@ pub struct SpaceDraft {
     pub access_config: AccessConfig,
     pub role_policy: RolePolicy,
     pub schedule_policy: SchedulePolicy,
+    /// Part F: validated sparse collaboration overrides.
+    pub collaboration_policy: CollaborationPolicyPatch,
 }
 
 fn valid_domain(d: &str) -> bool {
@@ -198,6 +201,7 @@ impl SpaceDraft {
             ));
         }
         self.role_policy.validate().map_err(validation)?;
+        self.collaboration_policy.validate().map_err(validation)?;
         let s = &self.schedule_policy;
         if s.early_start_minutes > 240
             || s.late_start_grace_minutes > 1440
@@ -217,7 +221,17 @@ impl SpaceDraft {
             access_policy: req.access_policy.unwrap_or(AccessPolicy::Authenticated),
             waiting_room_policy: req.waiting_room_policy.unwrap_or(WaitingRoomPolicy::Off),
             security_profile: req.security_profile.unwrap_or(SecurityProfile::Standard),
-            default_role: req.default_role.unwrap_or(Role::Participant),
+            // Part F §53: webinar attendees are subscribe-only unless explicitly configured.
+            default_role: req.default_role.unwrap_or(
+                if matches!(
+                    req.meeting_type,
+                    Some(MeetingType::Webinar | MeetingType::TownHall)
+                ) {
+                    Role::Viewer
+                } else {
+                    Role::Participant
+                },
+            ),
             has_passcode: req.passcode.is_some(),
             interactive_capacity: req.interactive_capacity.unwrap_or(100),
             viewer_capacity: req.viewer_capacity.unwrap_or(0),
@@ -232,6 +246,7 @@ impl SpaceDraft {
             access_config: req.access_config.clone().unwrap_or_default(),
             role_policy: req.role_policy.clone().unwrap_or_default(),
             schedule_policy: req.schedule_policy.unwrap_or_default(),
+            collaboration_policy: req.collaboration_policy.clone().unwrap_or_default(),
         }
     }
 
@@ -255,6 +270,7 @@ impl SpaceDraft {
             access_config: access_config(m),
             role_policy: RolePolicy::from_json(&m.role_policy),
             schedule_policy: schedule_policy(m),
+            collaboration_policy: CollaborationPolicyPatch::from_json(&m.collaboration_policy),
         }
     }
 }
@@ -340,6 +356,7 @@ impl MeetingSpaceService {
                 updated_at: Set(now),
                 archived_at: Set(None),
                 version: Set(1),
+                collaboration_policy: Set(draft.collaboration_policy.to_json()),
             };
             let savepoint = conn.begin().await?;
             match model.insert(&savepoint).await {
@@ -661,6 +678,9 @@ impl MeetingSpaceService {
         if let Some(v) = req.schedule_policy {
             draft.schedule_policy = v;
         }
+        if let Some(v) = &req.collaboration_policy {
+            draft.collaboration_policy = v.clone();
+        }
         let passcode_changed = req.passcode.is_some() || req.clear_passcode;
         if req.clear_passcode {
             draft.has_passcode = false;
@@ -682,6 +702,9 @@ impl MeetingSpaceService {
         }
         if before.role_policy != draft.role_policy {
             sensitive.push("rolePolicy");
+        }
+        if before.collaboration_policy != draft.collaboration_policy {
+            sensitive.push("collaborationPolicy");
         }
         if before.access_config != draft.access_config {
             sensitive.push("accessConfig");
@@ -717,6 +740,7 @@ impl MeetingSpaceService {
         am.interactive_capacity = Set(draft.interactive_capacity);
         am.viewer_capacity = Set(draft.viewer_capacity);
         am.recording_policy = Set(draft.recording_policy);
+        am.collaboration_policy = Set(draft.collaboration_policy.to_json());
         am.transcription_policy = Set(draft.transcription_policy);
         am.retention_policy_ref = Set(draft.retention_policy_ref.clone());
         am.access_config =

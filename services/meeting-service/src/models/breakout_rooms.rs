@@ -19,6 +19,15 @@ pub struct Model {
     pub updated_at: DateTimeUtc,
     pub opened_at: Option<DateTimeUtc>,
     pub closed_at: Option<DateTimeUtc>,
+    pub capacity: Option<i32>,
+    pub created_by: Option<String>,
+    /// Persisted close deadline (CLOSING → CLOSED); survives restarts.
+    pub closing_at: Option<DateTimeUtc>,
+    pub close_requested_at: Option<DateTimeUtc>,
+    pub recording_policy: String,
+    pub config: Json,
+    pub rtc_room_ready_at: Option<DateTimeUtc>,
+    pub version: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

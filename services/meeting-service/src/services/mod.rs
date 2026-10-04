@@ -10,6 +10,7 @@ pub mod token_blacklist;
 pub mod actor;
 pub mod admission;
 pub mod appointment_authorization;
+pub mod collaboration;
 pub mod compat;
 pub mod conference;
 pub mod invitations;

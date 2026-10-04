@@ -7,14 +7,15 @@ use axum::{
     extract::{Request, State},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{get, patch, post, put},
+    routing::{delete, get, patch, post, put},
     Router,
 };
 
 use crate::{
     error::{ApiError, ErrorCode},
     handlers::v2::{
-        compat, conferences, invitations, members, organizations, participants, realtime, spaces,
+        breakouts, collaboration as collab, compat, conferences, engagement, invitations, members,
+        organizations, participants, realtime, spaces,
     },
     state::AppState,
 };
@@ -169,6 +170,160 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         )
         .route("/conferences/:id/realtime", get(realtime::subscribe))
         .route("/conferences/:id/events", get(realtime::replay_events))
+        // Part F — media controls
+        .route(
+            "/conferences/:id/participants/:participant_id/audio-lock",
+            post(collab::audio_lock).delete(collab::audio_unlock),
+        )
+        .route(
+            "/conferences/:id/participants/:participant_id/video-lock",
+            post(collab::video_lock).delete(collab::video_unlock),
+        )
+        .route(
+            "/conferences/:id/participants/:participant_id/screen-share-lock",
+            post(collab::screen_share_lock).delete(collab::screen_share_unlock),
+        )
+        .route(
+            "/conferences/:id/screen-share/:pid/stop",
+            post(collab::stop_screen_share),
+        )
+        .route("/conferences/:id/spotlights", post(collab::spotlight))
+        .route(
+            "/conferences/:id/spotlights/:pid",
+            delete(collab::remove_spotlight),
+        )
+        .route(
+            "/conferences/:id/media-credential",
+            post(collab::media_credential),
+        )
+        .route(
+            "/conferences/:id/collaboration",
+            get(collab::collaboration_state),
+        )
+        .route(
+            "/conferences/:id/collaboration-policy",
+            patch(collab::update_policy),
+        )
+        .route("/conferences/:id/pre-join", get(collab::pre_join))
+        // Part F — chat
+        .route(
+            "/conferences/:id/messages",
+            get(collab::list_messages).post(collab::send_message),
+        )
+        .route(
+            "/conferences/:id/messages/:mid",
+            delete(collab::delete_message),
+        )
+        .route(
+            "/conferences/:id/chat-policy",
+            patch(collab::update_chat_policy),
+        )
+        .route(
+            "/conferences/:id/participants/:participant_id/chat-restriction",
+            post(collab::restrict_chat).delete(collab::unrestrict_chat),
+        )
+        // Part F — reactions / hand raise
+        .route("/conferences/:id/reactions", post(collab::send_reaction))
+        .route(
+            "/conferences/:id/hand-raise",
+            get(collab::raised_hands)
+                .post(collab::raise_hand)
+                .delete(collab::lower_hand),
+        )
+        .route(
+            "/conferences/:id/participants/:participant_id/hand-raise",
+            delete(collab::lower_other_hand),
+        )
+        // Part F — breakouts
+        .route(
+            "/conferences/:id/breakouts",
+            get(breakouts::list).post(breakouts::create),
+        )
+        .route("/conferences/:id/breakouts/assign", post(breakouts::assign))
+        .route(
+            "/conferences/:id/breakouts/move",
+            post(breakouts::move_participant),
+        )
+        .route("/conferences/:id/breakouts/leave", post(breakouts::leave))
+        .route(
+            "/conferences/:id/breakouts/announcement",
+            post(breakouts::announce_all),
+        )
+        .route(
+            "/conferences/:id/breakouts/close-all",
+            post(breakouts::close_all),
+        )
+        .route(
+            "/conferences/:id/breakouts/:bid/assignments",
+            patch(breakouts::patch_assignments),
+        )
+        .route(
+            "/conferences/:id/breakouts/:bid/open",
+            post(breakouts::open),
+        )
+        .route(
+            "/conferences/:id/breakouts/:bid/enter",
+            post(breakouts::enter),
+        )
+        .route(
+            "/conferences/:id/breakouts/:bid/announcement",
+            post(breakouts::announce),
+        )
+        .route(
+            "/conferences/:id/breakouts/:bid/close",
+            post(breakouts::close),
+        )
+        // Part F — polls
+        .route(
+            "/conferences/:id/polls",
+            get(engagement::list_polls).post(engagement::create_poll),
+        )
+        .route("/conferences/:id/polls/:pid", get(engagement::get_poll))
+        .route(
+            "/conferences/:id/polls/:pid/open",
+            post(engagement::open_poll),
+        )
+        .route(
+            "/conferences/:id/polls/:pid/close",
+            post(engagement::close_poll),
+        )
+        .route(
+            "/conferences/:id/polls/:pid/archive",
+            post(engagement::archive_poll),
+        )
+        .route(
+            "/conferences/:id/polls/:pid/responses",
+            post(engagement::respond),
+        )
+        .route(
+            "/conferences/:id/polls/:pid/results",
+            get(engagement::results),
+        )
+        // Part F — Q&A
+        .route(
+            "/conferences/:id/questions",
+            get(engagement::list_questions).post(engagement::submit_question),
+        )
+        .route(
+            "/conferences/:id/questions/:qid/vote",
+            post(engagement::vote).delete(engagement::unvote),
+        )
+        .route(
+            "/conferences/:id/questions/:qid/answer",
+            post(engagement::answer),
+        )
+        .route(
+            "/conferences/:id/questions/:qid/dismiss",
+            post(engagement::dismiss),
+        )
+        .route(
+            "/conferences/:id/questions/:qid/archive",
+            post(engagement::archive),
+        )
+        .route(
+            "/conferences/:id/questions/:qid/pin",
+            post(engagement::pin).delete(engagement::unpin),
+        )
         // Compatibility (platform admin)
         .route(
             "/admin/compat/legacy-meetings/:id/shadow",

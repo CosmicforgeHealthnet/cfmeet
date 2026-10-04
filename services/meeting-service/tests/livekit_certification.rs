@@ -51,13 +51,20 @@ struct Probe {
 
 impl Probe {
     fn spawn(bin: &str, url: &str, credential: &str, publish: bool, secs: u32) -> Self {
+        Self::spawn_with(
+            bin,
+            url,
+            credential,
+            if publish { "true" } else { "false" },
+            secs,
+        )
+    }
+
+    /// `publish`: false | true | comma list of mic,camera,screen.
+    fn spawn_with(bin: &str, url: &str, credential: &str, publish: &str, secs: u32) -> Self {
         let mut child = Command::new(bin)
-            .args([
-                url,
-                credential,
-                if publish { "true" } else { "false" },
-                &secs.to_string(),
-            ])
+            .args([url, credential, publish, &secs.to_string()])
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true)
@@ -77,6 +84,37 @@ impl Probe {
             child,
             rx,
             seen: vec![],
+        }
+    }
+
+    /// Ask the live probe to publish another track (`mic`, `camera`, `screen`).
+    async fn publish(&mut self, source: &str) {
+        use tokio::io::AsyncWriteExt;
+        let stdin = self.child.stdin.as_mut().expect("probe stdin");
+        stdin
+            .write_all(format!("publish {source}\n").as_bytes())
+            .await
+            .unwrap();
+        stdin.flush().await.unwrap();
+    }
+
+    /// Next observation (after everything already seen) matching any of `events` for
+    /// `source`.
+    async fn next_for(&mut self, events: &[&str], source: &str, within: Duration) -> Value {
+        let deadline = tokio::time::Instant::now() + within;
+        loop {
+            match tokio::time::timeout_at(deadline, self.rx.recv()).await {
+                Ok(Some(v)) => {
+                    self.seen.push(v.clone());
+                    if events.iter().any(|e| v["event"] == *e) && v["source"] == source {
+                        return v;
+                    }
+                }
+                _ => panic!(
+                    "rtcprobe never reported {events:?} for {source}; saw {:?}",
+                    self.seen
+                ),
+            }
         }
     }
 
@@ -109,6 +147,7 @@ async fn app_for(r: &Real) -> TestApp {
         flags: FeatureFlags {
             rtc_provider_control_v2: true,
             conference_realtime_enabled: true,
+            collaboration_v2_enabled: true,
             ..FeatureFlags::all_v2_enabled()
         },
         ..TestOptions::default()
@@ -348,4 +387,191 @@ async fn real_livekit_reconciliation() {
     assert!(provider.get_room(&room_ref).await.unwrap().is_some());
     println!("CERT reconcile LIVE_ROOM_MISSING: PASS");
     let _ = Uuid::nil();
+}
+
+/// Part F against the real SFU: host mute, audio/video permission reduction and
+/// restore, screen-share policy enforcement, provider screen-share events, host stop.
+#[tokio::test]
+#[ignore = "requires a real livekit-server (scripts/livekit-certification/run.sh)"]
+async fn real_livekit_part_f_media_controls() {
+    let r = real();
+    let app = app_for(&r).await;
+    let owner = app.user("owner").await;
+    let (_, cid) = app
+        .live_conference(
+            &owner,
+            json!({ "title": "cert-f", "accessPolicy": "PUBLIC" }),
+        )
+        .await;
+    let base = format!("/api/v2/conferences/{cid}");
+    let a = join_guest(&app, cid, "presenter").await;
+    let mut probe = Probe::spawn_with(&r.probe, &r.url, &a.credential, "mic,camera", 90);
+    probe.wait_for("connected", Duration::from_secs(20)).await;
+    probe
+        .next_for(&["publish_ok"], "MICROPHONE", Duration::from_secs(20))
+        .await;
+    probe
+        .next_for(&["publish_ok"], "CAMERA", Duration::from_secs(20))
+        .await;
+    eventually("session CONNECTED via real webhook", || async {
+        session_state(&app, a.session_id).await == "CONNECTED"
+    })
+    .await;
+    let provider = app.state.meeting.core.rtc.clone();
+    let room_ref = RtcRoomRef {
+        conference_id: cid,
+        room_name: room(cid),
+    };
+    eventually("both published tracks visible to the SFU", || async {
+        provider
+            .list_participants(&room_ref)
+            .await
+            .unwrap()
+            .iter()
+            .any(|p| p.media_identity == a.identity && p.tracks.len() >= 2)
+    })
+    .await;
+
+    // Host audio mute (MUTE NOW).
+    let (s, v) = app
+        .post(
+            format!("{base}/participants/{}/mute", a.participant_id),
+            Auth::Bearer(&owner.token),
+            json!({ "trackKind": "AUDIO" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["mutedTracks"], 1, "{v}");
+    probe
+        .next_for(&["track_muted"], "MICROPHONE", Duration::from_secs(10))
+        .await;
+    println!("CERT F host audio mute: PASS");
+
+    // Audio lock: provider grant reduced; live and future microphone publication refused.
+    let (s, v) = app
+        .post(
+            format!("{base}/participants/{}/audio-lock", a.participant_id),
+            Auth::Bearer(&owner.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["providerEnforcement"], "ENFORCED", "{v}");
+    probe.publish("mic").await;
+    probe
+        .next_for(&["publish_denied"], "MICROPHONE", Duration::from_secs(15))
+        .await;
+    println!("CERT F audio permission reduction: PASS");
+    // Video lock: the live camera track is unpublished / muted and cannot come back.
+    let (s, v) = app
+        .post(
+            format!("{base}/participants/{}/video-lock", a.participant_id),
+            Auth::Bearer(&owner.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let cam = probe
+        .next_for(
+            &["track_unpublished", "track_muted"],
+            "CAMERA",
+            Duration::from_secs(15),
+        )
+        .await;
+    println!("CERT F video-lock live camera signal: {}", cam["event"]);
+    probe.publish("camera").await;
+    probe
+        .next_for(&["publish_denied"], "CAMERA", Duration::from_secs(15))
+        .await;
+    println!("CERT F video permission reduction: PASS");
+    // Restore.
+    app.delete(
+        format!("{base}/participants/{}/audio-lock", a.participant_id),
+        Auth::Bearer(&owner.token),
+    )
+    .await;
+    app.delete(
+        format!("{base}/participants/{}/video-lock", a.participant_id),
+        Auth::Bearer(&owner.token),
+    )
+    .await;
+    probe.publish("mic").await;
+    probe
+        .next_for(&["publish_ok"], "MICROPHONE", Duration::from_secs(15))
+        .await;
+    probe.publish("camera").await;
+    probe
+        .next_for(&["publish_ok"], "CAMERA", Duration::from_secs(15))
+        .await;
+    println!("CERT F permission restore: PASS");
+
+    // Screen-share policy enforced by the real SFU.
+    let v0 = collab_version(&app, &base, &owner.token).await;
+    let (s, v) = app
+        .patch(
+            format!("{base}/collaboration-policy"),
+            Auth::Bearer(&owner.token),
+            json!({ "collaborationVersion": v0, "changes": { "screenSharePolicy": "HOST_ONLY" } }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    probe.publish("screen").await;
+    probe
+        .next_for(&["publish_denied"], "SCREEN_SHARE", Duration::from_secs(15))
+        .await;
+    println!("CERT F screen-share permission enforcement: PASS");
+    let v1 = collab_version(&app, &base, &owner.token).await;
+    app.patch(format!("{base}/collaboration-policy"), Auth::Bearer(&owner.token), json!({ "collaborationVersion": v1, "changes": { "screenSharePolicy": "ALL_INTERACTIVE" } })).await;
+    probe.publish("screen").await;
+    probe
+        .next_for(&["publish_ok"], "SCREEN_SHARE", Duration::from_secs(15))
+        .await;
+    eventually(
+        "screenshare.started from the real track_published webhook",
+        || async { events(&app, cid, "screenshare.started").await == 1 },
+    )
+    .await;
+    println!("CERT F screen-share provider event: PASS");
+
+    // Host stops the share (STOP NOW, not a lock).
+    let (s, v) = app
+        .post(
+            format!("{base}/screen-share/{}/stop", a.participant_id),
+            Auth::Bearer(&owner.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let scr = probe
+        .next_for(
+            &["track_unpublished", "track_muted"],
+            "SCREEN_SHARE",
+            Duration::from_secs(15),
+        )
+        .await;
+    println!("CERT F host stop live screen signal: {}", scr["event"]);
+    eventually("screenshare.ended", || async {
+        events(&app, cid, "screenshare.ended").await >= 1
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(
+        events(&app, cid, "screenshare.ended").await,
+        1,
+        "late provider evidence deduplicated"
+    );
+    probe.publish("screen").await;
+    probe
+        .next_for(&["publish_ok"], "SCREEN_SHARE", Duration::from_secs(15))
+        .await;
+    println!("CERT F stop screen share (+ sharing still permitted): PASS");
+    drop(probe.child.kill().await);
+}
+
+async fn collab_version(app: &TestApp, base: &str, token: &str) -> i64 {
+    app.get(format!("{base}/collaboration"), Auth::Bearer(token))
+        .await
+        .1["collaborationVersion"]
+        .as_i64()
+        .unwrap()
 }

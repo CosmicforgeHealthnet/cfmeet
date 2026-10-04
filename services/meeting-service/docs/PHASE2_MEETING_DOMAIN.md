@@ -1,4 +1,4 @@
-# Phase 2 Meeting Domain (`/api/v2`) — Parts A–D
+# Phase 2 Meeting Domain (`/api/v2`) — Parts A–F
 
 Spec: *CF Meet Phase 2 Backend Implementation Specification v1.1*. Current→target map:
 [`docs/phases/phase-02/parts-a-d-implementation-map.md`](../../../docs/phases/phase-02/parts-a-d-implementation-map.md).
@@ -98,8 +98,9 @@ are append-only; invitation `usage_count <= use_limit`.
 
 `FEATURE_MEETING_V2_ENABLED`, `FEATURE_WAITING_ROOM_V2_ENABLED`, `MEETING_V2_WRITE_ALLOWLIST`,
 `FEATURE_MEETING_V2_SHADOW_READ`, Part E (`FEATURE_RTC_PROVIDER_CONTROL_V2`,
-`FEATURE_CONFERENCE_REALTIME_ENABLED`), and Part F+ placeholders (`FEATURE_COLLABORATION_V2_ENABLED`,
-`FEATURE_RECORDING_V2_ENABLED`, `FEATURE_WEBINAR_MODE_ENABLED`, `FEATURE_HEALTHCARE_PROFILE_ENABLED`).
+`FEATURE_CONFERENCE_REALTIME_ENABLED`), Part F (`FEATURE_COLLABORATION_V2_ENABLED`: media controls and
+collaboration routes, breakout closer worker, webinar attendee defaults), and placeholders
+(`FEATURE_RECORDING_V2_ENABLED`, `FEATURE_WEBINAR_MODE_ENABLED`, `FEATURE_HEALTHCARE_PROFILE_ENABLED`).
 `FEATURE_LEGACY_MEETING_WRITE_DISABLED` is not honoured during A–D.
 
 ## Legacy compatibility
@@ -307,4 +308,156 @@ outbox backlog per channel.
   `tests/livekit_certification.rs` (`#[ignore]`d in the default suite) with the `rtcprobe` pion
   WebRTC client: room create/lookup, credential + real media join, verified webhook session
   sync, participant listing, mute, permission update, VIEWER publish refusal, removal,
-  termination, reconciliation.
+  termination, reconciliation, and (Part F) host mute, audio/video lock and restore,
+  screen-share policy enforcement, `track_published` screen-share evidence and host stop.
+
+## Part F — Media controls & collaboration
+
+Everything lives inside meeting-service (no new deployable service). PostgreSQL stays the
+authority; LiveKit enforces the committed media grant; Redis only fans out. Routes are under
+`/api/v2/conferences/{id}/…` and exist only with `FEATURE_COLLABORATION_V2_ENABLED`
+(otherwise `404 FEATURE_DISABLED`). Every request runs the same loader: identity (anonymous /
+legacy guest → `401`) → conference scope + state → admitted participant → permission
+(`MeetingPermissionService`, baseline `v2`) → collaboration policy. Recording, transcription and
+AI are Part G and are not implemented here (policy only stores consent / notice metadata).
+
+### Collaboration policy
+
+Effective policy = meeting-type defaults → `meeting_spaces.collaboration_policy` →
+`conference_sessions.collaboration_policy` (sparse patches, unknown keys rejected). Updated with
+`PATCH …/collaboration-policy {collaborationVersion, changes}` (optimistic: stale version →
+`409`) or `PATCH …/chat-policy`. Fields: `screenSharePolicy` (`HOST_ONLY` | `PRESENTERS_ONLY` |
+`ALL_INTERACTIVE`), conference-wide `audioLocked` / `videoLocked`, `maxSpotlights`, chat
+(`chatEnabled`, `chatSendMode` `EVERYONE`|`HOSTS_ONLY`, `privateChatMode`
+`EVERYONE`|`HOSTS_ONLY`|`DISABLED`, `breakoutChatEnabled`, `mainChatVisibleInBreakouts`),
+`reactionsEnabled` / `allowedReactions`, `handRaiseEnabled`, `qnaEnabled` /
+`qnaAnonymousAllowed`, `pollsEnabled`, `maxBreakouts`, `breakoutRecordingPolicy` (metadata only),
+`requiredConsents`, `consentVersion`, `aiNotice`. Policy changes re-push grants to every live
+session and re-scope every realtime subscriber.
+
+### Media controls
+
+`effective_media(role, policy, locks)` = role grant ∧ screen-share tier ∧ ¬conference-wide lock
+(roles holding `participant.mute` are exempt) ∧ ¬participant lock. It is the single projection
+used by join credentials, `POST …/media-credential` (refresh), permission sync after any change,
+and the reconciler — there is no second permission matrix.
+
+- MUTE NOW: `POST …/participants/{pid}/mute` (Part E) mutes the live track; the participant may
+  unmute.
+- LOCK: `POST|DELETE …/participants/{pid}/audio-lock | video-lock | screen-share-lock` persists
+  `*_locked_at/by`, commits, then removes the publish source at the provider
+  (`providerEnforcement: ENFORCED | PENDING_RETRY`). Real LiveKit unpublishes a live track whose
+  source is withdrawn and refuses re-publication until unlocked.
+- Screen share: evidence comes only from verified `track_published` / `track_unpublished`
+  webhooks for `SCREEN_SHARE` video (screen-share audio is ignored). `screenshare.started` /
+  `screenshare.ended` are emitted once per share (late/duplicate evidence is deduplicated).
+  `POST …/screen-share/{pid}/stop` withdraws the grant, mutes, restores the grant, and emits
+  `screenshare.ended` only after provider confirmation. Withdrawing the grant (lock, policy,
+  demotion) ends a recorded share with reason `PERMISSION_REVOKED`.
+- Spotlight: `POST …/spotlights`, `DELETE …/spotlights/{pid}`; bounded by `maxSpotlights`.
+
+### Pre-join
+
+`GET …/pre-join` returns policy-derived capabilities (media defaults, chat/Q&A/poll availability,
+display-name editability, required consents + version, AI notice). Required consents are enforced
+at join (`CONSENT_REQUIRED`) and stored in `meeting_consents`; in HEALTHCARE / HIGH_SECURITY
+profiles registered users join with their profile name. Webinar meetings default new attendees to
+`VIEWER` (subscribe-only) while keeping policy-controlled Q&A, reactions, polls and hand raise.
+
+### Chat (Phase 5 compatible)
+
+`conference_messages` (scope `CONFERENCE` | `BREAKOUT` | `PRIVATE`, `client_message_id`
+idempotency, soft delete by moderators, cursor pagination `GET …/messages?before=&limit=`). Access
+is behind the `MessageStore` trait (`PgMessageStore` today), so Phase 5 Unified Messaging can
+replace the store without changing the HTTP or realtime contract. Policy gates: chat disabled,
+announcements-only, private chat mode, breakout chat, per-participant restriction
+(`POST|DELETE …/participants/{pid}/chat-restriction`).
+
+### Reactions & hand raise
+
+Reactions are transient: validated against `allowedReactions`, rate-limited, published straight
+to Redis as `{transient: true, audience, event}` (no outbox row, no replay) and delivered only to
+subscribers that pass the audience check. Hand raise is durable (`hand_raised_at` /
+`hand_lowered_at`), idempotent, ordered by raise time (`GET …/hand-raise`); self-lower is always
+allowed, lowering others requires `hand.lower_other`.
+
+### Breakouts
+
+- One provider room per breakout: `cfbr-<breakout uuid>` (distinct from the main `cf-` prefix).
+  `breakout_rooms.status` `CREATED → OPEN → CLOSING → CLOSED`, `capacity`, `closing_at`,
+  `version`; active names are unique per conference.
+- Assignment modes `MANUAL` / `RANDOM` / `BALANCED` / `MOVE`; one active assignment per
+  participant. A participant has exactly one media context: host visit room → active assignment
+  in an OPEN/CLOSING room → MAIN. Credentials, the realtime audience and the reconciler all use
+  that context; `rtc.participant_reroute_requested` removes provider sessions from the previous
+  room, and a provider join in the wrong room is evicted (`STALE_MEDIA_CONTEXT`).
+- Close: `POST …/breakouts/{bid}/close {countdownSeconds}` persists `closing_at`; the
+  `BreakoutCloser` worker (restart-safe) completes due closes, returns participants to MAIN and
+  terminates `cfbr-` rooms. Ending the conference closes every breakout. The reconciler repairs
+  missing / orphan / unmapped `cfbr-` rooms and context drift.
+
+### Polls & quizzes
+
+Typed questions (`SINGLE_CHOICE`, `MULTIPLE_CHOICE`, `SHORT_TEXT`, `LONG_TEXT`, `RATING`,
+`RANKING`); `DRAFT → OPEN → CLOSED → ARCHIVED` (no reopening). Quiz answers are hidden until
+results are visible and scores are computed server-side (client scores are ignored). Results
+visibility `HOST_ONLY` | `AFTER_VOTE` | `AFTER_CLOSE`. Idempotent responses (client
+`idempotencyKey` digest).
+
+Anonymous privacy model: the "has voted" ballot (`meeting_poll_ballots(poll_id, participant_id,
+request_digest)`) is stored separately from the answers (`meeting_poll_responses.participant_id`
+NULL, `created_at` = poll opened time so ordering cannot re-identify voters). Anonymous
+aggregates — for hosts too — are withheld until the poll is CLOSED; no API, event, audit row or
+export links an anonymous answer to a participant.
+
+### Q&A
+
+`OPEN → ANSWERED | DISMISSED | ARCHIVED` plus pin / unpin. Votes are recomputed under a row lock
+(no self-vote, one vote per participant); the first answer wins. Anonymous questions never expose
+the author in any projection or event.
+
+### Rate limits
+
+Per participant (Redis `INCR`+TTL, in-process fallback): chat 20/10 s, reactions 10/10 s, hand
+toggle 10/60 s, poll responses 20/60 s, Q&A submit 5/60 s, Q&A vote 30/60 s, announcements
+5/60 s. Exceeded → `429 RATE_LIMITED`, `Retry-After` header and `retryAfterSeconds`.
+
+### Realtime event contract
+
+Audience is evaluated server-side per subscriber (`outbox_events.audience`; NULL = the Part E
+rules). Every durable event is recoverable through cursor replay and the REST resource listed.
+
+| Event | Audience | Payload (summary) | Persistence | Privacy | REST recovery |
+|---|---|---|---|---|---|
+| `participant.audio_locked/unlocked`, `video_*`, `screen_share_*` | conference | participantId, by, providerEnforcement | outbox | — | `GET …/collaboration` |
+| `participant.muted` | conference | participantId, trackKind, mutedTracks | outbox | — | `GET …/participants` |
+| `screenshare.started` / `screenshare.ended` | conference | participantId, reason | outbox | no provider track ids | `GET …/collaboration` |
+| `participant.spotlighted` / `spotlight_removed` | conference | participantId | outbox | — | `GET …/collaboration` |
+| `collaboration.policy_changed`, `chat.policy_changed` | conference | collaborationVersion, policy | outbox | — | `GET …/collaboration` |
+| `chat.message_created` / `message_deleted` | main room, breakout, or sender+recipient (private) | message projection | outbox + `conference_messages` | private: participants only (moderators never implicitly) | `GET …/messages` |
+| `chat.participant_restricted/unrestricted` | target + `chat.moderate` | participantId | outbox | — | `GET …/collaboration` |
+| `reaction.sent` | current media context (main / breakout) | participantId, reaction | Redis only (transient) | — | none (ephemeral) |
+| `hand.raised` / `hand.lowered` | conference | participantId, raisedAt | outbox | — | `GET …/hand-raise` |
+| `breakout.created/opened/closing/closed` | conference | breakout projection, closingAt | outbox | — | `GET …/breakouts` |
+| `breakout.assignment_changed` | `breakout.assign` holders | assignments | outbox | — | `GET …/breakouts` |
+| `breakout.participant_moved` | moved participant + `breakout.assign` | participantId, from, to | outbox | — | `GET …/breakouts` |
+| `breakout.announcement` | one breakout or all breakouts | message | outbox | — | — |
+| `poll.created` | `poll.create` holders (drafts) | poll | outbox | quiz answers stripped | `GET …/polls` |
+| `poll.started/closed/archived` | conference | poll (answers revealed only in results state) | outbox | — | `GET …/polls/{pid}` |
+| `poll.response_recorded` | responder | pollId | outbox | anonymous: no identity | `GET …/polls/{pid}` |
+| `poll.results_updated` | `poll.view_results` holders / per visibility | aggregates | outbox | anonymous aggregates only after CLOSED | `GET …/polls/{pid}/results` |
+| `qna.question_*` | conference | question projection | outbox | anonymous: no author | `GET …/questions` |
+
+Subscribers are re-authorized (and re-scoped) on `breakout.opened/closed`, policy changes and
+their own `breakout.participant_moved`. Provider commands (`rtc.screenshare_stop_requested`,
+`rtc.participant_reroute_requested`, `rtc.breakout_prepare_requested`,
+`rtc.breakout_terminate_requested`) use the `PROVIDER_COMMAND` channel and never reach clients.
+
+### Audit
+
+Every host action is audited (`MEDIA_*_LOCK/UNLOCK`, `SCREEN_SHARE_STOP`, `SPOTLIGHT_*`,
+`COLLABORATION_POLICY_UPDATE`, `CHAT_MESSAGE_DELETE`, `CHAT_PARTICIPANT_(UN)RESTRICT`,
+`CHAT_ANNOUNCEMENT`, `HAND_LOWER_OTHER`, `BREAKOUT_*`, `POLL_*`, `QNA_*`, `CONSENT_RECORDED`) in
+the same transaction as the state change and its outbox row. Audit metadata never carries message
+bodies, poll answers or anonymous identities. Counters: `GET /internal/rtc/metrics` →
+`collaboration`.

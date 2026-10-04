@@ -125,6 +125,8 @@ pub async fn record_room_terminated(
     } else {
         0
     };
+    // Part F: the parent conference owns its breakouts — closing it closes them all.
+    crate::services::collaboration::breakouts::close_all_in_txn(txn, &current, actor).await?;
     let mut am: conference_sessions::ActiveModel = current.clone().into();
     am.rtc_room_terminated_at = Set(Some(now));
     if ending {
@@ -427,23 +429,57 @@ impl RtcControl {
                 {
                     return CommandResult::Done;
                 }
-                let target = RtcParticipantRef {
-                    conference_id,
-                    room_name: RtcRoomRef::for_conference(&conference).room_name,
-                    participant_session_id: session_id,
-                    media_identity: identity,
+                // Part F: a removal disconnects the main room AND every active breakout
+                // room; a context eviction (`roomName`) targets only that room.
+                let rooms = match p["roomName"].as_str() {
+                    Some(r) => {
+                        match crate::services::collaboration::breakouts::conference_rooms(
+                            &self.core.db,
+                            &conference,
+                        )
+                        .await
+                        {
+                            Ok(all) if all.iter().any(|x| x == r) => vec![r.to_string()],
+                            Ok(_) => {
+                                return CommandResult::Dead(
+                                    "room is not part of this conference".into(),
+                                )
+                            }
+                            Err(e) => return CommandResult::Retry(e.to_string()),
+                        }
+                    }
+                    None => match crate::services::collaboration::breakouts::conference_rooms(
+                        &self.core.db,
+                        &conference,
+                    )
+                    .await
+                    {
+                        Ok(all) => all,
+                        Err(e) => return CommandResult::Retry(e.to_string()),
+                    },
                 };
                 let reason = p["reason"].as_str().unwrap_or("REMOVED");
-                match self.core.rtc.remove_participant(&target, reason).await {
-                    Ok(()) => {
-                        inc(&M.participants_removed);
-                        CommandResult::Done
-                    }
-                    Err(e) => {
-                        inc(&M.provider_errors);
-                        CommandResult::Retry(e.to_string())
+                for (i, room_name) in rooms.into_iter().enumerate() {
+                    let target = RtcParticipantRef {
+                        conference_id,
+                        room_name,
+                        participant_session_id: session_id,
+                        media_identity: identity.clone(),
+                    };
+                    match self.core.rtc.remove_participant(&target, reason).await {
+                        Ok(()) => {
+                            if i == 0 {
+                                inc(&M.participants_removed);
+                            }
+                        }
+                        Err(RtcError::NotFound) if i > 0 => {}
+                        Err(e) => {
+                            inc(&M.provider_errors);
+                            return CommandResult::Retry(e.to_string());
+                        }
                     }
                 }
+                CommandResult::Done
             }
             event::RTC_PERMISSIONS_UPDATE_REQUESTED => {
                 let Some(pid) = p["participantId"]
@@ -461,8 +497,87 @@ impl RtcControl {
                     Err(e) => retry(e),
                 }
             }
+            event::RTC_BREAKOUT_PREPARE_REQUESTED
+            | event::RTC_BREAKOUT_TERMINATE_REQUESTED
+            | event::RTC_PARTICIPANT_REROUTE_REQUESTED => {
+                crate::services::collaboration::breakouts::execute_command(
+                    &self.core,
+                    &conference,
+                    row,
+                )
+                .await
+            }
+            event::RTC_SCREENSHARE_STOP_REQUESTED => {
+                let Some(pid) = p["participantId"]
+                    .as_str()
+                    .and_then(|s| Uuid::parse_str(s).ok())
+                else {
+                    return CommandResult::Dead("missing participantId".into());
+                };
+                if conference.status != ConferenceStatus::Live {
+                    return CommandResult::Done;
+                }
+                match self.enforce_screen_share(&conference, pid).await {
+                    Ok(()) => CommandResult::Done,
+                    Err(ApiError::Domain {
+                        code: ErrorCode::ParticipantNotFound,
+                        ..
+                    }) => CommandResult::Dead("participant is not part of this conference".into()),
+                    Err(e) => retry(e),
+                }
+            }
             other => CommandResult::Dead(format!("unknown provider command {other}")),
         }
+    }
+
+    /// Re-assert grants and stop any screen share the participant may no longer publish.
+    async fn enforce_screen_share(
+        &self,
+        conference: &conference_sessions::Model,
+        participant_id: Uuid,
+    ) -> ApiResult<()> {
+        let participant =
+            find_scoped_participant(&self.core.db, conference.id, participant_id, false).await?;
+        let permissions = crate::services::collaboration::media::effective_media_for(
+            &self.core.db,
+            conference,
+            &participant,
+        )
+        .await?;
+        self.sync_permissions(conference, participant_id).await?;
+        if permissions.screen_share_publish {
+            return Ok(());
+        }
+        let room = crate::services::collaboration::breakouts::media_context(
+            &self.core.db,
+            conference,
+            &participant,
+        )
+        .await?
+        .room_name(conference);
+        let sessions = participant_sessions::Entity::find()
+            .filter(participant_sessions::Column::ConferenceParticipantId.eq(participant_id))
+            .filter(participant_sessions::Column::State.eq(SessionState::Connected))
+            .all(&self.core.db)
+            .await?;
+        for s in sessions {
+            let target = RtcParticipantRef {
+                conference_id: conference.id,
+                room_name: room.clone(),
+                participant_session_id: s.id,
+                media_identity: s.media_identity.clone(),
+            };
+            match self
+                .core
+                .rtc
+                .mute_track(&target, TrackKind::ScreenShare)
+                .await
+            {
+                Ok(_) | Err(RtcError::NotFound) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(())
     }
 
     /// Push the CURRENT authoritative grants (from the permission engine) to every live
@@ -479,8 +594,21 @@ impl RtcControl {
         {
             return Ok(0);
         }
-        let space = find_space(&self.core.db, conference.meeting_space_id).await?;
-        let permissions = PermissionContext::for_space(&space).media(participant.role);
+        // Part F: the single effective projection (role ∧ policy ∧ locks), pushed to the
+        // participant's current media context room (main or breakout).
+        let permissions = crate::services::collaboration::media::effective_media_for(
+            &self.core.db,
+            conference,
+            &participant,
+        )
+        .await?;
+        let room = crate::services::collaboration::breakouts::media_context(
+            &self.core.db,
+            conference,
+            &participant,
+        )
+        .await?
+        .room_name(conference);
         let sessions = participant_sessions::Entity::find()
             .filter(participant_sessions::Column::ConferenceParticipantId.eq(participant.id))
             .filter(
@@ -491,10 +619,14 @@ impl RtcControl {
             .await?;
         let mut updated = 0;
         for s in sessions {
+            let target = RtcParticipantRef {
+                room_name: room.clone(),
+                ..RtcParticipantRef::new(conference, &s)
+            };
             match self
                 .core
                 .rtc
-                .update_permissions(&RtcParticipantRef::new(conference, &s), &permissions)
+                .update_permissions(&target, &permissions)
                 .await
             {
                 Ok(()) => {
@@ -509,6 +641,21 @@ impl RtcControl {
                     return Err(e.into());
                 }
             }
+        }
+        // Part F: a confirmed grant withdrawal unpublishes the share at the provider;
+        // record it so the authoritative view never shows a share that cannot exist.
+        if !permissions.screen_share_publish {
+            let txn = self.core.db.begin().await?;
+            let locked = lock_conference(&txn, conference.id).await?;
+            crate::services::collaboration::media::end_screen_share(
+                &txn,
+                &locked,
+                &participant,
+                None,
+                "PERMISSION_REVOKED",
+            )
+            .await?;
+            txn.commit().await?;
         }
         Ok(updated)
     }
@@ -639,14 +786,20 @@ impl RtcControl {
             .filter(participant_sessions::Column::State.eq(SessionState::Connected))
             .all(&self.core.db)
             .await?;
+        let room = crate::services::collaboration::breakouts::media_context(
+            &self.core.db,
+            &conference,
+            &target,
+        )
+        .await?
+        .room_name(&conference);
         let mut muted = 0;
         for s in &sessions {
-            match self
-                .core
-                .rtc
-                .mute_track(&RtcParticipantRef::new(&conference, s), kind)
-                .await
-            {
+            let target_ref = RtcParticipantRef {
+                room_name: room.clone(),
+                ..RtcParticipantRef::new(&conference, s)
+            };
+            match self.core.rtc.mute_track(&target_ref, kind).await {
                 Ok(n) => muted += n,
                 Err(RtcError::NotFound) => {}
                 Err(e) => {
@@ -669,6 +822,24 @@ impl RtcControl {
             },
         )
         .await?;
+        // Part F: MUTE NOW is a one-off provider action (not a lock); announce it.
+        let txn = self.core.db.begin().await?;
+        emit(
+            &txn,
+            crate::services::meeting_events::OutboxRecord {
+                aggregate_type: "conference_participant",
+                aggregate_id: target.id,
+                event_type: event::PARTICIPANT_MUTED,
+                meeting_space_id: Some(space.id),
+                conference_id: Some(conference_id),
+                payload: json!({ "participantId": target.id, "trackKind": kind.as_str(), "mutedTracks": muted }),
+            },
+        )
+        .await?;
+        txn.commit().await?;
+        crate::services::collaboration::metrics::inc(
+            &crate::services::collaboration::metrics::COLLAB_METRICS.media_mutes,
+        );
         Ok(MuteOutcome {
             sessions: sessions.len() as u32,
             muted_tracks: muted,

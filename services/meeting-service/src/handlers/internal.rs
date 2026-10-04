@@ -73,6 +73,7 @@ pub async fn rtc_metrics(State(state): State<AppState>, headers: HeaderMap) -> R
     let (realtime, commands) = outbox::backlog(&state.db).await.unwrap_or((-1, -1));
     Json(json!({
         "counters": M.snapshot(),
+        "collaboration": crate::services::collaboration::metrics::COLLAB_METRICS.snapshot(),
         "outboxBacklog": { "realtime": realtime, "providerCommands": commands },
     }))
     .into_response()

@@ -20,6 +20,7 @@ mod m20261003_000002_phase2_legacy_backfill;
 mod m20261004_000001_organizations;
 mod m20261004_000002_recurrence_exceptions;
 mod m20261004_000003_rtc_control_plane;
+mod m20261004_000004_collaboration;
 
 pub mod phase2_backfill;
 
@@ -48,6 +49,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261004_000001_organizations::Migration),
             Box::new(m20261004_000002_recurrence_exceptions::Migration),
             Box::new(m20261004_000003_rtc_control_plane::Migration),
+            Box::new(m20261004_000004_collaboration::Migration),
         ]
     }
 }

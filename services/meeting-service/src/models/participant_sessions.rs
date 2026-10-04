@@ -26,6 +26,10 @@ pub struct Model {
     pub legacy_participant_id: Option<Uuid>,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
+    /// Part F: provider-evidenced active screen share (track ref is internal).
+    pub screen_share_started_at: Option<DateTimeUtc>,
+    #[serde(skip_serializing)]
+    pub screen_share_track_ref: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

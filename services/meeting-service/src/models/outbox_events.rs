@@ -28,6 +28,8 @@ pub struct Model {
     pub conference_seq: Option<i64>,
     /// Relay lease holder while a delivery attempt is in flight.
     pub locked_by: Option<String>,
+    /// Part F: server-side realtime audience (never sent to clients).
+    pub audience: Option<Json>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

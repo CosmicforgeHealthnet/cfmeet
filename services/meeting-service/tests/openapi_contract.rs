@@ -103,6 +103,129 @@ fn every_v2_route_is_documented() {
         ("post", "/api/v2/conferences/{id}/realtime/ticket"),
         ("get", "/api/v2/conferences/{id}/realtime"),
         ("get", "/api/v2/conferences/{id}/events"),
+        // Part F — media controls & collaboration
+        (
+            "post",
+            "/api/v2/conferences/{id}/screen-share/{participantId}/stop",
+        ),
+        ("post", "/api/v2/conferences/{id}/spotlights"),
+        (
+            "delete",
+            "/api/v2/conferences/{id}/spotlights/{participantId}",
+        ),
+        ("patch", "/api/v2/conferences/{id}/collaboration-policy"),
+        ("patch", "/api/v2/conferences/{id}/chat-policy"),
+        ("get", "/api/v2/conferences/{id}/collaboration"),
+        ("post", "/api/v2/conferences/{id}/media-credential"),
+        ("get", "/api/v2/conferences/{id}/messages"),
+        ("post", "/api/v2/conferences/{id}/messages"),
+        ("delete", "/api/v2/conferences/{id}/messages/{messageId}"),
+        (
+            "post",
+            "/api/v2/conferences/{id}/participants/{participantId}/chat-restriction",
+        ),
+        (
+            "delete",
+            "/api/v2/conferences/{id}/participants/{participantId}/chat-restriction",
+        ),
+        ("post", "/api/v2/conferences/{id}/reactions"),
+        ("post", "/api/v2/conferences/{id}/hand-raise"),
+        ("delete", "/api/v2/conferences/{id}/hand-raise"),
+        (
+            "delete",
+            "/api/v2/conferences/{id}/participants/{participantId}/hand-raise",
+        ),
+        ("get", "/api/v2/conferences/{id}/hand-raise"),
+        ("get", "/api/v2/conferences/{id}/pre-join"),
+        (
+            "post",
+            "/api/v2/conferences/{id}/participants/{participantId}/audio-lock",
+        ),
+        (
+            "delete",
+            "/api/v2/conferences/{id}/participants/{participantId}/audio-lock",
+        ),
+        (
+            "post",
+            "/api/v2/conferences/{id}/participants/{participantId}/video-lock",
+        ),
+        (
+            "delete",
+            "/api/v2/conferences/{id}/participants/{participantId}/video-lock",
+        ),
+        (
+            "post",
+            "/api/v2/conferences/{id}/participants/{participantId}/screen-share-lock",
+        ),
+        (
+            "delete",
+            "/api/v2/conferences/{id}/participants/{participantId}/screen-share-lock",
+        ),
+        ("get", "/api/v2/conferences/{id}/breakouts"),
+        ("post", "/api/v2/conferences/{id}/breakouts"),
+        ("post", "/api/v2/conferences/{id}/breakouts/assign"),
+        ("post", "/api/v2/conferences/{id}/breakouts/move"),
+        (
+            "patch",
+            "/api/v2/conferences/{id}/breakouts/{breakoutId}/assignments",
+        ),
+        (
+            "post",
+            "/api/v2/conferences/{id}/breakouts/{breakoutId}/open",
+        ),
+        (
+            "post",
+            "/api/v2/conferences/{id}/breakouts/{breakoutId}/enter",
+        ),
+        ("post", "/api/v2/conferences/{id}/breakouts/leave"),
+        ("post", "/api/v2/conferences/{id}/breakouts/announcement"),
+        (
+            "post",
+            "/api/v2/conferences/{id}/breakouts/{breakoutId}/announcement",
+        ),
+        (
+            "post",
+            "/api/v2/conferences/{id}/breakouts/{breakoutId}/close",
+        ),
+        ("post", "/api/v2/conferences/{id}/breakouts/close-all"),
+        ("post", "/api/v2/conferences/{id}/polls"),
+        ("get", "/api/v2/conferences/{id}/polls"),
+        ("get", "/api/v2/conferences/{id}/polls/{pollId}"),
+        ("post", "/api/v2/conferences/{id}/polls/{pollId}/responses"),
+        ("get", "/api/v2/conferences/{id}/polls/{pollId}/results"),
+        ("post", "/api/v2/conferences/{id}/questions"),
+        ("get", "/api/v2/conferences/{id}/questions"),
+        (
+            "post",
+            "/api/v2/conferences/{id}/questions/{questionId}/vote",
+        ),
+        (
+            "delete",
+            "/api/v2/conferences/{id}/questions/{questionId}/vote",
+        ),
+        (
+            "post",
+            "/api/v2/conferences/{id}/questions/{questionId}/answer",
+        ),
+        (
+            "post",
+            "/api/v2/conferences/{id}/questions/{questionId}/dismiss",
+        ),
+        (
+            "post",
+            "/api/v2/conferences/{id}/questions/{questionId}/archive",
+        ),
+        (
+            "post",
+            "/api/v2/conferences/{id}/questions/{questionId}/pin",
+        ),
+        (
+            "delete",
+            "/api/v2/conferences/{id}/questions/{questionId}/pin",
+        ),
+        ("post", "/api/v2/conferences/{id}/polls/{pollId}/open"),
+        ("post", "/api/v2/conferences/{id}/polls/{pollId}/close"),
+        ("post", "/api/v2/conferences/{id}/polls/{pollId}/archive"),
     ];
     for (method, path) in expected {
         assert!(

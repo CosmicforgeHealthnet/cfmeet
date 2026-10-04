@@ -134,6 +134,13 @@ async fn main() -> anyhow::Result<()> {
             });
             spawn_outbox_relay(OutboxRelay::with_control(db.clone(), publisher, control), 2)
         });
+    // Part F: restart-safe breakout countdown completion.
+    let _breakout_closer = flags.collaboration_v2_enabled.then(|| {
+        backend::workers::spawn_breakout_closer(
+            backend::workers::BreakoutCloser::new(state.meeting.core.clone()),
+            2,
+        )
+    });
     let _conference_reconciler = flags.rtc_provider_control_v2.then(|| {
         let poll = state.meeting.core.config.reconciler_poll_secs;
         backend::workers::spawn_conference_reconciler(

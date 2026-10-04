@@ -11,7 +11,8 @@ use utoipa::ToSchema;
 
 use crate::domain::{MediaCapturePolicy, Role};
 
-pub const BASELINE_VERSION: &str = "baseline-v1";
+/// v2 adds the Part F collaboration permissions; v1 cells are unchanged.
+pub const BASELINE_VERSION: &str = "baseline-v2";
 
 /// Semantic conference permissions (stable identifiers for later parts).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -43,6 +44,33 @@ pub enum Permission {
     RecordingStop,
     TranscriptionStart,
     ArtifactRead,
+    // Part F (baseline-v2)
+    ParticipantAudioLock,
+    ParticipantVideoLock,
+    ParticipantScreenShareStop,
+    ParticipantSpotlight,
+    ChatRead,
+    ChatPrivate,
+    ReactionSend,
+    HandRaise,
+    HandLowerSelf,
+    HandLowerOther,
+    BreakoutCreate,
+    BreakoutAssign,
+    BreakoutMove,
+    BreakoutEnterAny,
+    BreakoutAnnounce,
+    BreakoutClose,
+    PollCreate,
+    PollOpen,
+    PollClose,
+    PollRespond,
+    PollViewResults,
+    QnaSubmit,
+    QnaVote,
+    QnaAnswer,
+    QnaDismiss,
+    QnaPin,
 }
 
 impl Permission {
@@ -74,6 +102,32 @@ impl Permission {
         Permission::RecordingStop,
         Permission::TranscriptionStart,
         Permission::ArtifactRead,
+        Permission::ParticipantAudioLock,
+        Permission::ParticipantVideoLock,
+        Permission::ParticipantScreenShareStop,
+        Permission::ParticipantSpotlight,
+        Permission::ChatRead,
+        Permission::ChatPrivate,
+        Permission::ReactionSend,
+        Permission::HandRaise,
+        Permission::HandLowerSelf,
+        Permission::HandLowerOther,
+        Permission::BreakoutCreate,
+        Permission::BreakoutAssign,
+        Permission::BreakoutMove,
+        Permission::BreakoutEnterAny,
+        Permission::BreakoutAnnounce,
+        Permission::BreakoutClose,
+        Permission::PollCreate,
+        Permission::PollOpen,
+        Permission::PollClose,
+        Permission::PollRespond,
+        Permission::PollViewResults,
+        Permission::QnaSubmit,
+        Permission::QnaVote,
+        Permission::QnaAnswer,
+        Permission::QnaDismiss,
+        Permission::QnaPin,
     ];
 
     pub fn key(&self) -> &'static str {
@@ -105,6 +159,32 @@ impl Permission {
             Permission::RecordingStop => "recording.stop",
             Permission::TranscriptionStart => "transcription.start",
             Permission::ArtifactRead => "artifact.read",
+            Permission::ParticipantAudioLock => "participant.audio_lock",
+            Permission::ParticipantVideoLock => "participant.video_lock",
+            Permission::ParticipantScreenShareStop => "participant.screen_share_stop",
+            Permission::ParticipantSpotlight => "participant.spotlight",
+            Permission::ChatRead => "chat.read",
+            Permission::ChatPrivate => "chat.private",
+            Permission::ReactionSend => "reaction.send",
+            Permission::HandRaise => "hand.raise",
+            Permission::HandLowerSelf => "hand.lower_self",
+            Permission::HandLowerOther => "hand.lower_other",
+            Permission::BreakoutCreate => "breakout.create",
+            Permission::BreakoutAssign => "breakout.assign",
+            Permission::BreakoutMove => "breakout.move",
+            Permission::BreakoutEnterAny => "breakout.enter_any",
+            Permission::BreakoutAnnounce => "breakout.announce",
+            Permission::BreakoutClose => "breakout.close",
+            Permission::PollCreate => "poll.create",
+            Permission::PollOpen => "poll.open",
+            Permission::PollClose => "poll.close",
+            Permission::PollRespond => "poll.respond",
+            Permission::PollViewResults => "poll.view_results",
+            Permission::QnaSubmit => "qna.submit",
+            Permission::QnaVote => "qna.vote",
+            Permission::QnaAnswer => "qna.answer",
+            Permission::QnaDismiss => "qna.dismiss",
+            Permission::QnaPin => "qna.pin",
         }
     }
 
@@ -138,21 +218,35 @@ pub fn baseline(role: Role, permission: Permission) -> Cell {
         ParticipantBan => 5,
         CohostAssign => 6,
         ParticipantRoleChange => 7,
-        ParticipantMute | ParticipantVideoDisable | ScreenshareManage | ConferenceConfigureLive => {
-            8
-        }
+        ParticipantMute
+        | ParticipantVideoDisable
+        | ScreenshareManage
+        | ConferenceConfigureLive
+        | ParticipantAudioLock
+        | ParticipantVideoLock
+        | ParticipantScreenShareStop
+        | ParticipantSpotlight
+        | HandLowerOther => 8,
         ScreensharePublish => 9,
-        BreakoutManage => 10,
-        PollManage | QnaManage | ChatModerate => 11,
+        BreakoutManage | BreakoutCreate | BreakoutAssign | BreakoutMove | BreakoutEnterAny
+        | BreakoutAnnounce | BreakoutClose => 10,
+        PollManage | QnaManage | ChatModerate | PollCreate | PollOpen | PollClose
+        | PollViewResults | QnaAnswer | QnaDismiss | QnaPin => 11,
         RecordingStart | RecordingStop | TranscriptionStart => 12,
         AudioPublish | VideoPublish => 13,
         MediaSubscribe => 14,
-        ChatSend => {
+        // Attendee collaboration: everyone by default; VIEWER is POLICY so view-only
+        // never silently means collaboration-disabled (Part F §14), and the meeting
+        // policy can still narrow it.
+        ChatSend | ChatRead | ChatPrivate | ReactionSend | HandRaise | PollRespond | QnaSubmit
+        | QnaVote => {
             return match role {
                 Role::Viewer => P(true),
                 _ => Y,
             }
         }
+        // Lowering one's own hand is always allowed.
+        HandLowerSelf => return Y,
         ArtifactRead => {
             return match role {
                 Role::Owner | Role::Host => Y,
@@ -488,13 +582,78 @@ mod tests {
         assert!(!c.allows(Role::Presenter, Permission::ParticipantAdmit));
         assert!(c.allows(Role::Participant, Permission::AudioPublish));
         assert!(!c.allows(Role::Participant, Permission::ParticipantAdmit));
+        // Viewer: subscribe + attendee collaboration only (Part F §14), never media
+        // publication or any management permission.
+        let viewer_allowed = [
+            Permission::MediaSubscribe,
+            Permission::ChatSend,
+            Permission::ChatRead,
+            Permission::ChatPrivate,
+            Permission::ReactionSend,
+            Permission::HandRaise,
+            Permission::HandLowerSelf,
+            Permission::PollRespond,
+            Permission::QnaSubmit,
+            Permission::QnaVote,
+        ];
         for p in Permission::ALL {
-            if *p == Permission::MediaSubscribe || *p == Permission::ChatSend {
+            if viewer_allowed.contains(p) {
+                assert!(c.allows(Role::Viewer, *p), "viewer should have {p:?}");
                 continue;
             }
             assert!(!c.allows(Role::Viewer, *p), "viewer must not have {p:?}");
         }
         assert!(c.allows(Role::Viewer, Permission::MediaSubscribe));
+    }
+
+    #[test]
+    fn part_f_permissions_follow_appendix_rows() {
+        let c = ctx();
+        for role in [Role::Owner, Role::Host, Role::CoHost] {
+            for p in [
+                Permission::ParticipantAudioLock,
+                Permission::ParticipantVideoLock,
+                Permission::ParticipantScreenShareStop,
+                Permission::ParticipantSpotlight,
+                Permission::HandLowerOther,
+                Permission::BreakoutCreate,
+                Permission::BreakoutMove,
+                Permission::BreakoutEnterAny,
+                Permission::BreakoutClose,
+                Permission::PollCreate,
+                Permission::PollViewResults,
+                Permission::QnaAnswer,
+                Permission::QnaPin,
+            ] {
+                assert!(c.allows(role, p), "{role} {p:?}");
+            }
+        }
+        // Moderator: media controls are POLICY(default allow), breakouts POLICY(deny).
+        assert!(c.allows(Role::Moderator, Permission::ParticipantAudioLock));
+        assert!(!c.allows(Role::Moderator, Permission::BreakoutCreate));
+        assert!(c.allows(Role::Moderator, Permission::QnaAnswer));
+        for role in [Role::Presenter, Role::Participant, Role::Viewer] {
+            assert!(!c.allows(role, Permission::ParticipantAudioLock), "{role}");
+            assert!(!c.allows(role, Permission::BreakoutMove), "{role}");
+            assert!(!c.allows(role, Permission::PollViewResults) || role == Role::Presenter);
+            assert!(c.allows(role, Permission::HandRaise));
+            assert!(c.allows(role, Permission::QnaSubmit));
+            assert!(c.allows(role, Permission::PollRespond));
+        }
+        // Policy can take attendee collaboration away from viewers only.
+        let mut policy = RolePolicy::default();
+        policy
+            .overrides
+            .entry(Role::Viewer)
+            .or_default()
+            .insert("chat.send".into(), false);
+        assert!(policy.validate().is_ok());
+        let narrowed = PermissionContext {
+            role_policy: policy,
+            ..ctx()
+        };
+        assert!(!narrowed.allows(Role::Viewer, Permission::ChatSend));
+        assert_eq!(BASELINE_VERSION, "baseline-v2");
     }
 
     #[test]

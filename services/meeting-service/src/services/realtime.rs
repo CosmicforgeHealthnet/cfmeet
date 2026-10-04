@@ -25,7 +25,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
-    domain::{AdmissionState, OutboxChannel, RecordOrigin},
+    domain::{AdmissionState, OutboxChannel, RecordOrigin, Role},
     error::{ApiError, ApiResult, ErrorCode},
     models::{conference_participants, conference_sessions, outbox_events},
     services::{
@@ -34,7 +34,8 @@ use crate::{
             conference_authority, find_conference, find_space, not_found_conference,
             own_participant, permission_denied, Core,
         },
-        meeting_events::event,
+        meeting_events::{event, Audience},
+        meeting_permissions::{Permission, PermissionContext},
         rtc_metrics::{inc, RTC_METRICS as M},
         RedisService,
     },
@@ -180,10 +181,74 @@ pub struct Subscriber {
     pub scope: SubscriptionScope,
     /// The subscriber's own participant row, if any.
     pub participant_id: Option<Uuid>,
+    /// Part F: effective role (for permission-scoped audiences).
+    pub role: Option<Role>,
+    pub permissions: PermissionContext,
+    /// Part F: current breakout context (assignment or host visit).
+    pub breakout: Option<Uuid>,
+    /// Policy: participants in a breakout still see main-room traffic.
+    pub main_visible_in_breakouts: bool,
+}
+
+/// Parse a row's server-side audience. Unreadable audience = deliver to nobody.
+pub fn row_audience(row: &outbox_events::Model) -> Result<Option<Audience>, serde_json::Error> {
+    match &row.audience {
+        None => Ok(None),
+        Some(Value::Null) => Ok(None),
+        Some(v) => serde_json::from_value(v.clone()).map(Some),
+    }
 }
 
 impl Subscriber {
-    /// Whether this subscriber may receive an event.
+    fn holds(&self, permission: &str) -> bool {
+        match (self.role, Permission::from_key(permission)) {
+            (Some(role), Some(p)) => self.permissions.allows(role, p),
+            _ => false,
+        }
+    }
+
+    /// Part F §57: server-side audience evaluation.
+    pub fn audience_allows(&self, audience: &Audience) -> bool {
+        match audience {
+            Audience::Participants {
+                ids,
+                moderator_permission,
+            } => {
+                self.participant_id
+                    .map(|p| ids.contains(&p))
+                    .unwrap_or(false)
+                    || moderator_permission
+                        .as_deref()
+                        .map(|perm| self.holds(perm))
+                        .unwrap_or(false)
+            }
+            Audience::Permission { permission } => self.holds(permission),
+            Audience::Breakout { breakout_id } => {
+                self.breakout == Some(*breakout_id)
+                    || self.holds(Permission::BreakoutEnterAny.key())
+            }
+            Audience::MainRoom => {
+                self.breakout.is_none()
+                    || self.main_visible_in_breakouts
+                    || self.holds(Permission::ChatModerate.key())
+            }
+            Audience::Breakouts => {
+                self.breakout.is_some() || self.holds(Permission::BreakoutEnterAny.key())
+            }
+        }
+    }
+
+    /// Whether this subscriber may receive an event with this audience.
+    pub fn may_receive_scoped(&self, env: &RealtimeEnvelope, audience: Option<&Audience>) -> bool {
+        if let Some(a) = audience {
+            if !self.audience_allows(a) {
+                return false;
+            }
+        }
+        self.may_receive(env)
+    }
+
+    /// Scope rule (Part E): waiting participants only see lifecycle + their own events.
     pub fn may_receive(&self, env: &RealtimeEnvelope) -> bool {
         match self.scope {
             SubscriptionScope::Full => true,
@@ -194,8 +259,32 @@ impl Subscriber {
         }
     }
 
+    /// May this subscriber receive a committed outbox row?
+    pub fn may_receive_row(&self, row: &outbox_events::Model, env: &RealtimeEnvelope) -> bool {
+        match row_audience(row) {
+            Ok(a) => self.may_receive_scoped(env, a.as_ref()),
+            Err(_) => false,
+        }
+    }
+
     /// Events after which the subscription must be re-authorized.
     pub fn requires_recheck(&self, env: &RealtimeEnvelope) -> bool {
+        // Part F: context / policy changes re-scope every subscriber.
+        if matches!(
+            env.event_type.as_str(),
+            event::BREAKOUT_OPENED
+                | event::BREAKOUT_CLOSED
+                | event::COLLABORATION_POLICY_CHANGED
+                | event::CHAT_POLICY_CHANGED
+        ) {
+            return true;
+        }
+        if env.event_type == event::BREAKOUT_PARTICIPANT_MOVED {
+            return self
+                .participant_id
+                .map(|p| env.payload["participantId"].as_str() == Some(&p.to_string()))
+                .unwrap_or(false);
+        }
         matches!(
             env.event_type.as_str(),
             event::PARTICIPANT_REMOVED
@@ -312,15 +401,15 @@ impl RealtimeService {
         principal: SubscriberPrincipal,
     ) -> ApiResult<Subscriber> {
         let denied = || permission_denied("You are not permitted to follow this conference");
-        let (scope, participant_id) = match &principal {
+        let space = find_space(&self.core.db, conference.meeting_space_id).await?;
+        let (scope, participant, role) = match &principal {
             SubscriberPrincipal::User(ctx) => {
-                let space = find_space(&self.core.db, conference.meeting_space_id).await?;
                 match conference_authority(&self.core.db, &space, conference.id, ctx).await? {
-                    Some(a) => (SubscriptionScope::Full, a.participant.map(|p| p.id)),
+                    Some(a) => (SubscriptionScope::Full, a.participant, Some(a.role)),
                     None => {
                         match own_participant(&self.core.db, conference.id, ctx, false).await? {
                             Some(p) if p.admission_state == AdmissionState::Waiting => {
-                                (SubscriptionScope::SelfOnly(p.id), Some(p.id))
+                                (SubscriptionScope::SelfOnly(p.id), Some(p), None)
                             }
                             _ => return Err(denied()),
                         }
@@ -334,18 +423,39 @@ impl RealtimeService {
                     .await?
                     .ok_or_else(denied)?;
                 match p.admission_state {
-                    AdmissionState::Admitted => (SubscriptionScope::Full, Some(p.id)),
-                    AdmissionState::Waiting => (SubscriptionScope::SelfOnly(p.id), Some(p.id)),
+                    AdmissionState::Admitted => {
+                        let role = Some(p.role);
+                        (SubscriptionScope::Full, Some(p), role)
+                    }
+                    AdmissionState::Waiting => (SubscriptionScope::SelfOnly(p.id), Some(p), None),
                     _ => return Err(denied()),
                 }
             }
         };
+        let breakout = match participant
+            .as_ref()
+            .filter(|p| p.admission_state == AdmissionState::Admitted)
+        {
+            Some(p) => crate::services::collaboration::breakouts::media_context(
+                &self.core.db,
+                conference,
+                p,
+            )
+            .await?
+            .breakout_id(),
+            None => None,
+        };
+        let policy = crate::services::collaboration::effective_policy(&space, conference);
         Ok(Subscriber {
             conference_id: conference.id,
             meeting_space_id: conference.meeting_space_id,
             principal,
             scope,
-            participant_id,
+            participant_id: participant.map(|p| p.id),
+            role,
+            permissions: PermissionContext::for_space(&space),
+            breakout,
+            main_visible_in_breakouts: policy.main_chat_visible_in_breakouts,
         })
     }
 
@@ -458,8 +568,9 @@ impl RealtimeService {
         let last = rows.last().and_then(|r| r.conference_seq).unwrap_or(cursor);
         Ok(Some((
             rows.iter()
-                .filter_map(envelope)
-                .filter(|e| sub.may_receive(e))
+                .filter_map(|r| envelope(r).map(|e| (r, e)))
+                .filter(|(r, e)| sub.may_receive_row(r, e))
+                .map(|(_, e)| e)
                 .collect(),
             last,
         )))
@@ -550,6 +661,7 @@ mod tests {
             channel: OutboxChannel::ProviderCommand,
             conference_seq: None,
             locked_by: None,
+            audience: None,
         };
         assert!(envelope(&row).is_none());
         // Even if mislabelled, an rtc.* type is never exposed.

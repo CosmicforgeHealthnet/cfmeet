@@ -1,4 +1,4 @@
-# Real self-hosted LiveKit certification (Phase 2 Part E)
+# Real self-hosted LiveKit certification (Phase 2 Parts E and F)
 
 Certifies the production `LiveKitProvider` against a real `livekit-server` and a real WebRTC
 participant. No Docker.
@@ -10,3 +10,11 @@ participant. No Docker.
 
 `livekit.yaml` binds to loopback only and uses a local certification key — it is not a
 production configuration. Each step prints `CERT <capability>: PASS`.
+
+Part F (`real_livekit_part_f_media_controls`) prints `CERT F <capability>: PASS` for host audio
+mute, audio and video permission reduction, permission restore, screen-share policy enforcement,
+the screen-share provider event (real `track_published` webhook) and host stop screen share. The
+probe accepts `mic,camera,screen` as its publish list and a stdin line `publish <source>` to
+attempt another publication on the live connection.
+
+Make sure no earlier `livekit-server` is still shutting down (ports 7880/7881) before re-running.

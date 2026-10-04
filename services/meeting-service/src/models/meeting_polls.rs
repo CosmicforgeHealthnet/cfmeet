@@ -21,6 +21,12 @@ pub struct Model {
     pub opened_at: Option<DateTimeUtc>,
     pub closed_at: Option<DateTimeUtc>,
     pub version: i32,
+    pub definition: Json,
+    pub quiz_mode: bool,
+    pub results_visibility: String,
+    pub created_by: Option<String>,
+    pub archived_at: Option<DateTimeUtc>,
+    pub updated_at: DateTimeUtc,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

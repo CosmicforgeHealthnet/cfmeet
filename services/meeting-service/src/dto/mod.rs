@@ -5,6 +5,7 @@ pub mod common;
 pub mod meetings;
 pub mod users;
 pub mod v2;
+pub mod v2_collab;
 pub mod webhooks;
 
 // Re-export for convenience

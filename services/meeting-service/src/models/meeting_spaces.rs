@@ -41,6 +41,8 @@ pub struct Model {
     pub updated_at: DateTimeUtc,
     pub archived_at: Option<DateTimeUtc>,
     pub version: i32,
+    /// Part F: sparse space-level collaboration policy defaults.
+    pub collaboration_policy: Json,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

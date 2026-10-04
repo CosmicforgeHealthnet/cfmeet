@@ -38,6 +38,29 @@ pub enum ErrorCode {
     RtcProviderUnavailable,
     RecordingNotAllowed,
     RevocationCheckUnavailable,
+    // Part F
+    MediaPermissionDenied,
+    MediaLocked,
+    ScreenShareNotAllowed,
+    ScreenShareNotActive,
+    ChatDisabled,
+    PrivateChatDisabled,
+    ChatParticipantRestricted,
+    ReactionsDisabled,
+    HandRaiseDisabled,
+    BreakoutNotFound,
+    BreakoutClosed,
+    BreakoutAssignmentConflict,
+    PollNotFound,
+    PollNotOpen,
+    PollAlreadyResponded,
+    PollResponseInvalid,
+    PollResultsNotVisible,
+    QuestionNotFound,
+    QnaDisabled,
+    PollsDisabled,
+    MessageNotFound,
+    ConsentRequired,
 }
 
 impl ErrorCode {
@@ -67,6 +90,28 @@ impl ErrorCode {
             ErrorCode::RtcProviderUnavailable => "RTC_PROVIDER_UNAVAILABLE",
             ErrorCode::RecordingNotAllowed => "RECORDING_NOT_ALLOWED",
             ErrorCode::RevocationCheckUnavailable => "REVOCATION_CHECK_UNAVAILABLE",
+            ErrorCode::MediaPermissionDenied => "MEDIA_PERMISSION_DENIED",
+            ErrorCode::MediaLocked => "MEDIA_LOCKED",
+            ErrorCode::ScreenShareNotAllowed => "SCREEN_SHARE_NOT_ALLOWED",
+            ErrorCode::ScreenShareNotActive => "SCREEN_SHARE_NOT_ACTIVE",
+            ErrorCode::ChatDisabled => "CHAT_DISABLED",
+            ErrorCode::PrivateChatDisabled => "PRIVATE_CHAT_DISABLED",
+            ErrorCode::ChatParticipantRestricted => "CHAT_PARTICIPANT_RESTRICTED",
+            ErrorCode::ReactionsDisabled => "REACTIONS_DISABLED",
+            ErrorCode::HandRaiseDisabled => "HAND_RAISE_DISABLED",
+            ErrorCode::BreakoutNotFound => "BREAKOUT_NOT_FOUND",
+            ErrorCode::BreakoutClosed => "BREAKOUT_CLOSED",
+            ErrorCode::BreakoutAssignmentConflict => "BREAKOUT_ASSIGNMENT_CONFLICT",
+            ErrorCode::PollNotFound => "POLL_NOT_FOUND",
+            ErrorCode::PollNotOpen => "POLL_NOT_OPEN",
+            ErrorCode::PollAlreadyResponded => "POLL_ALREADY_RESPONDED",
+            ErrorCode::PollResponseInvalid => "POLL_RESPONSE_INVALID",
+            ErrorCode::PollResultsNotVisible => "POLL_RESULTS_NOT_VISIBLE",
+            ErrorCode::QuestionNotFound => "QUESTION_NOT_FOUND",
+            ErrorCode::QnaDisabled => "QNA_DISABLED",
+            ErrorCode::PollsDisabled => "POLLS_DISABLED",
+            ErrorCode::MessageNotFound => "MESSAGE_NOT_FOUND",
+            ErrorCode::ConsentRequired => "CONSENT_REQUIRED",
         }
     }
 
@@ -96,6 +141,28 @@ impl ErrorCode {
             ErrorCode::RtcProviderUnavailable | ErrorCode::RevocationCheckUnavailable => {
                 StatusCode::SERVICE_UNAVAILABLE
             }
+            ErrorCode::MediaPermissionDenied
+            | ErrorCode::MediaLocked
+            | ErrorCode::ScreenShareNotAllowed
+            | ErrorCode::ChatDisabled
+            | ErrorCode::PrivateChatDisabled
+            | ErrorCode::ChatParticipantRestricted
+            | ErrorCode::ReactionsDisabled
+            | ErrorCode::HandRaiseDisabled
+            | ErrorCode::PollResultsNotVisible
+            | ErrorCode::QnaDisabled
+            | ErrorCode::PollsDisabled
+            | ErrorCode::ConsentRequired => StatusCode::FORBIDDEN,
+            ErrorCode::ScreenShareNotActive
+            | ErrorCode::BreakoutClosed
+            | ErrorCode::BreakoutAssignmentConflict
+            | ErrorCode::PollNotOpen
+            | ErrorCode::PollAlreadyResponded => StatusCode::CONFLICT,
+            ErrorCode::BreakoutNotFound
+            | ErrorCode::PollNotFound
+            | ErrorCode::QuestionNotFound
+            | ErrorCode::MessageNotFound => StatusCode::NOT_FOUND,
+            ErrorCode::PollResponseInvalid => StatusCode::BAD_REQUEST,
         }
     }
 }
@@ -132,6 +199,13 @@ pub enum ApiError {
     /// Phase 2 semantic domain error with a stable public code.
     #[error("{code:?}: {message}")]
     Domain { code: ErrorCode, message: String },
+
+    /// `RATE_LIMITED` with retry semantics (`Retry-After` header + body field).
+    #[error("RATE_LIMITED: {message}")]
+    RateLimited {
+        message: String,
+        retry_after_secs: u64,
+    },
 }
 
 impl ApiError {
@@ -146,13 +220,45 @@ impl ApiError {
     pub fn code(&self) -> Option<ErrorCode> {
         match self {
             ApiError::Domain { code, .. } => Some(*code),
+            ApiError::RateLimited { .. } => Some(ErrorCode::RateLimited),
             _ => None,
+        }
+    }
+
+    pub fn rate_limited(message: impl Into<String>, retry_after_secs: u64) -> Self {
+        ApiError::RateLimited {
+            message: message.into(),
+            retry_after_secs: retry_after_secs.max(1),
         }
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        if let ApiError::RateLimited {
+            message,
+            retry_after_secs,
+        } = self
+        {
+            let body = Json(json!({
+                "success": false,
+                "error": {
+                    "code": ErrorCode::RateLimited.as_str(),
+                    "message": message,
+                    "retryAfterSeconds": retry_after_secs,
+                    "requestId": current_request_id(),
+                }
+            }));
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                [(
+                    axum::http::header::RETRY_AFTER,
+                    retry_after_secs.to_string(),
+                )],
+                body,
+            )
+                .into_response();
+        }
         let (status, error_code, message) = match self {
             ApiError::DatabaseError(e) => {
                 // Never expose SQL text / SeaORM internals to clients.
@@ -181,6 +287,7 @@ impl IntoResponse for ApiError {
                 (StatusCode::TOO_MANY_REQUESTS, "TOO_MANY_REQUESTS", msg)
             }
             ApiError::Domain { code, message } => (code.status(), code.as_str(), message),
+            ApiError::RateLimited { .. } => unreachable!("handled above"),
         };
 
         let body = Json(json!({

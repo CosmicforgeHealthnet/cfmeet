@@ -49,6 +49,9 @@ pub struct Model {
     pub rtc_room_ready_at: Option<DateTimeUtc>,
     /// Provider confirmed termination / absence (ENDING → ENDED requires it).
     pub rtc_room_terminated_at: Option<DateTimeUtc>,
+    /// Part F: sparse conference-level collaboration policy overrides.
+    pub collaboration_policy: Json,
+    pub collaboration_version: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -21,6 +21,7 @@
 //!
 //! See `/docs/EMAIL_QUEUE.md` for the email worker example.
 
+pub mod breakout_closer;
 pub mod conference_reconciler;
 pub mod conference_scheduler;
 pub mod email;
@@ -28,6 +29,7 @@ pub mod meeting_auto_end;
 pub mod meeting_auto_start;
 pub mod outbox_relay;
 
+pub use breakout_closer::{spawn_breakout_closer, BreakoutCloser};
 pub use conference_reconciler::{
     spawn_conference_reconciler, ConferenceReconciler, ReconcileReport,
 };

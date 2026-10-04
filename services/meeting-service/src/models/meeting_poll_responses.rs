@@ -12,9 +12,13 @@ pub struct Model {
     pub id: Uuid,
     pub poll_id: Uuid,
     pub conference_id: Uuid,
-    pub participant_id: Uuid,
+    /// NULL for anonymous polls: answers never carry identity.
+    pub participant_id: Option<Uuid>,
     pub selected_options: Json,
     pub created_at: DateTimeUtc,
+    pub answers: Json,
+    pub score: Option<f64>,
+    pub max_score: Option<f64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

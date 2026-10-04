@@ -162,6 +162,10 @@ pub struct DomainCore {
     pub appointments:
         Arc<dyn crate::services::appointment_authorization::AppointmentAuthorizationAdapter>,
     pub passcode_limiter: AttemptLimiter,
+    /// Part F: realtime fanout for transient events (reactions). Never authority.
+    pub redis: Option<Arc<RedisService>>,
+    /// Part F: participant-scoped collaboration rate limits.
+    pub collab_limiter: crate::services::collaboration::CollabLimiter,
 }
 
 pub type Core = Arc<DomainCore>;

@@ -35,8 +35,13 @@ use uuid::Uuid;
 use crate::{
     domain::{AdmissionState, ConferenceStatus, RecordOrigin, SessionState},
     error::ApiResult,
-    models::{conference_participants, conference_sessions, participant_sessions},
+    models::{breakout_rooms, conference_participants, conference_sessions, participant_sessions},
     services::{
+        collaboration::{
+            breakouts,
+            media::{effective_media, MediaRestrictions},
+            metrics::COLLAB_METRICS as CM,
+        },
         meeting_core::{find_space, lock_conference, Core},
         meeting_events::{emit, event, OutboxRecord},
         meeting_permissions::PermissionContext,
@@ -364,6 +369,67 @@ impl ConferenceReconciler {
                 }
             }
         }
+        // 6. Part F: provider breakout rooms whose breakout is not active.
+        if let Ok(rooms) = self
+            .core
+            .rtc
+            .list_rooms(breakouts::BREAKOUT_ROOM_PREFIX)
+            .await
+        {
+            for room in rooms
+                .into_iter()
+                .take(self.core.config.reconciler_batch as usize)
+            {
+                match breakouts::breakout_by_room(&self.core.db, &room.room_name).await? {
+                    None => {
+                        self.record(
+                            &mut report,
+                            None,
+                            Some(&room.room_name),
+                            "UNMAPPED_PROVIDER_ROOM",
+                            Action::Escalated,
+                            json!({ "participants": room.participant_count }),
+                        )
+                        .await;
+                    }
+                    Some(br) => {
+                        let conference_live =
+                            conference_sessions::Entity::find_by_id(br.conference_id)
+                                .one(&self.core.db)
+                                .await?
+                                .map(|c| c.status == ConferenceStatus::Live)
+                                .unwrap_or(false);
+                        let active = matches!(br.status.as_str(), "OPEN" | "CLOSING");
+                        if active && conference_live {
+                            continue;
+                        }
+                        let target = RtcRoomRef {
+                            conference_id: br.conference_id,
+                            room_name: room.room_name.clone(),
+                        };
+                        let action = match self
+                            .core
+                            .rtc
+                            .terminate_room(&target, "BREAKOUT_NOT_ACTIVE")
+                            .await
+                        {
+                            Ok(()) => Action::Repaired,
+                            Err(_) => Action::Failed,
+                        };
+                        inc(&CM.breakout_drift);
+                        self.record(
+                            &mut report,
+                            Some(br.conference_id),
+                            Some(&room.room_name),
+                            "BREAKOUT_ROOM_ORPHAN",
+                            action,
+                            json!({ "breakoutId": br.id, "status": br.status }),
+                        )
+                        .await;
+                    }
+                }
+            }
+        }
         Ok(report)
     }
 
@@ -423,6 +489,7 @@ impl ConferenceReconciler {
 
         let space = find_space(&self.core.db, c.meeting_space_id).await?;
         let pctx = PermissionContext::for_space(&space);
+        let policy = crate::services::collaboration::effective_policy(&space, c);
         let sessions = participant_sessions::Entity::find()
             .filter(participant_sessions::Column::ConferenceId.eq(c.id))
             .filter(
@@ -484,6 +551,30 @@ impl ConferenceReconciler {
                 continue;
             };
             let participant = participant.expect("authorized implies participant");
+            // Part F: a participant routed into a breakout must not stay in the main room.
+            let context = breakouts::media_context(&self.core.db, c, participant).await?;
+            if context != breakouts::MediaContext::Main {
+                let action = match self
+                    .core
+                    .rtc
+                    .remove_participant(&target, "BREAKOUT_CONTEXT")
+                    .await
+                {
+                    Ok(()) => Action::Repaired,
+                    Err(_) => Action::Failed,
+                };
+                inc(&CM.breakout_drift);
+                self.record(
+                    report,
+                    Some(c.id),
+                    Some(&room.room_name),
+                    "BREAKOUT_CONTEXT_DRIFT",
+                    action,
+                    json!({ "participantId": participant.id }),
+                )
+                .await;
+                continue;
+            }
             if session.state == SessionState::Pending {
                 // Webhook delayed/lost: the provider is authoritative for connectivity.
                 let action = match self.mark_connected(c, session, participant).await {
@@ -500,14 +591,15 @@ impl ConferenceReconciler {
                 )
                 .await;
             }
-            let expected = ProviderGrants::from_permissions(&pctx.media(participant.role));
+            let effective = effective_media(
+                &pctx,
+                &policy,
+                participant.role,
+                MediaRestrictions::of(participant),
+            );
+            let expected = ProviderGrants::from_permissions(&effective);
             if p.grants.as_ref() != Some(&expected) {
-                let action = match self
-                    .core
-                    .rtc
-                    .update_permissions(&target, &pctx.media(participant.role))
-                    .await
-                {
+                let action = match self.core.rtc.update_permissions(&target, &effective).await {
                     Ok(()) => Action::Repaired,
                     Err(_) => Action::Failed,
                 };
@@ -522,7 +614,161 @@ impl ConferenceReconciler {
                 .await;
             }
         }
+        self.reconcile_breakouts(
+            c,
+            &pctx,
+            &policy,
+            &by_identity,
+            &participants,
+            &mut present,
+            report,
+        )
+        .await?;
         self.close_absent_sessions(c, &present, report).await
+    }
+
+    /// Part F: active breakout rooms of a LIVE conference — room presence, context
+    /// isolation (only the assigned / visiting participants), late webhooks and grants.
+    #[allow(clippy::too_many_arguments)]
+    async fn reconcile_breakouts(
+        &self,
+        c: &conference_sessions::Model,
+        pctx: &PermissionContext,
+        policy: &crate::services::collaboration::policy::CollaborationPolicy,
+        by_identity: &HashMap<&str, &participant_sessions::Model>,
+        participants: &HashMap<Uuid, conference_participants::Model>,
+        present: &mut HashSet<String>,
+        report: &mut ReconcileReport,
+    ) -> ApiResult<()> {
+        let rooms = breakout_rooms::Entity::find()
+            .filter(breakout_rooms::Column::ConferenceId.eq(c.id))
+            .filter(breakout_rooms::Column::Status.is_in(["OPEN", "CLOSING"]))
+            .all(&self.core.db)
+            .await?;
+        for br in rooms {
+            report.examined += 1;
+            let room = RtcRoomRef {
+                conference_id: c.id,
+                room_name: br
+                    .rtc_room_name
+                    .clone()
+                    .unwrap_or_else(|| breakouts::breakout_room_name(br.id)),
+            };
+            let snapshot = match self.core.rtc.reconcile(&room).await {
+                Ok(s) => s,
+                Err(e) => {
+                    self.record(
+                        report,
+                        Some(c.id),
+                        Some(&room.room_name),
+                        "PROVIDER_UNAVAILABLE",
+                        Action::Failed,
+                        json!({ "error": e.to_string() }),
+                    )
+                    .await;
+                    continue;
+                }
+            };
+            if snapshot.room.is_none() {
+                let action = match breakouts::ensure_breakout_room(&self.core, &br).await {
+                    Ok(()) => Action::Repaired,
+                    Err(_) => Action::Failed,
+                };
+                inc(&CM.breakout_drift);
+                self.record(
+                    report,
+                    Some(c.id),
+                    Some(&room.room_name),
+                    "BREAKOUT_ROOM_MISSING",
+                    action,
+                    json!({ "breakoutId": br.id }),
+                )
+                .await;
+                continue;
+            }
+            for p in snapshot.participants.iter().filter(|p| p.connected) {
+                let session = by_identity.get(p.media_identity.as_str()).copied();
+                let participant =
+                    session.and_then(|s| participants.get(&s.conference_participant_id));
+                let target = RtcParticipantRef {
+                    conference_id: c.id,
+                    room_name: room.room_name.clone(),
+                    participant_session_id: session.map(|s| s.id).unwrap_or(Uuid::nil()),
+                    media_identity: p.media_identity.clone(),
+                };
+                let in_context =
+                    match participant.filter(|pp| pp.admission_state == AdmissionState::Admitted) {
+                        Some(pp) => {
+                            breakouts::media_context(&self.core.db, c, pp)
+                                .await?
+                                .breakout_id()
+                                == Some(br.id)
+                        }
+                        None => false,
+                    };
+                let (Some(session), Some(participant), true) = (session, participant, in_context)
+                else {
+                    let action = match self
+                        .core
+                        .rtc
+                        .remove_participant(&target, "BREAKOUT_CONTEXT")
+                        .await
+                    {
+                        Ok(()) => Action::Repaired,
+                        Err(_) => Action::Failed,
+                    };
+                    inc(&CM.breakout_drift);
+                    self.record(
+                        report,
+                        Some(c.id),
+                        Some(&room.room_name),
+                        "BREAKOUT_CONTEXT_DRIFT",
+                        action,
+                        json!({ "breakoutId": br.id }),
+                    )
+                    .await;
+                    continue;
+                };
+                present.insert(p.media_identity.clone());
+                if session.state == SessionState::Pending {
+                    let action = match self.mark_connected(c, session, participant).await {
+                        Ok(()) => Action::Repaired,
+                        Err(_) => Action::Failed,
+                    };
+                    self.record(
+                        report,
+                        Some(c.id),
+                        Some(&room.room_name),
+                        "SESSION_CONNECTED_NOT_RECORDED",
+                        action,
+                        json!({ "participantSessionId": session.id }),
+                    )
+                    .await;
+                }
+                let effective = effective_media(
+                    pctx,
+                    policy,
+                    participant.role,
+                    MediaRestrictions::of(participant),
+                );
+                if p.grants.as_ref() != Some(&ProviderGrants::from_permissions(&effective)) {
+                    let action = match self.core.rtc.update_permissions(&target, &effective).await {
+                        Ok(()) => Action::Repaired,
+                        Err(_) => Action::Failed,
+                    };
+                    self.record(
+                        report,
+                        Some(c.id),
+                        Some(&room.room_name),
+                        "PERMISSION_DRIFT",
+                        action,
+                        json!({ "participantId": participant.id, "breakoutId": br.id }),
+                    )
+                    .await;
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn mark_connected(

@@ -59,6 +59,58 @@ pub mod event {
     pub const RTC_PARTICIPANT_REMOVE_REQUESTED: &str = "rtc.participant_remove_requested";
     pub const RTC_PERMISSIONS_UPDATE_REQUESTED: &str = "rtc.permissions_update_requested";
     pub const RTC_ROOM_PREPARE_REQUESTED: &str = "rtc.room_prepare_requested";
+    /// Part F provider commands.
+    pub const RTC_SCREENSHARE_STOP_REQUESTED: &str = "rtc.screenshare_stop_requested";
+    pub const RTC_PARTICIPANT_REROUTE_REQUESTED: &str = "rtc.participant_reroute_requested";
+    pub const RTC_BREAKOUT_PREPARE_REQUESTED: &str = "rtc.breakout_prepare_requested";
+    pub const RTC_BREAKOUT_TERMINATE_REQUESTED: &str = "rtc.breakout_terminate_requested";
+
+    // Part F — media
+    pub const PARTICIPANT_AUDIO_LOCKED: &str = "participant.audio_locked";
+    pub const PARTICIPANT_AUDIO_UNLOCKED: &str = "participant.audio_unlocked";
+    pub const PARTICIPANT_VIDEO_LOCKED: &str = "participant.video_locked";
+    pub const PARTICIPANT_VIDEO_UNLOCKED: &str = "participant.video_unlocked";
+    pub const PARTICIPANT_SCREEN_SHARE_LOCKED: &str = "participant.screen_share_locked";
+    pub const PARTICIPANT_SCREEN_SHARE_UNLOCKED: &str = "participant.screen_share_unlocked";
+    pub const PARTICIPANT_MUTED: &str = "participant.muted";
+    pub const SCREENSHARE_STARTED: &str = "screenshare.started";
+    pub const SCREENSHARE_ENDED: &str = "screenshare.ended";
+    pub const PARTICIPANT_SPOTLIGHTED: &str = "participant.spotlighted";
+    pub const PARTICIPANT_SPOTLIGHT_REMOVED: &str = "participant.spotlight_removed";
+    pub const COLLABORATION_POLICY_CHANGED: &str = "collaboration.policy_changed";
+    // Part F — chat
+    pub const CHAT_MESSAGE_CREATED: &str = "chat.message_created";
+    pub const CHAT_MESSAGE_DELETED: &str = "chat.message_deleted";
+    pub const CHAT_PARTICIPANT_RESTRICTED: &str = "chat.participant_restricted";
+    pub const CHAT_PARTICIPANT_UNRESTRICTED: &str = "chat.participant_unrestricted";
+    pub const CHAT_POLICY_CHANGED: &str = "chat.policy_changed";
+    // Part F — reactions / hand (reactions are transient: never written to the outbox)
+    pub const REACTION_SENT: &str = "reaction.sent";
+    pub const HAND_RAISED: &str = "hand.raised";
+    pub const HAND_LOWERED: &str = "hand.lowered";
+    // Part F — breakouts
+    pub const BREAKOUT_CREATED: &str = "breakout.created";
+    pub const BREAKOUT_OPENED: &str = "breakout.opened";
+    pub const BREAKOUT_ASSIGNMENT_CHANGED: &str = "breakout.assignment_changed";
+    pub const BREAKOUT_PARTICIPANT_MOVED: &str = "breakout.participant_moved";
+    pub const BREAKOUT_ANNOUNCEMENT: &str = "breakout.announcement";
+    pub const BREAKOUT_CLOSING: &str = "breakout.closing";
+    pub const BREAKOUT_CLOSED: &str = "breakout.closed";
+    // Part F — polls
+    pub const POLL_CREATED: &str = "poll.created";
+    pub const POLL_STARTED: &str = "poll.started";
+    pub const POLL_RESPONSE_RECORDED: &str = "poll.response_recorded";
+    pub const POLL_CLOSED: &str = "poll.closed";
+    pub const POLL_ARCHIVED: &str = "poll.archived";
+    pub const POLL_RESULTS_UPDATED: &str = "poll.results_updated";
+    // Part F — Q&A
+    pub const QNA_QUESTION_CREATED: &str = "qna.question_created";
+    pub const QNA_QUESTION_UPVOTED: &str = "qna.question_upvoted";
+    pub const QNA_QUESTION_ANSWERED: &str = "qna.question_answered";
+    pub const QNA_QUESTION_DISMISSED: &str = "qna.question_dismissed";
+    pub const QNA_QUESTION_ARCHIVED: &str = "qna.question_archived";
+    pub const QNA_QUESTION_PINNED: &str = "qna.question_pinned";
+    pub const QNA_QUESTION_UNPINNED: &str = "qna.question_unpinned";
 
     /// Internal provider-control command (never delivered to clients).
     pub fn is_provider_command(event_type: &str) -> bool {
@@ -105,6 +157,63 @@ pub mod action {
     pub const BAN: &str = "BAN";
     pub const MEDIA_MUTE: &str = "MEDIA_MUTE";
     pub const PROVIDER_PARTICIPANT_EVICTED: &str = "PROVIDER_PARTICIPANT_EVICTED";
+    // Part F
+    pub const MEDIA_AUDIO_LOCK: &str = "MEDIA_AUDIO_LOCK";
+    pub const MEDIA_AUDIO_UNLOCK: &str = "MEDIA_AUDIO_UNLOCK";
+    pub const MEDIA_VIDEO_LOCK: &str = "MEDIA_VIDEO_LOCK";
+    pub const MEDIA_VIDEO_UNLOCK: &str = "MEDIA_VIDEO_UNLOCK";
+    pub const MEDIA_SCREEN_SHARE_LOCK: &str = "MEDIA_SCREEN_SHARE_LOCK";
+    pub const MEDIA_SCREEN_SHARE_UNLOCK: &str = "MEDIA_SCREEN_SHARE_UNLOCK";
+    pub const SCREEN_SHARE_STOP: &str = "SCREEN_SHARE_STOP";
+    pub const SPOTLIGHT_SET: &str = "SPOTLIGHT_SET";
+    pub const SPOTLIGHT_REMOVE: &str = "SPOTLIGHT_REMOVE";
+    pub const COLLABORATION_POLICY_UPDATE: &str = "COLLABORATION_POLICY_UPDATE";
+    pub const CHAT_MESSAGE_DELETE: &str = "CHAT_MESSAGE_DELETE";
+    pub const CHAT_PARTICIPANT_RESTRICT: &str = "CHAT_PARTICIPANT_RESTRICT";
+    pub const CHAT_PARTICIPANT_UNRESTRICT: &str = "CHAT_PARTICIPANT_UNRESTRICT";
+    pub const CHAT_ANNOUNCEMENT: &str = "CHAT_ANNOUNCEMENT";
+    pub const HAND_LOWER_OTHER: &str = "HAND_LOWER_OTHER";
+    pub const BREAKOUT_CREATE: &str = "BREAKOUT_CREATE";
+    pub const BREAKOUT_ASSIGN: &str = "BREAKOUT_ASSIGN";
+    pub const BREAKOUT_MOVE: &str = "BREAKOUT_MOVE";
+    pub const BREAKOUT_OPEN: &str = "BREAKOUT_OPEN";
+    pub const BREAKOUT_CLOSE: &str = "BREAKOUT_CLOSE";
+    pub const BREAKOUT_CLOSE_COMPLETE: &str = "BREAKOUT_CLOSE_COMPLETE";
+    pub const BREAKOUT_VISIT: &str = "BREAKOUT_VISIT";
+    pub const BREAKOUT_ANNOUNCE: &str = "BREAKOUT_ANNOUNCE";
+    pub const POLL_CREATE: &str = "POLL_CREATE";
+    pub const POLL_OPEN: &str = "POLL_OPEN";
+    pub const POLL_CLOSE: &str = "POLL_CLOSE";
+    pub const POLL_ARCHIVE: &str = "POLL_ARCHIVE";
+    pub const QNA_ANSWER: &str = "QNA_ANSWER";
+    pub const QNA_DISMISS: &str = "QNA_DISMISS";
+    pub const QNA_PIN: &str = "QNA_PIN";
+    pub const QNA_UNPIN: &str = "QNA_UNPIN";
+    pub const QNA_ARCHIVE: &str = "QNA_ARCHIVE";
+    pub const CONSENT_RECORDED: &str = "CONSENT_RECORDED";
+}
+
+/// Server-side realtime audience of a client event (Part F §57). Stored in
+/// `outbox_events.audience`, evaluated per subscriber, never sent to clients.
+/// `None` (no audience) = every authorized conference subscriber.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum Audience {
+    /// Listed participants, plus subscribers holding `moderator_permission` (if any).
+    Participants {
+        ids: Vec<Uuid>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        moderator_permission: Option<String>,
+    },
+    /// Only subscribers whose role holds this permission (e.g. `poll.view_results`).
+    Permission { permission: String },
+    /// Members / visitors of one breakout room, plus `breakout.enter_any` holders.
+    Breakout { breakout_id: Uuid },
+    /// Everyone not inside a breakout (unless policy shows main chat in breakouts),
+    /// plus `chat.moderate` holders.
+    MainRoom,
+    /// Everyone inside any open breakout, plus `breakout.enter_any` holders.
+    Breakouts,
 }
 
 /// Who performed an audited action.
@@ -212,6 +321,16 @@ async fn next_conference_seq<C: ConnectionTrait>(
 }
 
 pub async fn emit<C: ConnectionTrait>(conn: &C, record: OutboxRecord<'_>) -> ApiResult<()> {
+    emit_to(conn, record, None).await
+}
+
+/// Emit a client event restricted to `audience` (server-side filtered delivery).
+pub async fn emit_to<C: ConnectionTrait>(
+    conn: &C,
+    record: OutboxRecord<'_>,
+    audience: Option<Audience>,
+) -> ApiResult<()> {
+    let audience = audience.map(|a| serde_json::to_value(a).unwrap_or(Value::Null));
     let now = Utc::now();
     let channel = if event::is_provider_command(record.event_type) {
         OutboxChannel::ProviderCommand
@@ -240,6 +359,7 @@ pub async fn emit<C: ConnectionTrait>(conn: &C, record: OutboxRecord<'_>) -> Api
         channel: Set(channel),
         conference_seq: Set(conference_seq),
         locked_by: Set(None),
+        audience: Set(audience),
     }
     .insert(conn)
     .await?;

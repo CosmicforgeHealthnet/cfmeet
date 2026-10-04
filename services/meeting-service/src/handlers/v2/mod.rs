@@ -4,8 +4,11 @@
 //! call one service method, and serialize. No role checks, transactions, policy
 //! orchestration or provider calls live here.
 
+pub mod breakouts;
+pub mod collaboration;
 pub mod compat;
 pub mod conferences;
+pub mod engagement;
 pub mod invitations;
 pub mod members;
 pub mod organizations;

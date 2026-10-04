@@ -33,6 +33,7 @@ use crate::{
     error::{ApiError, ApiResult, ErrorCode},
     services::{
         actor::ActorContext,
+        collaboration::TransientMessage,
         meeting_events::event,
         realtime::{
             conference_channel, envelope, RealtimeService, Subscriber, SubscriberPrincipal,
@@ -293,7 +294,26 @@ async fn run_socket(
         let mut wake = false;
         tokio::select! {
             signal = next_signal(&mut stream) => match signal {
-                Some(Some(_)) => wake = true,
+                Some(Some(msg)) => {
+                    // Part F: transient events (reactions) are delivered straight from the
+                    // fanout after the same server-side audience check; everything else
+                    // only wakes the PostgreSQL tail.
+                    let transient = msg
+                        .get_payload::<String>()
+                        .ok()
+                        .and_then(|b| serde_json::from_str::<TransientMessage>(&b).ok())
+                        .filter(|t| t.transient && t.event.conference_id == Some(conference_id));
+                    match transient {
+                        Some(t) => {
+                            if sub.may_receive_scoped(&t.event, t.audience.as_ref())
+                                && !send_json(&mut tx, json!({ "type": "event", "transient": true, "event": t.event })).await
+                            {
+                                return;
+                            }
+                        }
+                        None => wake = true,
+                    }
+                }
                 _ => {
                     // Fanout lost mid-connection: degrade to PostgreSQL tailing.
                     stream = None;
@@ -338,7 +358,7 @@ async fn run_socket(
                 };
                 last = seq;
                 let Some(env) = envelope(&row) else { continue };
-                if sub.may_receive(&env)
+                if sub.may_receive_row(&row, &env)
                     && !send_json(&mut tx, json!({ "type": "event", "event": env })).await
                 {
                     return;

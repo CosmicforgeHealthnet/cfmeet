@@ -2615,6 +2615,926 @@
         ]
       }
     },
+    "/api/v2/conferences/{id}/breakouts": {
+      "get": {
+        "tags": [
+          "Breakouts (v2)"
+        ],
+        "summary": "Breakout rooms of a conference (members listed for breakout managers only).",
+        "operationId": "v2_list_breakouts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Breakouts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BreakoutListResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "CONFERENCE_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Breakouts (v2)"
+        ],
+        "summary": "Create named or numbered breakout rooms.",
+        "operationId": "v2_create_breakouts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBreakoutsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BreakoutListCreatedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_STATE_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/breakouts/announcement": {
+      "post": {
+        "tags": [
+          "Breakouts (v2)"
+        ],
+        "summary": "Announcement to every open breakout room.",
+        "operationId": "v2_breakout_announcement_all",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BreakoutAnnouncementRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Delivered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnouncementResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "BREAKOUT_CLOSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/breakouts/assign": {
+      "post": {
+        "tags": [
+          "Breakouts (v2)"
+        ],
+        "summary": "Assign participants (MANUAL, RANDOM or BALANCED).",
+        "operationId": "v2_assign_breakouts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignBreakoutsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Assignments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssignmentResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "BREAKOUT_NOT_FOUND / PARTICIPANT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "BREAKOUT_CLOSED / BREAKOUT_ASSIGNMENT_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/breakouts/close-all": {
+      "post": {
+        "tags": [
+          "Breakouts (v2)"
+        ],
+        "summary": "Close every breakout of the conference.",
+        "operationId": "v2_close_all_breakouts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseBreakoutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Closing / closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CloseBreakoutsResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/breakouts/leave": {
+      "post": {
+        "tags": [
+          "Breakouts (v2)"
+        ],
+        "summary": "Leave a breakout visit.",
+        "operationId": "v2_leave_breakout_visit",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Back in the assigned room or main",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaContextResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/breakouts/move": {
+      "post": {
+        "tags": [
+          "Breakouts (v2)"
+        ],
+        "summary": "Move a participant: main → breakout, breakout → breakout, breakout → main.",
+        "operationId": "v2_move_participant",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveParticipantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Moved (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaContextResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "BREAKOUT_NOT_FOUND / PARTICIPANT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "BREAKOUT_CLOSED / BREAKOUT_ASSIGNMENT_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/breakouts/{breakoutId}/announcement": {
+      "post": {
+        "tags": [
+          "Breakouts (v2)"
+        ],
+        "summary": "Announcement to one open breakout room.",
+        "operationId": "v2_breakout_announcement",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "breakoutId",
+            "in": "path",
+            "description": "Breakout id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BreakoutAnnouncementRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Delivered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnouncementResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "BREAKOUT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/breakouts/{breakoutId}/assignments": {
+      "patch": {
+        "tags": [
+          "Breakouts (v2)"
+        ],
+        "summary": "Add / remove participants of one breakout room.",
+        "operationId": "v2_patch_breakout_assignments",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "breakoutId",
+            "in": "path",
+            "description": "Breakout id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoomAssignmentsPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Room",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BreakoutView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "BREAKOUT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "BREAKOUT_CLOSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/breakouts/{breakoutId}/close": {
+      "post": {
+        "tags": [
+          "Breakouts (v2)"
+        ],
+        "summary": "Close one breakout (countdown persisted; 0 = immediate).",
+        "operationId": "v2_close_breakout",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "breakoutId",
+            "in": "path",
+            "description": "Breakout id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseBreakoutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Closing / closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CloseBreakoutsResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "BREAKOUT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/breakouts/{breakoutId}/enter": {
+      "post": {
+        "tags": [
+          "Breakouts (v2)"
+        ],
+        "summary": "Host / co-host enters a breakout room (privileged visit, not an assignment).",
+        "operationId": "v2_enter_breakout",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "breakoutId",
+            "in": "path",
+            "description": "Breakout id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Visiting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaContextResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "BREAKOUT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "BREAKOUT_CLOSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/breakouts/{breakoutId}/open": {
+      "post": {
+        "tags": [
+          "Breakouts (v2)"
+        ],
+        "summary": "Open a breakout room (provider room created, assigned participants rerouted).",
+        "operationId": "v2_open_breakout",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "breakoutId",
+            "in": "path",
+            "description": "Breakout id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Opened (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BreakoutResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "BREAKOUT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "BREAKOUT_CLOSED / CONFERENCE_NOT_LIVE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
     "/api/v2/conferences/{id}/cancel": {
       "post": {
         "tags": [
@@ -2657,6 +3577,221 @@
           },
           "409": {
             "description": "CONFERENCE_STATE_CONFLICT / CONFERENCE_NOT_LIVE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/chat-policy": {
+      "patch": {
+        "tags": [
+          "Chat (v2)"
+        ],
+        "summary": "Update the chat subset of the collaboration policy.",
+        "operationId": "v2_update_chat_policy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatPolicyUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Effective policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollaborationPolicyResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "MEETING_VERSION_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/collaboration": {
+      "get": {
+        "tags": [
+          "Collaboration (v2)"
+        ],
+        "summary": "Canonical collaboration state (REST recovery source for media restrictions,",
+        "description": "spotlight, hand raise, active screen shares and the caller's media context).",
+        "operationId": "v2_collaboration_state",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "State",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollaborationStateResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "CONFERENCE_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/collaboration-policy": {
+      "patch": {
+        "tags": [
+          "Collaboration (v2)"
+        ],
+        "summary": "Update the conference collaboration policy (media locks, screen-share policy, chat,",
+        "description": "reactions, hand raise, Q&A, polls, breakouts, consents).",
+        "operationId": "v2_update_collaboration_policy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollaborationPolicyUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Effective policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollaborationPolicyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "MEETING_VERSION_CONFLICT / CONFERENCE_STATE_CONFLICT",
             "content": {
               "application/json": {
                 "schema": {
@@ -2794,6 +3929,155 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/hand-raise": {
+      "get": {
+        "tags": [
+          "Engagement (v2)"
+        ],
+        "summary": "Raised hands, oldest first.",
+        "operationId": "v2_raised_hands",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Queue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RaisedHandsResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Engagement (v2)"
+        ],
+        "summary": "Raise the caller's own hand.",
+        "operationId": "v2_raise_hand",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Raised (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandRaiseResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "HAND_RAISE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Engagement (v2)"
+        ],
+        "summary": "Lower the caller's own hand.",
+        "operationId": "v2_lower_hand",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lowered (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandRaiseResponse"
                 }
               }
             }
@@ -3034,6 +4318,373 @@
         ]
       }
     },
+    "/api/v2/conferences/{id}/media-credential": {
+      "post": {
+        "tags": [
+          "Media controls (v2)"
+        ],
+        "summary": "Fresh media credential for the caller's own session in its current context (main",
+        "description": "or breakout) with current effective grants — used after moves and for refresh.",
+        "operationId": "v2_media_credential",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MediaCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaCredentialResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_NOT_LIVE / PARTICIPANT_STATE_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "RTC_PROVIDER_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/messages": {
+      "get": {
+        "tags": [
+          "Chat (v2)"
+        ],
+        "summary": "Meeting chat history (database cursor pagination, newest first).",
+        "operationId": "v2_list_messages",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "MAIN (default), BREAKOUT or PRIVATE",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "breakoutId",
+            "in": "query",
+            "description": "BREAKOUT scope room",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "peerId",
+            "in": "query",
+            "description": "PRIVATE scope peer participant",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Cursor",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (max 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true,
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePage"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED / CHAT_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "BREAKOUT_NOT_FOUND / PARTICIPANT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Chat (v2)"
+        ],
+        "summary": "Send a message (sender is always the caller's own participant).",
+        "operationId": "v2_send_message",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CHAT_DISABLED / PRIVATE_CHAT_DISABLED / CHAT_PARTICIPANT_RESTRICTED / PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND / BREAKOUT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_NOT_LIVE / BREAKOUT_CLOSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/messages/{messageId}": {
+      "delete": {
+        "tags": [
+          "Chat (v2)"
+        ],
+        "summary": "Delete / hide a message (moderators, or the sender).",
+        "operationId": "v2_delete_message",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "description": "Message id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangedResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "MESSAGE_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
     "/api/v2/conferences/{id}/participants": {
       "get": {
         "tags": [
@@ -3139,6 +4790,164 @@
         ]
       }
     },
+    "/api/v2/conferences/{id}/participants/{participantId}/audio-lock": {
+      "post": {
+        "tags": [
+          "Media controls (v2)"
+        ],
+        "operationId": "v2_audio_lock",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "participantId",
+            "in": "path",
+            "description": "Participant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Locked (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaLockResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND / CONFERENCE_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_STATE_CONFLICT / PARTICIPANT_STATE_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Media controls (v2)"
+        ],
+        "operationId": "v2_audio_unlock",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "participantId",
+            "in": "path",
+            "description": "Participant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Unlocked (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaLockResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
     "/api/v2/conferences/{id}/participants/{participantId}/ban": {
       "post": {
         "tags": [
@@ -3185,6 +4994,217 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ModerationResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/participants/{participantId}/chat-restriction": {
+      "post": {
+        "tags": [
+          "Chat (v2)"
+        ],
+        "summary": "Disable chat for a participant.",
+        "operationId": "v2_restrict_chat",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "participantId",
+            "in": "path",
+            "description": "Participant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Restricted (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangedResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Chat (v2)"
+        ],
+        "summary": "Re-enable chat for a participant.",
+        "operationId": "v2_unrestrict_chat",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "participantId",
+            "in": "path",
+            "description": "Participant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Unrestricted (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangedResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/participants/{participantId}/hand-raise": {
+      "delete": {
+        "tags": [
+          "Engagement (v2)"
+        ],
+        "summary": "Host lowers another participant's hand.",
+        "operationId": "v2_lower_other_hand",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "participantId",
+            "in": "path",
+            "description": "Participant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lowered (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangedResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -3535,6 +5555,970 @@
         ]
       }
     },
+    "/api/v2/conferences/{id}/participants/{participantId}/screen-share-lock": {
+      "post": {
+        "tags": [
+          "Media controls (v2)"
+        ],
+        "operationId": "v2_screen_share_lock",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "participantId",
+            "in": "path",
+            "description": "Participant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Locked (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaLockResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND / CONFERENCE_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_STATE_CONFLICT / PARTICIPANT_STATE_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Media controls (v2)"
+        ],
+        "operationId": "v2_screen_share_unlock",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "participantId",
+            "in": "path",
+            "description": "Participant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Unlocked (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaLockResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/participants/{participantId}/video-lock": {
+      "post": {
+        "tags": [
+          "Media controls (v2)"
+        ],
+        "operationId": "v2_video_lock",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "participantId",
+            "in": "path",
+            "description": "Participant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Locked (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaLockResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND / CONFERENCE_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_STATE_CONFLICT / PARTICIPANT_STATE_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Media controls (v2)"
+        ],
+        "operationId": "v2_video_unlock",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "participantId",
+            "in": "path",
+            "description": "Participant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Unlocked (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaLockResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/polls": {
+      "get": {
+        "tags": [
+          "Polls (v2)"
+        ],
+        "summary": "Polls of a conference (drafts for poll managers only; quiz answers protected).",
+        "operationId": "v2_list_polls",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Polls",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PollListResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Polls (v2)"
+        ],
+        "summary": "Create a poll or quiz (DRAFT).",
+        "operationId": "v2_create_poll",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePollRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PollView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED / POLLS_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/polls/{pollId}": {
+      "get": {
+        "tags": [
+          "Polls (v2)"
+        ],
+        "summary": "One poll.",
+        "operationId": "v2_get_poll",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "pollId",
+            "in": "path",
+            "description": "Poll id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Poll",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PollView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "POLL_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/polls/{pollId}/archive": {
+      "post": {
+        "tags": [
+          "Polls (v2)"
+        ],
+        "summary": "CLOSED → ARCHIVED (or cancel a DRAFT).",
+        "operationId": "v2_archive_poll",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "pollId",
+            "in": "path",
+            "description": "Poll id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transitioned (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PollTransitionResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "POLL_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "POLL_NOT_OPEN / CONFERENCE_STATE_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/polls/{pollId}/close": {
+      "post": {
+        "tags": [
+          "Polls (v2)"
+        ],
+        "summary": "OPEN → CLOSED (never reopened).",
+        "operationId": "v2_close_poll",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "pollId",
+            "in": "path",
+            "description": "Poll id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transitioned (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PollTransitionResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "POLL_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "POLL_NOT_OPEN / CONFERENCE_STATE_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/polls/{pollId}/open": {
+      "post": {
+        "tags": [
+          "Polls (v2)"
+        ],
+        "summary": "DRAFT → OPEN.",
+        "operationId": "v2_open_poll",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "pollId",
+            "in": "path",
+            "description": "Poll id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transitioned (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PollTransitionResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "POLL_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "POLL_NOT_OPEN / CONFERENCE_STATE_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/polls/{pollId}/responses": {
+      "post": {
+        "tags": [
+          "Polls (v2)"
+        ],
+        "summary": "Submit the caller's own response (one ballot per participant).",
+        "operationId": "v2_submit_poll_response",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "pollId",
+            "in": "path",
+            "description": "Poll id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitPollResponseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PollResponseReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "POLL_RESPONSE_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "POLL_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "POLL_NOT_OPEN / POLL_ALREADY_RESPONDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/polls/{pollId}/results": {
+      "get": {
+        "tags": [
+          "Polls (v2)"
+        ],
+        "summary": "Aggregate results, subject to the poll's visibility mode.",
+        "operationId": "v2_poll_results",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "pollId",
+            "in": "path",
+            "description": "Poll id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PollResults"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "POLL_RESULTS_NOT_VISIBLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "POLL_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/pre-join": {
+      "get": {
+        "tags": [
+          "Collaboration (v2)"
+        ],
+        "summary": "Pre-join contract: everything a pre-join screen needs before the media join.",
+        "operationId": "v2_pre_join",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pre-join view",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreJoinResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "CONFERENCE_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {},
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
     "/api/v2/conferences/{id}/prepare": {
       "post": {
         "tags": [
@@ -3577,6 +6561,690 @@
           },
           "409": {
             "description": "CONFERENCE_STATE_CONFLICT / CONFERENCE_NOT_LIVE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/questions": {
+      "get": {
+        "tags": [
+          "Q&A (v2)"
+        ],
+        "summary": "Questions (pinned first, then by upvotes).",
+        "operationId": "v2_list_questions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Questions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuestionListResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Q&A (v2)"
+        ],
+        "summary": "Ask a question (optionally anonymous).",
+        "operationId": "v2_submit_question",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitQuestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuestionView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "QNA_DISABLED / PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/questions/{questionId}/answer": {
+      "post": {
+        "tags": [
+          "Q&A (v2)"
+        ],
+        "summary": "Answer a question (first committed answer wins).",
+        "operationId": "v2_answer_question",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "questionId",
+            "in": "path",
+            "description": "Question id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerQuestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Answered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuestionActionResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "QUESTION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_STATE_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/questions/{questionId}/archive": {
+      "post": {
+        "tags": [
+          "Q&A (v2)"
+        ],
+        "summary": "Archive a question.",
+        "operationId": "v2_archive_question",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "questionId",
+            "in": "path",
+            "description": "Question id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Archived",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuestionActionResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "QUESTION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/questions/{questionId}/dismiss": {
+      "post": {
+        "tags": [
+          "Q&A (v2)"
+        ],
+        "summary": "Dismiss a question.",
+        "operationId": "v2_dismiss_question",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "questionId",
+            "in": "path",
+            "description": "Question id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Dismissed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuestionActionResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "QUESTION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/questions/{questionId}/pin": {
+      "post": {
+        "tags": [
+          "Q&A (v2)"
+        ],
+        "summary": "Pin a question.",
+        "operationId": "v2_pin_question",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "questionId",
+            "in": "path",
+            "description": "Question id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pinned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuestionActionResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_STATE_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Q&A (v2)"
+        ],
+        "summary": "Unpin a question.",
+        "operationId": "v2_unpin_question",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "questionId",
+            "in": "path",
+            "description": "Question id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Unpinned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuestionActionResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/questions/{questionId}/vote": {
+      "post": {
+        "tags": [
+          "Q&A (v2)"
+        ],
+        "summary": "Upvote a question (idempotent).",
+        "operationId": "v2_vote_question",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "questionId",
+            "in": "path",
+            "description": "Question id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Voted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuestionActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "QUESTION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_STATE_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Q&A (v2)"
+        ],
+        "summary": "Remove the caller's upvote (idempotent).",
+        "operationId": "v2_unvote_question",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "questionId",
+            "in": "path",
+            "description": "Question id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Vote removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuestionActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "QUESTION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/reactions": {
+      "post": {
+        "tags": [
+          "Engagement (v2)"
+        ],
+        "summary": "Send a transient reaction (no stored row).",
+        "operationId": "v2_send_reaction",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReactionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReactionResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "REACTIONS_DISABLED / PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
             "content": {
               "application/json": {
                 "schema": {
@@ -3807,6 +7475,239 @@
         "security": [
           {
             "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/screen-share/{participantId}/stop": {
+      "post": {
+        "tags": [
+          "Media controls (v2)"
+        ],
+        "summary": "STOP SHARE NOW: terminate a participant's active screen share (not a lock).",
+        "operationId": "v2_stop_screen_share",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "participantId",
+            "in": "path",
+            "description": "Sharing participant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Provider confirmed the share ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StopScreenShareResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCREEN_SHARE_NOT_ACTIVE / CONFERENCE_NOT_LIVE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "RTC_PROVIDER_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/spotlights": {
+      "post": {
+        "tags": [
+          "Media controls (v2)"
+        ],
+        "summary": "Spotlight a participant (shared presentation metadata; personal pins stay client-side).",
+        "operationId": "v2_spotlight",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpotlightRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Current spotlights",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpotlightListResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/spotlights/{participantId}": {
+      "delete": {
+        "tags": [
+          "Media controls (v2)"
+        ],
+        "summary": "Remove a spotlight.",
+        "operationId": "v2_remove_spotlight",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "participantId",
+            "in": "path",
+            "description": "Participant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current spotlights",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpotlightListResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
           }
         ]
       }
@@ -6012,6 +9913,30 @@
         },
         "additionalProperties": false
       },
+      "AnnouncementResponse": {
+        "type": "object",
+        "required": [
+          "rooms"
+        ],
+        "properties": {
+          "rooms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "AnswerQuestionRequest": {
+        "type": "object",
+        "properties": {
+          "answer": {
+            "type": "string",
+            "description": "Optional written answer (omit when answered live).",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "ApiCreateMeetingRequest": {
         "type": "object",
         "description": "Request to create a meeting via API key\n\n**Note**: `start_time` and `end_time` are in the user's local timezone.\nThe `timezone` field must be a valid IANA timezone string.",
@@ -6123,6 +10048,103 @@
           "used_count": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "AssignBreakoutsRequest": {
+        "type": "object",
+        "properties": {
+          "assignments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManualAssignment"
+            },
+            "description": "MANUAL: explicit participant → breakout mapping.",
+            "nullable": true
+          },
+          "breakoutIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "RANDOM / BALANCED: target rooms (default: every CREATED/OPEN room).",
+            "nullable": true
+          },
+          "includeHosts": {
+            "type": "boolean",
+            "description": "Include OWNER/HOST/CO_HOST participants (default false)."
+          },
+          "includeViewers": {
+            "type": "boolean",
+            "description": "Include VIEWER participants (default true).",
+            "nullable": true
+          },
+          "mode": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AssignmentMode"
+              }
+            ],
+            "nullable": true
+          },
+          "onlyUnassigned": {
+            "type": "boolean",
+            "description": "Only distribute participants without an assignment (default true).",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "AssignmentMode": {
+        "type": "string",
+        "enum": [
+          "MANUAL",
+          "RANDOM",
+          "BALANCED"
+        ]
+      },
+      "AssignmentPair": {
+        "type": "object",
+        "required": [
+          "participantId",
+          "breakoutId"
+        ],
+        "properties": {
+          "breakoutId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "participantId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "AssignmentResult": {
+        "type": "object",
+        "required": [
+          "assigned",
+          "unassigned",
+          "enforcement"
+        ],
+        "properties": {
+          "assigned": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AssignmentPair"
+            }
+          },
+          "enforcement": {
+            "type": "string"
+          },
+          "unassigned": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Eligible participants left unassigned (all rooms at capacity)."
           }
         }
       },
@@ -6260,6 +10282,164 @@
           "Guest"
         ]
       },
+      "BreakoutAnnouncementRequest": {
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "BreakoutListCreatedResponse": {
+        "type": "object",
+        "required": [
+          "breakouts"
+        ],
+        "properties": {
+          "breakouts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BreakoutView"
+            }
+          }
+        }
+      },
+      "BreakoutListResponse": {
+        "type": "object",
+        "required": [
+          "breakouts"
+        ],
+        "properties": {
+          "breakouts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BreakoutView"
+            }
+          },
+          "myContext": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MediaContextView"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "BreakoutRecordingPolicy": {
+        "type": "string",
+        "description": "Breakout recording metadata only — recording itself is Part G.",
+        "enum": [
+          "INHERIT_MAIN_POLICY",
+          "DISABLED",
+          "SEPARATE_ALLOWED"
+        ]
+      },
+      "BreakoutResponse": {
+        "type": "object",
+        "required": [
+          "breakout",
+          "changed",
+          "providerEnforcement"
+        ],
+        "properties": {
+          "breakout": {
+            "$ref": "#/components/schemas/BreakoutView"
+          },
+          "changed": {
+            "type": "boolean"
+          },
+          "providerEnforcement": {
+            "$ref": "#/components/schemas/ProviderEnforcement"
+          }
+        }
+      },
+      "BreakoutStatus": {
+        "type": "string",
+        "enum": [
+          "CREATED",
+          "OPEN",
+          "CLOSING",
+          "CLOSED"
+        ]
+      },
+      "BreakoutView": {
+        "type": "object",
+        "required": [
+          "id",
+          "conferenceId",
+          "name",
+          "status",
+          "position",
+          "recordingPolicy",
+          "participantCount",
+          "version"
+        ],
+        "properties": {
+          "capacity": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "closedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "closingAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "conferenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "openedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "participantCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "participantIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Assigned participant ids — only for roles that manage breakouts.",
+            "nullable": true
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "recordingPolicy": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BreakoutStatus"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "BulkAdmissionResponse": {
         "type": "object",
         "required": [
@@ -6290,6 +10470,17 @@
               "format": "uuid"
             },
             "description": "Already in the requested state (idempotent retry)."
+          }
+        }
+      },
+      "ChangedResponse": {
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "properties": {
+          "changed": {
+            "type": "boolean"
           }
         }
       },
@@ -6339,6 +10530,403 @@
           },
           "success": {
             "type": "boolean"
+          }
+        }
+      },
+      "ChatPolicyUpdateRequest": {
+        "type": "object",
+        "description": "Chat-only subset of the collaboration policy.",
+        "required": [
+          "collaborationVersion"
+        ],
+        "properties": {
+          "breakoutChatEnabled": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "chatEnabled": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "chatSendMode": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ChatSendMode"
+              }
+            ],
+            "nullable": true
+          },
+          "collaborationVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "mainChatVisibleInBreakouts": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "privateChatMode": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PrivateChatMode"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChatSendMode": {
+        "type": "string",
+        "enum": [
+          "EVERYONE",
+          "HOSTS_ONLY"
+        ]
+      },
+      "CloseBreakoutRequest": {
+        "type": "object",
+        "properties": {
+          "countdownSeconds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Grace period before participants return (0 = immediate, max 600).",
+            "nullable": true,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "CloseBreakoutsResponse": {
+        "type": "object",
+        "required": [
+          "breakouts",
+          "providerEnforcement"
+        ],
+        "properties": {
+          "breakouts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BreakoutView"
+            }
+          },
+          "providerEnforcement": {
+            "$ref": "#/components/schemas/ProviderEnforcement"
+          }
+        }
+      },
+      "CollaborationPolicy": {
+        "type": "object",
+        "description": "Complete effective collaboration policy of a conference.",
+        "required": [
+          "screenSharePolicy",
+          "audioLocked",
+          "videoLocked",
+          "maxSpotlights",
+          "chatEnabled",
+          "chatSendMode",
+          "privateChatMode",
+          "breakoutChatEnabled",
+          "mainChatVisibleInBreakouts",
+          "reactionsEnabled",
+          "allowedReactions",
+          "handRaiseEnabled",
+          "qnaEnabled",
+          "qnaAnonymousAllowed",
+          "pollsEnabled",
+          "maxBreakouts",
+          "breakoutRecordingPolicy",
+          "requiredConsents",
+          "consentVersion",
+          "aiNotice"
+        ],
+        "properties": {
+          "aiNotice": {
+            "type": "boolean",
+            "description": "Show an AI-processing notice before join (no AI runs in Part F)."
+          },
+          "allowedReactions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "audioLocked": {
+            "type": "boolean",
+            "description": "Conference-wide microphone lock for every role without `participant.mute`."
+          },
+          "breakoutChatEnabled": {
+            "type": "boolean"
+          },
+          "breakoutRecordingPolicy": {
+            "$ref": "#/components/schemas/BreakoutRecordingPolicy"
+          },
+          "chatEnabled": {
+            "type": "boolean"
+          },
+          "chatSendMode": {
+            "$ref": "#/components/schemas/ChatSendMode"
+          },
+          "consentVersion": {
+            "type": "string"
+          },
+          "handRaiseEnabled": {
+            "type": "boolean"
+          },
+          "mainChatVisibleInBreakouts": {
+            "type": "boolean",
+            "description": "Whether participants inside a breakout still see (read-only) main chat."
+          },
+          "maxBreakouts": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "maxSpotlights": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "pollsEnabled": {
+            "type": "boolean"
+          },
+          "privateChatMode": {
+            "$ref": "#/components/schemas/PrivateChatMode"
+          },
+          "qnaAnonymousAllowed": {
+            "type": "boolean"
+          },
+          "qnaEnabled": {
+            "type": "boolean"
+          },
+          "reactionsEnabled": {
+            "type": "boolean"
+          },
+          "requiredConsents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConsentKind"
+            },
+            "description": "Consents an attendee must grant before admission (pre-join contract)."
+          },
+          "screenSharePolicy": {
+            "$ref": "#/components/schemas/ScreenSharePolicy"
+          },
+          "videoLocked": {
+            "type": "boolean",
+            "description": "Conference-wide camera lock for every role without `participant.mute`."
+          }
+        }
+      },
+      "CollaborationPolicyPatch": {
+        "type": "object",
+        "description": "Sparse override. Unknown fields are rejected.",
+        "properties": {
+          "aiNotice": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "allowedReactions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "audioLocked": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "breakoutChatEnabled": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "breakoutRecordingPolicy": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BreakoutRecordingPolicy"
+              }
+            ],
+            "nullable": true
+          },
+          "chatEnabled": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "chatSendMode": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ChatSendMode"
+              }
+            ],
+            "nullable": true
+          },
+          "consentVersion": {
+            "type": "string",
+            "nullable": true
+          },
+          "handRaiseEnabled": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "mainChatVisibleInBreakouts": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "maxBreakouts": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "maxSpotlights": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true,
+            "minimum": 0
+          },
+          "pollsEnabled": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "privateChatMode": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PrivateChatMode"
+              }
+            ],
+            "nullable": true
+          },
+          "qnaAnonymousAllowed": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "qnaEnabled": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "reactionsEnabled": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "requiredConsents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConsentKind"
+            },
+            "nullable": true
+          },
+          "screenSharePolicy": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ScreenSharePolicy"
+              }
+            ],
+            "nullable": true
+          },
+          "videoLocked": {
+            "type": "boolean",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CollaborationPolicyResponse": {
+        "type": "object",
+        "required": [
+          "conferenceId",
+          "collaborationVersion",
+          "policy",
+          "providerEnforcement"
+        ],
+        "properties": {
+          "collaborationVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "conferenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/CollaborationPolicy"
+          },
+          "providerEnforcement": {
+            "$ref": "#/components/schemas/ProviderEnforcement"
+          }
+        }
+      },
+      "CollaborationPolicyUpdateRequest": {
+        "type": "object",
+        "required": [
+          "collaborationVersion",
+          "changes"
+        ],
+        "properties": {
+          "changes": {
+            "$ref": "#/components/schemas/CollaborationPolicyPatch"
+          },
+          "collaborationVersion": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Optimistic concurrency: the `collaborationVersion` the client last read."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CollaborationStateResponse": {
+        "type": "object",
+        "description": "Canonical collaboration snapshot (REST recovery after realtime gaps).",
+        "required": [
+          "conferenceId",
+          "collaborationVersion",
+          "eventSequence",
+          "policy",
+          "spotlights",
+          "raisedHands",
+          "activeScreenShares"
+        ],
+        "properties": {
+          "activeScreenShares": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "collaborationVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "conferenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "eventSequence": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Realtime cursor this snapshot is at least as new as."
+          },
+          "me": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MyCollaborationState"
+              }
+            ],
+            "nullable": true
+          },
+          "policy": {
+            "$ref": "#/components/schemas/CollaborationPolicy"
+          },
+          "raisedHands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RaisedHand"
+            }
+          },
+          "spotlights": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpotlightView"
+            }
           }
         }
       },
@@ -6495,6 +11083,33 @@
           "Failed"
         ]
       },
+      "ConsentGrant": {
+        "type": "object",
+        "required": [
+          "type",
+          "version"
+        ],
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/ConsentKind"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ConsentKind": {
+        "type": "string",
+        "description": "Explicit pre-join consent kinds (`meeting_consents.consent_type`).",
+        "enum": [
+          "RECORDING",
+          "TRANSCRIPTION",
+          "AI_PROCESSING",
+          "HEALTHCARE_TERMS",
+          "PRIVACY_NOTICE"
+        ]
+      },
       "CreateApiKeyApiResponse": {
         "type": "object",
         "description": "API response wrapper for create API key",
@@ -6556,6 +11171,40 @@
             "format": "int32"
           }
         }
+      },
+      "CreateBreakoutsRequest": {
+        "type": "object",
+        "properties": {
+          "capacity": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of automatically numbered rooms (\"Room N\").",
+            "nullable": true,
+            "minimum": 0
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Named rooms. Mutually exclusive with `count`.",
+            "nullable": true
+          },
+          "recordingPolicy": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BreakoutRecordingPolicy"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
       },
       "CreateConferenceRequest": {
         "type": "object",
@@ -6686,6 +11335,14 @@
             ],
             "nullable": true
           },
+          "collaborationPolicy": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CollaborationPolicyPatch"
+              }
+            ],
+            "nullable": true
+          },
           "defaultRole": {
             "allOf": [
               {
@@ -6808,6 +11465,39 @@
           "slug": {
             "type": "string",
             "description": "Lowercase letters, digits and '-'."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreatePollRequest": {
+        "type": "object",
+        "required": [
+          "title",
+          "questions"
+        ],
+        "properties": {
+          "anonymous": {
+            "type": "boolean"
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PollQuestionInput"
+            }
+          },
+          "quizMode": {
+            "type": "boolean"
+          },
+          "resultsVisibility": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ResultsVisibility"
+              }
+            ],
+            "nullable": true
+          },
+          "title": {
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -7055,7 +11745,29 @@
           "FEATURE_DISABLED",
           "RTC_PROVIDER_UNAVAILABLE",
           "RECORDING_NOT_ALLOWED",
-          "REVOCATION_CHECK_UNAVAILABLE"
+          "REVOCATION_CHECK_UNAVAILABLE",
+          "MEDIA_PERMISSION_DENIED",
+          "MEDIA_LOCKED",
+          "SCREEN_SHARE_NOT_ALLOWED",
+          "SCREEN_SHARE_NOT_ACTIVE",
+          "CHAT_DISABLED",
+          "PRIVATE_CHAT_DISABLED",
+          "CHAT_PARTICIPANT_RESTRICTED",
+          "REACTIONS_DISABLED",
+          "HAND_RAISE_DISABLED",
+          "BREAKOUT_NOT_FOUND",
+          "BREAKOUT_CLOSED",
+          "BREAKOUT_ASSIGNMENT_CONFLICT",
+          "POLL_NOT_FOUND",
+          "POLL_NOT_OPEN",
+          "POLL_ALREADY_RESPONDED",
+          "POLL_RESPONSE_INVALID",
+          "POLL_RESULTS_NOT_VISIBLE",
+          "QUESTION_NOT_FOUND",
+          "QNA_DISABLED",
+          "POLLS_DISABLED",
+          "MESSAGE_NOT_FOUND",
+          "CONSENT_REQUIRED"
         ]
       },
       "ErrorEnvelope": {
@@ -7111,6 +11823,31 @@
         "properties": {
           "email": {
             "type": "string"
+          }
+        }
+      },
+      "HandRaiseResponse": {
+        "type": "object",
+        "required": [
+          "participantId",
+          "raised",
+          "changed"
+        ],
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          },
+          "participantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "raised": {
+            "type": "boolean"
+          },
+          "raisedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           }
         }
       },
@@ -7254,6 +11991,14 @@
       "JoinConferenceRequest": {
         "type": "object",
         "properties": {
+          "consents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConsentGrant"
+            },
+            "description": "Part F: explicit consents granted before admission (see the pre-join contract).",
+            "nullable": true
+          },
           "displayName": {
             "type": "string",
             "description": "Presentation name only — never identity. Required for guests.",
@@ -7288,11 +12033,15 @@
           "participant",
           "rtcStatus",
           "permissions",
-          "policy"
+          "policy",
+          "mediaContext"
         ],
         "properties": {
           "conference": {
             "$ref": "#/components/schemas/JoinConferenceSummary"
+          },
+          "mediaContext": {
+            "$ref": "#/components/schemas/MediaContextView"
           },
           "participant": {
             "$ref": "#/components/schemas/ParticipantResponse"
@@ -7571,6 +12320,24 @@
           }
         }
       },
+      "ManualAssignment": {
+        "type": "object",
+        "required": [
+          "participantId",
+          "breakoutId"
+        ],
+        "properties": {
+          "breakoutId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "participantId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
       "MediaCapturePolicy": {
         "type": "string",
         "description": "Recording and transcription policy share one representation.",
@@ -7580,6 +12347,119 @@
           "AutoStart",
           "OrganizationControlled"
         ]
+      },
+      "MediaContextResponse": {
+        "type": "object",
+        "required": [
+          "mediaContext",
+          "changed",
+          "providerEnforcement"
+        ],
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          },
+          "mediaContext": {
+            "$ref": "#/components/schemas/MediaContextView"
+          },
+          "participantId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "providerEnforcement": {
+            "$ref": "#/components/schemas/ProviderEnforcement"
+          }
+        }
+      },
+      "MediaContextView": {
+        "type": "object",
+        "required": [
+          "kind",
+          "visit"
+        ],
+        "properties": {
+          "breakoutId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "kind": {
+            "type": "string",
+            "description": "MAIN or BREAKOUT."
+          },
+          "visit": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MediaCredentialRequest": {
+        "type": "object",
+        "required": [
+          "participantSessionId"
+        ],
+        "properties": {
+          "participantSessionId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MediaCredentialResponse": {
+        "type": "object",
+        "required": [
+          "rtc",
+          "mediaContext",
+          "permissions"
+        ],
+        "properties": {
+          "mediaContext": {
+            "$ref": "#/components/schemas/MediaContextView"
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/JoinPermissions"
+          },
+          "rtc": {
+            "$ref": "#/components/schemas/RtcCredentialResponse"
+          }
+        }
+      },
+      "MediaLockResponse": {
+        "type": "object",
+        "required": [
+          "participantId",
+          "audioLocked",
+          "videoLocked",
+          "screenShareLocked",
+          "changed",
+          "permissions",
+          "providerEnforcement"
+        ],
+        "properties": {
+          "audioLocked": {
+            "type": "boolean"
+          },
+          "changed": {
+            "type": "boolean"
+          },
+          "participantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/JoinPermissions"
+          },
+          "providerEnforcement": {
+            "$ref": "#/components/schemas/ProviderEnforcement"
+          },
+          "screenShareLocked": {
+            "type": "boolean"
+          },
+          "videoLocked": {
+            "type": "boolean"
+          }
+        }
       },
       "MediaPermissions": {
         "type": "object",
@@ -7796,6 +12676,14 @@
           "archivedAt": {
             "type": "string",
             "format": "date-time",
+            "nullable": true
+          },
+          "collaborationPolicy": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CollaborationPolicyPatch"
+              }
+            ],
             "nullable": true
           },
           "createdAt": {
@@ -8026,6 +12914,66 @@
           "Revoked"
         ]
       },
+      "MessageKind": {
+        "type": "string",
+        "enum": [
+          "MESSAGE",
+          "ANNOUNCEMENT",
+          "BREAKOUT_ANNOUNCEMENT"
+        ]
+      },
+      "MessageListQuery": {
+        "type": "object",
+        "properties": {
+          "before": {
+            "type": "string",
+            "description": "Cursor from a previous page (`nextCursor`).",
+            "nullable": true
+          },
+          "breakoutId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "minimum": 0
+          },
+          "peerId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "PRIVATE: the other participant of the conversation.",
+            "nullable": true
+          },
+          "scope": {
+            "type": "string",
+            "description": "MAIN (default), BREAKOUT or PRIVATE.",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "MessagePage": {
+        "type": "object",
+        "required": [
+          "messages"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageView"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "description": "Pass as `before` to fetch older messages; absent at the end.",
+            "nullable": true
+          }
+        }
+      },
       "MessageResponse": {
         "type": "object",
         "required": [
@@ -8034,6 +12982,60 @@
         "properties": {
           "message": {
             "type": "string"
+          }
+        }
+      },
+      "MessageView": {
+        "type": "object",
+        "required": [
+          "id",
+          "conferenceId",
+          "senderParticipantId",
+          "senderDisplayName",
+          "kind",
+          "deleted",
+          "createdAt"
+        ],
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "`null` once deleted by moderation.",
+            "nullable": true
+          },
+          "breakoutId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "conferenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind"
+          },
+          "recipientParticipantId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "senderDisplayName": {
+            "type": "string"
+          },
+          "senderParticipantId": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -8056,6 +13058,25 @@
             "$ref": "#/components/schemas/ProviderEnforcement"
           }
         }
+      },
+      "MoveParticipantRequest": {
+        "type": "object",
+        "required": [
+          "participantId"
+        ],
+        "properties": {
+          "participantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "toBreakoutId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Target breakout; null = back to the main conference.",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
       },
       "MuteRequest": {
         "type": "object",
@@ -8096,6 +13117,51 @@
           },
           "trackKind": {
             "$ref": "#/components/schemas/TrackKind"
+          }
+        }
+      },
+      "MyCollaborationState": {
+        "type": "object",
+        "required": [
+          "participantId",
+          "role",
+          "permissions",
+          "audioLocked",
+          "videoLocked",
+          "screenShareLocked",
+          "chatRestricted",
+          "mediaContext"
+        ],
+        "properties": {
+          "audioLocked": {
+            "type": "boolean"
+          },
+          "chatRestricted": {
+            "type": "boolean"
+          },
+          "handRaisedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "mediaContext": {
+            "$ref": "#/components/schemas/MediaContextView"
+          },
+          "participantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/JoinPermissions"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "screenShareLocked": {
+            "type": "boolean"
+          },
+          "videoLocked": {
+            "type": "boolean"
           }
         }
       },
@@ -8368,11 +13434,728 @@
           }
         }
       },
+      "PollAnswer": {
+        "type": "object",
+        "description": "Validated answer, as stored.",
+        "properties": {
+          "optionIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "ranking": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "rating": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "text": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "PollAnswerInput": {
+        "type": "object",
+        "required": [
+          "questionId"
+        ],
+        "properties": {
+          "optionIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "questionId": {
+            "type": "string"
+          },
+          "ranking": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "rating": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "text": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PollListResponse": {
+        "type": "object",
+        "required": [
+          "polls"
+        ],
+        "properties": {
+          "polls": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PollView"
+            }
+          }
+        }
+      },
+      "PollOption": {
+        "type": "object",
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "PollQuestion": {
+        "type": "object",
+        "description": "Stored, validated question.",
+        "required": [
+          "id",
+          "type",
+          "prompt",
+          "required"
+        ],
+        "properties": {
+          "correct": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Option ids (choice/ranking) or rating value as string. Stripped from public views.",
+            "nullable": true
+          },
+          "id": {
+            "type": "string"
+          },
+          "maxLength": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 0
+          },
+          "maxSelections": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 0
+          },
+          "minSelections": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 0
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PollOption"
+            }
+          },
+          "points": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "ratingMax": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "ratingMin": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "type": {
+            "$ref": "#/components/schemas/PollQuestionType"
+          }
+        }
+      },
+      "PollQuestionInput": {
+        "type": "object",
+        "required": [
+          "type",
+          "prompt"
+        ],
+        "properties": {
+          "correct": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Quiz: correct option indexes (choice), the exact order (ranking) or `[value]`\n(rating). Never returned before the results state allows it.",
+            "nullable": true
+          },
+          "maxLength": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 0
+          },
+          "maxSelections": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 0
+          },
+          "minSelections": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 0
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Option labels (choice / ranking). Ids `o1…oN` are assigned by the server.",
+            "nullable": true
+          },
+          "points": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "ratingMax": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "ratingMin": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "type": {
+            "$ref": "#/components/schemas/PollQuestionType"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PollQuestionType": {
+        "type": "string",
+        "enum": [
+          "SINGLE_CHOICE",
+          "MULTIPLE_CHOICE",
+          "SHORT_TEXT",
+          "LONG_TEXT",
+          "RATING",
+          "RANKING"
+        ]
+      },
+      "PollResponseReceipt": {
+        "type": "object",
+        "required": [
+          "pollId",
+          "recorded",
+          "idempotentReplay"
+        ],
+        "properties": {
+          "idempotentReplay": {
+            "type": "boolean",
+            "description": "true when this request was a retry of an already-recorded ballot."
+          },
+          "maxScore": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "pollId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recorded": {
+            "type": "boolean"
+          },
+          "score": {
+            "type": "number",
+            "format": "double",
+            "description": "Quiz score, only where the results state already allows it (AFTER_VOTE,\nnon-anonymous).",
+            "nullable": true
+          }
+        }
+      },
+      "PollResults": {
+        "type": "object",
+        "required": [
+          "pollId",
+          "status",
+          "anonymous",
+          "responseCount",
+          "questions"
+        ],
+        "properties": {
+          "anonymous": {
+            "type": "boolean"
+          },
+          "averageScore": {
+            "type": "number",
+            "format": "double",
+            "description": "Quiz: average score and maximum (aggregate only).",
+            "nullable": true
+          },
+          "maxScore": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "myScore": {
+            "type": "number",
+            "format": "double",
+            "description": "The caller's own score (non-anonymous quiz, results visible).",
+            "nullable": true
+          },
+          "pollId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuestionResult"
+            }
+          },
+          "responseCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/PollStatus"
+          }
+        }
+      },
+      "PollStatus": {
+        "type": "string",
+        "enum": [
+          "DRAFT",
+          "OPEN",
+          "CLOSED",
+          "ARCHIVED"
+        ]
+      },
+      "PollTransitionResponse": {
+        "type": "object",
+        "required": [
+          "poll",
+          "changed"
+        ],
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          },
+          "poll": {
+            "$ref": "#/components/schemas/PollView"
+          }
+        }
+      },
+      "PollView": {
+        "type": "object",
+        "required": [
+          "id",
+          "conferenceId",
+          "title",
+          "status",
+          "anonymous",
+          "quizMode",
+          "resultsVisibility",
+          "questions",
+          "responseCount",
+          "hasResponded",
+          "createdAt",
+          "version"
+        ],
+        "properties": {
+          "anonymous": {
+            "type": "boolean"
+          },
+          "archivedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "closedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "conferenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "hasResponded": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "openedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PollQuestion"
+            }
+          },
+          "quizMode": {
+            "type": "boolean"
+          },
+          "responseCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "resultsVisibility": {
+            "$ref": "#/components/schemas/ResultsVisibility"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PollStatus"
+          },
+          "title": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "PreJoinAccess": {
+        "type": "object",
+        "required": [
+          "accessPolicy",
+          "authenticationRequired",
+          "invitationRequired",
+          "passcodeRequired",
+          "externalAuthorization",
+          "waitingRoomExpected",
+          "alreadyAuthorized"
+        ],
+        "properties": {
+          "accessPolicy": {
+            "$ref": "#/components/schemas/AccessPolicy"
+          },
+          "alreadyAuthorized": {
+            "type": "boolean"
+          },
+          "authenticationRequired": {
+            "type": "boolean"
+          },
+          "externalAuthorization": {
+            "type": "boolean",
+            "description": "Decided by an external authority (e.g. a healthcare appointment)."
+          },
+          "invitationRequired": {
+            "type": "boolean"
+          },
+          "passcodeRequired": {
+            "type": "boolean"
+          },
+          "waitingRoomExpected": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PreJoinConsents": {
+        "type": "object",
+        "required": [
+          "required",
+          "version",
+          "granted"
+        ],
+        "properties": {
+          "granted": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConsentKind"
+            },
+            "description": "Already granted by the caller's participant (rejoin)."
+          },
+          "required": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConsentKind"
+            },
+            "description": "Must be granted (join request `consents`) before admission."
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "PreJoinDevices": {
+        "type": "object",
+        "description": "Client-side device contract. The backend never needs device ids for authorization.",
+        "required": [
+          "cameraPreview",
+          "cameraSelection",
+          "microphoneSelection",
+          "microphoneTest",
+          "speakerSelection",
+          "backgroundEffects",
+          "deviceIdentifiersCollected"
+        ],
+        "properties": {
+          "backgroundEffects": {
+            "type": "string",
+            "description": "Background blur / replacement run client-side only."
+          },
+          "cameraPreview": {
+            "type": "boolean"
+          },
+          "cameraSelection": {
+            "type": "boolean"
+          },
+          "deviceIdentifiersCollected": {
+            "type": "boolean",
+            "description": "Device ids, labels and fingerprints are never sent or stored."
+          },
+          "microphoneSelection": {
+            "type": "boolean"
+          },
+          "microphoneTest": {
+            "type": "boolean"
+          },
+          "speakerSelection": {
+            "type": "string",
+            "description": "Speaker selection depends on the platform (setSinkId support)."
+          }
+        }
+      },
+      "PreJoinDisplayName": {
+        "type": "object",
+        "required": [
+          "editable",
+          "identityBearing"
+        ],
+        "properties": {
+          "editable": {
+            "type": "boolean"
+          },
+          "identityBearing": {
+            "type": "boolean",
+            "description": "Always false: a display name never selects identity, role or participant."
+          },
+          "suggested": {
+            "type": "string",
+            "description": "Suggested name (profile name for registered users).",
+            "nullable": true
+          }
+        }
+      },
+      "PreJoinMedia": {
+        "type": "object",
+        "required": [
+          "role",
+          "permissions",
+          "audioLocked",
+          "videoLocked",
+          "screenSharePolicy",
+          "screenShareEligible"
+        ],
+        "properties": {
+          "audioLocked": {
+            "type": "boolean"
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/JoinPermissions"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "screenShareEligible": {
+            "type": "boolean"
+          },
+          "screenSharePolicy": {
+            "$ref": "#/components/schemas/ScreenSharePolicy"
+          },
+          "videoLocked": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PreJoinNotices": {
+        "type": "object",
+        "required": [
+          "recordingPolicy",
+          "recordingActive",
+          "transcriptionPolicy",
+          "transcriptionActive",
+          "aiNotice"
+        ],
+        "properties": {
+          "aiNotice": {
+            "type": "boolean"
+          },
+          "recordingActive": {
+            "type": "boolean"
+          },
+          "recordingPolicy": {
+            "$ref": "#/components/schemas/MediaCapturePolicy"
+          },
+          "transcriptionActive": {
+            "type": "boolean"
+          },
+          "transcriptionPolicy": {
+            "$ref": "#/components/schemas/MediaCapturePolicy"
+          }
+        }
+      },
+      "PreJoinOrganization": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "PreJoinOrganizer": {
+        "type": "object",
+        "required": [
+          "displayName"
+        ],
+        "properties": {
+          "displayName": {
+            "type": "string"
+          }
+        }
+      },
+      "PreJoinResponse": {
+        "type": "object",
+        "required": [
+          "meetingSpaceId",
+          "conferenceId",
+          "meetingType",
+          "conferenceStatus",
+          "joinable",
+          "access",
+          "notices",
+          "consents",
+          "media",
+          "displayName",
+          "devices"
+        ],
+        "properties": {
+          "access": {
+            "$ref": "#/components/schemas/PreJoinAccess"
+          },
+          "conferenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conferenceStatus": {
+            "$ref": "#/components/schemas/ConferenceStatus"
+          },
+          "consents": {
+            "$ref": "#/components/schemas/PreJoinConsents"
+          },
+          "devices": {
+            "$ref": "#/components/schemas/PreJoinDevices"
+          },
+          "displayName": {
+            "$ref": "#/components/schemas/PreJoinDisplayName"
+          },
+          "joinable": {
+            "type": "boolean",
+            "description": "Media join is possible right now (LIVE)."
+          },
+          "media": {
+            "$ref": "#/components/schemas/PreJoinMedia"
+          },
+          "meetingSpaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "meetingType": {
+            "$ref": "#/components/schemas/MeetingType"
+          },
+          "notices": {
+            "$ref": "#/components/schemas/PreJoinNotices"
+          },
+          "organization": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PreJoinOrganization"
+              }
+            ],
+            "nullable": true
+          },
+          "organizer": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PreJoinOrganizer"
+              }
+            ],
+            "nullable": true
+          },
+          "scheduledStartAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "title": {
+            "type": "string",
+            "description": "Hidden for sensitive (healthcare / high-security) meetings until authorized.",
+            "nullable": true
+          }
+        }
+      },
       "PrincipalType": {
         "type": "string",
         "enum": [
           "User",
           "Email"
+        ]
+      },
+      "PrivateChatMode": {
+        "type": "string",
+        "enum": [
+          "EVERYONE",
+          "HOSTS_ONLY",
+          "DISABLED"
         ]
       },
       "ProviderEnforcement": {
@@ -8435,6 +14218,250 @@
             "type": "string"
           },
           "title": {
+            "type": "string"
+          }
+        }
+      },
+      "QuestionActionResponse": {
+        "type": "object",
+        "required": [
+          "question",
+          "changed"
+        ],
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          },
+          "question": {
+            "$ref": "#/components/schemas/QuestionView"
+          }
+        }
+      },
+      "QuestionListResponse": {
+        "type": "object",
+        "required": [
+          "questions"
+        ],
+        "properties": {
+          "questions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuestionView"
+            }
+          }
+        }
+      },
+      "QuestionResult": {
+        "type": "object",
+        "required": [
+          "questionId",
+          "type",
+          "answered"
+        ],
+        "properties": {
+          "answered": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "averagePositions": {
+            "type": "object",
+            "description": "Ranking: option id → average position (1 = first).",
+            "additionalProperties": {
+              "type": "number",
+              "format": "double"
+            },
+            "nullable": true
+          },
+          "correct": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Quiz: correct answer, once the results state allows it.",
+            "nullable": true
+          },
+          "optionCounts": {
+            "type": "object",
+            "description": "Choice: option id → votes.",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "nullable": true
+          },
+          "questionId": {
+            "type": "string"
+          },
+          "ratingAverage": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "ratingDistribution": {
+            "type": "object",
+            "description": "Rating: value → count, and the average.",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "nullable": true
+          },
+          "texts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TextAnswer"
+            },
+            "description": "Text answers (managers only; never attributed for anonymous polls).",
+            "nullable": true
+          },
+          "type": {
+            "$ref": "#/components/schemas/PollQuestionType"
+          }
+        }
+      },
+      "QuestionStatus": {
+        "type": "string",
+        "enum": [
+          "OPEN",
+          "ANSWERED",
+          "DISMISSED",
+          "ARCHIVED"
+        ]
+      },
+      "QuestionView": {
+        "type": "object",
+        "required": [
+          "id",
+          "conferenceId",
+          "body",
+          "anonymous",
+          "status",
+          "pinned",
+          "upvoteCount",
+          "votedByMe",
+          "isMine",
+          "createdAt",
+          "version"
+        ],
+        "properties": {
+          "anonymous": {
+            "type": "boolean"
+          },
+          "answer": {
+            "type": "string",
+            "nullable": true
+          },
+          "answeredAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "body": {
+            "type": "string"
+          },
+          "conferenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "isMine": {
+            "type": "boolean"
+          },
+          "participantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Absent for anonymous questions.",
+            "nullable": true
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/QuestionStatus"
+          },
+          "upvoteCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "votedByMe": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RaisedHand": {
+        "type": "object",
+        "required": [
+          "participantId",
+          "displayName",
+          "raisedAt"
+        ],
+        "properties": {
+          "displayName": {
+            "type": "string"
+          },
+          "participantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "raisedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RaisedHandsResponse": {
+        "type": "object",
+        "required": [
+          "hands"
+        ],
+        "properties": {
+          "hands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RaisedHand"
+            }
+          }
+        }
+      },
+      "ReactionRequest": {
+        "type": "object",
+        "required": [
+          "reaction"
+        ],
+        "properties": {
+          "reaction": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReactionResponse": {
+        "type": "object",
+        "required": [
+          "reaction",
+          "delivered"
+        ],
+        "properties": {
+          "delivered": {
+            "type": "boolean",
+            "description": "Transient: false when the realtime fanout was unavailable (nothing is stored)."
+          },
+          "reaction": {
             "type": "string"
           }
         }
@@ -8878,6 +14905,14 @@
           "SUMMARY"
         ]
       },
+      "ResultsVisibility": {
+        "type": "string",
+        "enum": [
+          "HOST_ONLY",
+          "AFTER_VOTE",
+          "AFTER_CLOSE"
+        ]
+      },
       "RevokeApiKeyResponse": {
         "type": "object",
         "description": "Response for API key revocation",
@@ -8952,6 +14987,26 @@
           "Legacy"
         ]
       },
+      "RoomAssignmentsPatch": {
+        "type": "object",
+        "properties": {
+          "add": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "remove": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
       "RtcCredentialResponse": {
         "type": "object",
         "required": [
@@ -9009,6 +15064,15 @@
           }
         },
         "additionalProperties": false
+      },
+      "ScreenSharePolicy": {
+        "type": "string",
+        "description": "Who may publish a screen share (on top of the `screenshare.publish` role grant).",
+        "enum": [
+          "HOST_ONLY",
+          "PRESENTERS_ONLY",
+          "ALL_INTERACTIVE"
+        ]
       },
       "ScreenShareResponse": {
         "type": "object",
@@ -9078,6 +15142,34 @@
             "description": "The participant sending the message"
           }
         }
+      },
+      "SendMessageRequest": {
+        "type": "object",
+        "required": [
+          "body"
+        ],
+        "properties": {
+          "announcement": {
+            "type": "boolean",
+            "description": "Host-only announcement to the main room (`chat.moderate`)."
+          },
+          "body": {
+            "type": "string"
+          },
+          "breakoutId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Breakout chat of this room (must be the sender's current breakout).",
+            "nullable": true
+          },
+          "recipientParticipantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Private message recipient (conference-scoped participant id).",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
       },
       "SessionState": {
         "type": "string",
@@ -9167,6 +15259,111 @@
           "Deleted"
         ]
       },
+      "SpotlightListResponse": {
+        "type": "object",
+        "required": [
+          "changed",
+          "spotlights"
+        ],
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          },
+          "spotlights": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpotlightView"
+            }
+          }
+        }
+      },
+      "SpotlightRequest": {
+        "type": "object",
+        "required": [
+          "participantId"
+        ],
+        "properties": {
+          "participantId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SpotlightView": {
+        "type": "object",
+        "required": [
+          "participantId",
+          "displayName",
+          "spotlightedAt"
+        ],
+        "properties": {
+          "displayName": {
+            "type": "string"
+          },
+          "participantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "spotlightedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "StopScreenShareResponse": {
+        "type": "object",
+        "required": [
+          "participantId",
+          "stoppedSessions"
+        ],
+        "properties": {
+          "participantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stoppedSessions": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "SubmitPollResponseRequest": {
+        "type": "object",
+        "required": [
+          "answers"
+        ],
+        "properties": {
+          "answers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PollAnswerInput"
+            }
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "description": "Client-chosen retry key: a retry with the same key is acknowledged\nidempotently instead of failing as a duplicate ballot.",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SubmitQuestionRequest": {
+        "type": "object",
+        "required": [
+          "body"
+        ],
+        "properties": {
+          "anonymous": {
+            "type": "boolean"
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "TerminationReason": {
         "type": "string",
         "enum": [
@@ -9178,6 +15375,23 @@
           "Cancelled",
           "Legacy"
         ]
+      },
+      "TextAnswer": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "participantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Only for non-anonymous polls.",
+            "nullable": true
+          },
+          "text": {
+            "type": "string"
+          }
+        }
       },
       "TrackKind": {
         "type": "string",
@@ -9272,6 +15486,14 @@
           },
           "clearPasscode": {
             "type": "boolean"
+          },
+          "collaborationPolicy": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CollaborationPolicyPatch"
+              }
+            ],
+            "nullable": true
           },
           "defaultRole": {
             "allOf": [
@@ -9787,6 +16009,34 @@
     {
       "name": "Participants (v2)",
       "description": "Logical conference participants (one per person per conference) and moderation. All participant ids are conference-scoped."
+    },
+    {
+      "name": "Media controls (v2)",
+      "description": "Part F: provider-enforced media locks, host mute, screen-share stop, spotlight and credential refresh. Locks only reduce rights; grants are always the effective projection of role ∧ policy ∧ locks."
+    },
+    {
+      "name": "Collaboration (v2)",
+      "description": "Part F: collaboration policy, canonical collaboration state (REST recovery) and the pre-join contract."
+    },
+    {
+      "name": "Chat (v2)",
+      "description": "Part F: MeetingMessagingService — server-derived sender identity, main / breakout / private scope, cursor pagination, rate limits and moderation."
+    },
+    {
+      "name": "Engagement (v2)",
+      "description": "Part F: transient reactions and persistent hand raise."
+    },
+    {
+      "name": "Breakouts (v2)",
+      "description": "Part F: breakout rooms owned by the parent conference (provider room per breakout), assignment, routing, visits, announcements and countdown close."
+    },
+    {
+      "name": "Polls (v2)",
+      "description": "Part F: polls and quizzes with server-side scoring, anonymous ballots and results visibility."
+    },
+    {
+      "name": "Q&A (v2)",
+      "description": "Part F: questions, upvotes and moderation (separate from chat; anonymous identity never projected)."
     },
     {
       "name": "Realtime (v2)",
