@@ -170,8 +170,7 @@ impl RtcControl {
 
     /// Participant removal / permissions / mute are provider-enforced.
     pub fn participant_control(&self) -> bool {
-        self.core.flags.rtc_provider_control_v2
-            && self.core.rtc.capabilities().participant_control
+        self.core.flags.rtc_provider_control_v2 && self.core.rtc.capabilities().participant_control
     }
 
     /// Bounded credential lifetime (never longer than the participant session).
@@ -190,6 +189,33 @@ impl RtcControl {
     /// and safe under concurrent prepare (LiveKit CreateRoom returns the existing room;
     /// the confirmation is applied under the conference row lock).
     pub async fn ensure_room(&self, conference_id: Uuid) -> ApiResult<conference_sessions::Model> {
+        self.ensure_room_inner(conference_id, false).await
+    }
+
+    /// Join-time check: the provider must currently have the room (a credential for a
+    /// missing room is useless; an unreachable provider is RTC_PROVIDER_UNAVAILABLE).
+    /// A room lost at the provider is re-created for a LIVE conference.
+    pub async fn verify_room_for_join(&self, conference_id: Uuid) -> ApiResult<()> {
+        let c = find_conference(&self.core.db, conference_id).await?;
+        let room = RtcRoomRef::for_conference(&c);
+        match self.core.rtc.get_room(&room).await {
+            Ok(Some(_)) if c.rtc_room_ready_at.is_some() => Ok(()),
+            Ok(_) => self
+                .ensure_room_inner(conference_id, true)
+                .await
+                .map(|_| ()),
+            Err(e) => {
+                inc(&M.provider_errors);
+                Err(e.into())
+            }
+        }
+    }
+
+    async fn ensure_room_inner(
+        &self,
+        conference_id: Uuid,
+        force: bool,
+    ) -> ApiResult<conference_sessions::Model> {
         let c = find_conference(&self.core.db, conference_id).await?;
         if c.origin == RecordOrigin::Legacy {
             return Err(state_conflict(
@@ -205,7 +231,7 @@ impl RtcControl {
                 c.status
             )));
         }
-        if c.rtc_room_ready_at.is_some() && c.status != ConferenceStatus::Preparing {
+        if !force && c.rtc_room_ready_at.is_some() && c.status != ConferenceStatus::Preparing {
             return Ok(c);
         }
         let room = RtcRoomRef::for_conference(&c);
@@ -232,7 +258,7 @@ impl RtcControl {
         }
         let now = Utc::now();
         let became_ready = current.status == ConferenceStatus::Preparing;
-        let set_id = current.rtc_room_id.is_none() && info.room_id.is_some();
+        let set_id = info.room_id.is_some() && current.rtc_room_id != info.room_id;
         if !became_ready && !set_id && current.rtc_room_ready_at.is_some() {
             txn.commit().await?;
             return Ok(current);
@@ -293,10 +319,7 @@ impl RtcControl {
             }
         }
         let room = RtcRoomRef::for_conference(&c);
-        let reason = c
-            .termination_reason
-            .map(|r| r.as_str())
-            .unwrap_or("CLOSED");
+        let reason = c.termination_reason.map(|r| r.as_str()).unwrap_or("CLOSED");
         if let Err(e) = self.core.rtc.terminate_room(&room, reason).await {
             inc(&M.room_terminate_failures);
             inc(&M.provider_errors);
@@ -353,24 +376,26 @@ impl RtcControl {
         let retry = |e: ApiError| CommandResult::Retry(e.to_string());
         match row.event_type.as_str() {
             event::RTC_ROOM_PREPARE_REQUESTED => match conference.status {
-                ConferenceStatus::Preparing | ConferenceStatus::Waiting | ConferenceStatus::Live => {
-                    match self.ensure_room(conference_id).await {
-                        Ok(_) => CommandResult::Done,
-                        Err(e) => retry(e),
-                    }
-                }
+                ConferenceStatus::Preparing
+                | ConferenceStatus::Waiting
+                | ConferenceStatus::Live => match self.ensure_room(conference_id).await {
+                    Ok(_) => CommandResult::Done,
+                    Err(e) => retry(e),
+                },
                 // Obsolete: rooms are never created for unstarted or closed conferences.
                 _ => CommandResult::Done,
             },
             event::RTC_ROOM_TERMINATE_REQUESTED => match conference.status {
                 ConferenceStatus::Ended => CommandResult::Done,
-                ConferenceStatus::Ending | ConferenceStatus::Cancelled | ConferenceStatus::Failed => {
-                    match self.finalize_room(conference_id).await {
-                        Ok(_) => CommandResult::Done,
-                        Err(e) => retry(e),
-                    }
+                ConferenceStatus::Ending
+                | ConferenceStatus::Cancelled
+                | ConferenceStatus::Failed => match self.finalize_room(conference_id).await {
+                    Ok(_) => CommandResult::Done,
+                    Err(e) => retry(e),
+                },
+                other => {
+                    CommandResult::Dead(format!("terminate requested for a {other} conference"))
                 }
-                other => CommandResult::Dead(format!("terminate requested for a {other} conference")),
             },
             event::RTC_PARTICIPANT_REMOVE_REQUESTED => {
                 // The identity comes from the authoritative session row of THIS conference;
@@ -385,7 +410,11 @@ impl RtcControl {
                         .await
                     {
                         Ok(Some(s)) => (s.id, s.media_identity),
-                        Ok(None) => return CommandResult::Dead("session is not part of this conference".into()),
+                        Ok(None) => {
+                            return CommandResult::Dead(
+                                "session is not part of this conference".into(),
+                            )
+                        }
                         Err(e) => return CommandResult::Retry(e.to_string()),
                     },
                     None => match p["mediaIdentity"].as_str() {
@@ -576,7 +605,9 @@ impl RtcControl {
             .ok_or_else(|| permission_denied("You are not permitted to manage this conference"))?;
         let pctx = PermissionContext::for_space(&space);
         if !pctx.allows(authority.role, Permission::ParticipantMute) {
-            return Err(permission_denied("Your role does not allow muting participants"));
+            return Err(permission_denied(
+                "Your role does not allow muting participants",
+            ));
         }
         let target =
             find_scoped_participant(&self.core.db, conference_id, participant_id, false).await?;

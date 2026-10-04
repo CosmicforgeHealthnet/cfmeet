@@ -156,7 +156,11 @@ impl OutboxRelay {
         Ok((ok, failed))
     }
 
-    async fn deliver(&self, publisher: &dyn EventPublisher, row: &outbox_events::Model) -> ApiResult<bool> {
+    async fn deliver(
+        &self,
+        publisher: &dyn EventPublisher,
+        row: &outbox_events::Model,
+    ) -> ApiResult<bool> {
         if row.channel == OutboxChannel::Realtime
             && crate::services::realtime::envelope(row).is_none()
         {

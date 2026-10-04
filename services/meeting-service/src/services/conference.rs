@@ -69,7 +69,8 @@ pub fn next_status(
         (Transition::Start, Created | Preparing | Waiting) => Live,
         (Transition::Start, Live) => return Ok(None),
         (Transition::End, Live) => Ending,
-        (Transition::End, Ending) => return Ok(None),
+        // Repeated END (double click, retries) is an idempotent no-op once closing.
+        (Transition::End, Ending | Ended) => return Ok(None),
         (Transition::CompleteEnd, Ending) => Ended,
         (Transition::CompleteEnd, Ended) => return Ok(None),
         (Transition::Cancel, Created | Preparing | Waiting) => Cancelled,
@@ -463,7 +464,10 @@ impl ConferenceService {
             &authority.audit,
             &updated,
             action::CONFERENCE_PREPARE,
-            &[event::CONFERENCE_PREPARING, event::RTC_ROOM_PREPARE_REQUESTED],
+            &[
+                event::CONFERENCE_PREPARING,
+                event::RTC_ROOM_PREPARE_REQUESTED,
+            ],
             json!({}),
         )
         .await?;
@@ -603,7 +607,10 @@ impl ConferenceService {
         self.record(&txn, &authority.audit, &updated, a, &[e], json!({}))
             .await?;
         txn.commit().await?;
-        Ok(ConferenceOutcome::changed(updated, Enforcement::NotRequired))
+        Ok(ConferenceOutcome::changed(
+            updated,
+            Enforcement::NotRequired,
+        ))
     }
 
     /// LIVE → ENDING (atomic). From this commit on no admission and no new usable join
@@ -632,7 +639,11 @@ impl ConferenceService {
         let Some(next) = next else {
             txn.commit().await?;
             if conference.status == ConferenceStatus::Ending && self.rtc.room_control() {
-                // Repeated END retries provider termination (idempotent).
+                // Repeated END retries provider termination now (idempotent), even while
+                // the queued command is in retry backoff.
+                if let Err(e) = self.rtc.finalize_room(id).await {
+                    tracing::warn!(conference_id = %id, "termination retry failed: {e}");
+                }
                 let (current, _) = self.enforce(id).await?;
                 let enforcement = if current.status == ConferenceStatus::Ended {
                     Enforcement::Enforced
@@ -732,7 +743,10 @@ impl ConferenceService {
             let (current, enforcement) = self.enforce(id).await?;
             return Ok(ConferenceOutcome::changed(current, enforcement));
         }
-        Ok(ConferenceOutcome::changed(updated, Enforcement::NotRequired))
+        Ok(ConferenceOutcome::changed(
+            updated,
+            Enforcement::NotRequired,
+        ))
     }
 
     /// One-off reschedule of an unstarted occurrence (series untouched).
@@ -785,7 +799,10 @@ impl ConferenceService {
         )
         .await?;
         txn.commit().await?;
-        Ok(ConferenceOutcome::changed(updated, Enforcement::NotRequired))
+        Ok(ConferenceOutcome::changed(
+            updated,
+            Enforcement::NotRequired,
+        ))
     }
 
     /// PREPARING|LIVE|ENDING → FAILED with a safe internal classification. Recovery is
@@ -883,6 +900,7 @@ mod tests {
         assert_eq!(next_status(Live, Transition::Start), Ok(None));
         assert_eq!(next_status(Live, Transition::End), Ok(Some(Ending)));
         assert_eq!(next_status(Ending, Transition::End), Ok(None));
+        assert_eq!(next_status(Ended, Transition::End), Ok(None));
         assert_eq!(
             next_status(Ending, Transition::CompleteEnd),
             Ok(Some(Ended))

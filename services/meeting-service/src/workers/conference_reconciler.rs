@@ -198,13 +198,24 @@ impl ConferenceReconciler {
         inc(&M.reconciler_runs);
 
         // 1. PREPARING without a confirmed room.
-        for c in self.conferences(&[ConferenceStatus::Preparing], None).await? {
+        for c in self
+            .conferences(&[ConferenceStatus::Preparing], None)
+            .await?
+        {
             report.examined += 1;
             let action = match self.control.ensure_room(c.id).await {
                 Ok(_) => Action::Repaired,
                 Err(_) => Action::Failed,
             };
-            self.record(&mut report, Some(c.id), c.rtc_room_name.as_deref(), "PREPARING_NOT_READY", action, json!({})).await;
+            self.record(
+                &mut report,
+                Some(c.id),
+                c.rtc_room_name.as_deref(),
+                "PREPARING_NOT_READY",
+                action,
+                json!({}),
+            )
+            .await;
         }
 
         // 2. ENDING: terminate → confirm absence → ENDED.
@@ -214,7 +225,15 @@ impl ConferenceReconciler {
                 Ok(_) => Action::Repaired,
                 Err(_) => Action::Failed,
             };
-            self.record(&mut report, Some(c.id), c.rtc_room_name.as_deref(), "ENDING_NOT_FINALIZED", action, json!({})).await;
+            self.record(
+                &mut report,
+                Some(c.id),
+                c.rtc_room_name.as_deref(),
+                "ENDING_NOT_FINALIZED",
+                action,
+                json!({}),
+            )
+            .await;
         }
 
         // 3. Closed conferences whose room may still exist (recent, bounded).
@@ -242,11 +261,27 @@ impl ConferenceReconciler {
                         Ok(()) => Action::Repaired,
                         Err(_) => Action::Failed,
                     };
-                    self.record(&mut report, Some(c.id), Some(&room.room_name), "ORPHAN_ROOM", action, json!({ "status": c.status })).await;
+                    self.record(
+                        &mut report,
+                        Some(c.id),
+                        Some(&room.room_name),
+                        "ORPHAN_ROOM",
+                        action,
+                        json!({ "status": c.status }),
+                    )
+                    .await;
                 }
                 Ok(None) => {}
                 Err(e) => {
-                    self.record(&mut report, Some(c.id), Some(&room.room_name), "PROVIDER_UNAVAILABLE", Action::Failed, json!({ "error": e.to_string() })).await;
+                    self.record(
+                        &mut report,
+                        Some(c.id),
+                        Some(&room.room_name),
+                        "PROVIDER_UNAVAILABLE",
+                        Action::Failed,
+                        json!({ "error": e.to_string() }),
+                    )
+                    .await;
                 }
             }
         }
@@ -258,13 +293,24 @@ impl ConferenceReconciler {
             report.examined += 1;
             live_rooms.insert(RtcRoomRef::for_conference(&c).room_name);
             if let Err(e) = self.reconcile_live(&c, &mut report).await {
-                self.record(&mut report, Some(c.id), c.rtc_room_name.as_deref(), "RECONCILE_ERROR", Action::Failed, json!({ "error": e.to_string() })).await;
+                self.record(
+                    &mut report,
+                    Some(c.id),
+                    c.rtc_room_name.as_deref(),
+                    "RECONCILE_ERROR",
+                    Action::Failed,
+                    json!({ "error": e.to_string() }),
+                )
+                .await;
             }
         }
 
         // 5. Provider rooms with no valid active conference.
         if let Ok(rooms) = self.core.rtc.list_rooms("cf-").await {
-            for room in rooms.into_iter().take(self.core.config.reconciler_batch as usize) {
+            for room in rooms
+                .into_iter()
+                .take(self.core.config.reconciler_batch as usize)
+            {
                 if live_rooms.contains(&room.room_name) {
                     continue;
                 }
@@ -275,7 +321,15 @@ impl ConferenceReconciler {
                 match conference {
                     None => {
                         // Not ours to judge: never delete a room we cannot map.
-                        self.record(&mut report, None, Some(&room.room_name), "UNMAPPED_PROVIDER_ROOM", Action::Escalated, json!({ "participants": room.participant_count })).await;
+                        self.record(
+                            &mut report,
+                            None,
+                            Some(&room.room_name),
+                            "UNMAPPED_PROVIDER_ROOM",
+                            Action::Escalated,
+                            json!({ "participants": room.participant_count }),
+                        )
+                        .await;
                     }
                     Some(c)
                         if matches!(
@@ -295,7 +349,15 @@ impl ConferenceReconciler {
                             Ok(()) => Action::Repaired,
                             Err(_) => Action::Failed,
                         };
-                        self.record(&mut report, Some(c.id), Some(&room.room_name), "ROOM_WITHOUT_ACTIVE_CONFERENCE", action, json!({ "status": c.status })).await;
+                        self.record(
+                            &mut report,
+                            Some(c.id),
+                            Some(&room.room_name),
+                            "ROOM_WITHOUT_ACTIVE_CONFERENCE",
+                            action,
+                            json!({ "status": c.status }),
+                        )
+                        .await;
                     }
                     // LIVE beyond this batch, ENDING / PREPARING / WAITING: handled above.
                     Some(_) => {}
@@ -314,7 +376,15 @@ impl ConferenceReconciler {
         let snapshot = match self.core.rtc.reconcile(&room).await {
             Ok(s) => s,
             Err(e) => {
-                self.record(report, Some(c.id), Some(&room.room_name), "PROVIDER_UNAVAILABLE", Action::Failed, json!({ "error": e.to_string() })).await;
+                self.record(
+                    report,
+                    Some(c.id),
+                    Some(&room.room_name),
+                    "PROVIDER_UNAVAILABLE",
+                    Action::Failed,
+                    json!({ "error": e.to_string() }),
+                )
+                .await;
                 return Ok(());
             }
         };
@@ -336,9 +406,18 @@ impl ConferenceReconciler {
                 }
                 Err(_) => Action::Failed,
             };
-            self.record(report, Some(c.id), Some(&room.room_name), "LIVE_ROOM_MISSING", action, json!({})).await;
+            self.record(
+                report,
+                Some(c.id),
+                Some(&room.room_name),
+                "LIVE_ROOM_MISSING",
+                action,
+                json!({}),
+            )
+            .await;
             // Sessions marked CONNECTED cannot be connected to a missing room.
-            self.close_absent_sessions(c, &HashSet::new(), report).await?;
+            self.close_absent_sessions(c, &HashSet::new(), report)
+                .await?;
             return Ok(());
         }
 
@@ -352,9 +431,14 @@ impl ConferenceReconciler {
             )
             .all(&self.core.db)
             .await?;
-        let by_identity: HashMap<&str, &participant_sessions::Model> =
-            sessions.iter().map(|s| (s.media_identity.as_str(), s)).collect();
-        let participant_ids: Vec<Uuid> = sessions.iter().map(|s| s.conference_participant_id).collect();
+        let by_identity: HashMap<&str, &participant_sessions::Model> = sessions
+            .iter()
+            .map(|s| (s.media_identity.as_str(), s))
+            .collect();
+        let participant_ids: Vec<Uuid> = sessions
+            .iter()
+            .map(|s| s.conference_participant_id)
+            .collect();
         let participants: HashMap<Uuid, conference_participants::Model> =
             conference_participants::Entity::find()
                 .filter(conference_participants::Column::Id.is_in(participant_ids))
@@ -379,11 +463,24 @@ impl ConferenceReconciler {
                 media_identity: p.media_identity.clone(),
             };
             let (Some(session), true) = (session, authorized) else {
-                let action = match self.core.rtc.remove_participant(&target, "NO_ACTIVE_SESSION").await {
+                let action = match self
+                    .core
+                    .rtc
+                    .remove_participant(&target, "NO_ACTIVE_SESSION")
+                    .await
+                {
                     Ok(()) => Action::Repaired,
                     Err(_) => Action::Failed,
                 };
-                self.record(report, Some(c.id), Some(&room.room_name), "PROVIDER_PARTICIPANT_WITHOUT_SESSION", action, json!({})).await;
+                self.record(
+                    report,
+                    Some(c.id),
+                    Some(&room.room_name),
+                    "PROVIDER_PARTICIPANT_WITHOUT_SESSION",
+                    action,
+                    json!({}),
+                )
+                .await;
                 continue;
             };
             let participant = participant.expect("authorized implies participant");
@@ -393,7 +490,15 @@ impl ConferenceReconciler {
                     Ok(()) => Action::Repaired,
                     Err(_) => Action::Failed,
                 };
-                self.record(report, Some(c.id), Some(&room.room_name), "SESSION_CONNECTED_NOT_RECORDED", action, json!({ "participantSessionId": session.id })).await;
+                self.record(
+                    report,
+                    Some(c.id),
+                    Some(&room.room_name),
+                    "SESSION_CONNECTED_NOT_RECORDED",
+                    action,
+                    json!({ "participantSessionId": session.id }),
+                )
+                .await;
             }
             let expected = ProviderGrants::from_permissions(&pctx.media(participant.role));
             if p.grants.as_ref() != Some(&expected) {
@@ -406,7 +511,15 @@ impl ConferenceReconciler {
                     Ok(()) => Action::Repaired,
                     Err(_) => Action::Failed,
                 };
-                self.record(report, Some(c.id), Some(&room.room_name), "PERMISSION_DRIFT", action, json!({ "participantId": participant.id, "role": participant.role })).await;
+                self.record(
+                    report,
+                    Some(c.id),
+                    Some(&room.room_name),
+                    "PERMISSION_DRIFT",
+                    action,
+                    json!({ "participantId": participant.id, "role": participant.role }),
+                )
+                .await;
             }
         }
         self.close_absent_sessions(c, &present, report).await
@@ -420,7 +533,9 @@ impl ConferenceReconciler {
     ) -> ApiResult<()> {
         let txn = self.core.db.begin().await?;
         lock_conference(&txn, c.id).await?;
-        let current = participant_sessions::Entity::find_by_id(session.id).one(&txn).await?;
+        let current = participant_sessions::Entity::find_by_id(session.id)
+            .one(&txn)
+            .await?;
         if let Some(current) = current.filter(|s| s.state == SessionState::Pending) {
             let now = Utc::now();
             let mut am: participant_sessions::ActiveModel = current.clone().into();
@@ -473,7 +588,9 @@ impl ConferenceReconciler {
         for s in stale {
             let txn = self.core.db.begin().await?;
             lock_conference(&txn, c.id).await?;
-            let current = participant_sessions::Entity::find_by_id(s.id).one(&txn).await?;
+            let current = participant_sessions::Entity::find_by_id(s.id)
+                .one(&txn)
+                .await?;
             if let Some(current) = current.filter(|x| x.state == SessionState::Connected) {
                 let now = Utc::now();
                 let mut am: participant_sessions::ActiveModel = current.clone().into();
@@ -502,13 +619,24 @@ impl ConferenceReconciler {
                 .await?;
             }
             txn.commit().await?;
-            self.record(report, Some(c.id), c.rtc_room_name.as_deref(), "SESSION_CONNECTED_BUT_ABSENT", Action::Repaired, json!({ "participantSessionId": s.id })).await;
+            self.record(
+                report,
+                Some(c.id),
+                c.rtc_room_name.as_deref(),
+                "SESSION_CONNECTED_BUT_ABSENT",
+                Action::Repaired,
+                json!({ "participantSessionId": s.id }),
+            )
+            .await;
         }
         Ok(())
     }
 }
 
-pub fn spawn_conference_reconciler(reconciler: ConferenceReconciler, poll_secs: u64) -> watch::Sender<bool> {
+pub fn spawn_conference_reconciler(
+    reconciler: ConferenceReconciler,
+    poll_secs: u64,
+) -> watch::Sender<bool> {
     let (tx, mut rx) = watch::channel(false);
     tokio::spawn(async move {
         loop {

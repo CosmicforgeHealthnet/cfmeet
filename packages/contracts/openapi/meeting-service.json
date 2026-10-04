@@ -7094,7 +7094,7 @@
           "events": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/crate.services.realtime.RealtimeEnvelope"
+              "$ref": "#/components/schemas/RealtimeEnvelope"
             }
           },
           "resyncRequired": {
@@ -8064,7 +8064,7 @@
         ],
         "properties": {
           "trackKind": {
-            "$ref": "#/components/schemas/crate.services.rtc_provider.TrackKind"
+            "$ref": "#/components/schemas/TrackKind"
           }
         },
         "additionalProperties": false
@@ -8095,7 +8095,7 @@
             "minimum": 0
           },
           "trackKind": {
-            "$ref": "#/components/schemas/crate.services.rtc_provider.TrackKind"
+            "$ref": "#/components/schemas/TrackKind"
           }
         }
       },

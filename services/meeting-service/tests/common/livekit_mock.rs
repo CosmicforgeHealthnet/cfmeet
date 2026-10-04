@@ -173,7 +173,12 @@ impl MockLiveKit {
     }
 
     /// Insert a participant out-of-band (rogue / unknown provider identity).
-    pub fn insert_participant(&self, room: &str, identity: &str, permission: proto::ParticipantPermission) {
+    pub fn insert_participant(
+        &self,
+        room: &str,
+        identity: &str,
+        permission: proto::ParticipantPermission,
+    ) {
         let sid = self.next("PA");
         if let Some(r) = self.rooms.lock().unwrap().get_mut(room) {
             r.participants.insert(
@@ -232,7 +237,12 @@ impl MockLiveKit {
     }
 
     /// Simulated client publish; the SFU enforces the participant's CURRENT grants.
-    pub fn publish(&self, room: &str, identity: &str, source: proto::TrackSource) -> Result<String, String> {
+    pub fn publish(
+        &self,
+        room: &str,
+        identity: &str,
+        source: proto::TrackSource,
+    ) -> Result<String, String> {
         let mut rooms = self.rooms.lock().unwrap();
         let p = rooms
             .get_mut(room)
@@ -271,15 +281,20 @@ impl MockLiveKit {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     fn authorize(&self, headers: &HeaderMap, need: &str, room: &str) -> Result<(), Response> {
         let token = headers
             .get("authorization")
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "))
-            .ok_or_else(|| twirp_error(StatusCode::UNAUTHORIZED, "unauthenticated", "missing token"))?;
+            .ok_or_else(|| {
+                twirp_error(StatusCode::UNAUTHORIZED, "unauthenticated", "missing token")
+            })?;
         let claims = TokenVerifier::with_api_key(API_KEY, API_SECRET)
             .verify(token)
-            .map_err(|_| twirp_error(StatusCode::UNAUTHORIZED, "unauthenticated", "invalid token"))?;
+            .map_err(|_| {
+                twirp_error(StatusCode::UNAUTHORIZED, "unauthenticated", "invalid token")
+            })?;
         let v = claims.video;
         let granted = match need {
             "create" => v.room_create,
@@ -324,21 +339,28 @@ impl MockLiveKit {
             tokio::time::sleep(Duration::from_millis(delay)).await;
         }
         if self.faults.fail_all.load(Ordering::SeqCst) {
-            return twirp_error(StatusCode::SERVICE_UNAVAILABLE, "unavailable", "injected outage");
+            return twirp_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "unavailable",
+                "injected outage",
+            );
         }
         macro_rules! decode {
             ($t:ty) => {
                 match <$t>::decode(body.clone()) {
                     Ok(v) => v,
-                    Err(_) => return twirp_error(StatusCode::BAD_REQUEST, "malformed", "bad protobuf"),
+                    Err(_) => {
+                        return twirp_error(StatusCode::BAD_REQUEST, "malformed", "bad protobuf")
+                    }
                 }
             };
         }
         let log = |room: &str, identity: &str| {
-            self.calls
-                .lock()
-                .unwrap()
-                .push((method.clone(), room.to_string(), identity.to_string()));
+            self.calls.lock().unwrap().push((
+                method.clone(),
+                room.to_string(),
+                identity.to_string(),
+            ));
         };
         match method.as_str() {
             "CreateRoom" => {
@@ -348,7 +370,11 @@ impl MockLiveKit {
                 }
                 log(&req.name, "");
                 if self.faults.fail_create.load(Ordering::SeqCst) {
-                    return twirp_error(StatusCode::SERVICE_UNAVAILABLE, "unavailable", "create failed");
+                    return twirp_error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "unavailable",
+                        "create failed",
+                    );
                 }
                 let mut rooms = self.rooms.lock().unwrap();
                 let room = rooms.entry(req.name.clone()).or_insert_with(|| MockRoom {
@@ -380,7 +406,11 @@ impl MockLiveKit {
                 }
                 log(&req.room, "");
                 if self.faults.fail_delete.load(Ordering::SeqCst) {
-                    return twirp_error(StatusCode::SERVICE_UNAVAILABLE, "unavailable", "delete failed");
+                    return twirp_error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "unavailable",
+                        "delete failed",
+                    );
                 }
                 if self.faults.delete_noop.load(Ordering::SeqCst) {
                     return ok(proto::DeleteRoomResponse {});
@@ -399,7 +429,11 @@ impl MockLiveKit {
                 let rooms = self.rooms.lock().unwrap();
                 match rooms.get(&req.room) {
                     Some(r) => ok(proto::ListParticipantsResponse {
-                        participants: r.participants.values().map(Self::participant_proto).collect(),
+                        participants: r
+                            .participants
+                            .values()
+                            .map(Self::participant_proto)
+                            .collect(),
                     }),
                     None => twirp_error(StatusCode::NOT_FOUND, "not_found", "room not found"),
                 }
@@ -412,7 +446,9 @@ impl MockLiveKit {
                 log(&req.room, &req.identity);
                 match self.participant(&req.room, &req.identity) {
                     Some(p) => ok(Self::participant_proto(&p)),
-                    None => twirp_error(StatusCode::NOT_FOUND, "not_found", "participant not found"),
+                    None => {
+                        twirp_error(StatusCode::NOT_FOUND, "not_found", "participant not found")
+                    }
                 }
             }
             "RemoveParticipant" => {
@@ -422,7 +458,11 @@ impl MockLiveKit {
                 }
                 log(&req.room, &req.identity);
                 if self.faults.fail_remove.load(Ordering::SeqCst) {
-                    return twirp_error(StatusCode::SERVICE_UNAVAILABLE, "unavailable", "remove failed");
+                    return twirp_error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "unavailable",
+                        "remove failed",
+                    );
                 }
                 let mut rooms = self.rooms.lock().unwrap();
                 match rooms
@@ -430,7 +470,9 @@ impl MockLiveKit {
                     .and_then(|r| r.participants.remove(&req.identity))
                 {
                     Some(_) => ok(proto::RemoveParticipantResponse {}),
-                    None => twirp_error(StatusCode::NOT_FOUND, "not_found", "participant not found"),
+                    None => {
+                        twirp_error(StatusCode::NOT_FOUND, "not_found", "participant not found")
+                    }
                 }
             }
             "UpdateParticipant" => {
@@ -440,14 +482,22 @@ impl MockLiveKit {
                 }
                 log(&req.room, &req.identity);
                 if self.faults.fail_update.load(Ordering::SeqCst) {
-                    return twirp_error(StatusCode::SERVICE_UNAVAILABLE, "unavailable", "update failed");
+                    return twirp_error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "unavailable",
+                        "update failed",
+                    );
                 }
                 let mut rooms = self.rooms.lock().unwrap();
                 let Some(p) = rooms
                     .get_mut(&req.room)
                     .and_then(|r| r.participants.get_mut(&req.identity))
                 else {
-                    return twirp_error(StatusCode::NOT_FOUND, "not_found", "participant not found");
+                    return twirp_error(
+                        StatusCode::NOT_FOUND,
+                        "not_found",
+                        "participant not found",
+                    );
                 };
                 if let Some(perm) = req.permission {
                     // Losing a source unpublishes its tracks, as the SFU does.
@@ -518,7 +568,13 @@ pub fn sign_webhook(body: &str, key: &str, secret: &str) -> String {
 }
 
 /// LiveKit webhook JSON (protojson camelCase, as livekit-server sends it).
-pub fn webhook_body(event: &str, id: &str, room: &str, room_sid: Option<&str>, identity: Option<&str>) -> String {
+pub fn webhook_body(
+    event: &str,
+    id: &str,
+    room: &str,
+    room_sid: Option<&str>,
+    identity: Option<&str>,
+) -> String {
     let mut v = json!({
         "event": event,
         "id": id,

@@ -276,7 +276,11 @@ impl RealtimeService {
     }
 
     /// Authorize a subscription for the request's actor.
-    pub async fn authorize(&self, ctx: &ActorContext, conference_id: Uuid) -> ApiResult<Subscriber> {
+    pub async fn authorize(
+        &self,
+        ctx: &ActorContext,
+        conference_id: Uuid,
+    ) -> ApiResult<Subscriber> {
         let conference = self.conference(conference_id).await?;
         let principal = match &ctx.kind {
             ActorKind::RegisteredUser(_) => SubscriberPrincipal::User(ctx.clone()),
@@ -313,12 +317,14 @@ impl RealtimeService {
                 let space = find_space(&self.core.db, conference.meeting_space_id).await?;
                 match conference_authority(&self.core.db, &space, conference.id, ctx).await? {
                     Some(a) => (SubscriptionScope::Full, a.participant.map(|p| p.id)),
-                    None => match own_participant(&self.core.db, conference.id, ctx, false).await? {
-                        Some(p) if p.admission_state == AdmissionState::Waiting => {
-                            (SubscriptionScope::SelfOnly(p.id), Some(p.id))
+                    None => {
+                        match own_participant(&self.core.db, conference.id, ctx, false).await? {
+                            Some(p) if p.admission_state == AdmissionState::Waiting => {
+                                (SubscriptionScope::SelfOnly(p.id), Some(p.id))
+                            }
+                            _ => return Err(denied()),
                         }
-                        _ => return Err(denied()),
-                    },
+                    }
                 }
             }
             SubscriberPrincipal::Participant(pid) => {
@@ -442,12 +448,12 @@ impl RealtimeService {
             .events_after(sub.conference_id, cursor, MAX_REPLAY)
             .await?;
         // Gap check: sequences are gap-free; a gap means rows were purged → resync.
-        let mut expected = cursor + 1;
-        for r in &rows {
-            if r.conference_seq != Some(expected) {
-                return Ok(None);
-            }
-            expected += 1;
+        let gap_free = rows
+            .iter()
+            .zip(cursor + 1..)
+            .all(|(r, expected)| r.conference_seq == Some(expected));
+        if !gap_free {
+            return Ok(None);
         }
         let last = rows.last().and_then(|r| r.conference_seq).unwrap_or(cursor);
         Ok(Some((
@@ -473,7 +479,11 @@ impl RealtimeService {
             .ok_or_else(|| {
                 ApiError::domain(ErrorCode::AuthenticationRequired, "Account is not active")
             })?;
-        let verified_organizations = self.core.organizations.organizations_for_user(user.id).await;
+        let verified_organizations = self
+            .core
+            .organizations
+            .organizations_for_user(user.id)
+            .await;
         // Same verification rule as `resolve_actor`.
         let email_verified = user.auth_type == AuthType::Google
             || (user.status == UserStatus::Active && self.require_email_verification);

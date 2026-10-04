@@ -44,24 +44,32 @@ bodies use `deny_unknown_fields`: `userId`, `role`, `ownerUserId`, `organization
 | `services/admission.rs` | join pipeline, waiting room, admit/deny (bulk, idempotent), return-to-waiting, role change, remove, ban, attendance |
 | `services/meeting_permissions.rs` | roles, Appendix A matrix, POLICY overrides, grant authority, media projection |
 | `services/meeting_events.rs` | audit + outbox writers |
-| `services/rtc_provider.rs` | `RtcProvider` trait + `LiveKitProvider` |
+| `services/rtc_provider.rs` | `RtcProvider` contract + `LiveKitProvider` (RoomService admin API, webhooks) |
+| `services/rtc_control.rs` | Part E control plane: provider-confirmed lifecycle, command execution, permission sync, mute |
+| `services/rtc_webhooks.rs` | verified, deduplicated provider webhooks → ParticipantSession state |
+| `services/outbox.rs` | crash-safe outbox claiming (leases, SKIP LOCKED), retry / dead-letter |
+| `services/realtime.rs` | realtime envelope, Redis publisher, subscription authorization, tickets, replay |
+| `services/rtc_metrics.rs` | control-plane counters |
 | `services/compat.rs` | identifier resolver, lazy legacy mapping, shadow comparison, backfill |
 | `workers/conference_scheduler.rs` | materialization + scheduled end (idempotent, multi-instance safe) |
-| `workers/outbox_relay.rs` | outbox delivery (started with Part E) |
+| `workers/outbox_relay.rs` | outbox delivery: realtime → Redis, provider commands → RtcControl |
+| `workers/conference_reconciler.rs` | PostgreSQL ↔ provider drift detection and repair |
+| `handlers/internal.rs` | internal LiveKit webhook + metrics routes |
 | `handlers/v2/*`, `routes/v2.rs` | thin transport |
 
 ## Conference lifecycle
 
 ```
-CREATED ─prepare→ PREPARING ─(provider ready, Part E)→ WAITING
-CREATED|PREPARING|WAITING ─start→ LIVE   (row lock + unique "one LIVE per space")
-LIVE ─end→ ENDING ─(provider terminated, Part E)→ ENDED
+CREATED ─prepare→ PREPARING ─(provider room confirmed)→ WAITING
+CREATED|PREPARING|WAITING ─start→ LIVE   (row lock + unique "one LIVE per space"; provider room required)
+LIVE ─end→ ENDING ─(room terminated + absence confirmed, sessions finalized)→ ENDED
 CREATED|PREPARING|WAITING ─cancel→ CANCELLED
 PREPARING|LIVE|ENDING ─fail→ FAILED
 ```
 
-ENDING immediately stops admission and new usable join credentials. ENDED is never set by
-Parts A–D code: the `rtc.room_terminate_requested` outbox intent is consumed by Part E.
+ENDING immediately stops admission and new usable join credentials. ENDED is only reached
+through the Part E control plane once the provider confirmed termination (see below); a
+credential-only provider never advances ENDING.
 
 ## Join pipeline
 
@@ -74,7 +82,9 @@ policy → 12. COMMIT → 13. ParticipantSession (ADMITTED only, server media id
 
 A WAITING participant never receives a credential (`rtcStatus = NOT_ISSUED_WAITING`). With
 `FEATURE_RTC_PROVIDER_CONTROL_V2=false` business admission still commits and the response says
-`PROVIDER_CONTROL_DISABLED` — no credential is fabricated.
+`PROVIDER_CONTROL_DISABLED` — no credential is fabricated. With provider control on, step 14 first
+confirms the room with the provider (re-creating a room lost at the provider); an unreachable
+provider yields `503 RTC_PROVIDER_UNAVAILABLE` and the session is closed — never a fallback token.
 
 ## Database invariants
 
@@ -87,8 +97,8 @@ are append-only; invitation `usage_count <= use_limit`.
 ## Feature flags
 
 `FEATURE_MEETING_V2_ENABLED`, `FEATURE_WAITING_ROOM_V2_ENABLED`, `MEETING_V2_WRITE_ALLOWLIST`,
-`FEATURE_MEETING_V2_SHADOW_READ`, and Part E+ placeholders (`FEATURE_RTC_PROVIDER_CONTROL_V2`,
-`FEATURE_CONFERENCE_REALTIME_ENABLED`, `FEATURE_COLLABORATION_V2_ENABLED`,
+`FEATURE_MEETING_V2_SHADOW_READ`, Part E (`FEATURE_RTC_PROVIDER_CONTROL_V2`,
+`FEATURE_CONFERENCE_REALTIME_ENABLED`), and Part F+ placeholders (`FEATURE_COLLABORATION_V2_ENABLED`,
 `FEATURE_RECORDING_V2_ENABLED`, `FEATURE_WEBINAR_MODE_ENABLED`, `FEATURE_HEALTHCARE_PROFILE_ENABLED`).
 `FEATURE_LEGACY_MEETING_WRITE_DISABLED` is not honoured during A–D.
 
@@ -169,3 +179,132 @@ occurrence (materialized or not), keyed by the original wall-clock start in the 
 exception when it generates the occurrence; already-materialized rows are updated immediately.
 Conference-level cancel/reschedule of recurring occurrences record the same exception. Timezone
 re-anchoring keeps exceptions aligned. Materialization stays bounded (30 days / 50 per run).
+
+## Part E — RTC control plane & realtime state
+
+PostgreSQL is the authority; LiveKit only enforces committed decisions; Redis only fans events
+out. Everything lives inside meeting-service.
+
+### RtcProvider
+
+`RtcProvider` (provider-neutral; business code never calls LiveKit directly) — LiveKit status:
+
+| Method | LiveKitProvider |
+|---|---|
+| `create_room(conference)` | RoomService `CreateRoom` (idempotent; canonical name `cf-<conference uuid>`) |
+| `get_room(conference)` | `ListRooms` filtered by name |
+| `terminate_room(conference, reason)` | `DeleteRoom` (absent room = success) |
+| `issue_join_credentials(session, permissions, ttl)` | signed access token; identity = server media identity `ps_<session>`; grants from `MeetingPermissionService` only; never admin/record/create |
+| `remove_participant(session, reason)` | `RemoveParticipant` (absent = success) |
+| `update_permissions(session, permissions)` | `UpdateParticipant` (publish sources / subscribe / data) |
+| `mute_track(session, track_kind)` | `GetParticipant` + `MutePublishedTrack` per matching track |
+| `list_participants(conference)` | `ListParticipants` (identity, state, grants, tracks) |
+| `list_rooms(prefix)` | `ListRooms` (reconciliation) |
+| `start_recording` / `stop_recording` | interface kept; gated (`NotSupported`) until Part G |
+| `reconcile(conference)` | room + participants snapshot |
+| `parse_webhook(body, authorization)` | LiveKit webhook verification (JWT signed with the API secret, `sha256` = body hash) |
+
+Every admin call is bounded (`LIVEKIT_API_TIMEOUT_MS`). Errors map to a stable
+`RTC_PROVIDER_UNAVAILABLE`; provider details are logged, never returned. A provider declares
+`capabilities()`; provider control is active only when `FEATURE_RTC_PROVIDER_CONTROL_V2` is on
+AND the provider controls rooms. A credential-only provider keeps the Parts A–D semantics.
+
+### Lifecycle
+
+- PREPARE: CREATED → PREPARING commits with an `rtc.room_prepare_requested` command; after commit
+  the command runs (`RtcControl::ensure_room`), and only the provider's confirmation moves
+  PREPARING → WAITING (`conference.ready`, `rtc_room_ready_at`). Concurrent prepares serialize on
+  the row lock; `CreateRoom` is idempotent; on failure the conference stays PREPARING and the
+  command/reconciler retry. START from CREATED/PREPARING runs prepare first and refuses to go LIVE
+  (`503`) until the room is confirmed; authorization and the start window are checked before any
+  provider call.
+- END: LIVE → ENDING commits with `rtc.room_terminate_requested` (joins and credentials refused from
+  that commit). After commit: `DeleteRoom` → `ListRooms` confirms absence → active sessions are
+  finalized (`TERMINATED`, `CONFERENCE_ENDED`) → ENDED (`conference.ended`, `rtc_room_terminated_at`).
+  Any failure leaves ENDING, logs `alert=RTC_TERMINATION_FAILED`, increments
+  `room_terminate_failures`, and is retried by the relay, a repeated END and the reconciler.
+  A verified `room_finished` webhook is also accepted as confirmed absence.
+- CANCEL / FAIL of a conference that had a room queue the same termination.
+
+### Credentials, grants, moderation
+
+- Credentials only after the admission/session commit, re-checked after minting (conference still
+  LIVE, session still active); bounded TTL (`RTC_CREDENTIAL_TTL_SECS`, default 600 s, never longer
+  than the session). VIEWER = subscribe-only (no publish sources).
+- Role change commits, then `rtc.permissions_update_requested` pushes the grants the permission
+  engine derives from the CURRENT role (payload grants are ignored) to every live session;
+  `participant.media_permission_changed` is emitted when the projection changes. On provider
+  connect the current grants are re-asserted (a credential minted before a demotion cannot keep
+  publish rights).
+- Remove / ban / return-to-waiting commit (DB trigger terminates sessions), then
+  `rtc.participant_remove_requested` disconnects every provider session. The command resolves the
+  identity from the session row of the same conference. Stale credentials: a provider join whose
+  identity does not map to an ACTIVE session of an ADMITTED participant of that conference is
+  evicted immediately (webhook) or by the reconciler. Reconnect always re-runs the join pipeline.
+- Mute: `POST /api/v2/conferences/{id}/participants/{pid}/mute {trackKind}` (permission
+  `participant.mute`, conference-scoped target, moderation rank) → `mute_track`. Cross-conference
+  targets are `PARTICIPANT_NOT_FOUND` before any provider call.
+
+### Webhooks
+
+`POST /internal/rtc/livekit/webhook` (not the user webhook system; enabled only with provider
+control). Verification: LiveKit JWT signed with the API secret, issuer = API key, `sha256` claim =
+body hash, expiry enforced (60 s leeway) — otherwise `401`. Dedupe: `rtc_webhook_events(event_id)`
+inserted in the same transaction as the state change (`DUPLICATE` on replay). Room → conference by
+`rtc_room_name`; identity → session only within that conference. Handled: `participant_joined`
+(PENDING → CONNECTED, `participant.joined`), `participant_left` / `participant_connection_aborted`
+(→ DISCONNECTED, `participant.left`), `room_finished` (confirmed absence: ENDING → ENDED; a LIVE
+room loss clears readiness so the next join/reconciler re-creates it), `room_started` (records the
+room id). Callbacks never create participants or change role/admission/membership/access; unknown
+rooms are recorded and ignored.
+
+### Reconciler
+
+`workers/conference_reconciler.rs` — see the module docs for the drift table (PREPARING not ready,
+LIVE room missing, ENDING not finalized, orphan rooms, unmapped rooms (escalated, never deleted),
+provider participants without session (evicted), late webhooks (session marked CONNECTED), sessions
+absent at the provider beyond grace (DISCONNECTED), permission drift (re-pushed)). Singleton via
+`worker_leases` (crash-safe expiry), bounded batches, findings in `rtc_drift_events`.
+
+### Outbox, realtime, recovery
+
+- `outbox_events.channel`: `REALTIME` (client events) vs `PROVIDER_COMMAND` (`rtc.*`, never
+  delivered to clients). Client events of a conference carry `conference_seq`: allocated by
+  incrementing `conference_sessions.event_seq` in the emitting transaction, so the sequence is
+  gap-free and in commit order.
+- Relay: leases via `available_at` + `locked_by` with `FOR UPDATE SKIP LOCKED` (multi-worker,
+  crash-safe: an expired lease is re-claimed; a zombie cannot complete a row it lost). Transient
+  failures (Redis/provider outage) retry with capped backoff and are never dropped; poison rows
+  (unknown/malformed/out-of-scope) are dead-lettered `FAILED`.
+- Redis: `PUBLISH cfmeet:rt:conference:{id}` with the envelope `{eventId, eventType, schemaVersion,
+  conferenceId, meetingSpaceId, sequence, occurredAt, correlationId, payload}` (payload scrubbed of
+  provider ids / secrets). Redis down → writes still commit, events stay PENDING, WebSockets
+  degrade to tailing PostgreSQL (`degraded` frame), REST replay keeps working.
+- WebSocket: `POST /api/v2/conferences/{id}/realtime/ticket` (authorized; 60 s one-shot ticket,
+  domain-separated key) then `GET /api/v2/conferences/{id}/realtime?ticket=…&cursor=…` (header auth
+  also accepted). Admitted participants / members / owners get `FULL`; waiting participants
+  `SELF_ONLY` (lifecycle + their own events). Re-authorized on relevant events and every 15 s;
+  removed/banned subscribers get `revoked` + close `4403`; conference end → `closed`.
+- Recovery: reconnect with `cursor` → missed events replayed in order (≤ 500); otherwise
+  `resync_required` with `canonical: GET /api/v2/conferences/{id}`. `GET /api/v2/conferences/{id}/events?after=`
+  offers the same replay over REST. Consumers must tolerate duplicates across reconnects.
+
+### Observability
+
+`GET /internal/rtc/metrics` (`X-Internal-Token` = `INTERNAL_API_TOKEN`) → counters (provider
+errors, room create/terminate failures, credentials, removals, permission updates, mutes, webhooks
+received/rejected/duplicate/unknown, evictions, drift detected/repaired/escalated, outbox
+published/retried/dead-lettered, realtime publish failures, WebSocket connections/rejections) and
+outbox backlog per channel.
+
+### Certification
+
+- Mocked provider: `tests/rtc_*.rs` run the production `LiveKitProvider` over HTTP against an
+  in-process mock RoomService that speaks the LiveKit Twirp/protobuf protocol, verifies admin
+  grants, and simulates SFU clients that enforce credential grants.
+- Real self-hosted LiveKit: `scripts/livekit-certification/run.sh` starts a local
+  `livekit-server` (config in the same folder, webhooks to `127.0.0.1:18089`) and runs
+  `tests/livekit_certification.rs` (`#[ignore]`d in the default suite) with the `rtcprobe` pion
+  WebRTC client: room create/lookup, credential + real media join, verified webhook session
+  sync, participant listing, mute, permission update, VIEWER publish refusal, removal,
+  termination, reconciliation.

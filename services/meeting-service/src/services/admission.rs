@@ -849,9 +849,9 @@ impl AdmissionService {
                 RtcOutcome::ProviderControlDisabled
             }
             Some(s) => {
-                // Part E: a credential is only minted for a provider-confirmed room.
-                if self.rtc.room_control() && conference.rtc_room_ready_at.is_none() {
-                    if let Err(e) = self.rtc.ensure_room(conference_id).await {
+                // Part E: a credential is only minted for a room the provider confirms now.
+                if self.rtc.room_control() {
+                    if let Err(e) = self.rtc.verify_room_for_join(conference_id).await {
                         inc(&M.credentials_refused);
                         self.close_session(
                             s.id,

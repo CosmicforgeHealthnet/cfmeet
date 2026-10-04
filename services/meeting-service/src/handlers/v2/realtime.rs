@@ -159,10 +159,13 @@ pub async fn subscribe(
         match &q.ticket {
             Some(ticket) => {
                 let principal = match rt.verify_ticket(ticket, id)? {
-                    TicketSubject::User(uid) => SubscriberPrincipal::User(rt.user_actor(uid).await?),
+                    TicketSubject::User(uid) => {
+                        SubscriberPrincipal::User(rt.user_actor(uid).await?)
+                    }
                     TicketSubject::Participant(pid) => SubscriberPrincipal::Participant(pid),
                 };
-                let conference = crate::services::meeting_core::find_conference(rt.db(), id).await?;
+                let conference =
+                    crate::services::meeting_core::find_conference(rt.db(), id).await?;
                 rt.resolve(&conference, principal).await
             }
             None => rt.authorize(&actor, id).await,
@@ -189,11 +192,18 @@ async fn next_signal(stream: &mut Option<RedisStream>) -> Option<Option<redis::M
     }
 }
 
-async fn send_json(tx: &mut futures_util::stream::SplitSink<WebSocket, Message>, v: serde_json::Value) -> bool {
+async fn send_json(
+    tx: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    v: serde_json::Value,
+) -> bool {
     tx.send(Message::Text(v.to_string())).await.is_ok()
 }
 
-async fn close(tx: &mut futures_util::stream::SplitSink<WebSocket, Message>, code: u16, reason: &'static str) {
+async fn close(
+    tx: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    code: u16,
+    reason: &'static str,
+) {
     let _ = tx
         .send(Message::Close(Some(CloseFrame {
             code,
@@ -202,7 +212,12 @@ async fn close(tx: &mut futures_util::stream::SplitSink<WebSocket, Message>, cod
         .await;
 }
 
-async fn run_socket(rt: Arc<RealtimeService>, mut sub: Subscriber, cursor: Option<i64>, socket: WebSocket) {
+async fn run_socket(
+    rt: Arc<RealtimeService>,
+    mut sub: Subscriber,
+    cursor: Option<i64>,
+    socket: WebSocket,
+) {
     inc(&M.ws_connections);
     let conference_id = sub.conference_id;
     let (mut tx, mut rx) = socket.split();
@@ -299,8 +314,11 @@ async fn run_socket(rt: Arc<RealtimeService>, mut sub: Subscriber, cursor: Optio
             incoming = rx.next() => match incoming {
                 None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return,
                 Some(Ok(Message::Ping(p))) => { let _ = tx.send(Message::Pong(p)).await; }
-                Some(Ok(Message::Text(t))) if t.trim() == "ping" => {
-                    if !send_json(&mut tx, json!({ "type": "pong", "cursor": last })).await { return; }
+                Some(Ok(Message::Text(t)))
+                    if t.trim() == "ping"
+                        && !send_json(&mut tx, json!({ "type": "pong", "cursor": last })).await =>
+                {
+                    return;
                 }
                 _ => {}
             },
@@ -315,7 +333,9 @@ async fn run_socket(rt: Arc<RealtimeService>, mut sub: Subscriber, cursor: Optio
             };
             let n = rows.len();
             for row in rows {
-                let Some(seq) = row.conference_seq else { continue };
+                let Some(seq) = row.conference_seq else {
+                    continue;
+                };
                 last = seq;
                 let Some(env) = envelope(&row) else { continue };
                 if sub.may_receive(&env)
@@ -334,9 +354,15 @@ async fn run_socket(rt: Arc<RealtimeService>, mut sub: Subscriber, cursor: Optio
                 }
                 if matches!(
                     env.event_type.as_str(),
-                    event::CONFERENCE_ENDED | event::CONFERENCE_CANCELLED | event::CONFERENCE_FAILED
+                    event::CONFERENCE_ENDED
+                        | event::CONFERENCE_CANCELLED
+                        | event::CONFERENCE_FAILED
                 ) {
-                    let _ = send_json(&mut tx, json!({ "type": "closed", "reason": env.event_type })).await;
+                    let _ = send_json(
+                        &mut tx,
+                        json!({ "type": "closed", "reason": env.event_type }),
+                    )
+                    .await;
                     return close(&mut tx, 1000, "conference closed").await;
                 }
             }

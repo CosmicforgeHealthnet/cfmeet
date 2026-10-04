@@ -8,6 +8,7 @@
 #![allow(dead_code)]
 
 pub mod livekit_mock;
+pub mod rtc;
 
 use std::{
     collections::HashMap,
@@ -377,6 +378,8 @@ pub struct TestOptions {
     pub rtc: RtcMode,
     /// Provider admin-call timeout (LiveKit modes).
     pub rtc_timeout: Duration,
+    /// Short pool acquire timeout (database-outage tests).
+    pub db_acquire_timeout: Option<Duration>,
     /// Non-empty → static directory; empty → the production `DbOrganizationDirectory`.
     pub organizations: HashMap<Uuid, Vec<Uuid>>,
     pub custom_allow: Vec<Uuid>,
@@ -394,6 +397,7 @@ impl Default for TestOptions {
             },
             rtc: RtcMode::Fake,
             rtc_timeout: Duration::from_secs(3),
+            db_acquire_timeout: None,
             organizations: HashMap::new(),
             custom_allow: vec![],
             appointments: None,
@@ -431,7 +435,15 @@ impl TestApp {
     }
 
     pub async fn with(opts: TestOptions) -> Option<Self> {
-        let db = TestDb::new().await?;
+        let mut db = TestDb::new().await?;
+        if let Some(t) = opts.db_acquire_timeout {
+            let mut o = sea_orm::ConnectOptions::new(db.url.clone());
+            o.max_connections(20)
+                .acquire_timeout(t)
+                .connect_timeout(t)
+                .sqlx_logging(false);
+            db.conn = Database::connect(o).await.unwrap();
+        }
         let lk = match opts.rtc {
             RtcMode::LiveKitMock => Some(livekit_mock::start().await),
             _ => None,
@@ -506,7 +518,14 @@ impl TestApp {
                 let p = LiveKitProvider::with_api_url(&cfg, &mock.http_url(), opts.rtc_timeout);
                 (cfg, Arc::new(p))
             }
-            (RtcMode::RealLiveKit { url, api_key, api_secret }, _) => {
+            (
+                RtcMode::RealLiveKit {
+                    url,
+                    api_key,
+                    api_secret,
+                },
+                _,
+            ) => {
                 let cfg = LiveKitConfig {
                     url: url.clone(),
                     api_key: api_key.clone(),
@@ -601,7 +620,8 @@ impl TestApp {
 
     /// Signed (valid) mock-LiveKit webhook.
     pub async fn signed_webhook(&self, body: &str) -> (StatusCode, Value) {
-        let auth = livekit_mock::sign_webhook(body, livekit_mock::API_KEY, livekit_mock::API_SECRET);
+        let auth =
+            livekit_mock::sign_webhook(body, livekit_mock::API_KEY, livekit_mock::API_SECRET);
         self.webhook(body, Some(&auth)).await
     }
 

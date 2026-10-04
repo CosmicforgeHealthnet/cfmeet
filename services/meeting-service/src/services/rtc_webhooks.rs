@@ -150,11 +150,15 @@ impl RtcWebhookService {
                 }
                 WebhookOutcome::Applied
             }
-            ProviderEventKind::RoomFinished => self.room_finished(&txn, conference.clone(), e).await?,
+            ProviderEventKind::RoomFinished => {
+                self.room_finished(&txn, conference.clone(), e).await?
+            }
             ProviderEventKind::ParticipantJoined => {
                 self.participant_joined(&txn, &conference, e).await?
             }
-            ProviderEventKind::ParticipantLeft => self.participant_left(&txn, &conference, e).await?,
+            ProviderEventKind::ParticipantLeft => {
+                self.participant_left(&txn, &conference, e).await?
+            }
             ProviderEventKind::Other => WebhookOutcome::Ignored,
         };
         self.finish(&txn, e, Some(conference.id), outcome).await?;
@@ -318,10 +322,11 @@ impl RtcWebhookService {
             }
             return Ok(WebhookOutcome::UnknownIdentityEvicted);
         };
-        let participant = conference_participants::Entity::find_by_id(session.conference_participant_id)
-            .filter(conference_participants::Column::ConferenceId.eq(conference.id))
-            .one(txn)
-            .await?;
+        let participant =
+            conference_participants::Entity::find_by_id(session.conference_participant_id)
+                .filter(conference_participants::Column::ConferenceId.eq(conference.id))
+                .one(txn)
+                .await?;
         let allowed = conference.status == ConferenceStatus::Live
             && session.state.is_active()
             && participant
@@ -342,7 +347,9 @@ impl RtcWebhookService {
         let now = Utc::now();
         let mut am: participant_sessions::ActiveModel = session.clone().into();
         am.state = Set(SessionState::Connected);
-        am.connected_at = Set(Some(e.occurred_at.unwrap_or(now).max(session.established_at)));
+        am.connected_at = Set(Some(
+            e.occurred_at.unwrap_or(now).max(session.established_at),
+        ));
         am.updated_at = Set(now);
         let session = am.update(txn).await?;
         emit(
@@ -391,13 +398,15 @@ impl RtcWebhookService {
         if !session.state.is_active() {
             return Ok(WebhookOutcome::Ignored);
         }
-        let participant = conference_participants::Entity::find_by_id(session.conference_participant_id)
-            .one(txn)
-            .await?;
+        let participant =
+            conference_participants::Entity::find_by_id(session.conference_participant_id)
+                .one(txn)
+                .await?;
         let now = Utc::now();
         let mut am: participant_sessions::ActiveModel = session.clone().into();
         am.state = Set(SessionState::Disconnected);
-        am.disconnected_at = Set(Some(e.occurred_at.unwrap_or(now).max(session.established_at)));
+        let floor = session.connected_at.unwrap_or(session.established_at);
+        am.disconnected_at = Set(Some(e.occurred_at.unwrap_or(now).max(floor)));
         am.end_reason = Set(Some("PROVIDER_LEFT".into()));
         am.updated_at = Set(now);
         let session = am.update(txn).await?;

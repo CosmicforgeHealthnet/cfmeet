@@ -272,8 +272,11 @@ pub trait RtcProvider: Send + Sync {
         request: &JoinCredentialRequest,
     ) -> RtcResult<JoinCredentials>;
     /// Disconnect one participant session. An already-absent participant is success.
-    async fn remove_participant(&self, participant: &RtcParticipantRef, reason: &str)
-        -> RtcResult<()>;
+    async fn remove_participant(
+        &self,
+        participant: &RtcParticipantRef,
+        reason: &str,
+    ) -> RtcResult<()>;
     /// Replace the participant's live publish/subscribe grants.
     async fn update_permissions(
         &self,
@@ -529,7 +532,9 @@ impl RtcProvider for LiveKitProvider {
             ))
             .await?;
         if created.name != room.room_name {
-            return Err(RtcError::Rejected("provider returned a different room".into()));
+            return Err(RtcError::Rejected(
+                "provider returned a different room".into(),
+            ));
         }
         Ok(Self::room_info(&created))
     }
@@ -631,8 +636,7 @@ impl RtcProvider for LiveKitProvider {
             }
             // `mute_published_track` unwraps the response body; isolate it so a malformed
             // provider reply cannot take down the request task.
-            let client =
-                RoomClient::with_api_key(&self.api_url, &self.api_key, &self.api_secret);
+            let client = RoomClient::with_api_key(&self.api_url, &self.api_key, &self.api_secret);
             let (room, identity, sid) = (
                 participant.room_name.clone(),
                 participant.media_identity.clone(),
@@ -649,8 +653,14 @@ impl RtcProvider for LiveKitProvider {
             match handle.await {
                 Ok(Ok(Ok(_))) => muted += 1,
                 Ok(Ok(Err(e))) => return Err(Self::map_err(e)),
-                Ok(Err(_)) => return Err(RtcError::Unavailable("provider request timed out".into())),
-                Err(_) => return Err(RtcError::Rejected("malformed provider mute response".into())),
+                Ok(Err(_)) => {
+                    return Err(RtcError::Unavailable("provider request timed out".into()))
+                }
+                Err(_) => {
+                    return Err(RtcError::Rejected(
+                        "malformed provider mute response".into(),
+                    ))
+                }
             }
         }
         Ok(muted)
@@ -784,7 +794,10 @@ mod tests {
     #[test]
     fn admin_url_mapping() {
         assert_eq!(admin_url_from("wss://lk.example"), "https://lk.example");
-        assert_eq!(admin_url_from("ws://127.0.0.1:7880"), "http://127.0.0.1:7880");
+        assert_eq!(
+            admin_url_from("ws://127.0.0.1:7880"),
+            "http://127.0.0.1:7880"
+        );
         assert_eq!(admin_url_from("https://x"), "https://x");
     }
 

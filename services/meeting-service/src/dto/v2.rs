@@ -17,6 +17,7 @@ use crate::{
         RecurrenceStatus, Role, SecurityProfile, SpaceStatus, TerminationReason, WaitingRoomPolicy,
     },
     services::meeting_permissions::{MediaPermissions, RolePolicy},
+    services::{realtime::RealtimeEnvelope, rtc_provider::TrackKind},
 };
 
 // ---------------------------------------------------------------------------
@@ -830,14 +831,14 @@ pub struct RecurrenceExceptionResponse {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MuteRequest {
-    pub track_kind: crate::services::rtc_provider::TrackKind,
+    pub track_kind: TrackKind,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MuteResponse {
     pub participant_id: Uuid,
-    pub track_kind: crate::services::rtc_provider::TrackKind,
+    pub track_kind: TrackKind,
     /// Connected device sessions examined.
     pub sessions: u32,
     /// Published tracks the provider muted.
@@ -867,7 +868,7 @@ pub struct EventReplayQuery {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EventReplayResponse {
-    pub events: Vec<crate::services::realtime::RealtimeEnvelope>,
+    pub events: Vec<RealtimeEnvelope>,
     /// Cursor to resume from.
     pub cursor: i64,
     /// True when the cursor cannot be served: refetch `canonical` and resume from `cursor`.

@@ -179,9 +179,13 @@ impl MeetingV2Config {
             ),
             rtc_credential_ttl_secs: env_num("RTC_CREDENTIAL_TTL_SECS", d.rtc_credential_ttl_secs)
                 .clamp(60, 6 * 60 * 60),
-            reconciler_poll_secs: env_num("CONFERENCE_RECONCILER_POLL_SECS", d.reconciler_poll_secs)
-                .max(1),
-            reconciler_batch: env_num("CONFERENCE_RECONCILER_BATCH", d.reconciler_batch).clamp(1, 1000),
+            reconciler_poll_secs: env_num(
+                "CONFERENCE_RECONCILER_POLL_SECS",
+                d.reconciler_poll_secs,
+            )
+            .max(1),
+            reconciler_batch: env_num("CONFERENCE_RECONCILER_BATCH", d.reconciler_batch)
+                .clamp(1, 1000),
             reconciler_presence_grace_secs: env_num(
                 "CONFERENCE_RECONCILER_PRESENCE_GRACE_SECS",
                 d.reconciler_presence_grace_secs,

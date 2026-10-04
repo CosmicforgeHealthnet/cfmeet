@@ -6,9 +6,7 @@
 //! the row becomes claimable again. No delivery work happens inside a transaction.
 
 use chrono::{Duration, Utc};
-use sea_orm::{
-    ConnectionTrait, DatabaseConnection, DbBackend, FromQueryResult, Statement,
-};
+use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, FromQueryResult, Statement};
 use uuid::Uuid;
 
 use crate::{

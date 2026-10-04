@@ -28,7 +28,9 @@ pub mod meeting_auto_end;
 pub mod meeting_auto_start;
 pub mod outbox_relay;
 
-pub use conference_reconciler::{spawn_conference_reconciler, ConferenceReconciler, ReconcileReport};
+pub use conference_reconciler::{
+    spawn_conference_reconciler, ConferenceReconciler, ReconcileReport,
+};
 pub use conference_scheduler::{
     spawn_conference_scheduler, ConferenceScheduler, ConferenceSchedulerHandle,
 };

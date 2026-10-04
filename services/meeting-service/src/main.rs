@@ -117,14 +117,16 @@ async fn main() -> anyhow::Result<()> {
     // `conference_realtime_enabled`) and executes provider commands through the RTC
     // control plane (when `rtc_provider_control_v2`). Without a consumer, rows stay
     // durably PENDING in PostgreSQL.
-    let _outbox_relay = (flags.conference_realtime_enabled || flags.rtc_provider_control_v2)
-        .then(|| {
-            let publisher: Option<std::sync::Arc<dyn backend::workers::outbox_relay::EventPublisher>> =
-                flags.conference_realtime_enabled.then(|| {
-                    std::sync::Arc::new(backend::services::realtime::RedisPublisher::new(
-                        state.redis.clone(),
-                    )) as std::sync::Arc<dyn backend::workers::outbox_relay::EventPublisher>
-                });
+    let _outbox_relay =
+        (flags.conference_realtime_enabled || flags.rtc_provider_control_v2).then(|| {
+            let publisher: Option<
+                std::sync::Arc<dyn backend::workers::outbox_relay::EventPublisher>,
+            > = flags.conference_realtime_enabled.then(|| {
+                std::sync::Arc::new(backend::services::realtime::RedisPublisher::new(
+                    state.redis.clone(),
+                ))
+                    as std::sync::Arc<dyn backend::workers::outbox_relay::EventPublisher>
+            });
             let control = flags.rtc_provider_control_v2.then(|| {
                 std::sync::Arc::new(backend::services::rtc_control::RtcControl::new(
                     state.meeting.core.clone(),
