@@ -106,9 +106,16 @@ resolver accepts v2 id, v2 code, legacy id and legacy code.
 `ActorContext`. The body `user_id` is a compatibility claim only: 401 without a bearer token,
 403 if it differs from the authenticated user. Guests resume only with their server-signed guest
 token (`Authorization: Bearer <guest access_token>`); display names are never matched. The
-API-key route joins as the key owner. **Web client follow-up (outside this service):**
-`apps/web/src/services/meeting.service.ts#joinMeeting` must use the authenticated `api` client
-(which sends the stored access/guest token) instead of `publicApi`.
+API-key route joins as the key owner.
+
+**Web client compatibility (cross-spec patch, final A–D closure):**
+`apps/web/src/services/meeting.service.ts#joinMeeting` now uses the authenticated `api` axios
+client instead of `publicApi`, so every join and waiting-room poll carries
+`Authorization: Bearer <cookie access_token>` — the signed-in user's token, or the guest token
+the pre-join screen already persists from the first guest join. An expired token gets 401, the
+client's existing refresh interceptor calls `POST /api/v1/auth/refresh` (guest refresh tokens
+keep the guest role and participant subject) and retries. No other frontend code changed.
+Regression coverage: `tests/legacy_v1_join.rs`, `tests/legacy_v1_web_compat.rs`.
 
 ### Organizations (ORGANIZATION_ONLY)
 No organization source existed in the monorepo; the meeting service is the current CF account

@@ -53,8 +53,11 @@ export const meetingService = {
   },
 
   // POST /meetings/join/:meeting_identifier — join a meeting
+  // Uses the authenticated client: the backend takes identity only from the bearer token
+  // (the signed-in user's token, or the server-issued guest token saved after the first
+  // guest join), never from body user_id or display name.
   joinMeeting: async (meetingIdentifier: string, data: JoinMeetingRequest) => {
-    const response = await publicApi.post<JoinMeetingResponse>(
+    const response = await api.post<JoinMeetingResponse>(
       `/meetings/join/${meetingIdentifier}`,
       data,
     );
