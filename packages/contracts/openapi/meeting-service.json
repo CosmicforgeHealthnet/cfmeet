@@ -2737,6 +2737,78 @@
         ]
       }
     },
+    "/api/v2/conferences/{id}/events": {
+      "get": {
+        "tags": [
+          "Realtime (v2)"
+        ],
+        "summary": "Replay committed conference events after a cursor (recovery without WebSocket).",
+        "operationId": "v2_replay_events",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Last processed sequence",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Events or resync instruction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventReplayResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "CONFERENCE_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
     "/api/v2/conferences/{id}/join": {
       "post": {
         "tags": [
@@ -3138,12 +3210,114 @@
         ]
       }
     },
+    "/api/v2/conferences/{id}/participants/{participantId}/mute": {
+      "post": {
+        "tags": [
+          "Participants (v2)"
+        ],
+        "summary": "Server-side mute of a participant's published tracks (provider-enforced primitive).",
+        "description": "Authorization and conference scoping are checked before any provider call.",
+        "operationId": "v2_mute_participant",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "participantId",
+            "in": "path",
+            "description": "Participant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Muted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MuteResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_NOT_LIVE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "RTC_PROVIDER_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
     "/api/v2/conferences/{id}/participants/{participantId}/remove": {
       "post": {
         "tags": [
           "Participants (v2)"
         ],
-        "summary": "Remove a participant (business authority; media disconnect is enforced in Part E).",
+        "summary": "Remove a participant (business authority; media disconnect enforced by the RTC provider).",
         "operationId": "v2_remove",
         "parameters": [
           {
@@ -3366,7 +3540,7 @@
         "tags": [
           "Conferences (v2)"
         ],
-        "summary": "CREATED → PREPARING (provider preparation is Part E).",
+        "summary": "CREATED → PREPARING → (provider room confirmed) → WAITING.",
         "operationId": "v2_prepare_conference",
         "parameters": [
           {
@@ -3403,6 +3577,163 @@
           },
           "409": {
             "description": "CONFERENCE_STATE_CONFLICT / CONFERENCE_NOT_LIVE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/realtime": {
+      "get": {
+        "tags": [
+          "Realtime (v2)"
+        ],
+        "summary": "WebSocket conference event stream.",
+        "operationId": "v2_realtime_subscribe",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "ticket",
+            "in": "query",
+            "description": "One-shot ticket",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Resume after this sequence",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching protocols (WebSocket)"
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "CONFERENCE_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {},
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/realtime/ticket": {
+      "post": {
+        "tags": [
+          "Realtime (v2)"
+        ],
+        "summary": "Mint a one-shot realtime subscription ticket.",
+        "operationId": "v2_realtime_ticket",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RealtimeTicketResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED / MEETING_ACCESS_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "CONFERENCE_NOT_FOUND / FEATURE_DISABLED",
             "content": {
               "application/json": {
                 "schema": {
@@ -6743,6 +7074,35 @@
           }
         }
       },
+      "EventReplayResponse": {
+        "type": "object",
+        "required": [
+          "events",
+          "cursor",
+          "resyncRequired",
+          "canonical"
+        ],
+        "properties": {
+          "canonical": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Cursor to resume from."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/crate.services.realtime.RealtimeEnvelope"
+            }
+          },
+          "resyncRequired": {
+            "type": "boolean",
+            "description": "True when the cursor cannot be served: refetch `canonical` and resume from `cursor`."
+          }
+        }
+      },
       "ForgotPasswordRequest": {
         "type": "object",
         "required": [
@@ -7697,6 +8057,48 @@
           }
         }
       },
+      "MuteRequest": {
+        "type": "object",
+        "required": [
+          "trackKind"
+        ],
+        "properties": {
+          "trackKind": {
+            "$ref": "#/components/schemas/crate.services.rtc_provider.TrackKind"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MuteResponse": {
+        "type": "object",
+        "required": [
+          "participantId",
+          "trackKind",
+          "sessions",
+          "mutedTracks"
+        ],
+        "properties": {
+          "mutedTracks": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Published tracks the provider muted.",
+            "minimum": 0
+          },
+          "participantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sessions": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Connected device sessions examined.",
+            "minimum": 0
+          },
+          "trackKind": {
+            "$ref": "#/components/schemas/crate.services.rtc_provider.TrackKind"
+          }
+        }
+      },
       "MyOrganizationResponse": {
         "type": "object",
         "required": [
@@ -7978,6 +8380,7 @@
         "description": "Provider enforcement state for operations whose media effect is Part E.",
         "enum": [
           "PENDING_PROVIDER_CONTROL",
+          "ENFORCED",
           "NOT_REQUIRED"
         ]
       },
@@ -8033,6 +8436,91 @@
           },
           "title": {
             "type": "string"
+          }
+        }
+      },
+      "RealtimeEnvelope": {
+        "type": "object",
+        "description": "Stable provider-neutral realtime envelope.",
+        "required": [
+          "eventId",
+          "eventType",
+          "schemaVersion",
+          "occurredAt",
+          "payload"
+        ],
+        "properties": {
+          "conferenceId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "correlationId": {
+            "type": "string",
+            "nullable": true
+          },
+          "eventId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "meetingSpaceId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Gap-free per-conference sequence (commit order) — the replay cursor.",
+            "nullable": true
+          }
+        }
+      },
+      "RealtimeTicketResponse": {
+        "type": "object",
+        "required": [
+          "ticket",
+          "expiresAt",
+          "websocketPath",
+          "cursor",
+          "scope"
+        ],
+        "properties": {
+          "cursor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Current conference event sequence (start cursor for a fresh subscriber)."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "scope": {
+            "type": "string",
+            "description": "`FULL` (admitted / members) or `SELF_ONLY` (waiting participants)."
+          },
+          "ticket": {
+            "type": "string",
+            "description": "One-shot, short-lived ticket for `GET …/realtime?ticket=` (browser WebSockets)."
+          },
+          "websocketPath": {
+            "type": "string",
+            "description": "WebSocket path relative to the API origin."
           }
         }
       },
@@ -8691,6 +9179,15 @@
           "Legacy"
         ]
       },
+      "TrackKind": {
+        "type": "string",
+        "description": "Media track kinds the business layer reasons about.",
+        "enum": [
+          "AUDIO",
+          "VIDEO",
+          "SCREEN_SHARE"
+        ]
+      },
       "UpdateAudioRequest": {
         "type": "object",
         "description": "Request to update audio state",
@@ -9290,6 +9787,10 @@
     {
       "name": "Participants (v2)",
       "description": "Logical conference participants (one per person per conference) and moderation. All participant ids are conference-scoped."
+    },
+    {
+      "name": "Realtime (v2)",
+      "description": "Authorized conference event stream (WebSocket) and replay. PostgreSQL is authority; events are delivery only — recover canonical state from GET /api/v2/conferences/{id}."
     },
     {
       "name": "Waiting Room (v2)",

@@ -3,7 +3,7 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::domain::OutboxStatus;
+use crate::domain::{OutboxChannel, OutboxStatus};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "outbox_events")]
@@ -23,6 +23,11 @@ pub struct Model {
     pub last_error: Option<String>,
     pub request_id: Option<String>,
     pub created_at: DateTimeUtc,
+    pub channel: OutboxChannel,
+    /// Gap-free, commit-ordered per-conference sequence (realtime replay cursor).
+    pub conference_seq: Option<i64>,
+    /// Relay lease holder while a delivery attempt is in flight.
+    pub locked_by: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

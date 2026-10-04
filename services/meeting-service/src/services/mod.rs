@@ -22,7 +22,12 @@ pub mod meeting_space;
 pub mod membership;
 pub mod organizations;
 pub mod recurrence;
+pub mod outbox;
+pub mod realtime;
+pub mod rtc_control;
+pub mod rtc_metrics;
 pub mod rtc_provider;
+pub mod rtc_webhooks;
 pub mod secrets;
 
 pub use otp::OtpService;

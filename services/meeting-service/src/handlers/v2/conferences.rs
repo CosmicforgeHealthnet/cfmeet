@@ -16,18 +16,11 @@ use crate::{
     state::AppState,
 };
 
-fn action_response(
-    o: ConferenceOutcome,
-    enforcement: ProviderEnforcement,
-) -> Json<ConferenceActionResponse> {
+fn action_response(o: ConferenceOutcome) -> Json<ConferenceActionResponse> {
     Json(ConferenceActionResponse {
         conference: views::conference(&o.conference, true),
         changed: o.changed,
-        provider_enforcement: if o.changed {
-            enforcement
-        } else {
-            ProviderEnforcement::NotRequired
-        },
+        provider_enforcement: o.enforcement.into(),
     })
 }
 
@@ -94,7 +87,7 @@ pub async fn get_conference(
     Ok(Json(views::conference(&c, full)))
 }
 
-/// CREATED → PREPARING (provider preparation is Part E).
+/// CREATED → PREPARING → (provider room confirmed) → WAITING.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/prepare", tag = "Conferences (v2)", operation_id = "v2_prepare_conference",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -111,10 +104,7 @@ pub async fn prepare_conference(
     V2Path(id): V2Path<Uuid>,
 ) -> ApiResult<Json<ConferenceActionResponse>> {
     let outcome = state.meeting.conferences.prepare(&actor, id).await?;
-    Ok(action_response(
-        outcome,
-        ProviderEnforcement::PendingProviderControl,
-    ))
+    Ok(action_response(outcome))
 }
 
 /// Start a conference. Concurrent starts yield exactly one LIVE authority.
@@ -134,7 +124,7 @@ pub async fn start_conference(
     V2Path(id): V2Path<Uuid>,
 ) -> ApiResult<Json<ConferenceActionResponse>> {
     let outcome = state.meeting.conferences.start(&actor, id).await?;
-    Ok(action_response(outcome, ProviderEnforcement::NotRequired))
+    Ok(action_response(outcome))
 }
 
 /// Lock a live conference: no new non-exempt entrants.
@@ -154,7 +144,7 @@ pub async fn lock_conference(
     V2Path(id): V2Path<Uuid>,
 ) -> ApiResult<Json<ConferenceActionResponse>> {
     let outcome = state.meeting.conferences.set_lock(&actor, id, true).await?;
-    Ok(action_response(outcome, ProviderEnforcement::NotRequired))
+    Ok(action_response(outcome))
 }
 
 /// Unlock a live conference.
@@ -178,7 +168,7 @@ pub async fn unlock_conference(
         .conferences
         .set_lock(&actor, id, false)
         .await?;
-    Ok(action_response(outcome, ProviderEnforcement::NotRequired))
+    Ok(action_response(outcome))
 }
 
 /// LIVE → ENDING. Admission and new join credentials stop immediately; ENDED follows provider termination (Part E).
@@ -202,10 +192,7 @@ pub async fn end_conference(
         .conferences
         .end(&actor, id, TerminationReason::HostEnded)
         .await?;
-    Ok(action_response(
-        outcome,
-        ProviderEnforcement::PendingProviderControl,
-    ))
+    Ok(action_response(outcome))
 }
 
 /// Cancel an unstarted conference (single-occurrence exception for recurring series).
@@ -225,7 +212,7 @@ pub async fn cancel_conference(
     V2Path(id): V2Path<Uuid>,
 ) -> ApiResult<Json<ConferenceActionResponse>> {
     let outcome = state.meeting.conferences.cancel(&actor, id).await?;
-    Ok(action_response(outcome, ProviderEnforcement::NotRequired))
+    Ok(action_response(outcome))
 }
 
 /// Reschedule one unstarted occurrence (series untouched).
@@ -247,7 +234,7 @@ pub async fn reschedule_conference(
         .conferences
         .reschedule(&actor, id, req)
         .await?;
-    Ok(action_response(o, ProviderEnforcement::NotRequired))
+    Ok(action_response(o))
 }
 
 /// Join (or reconnect to) a conference. Identity, role and admission are resolved

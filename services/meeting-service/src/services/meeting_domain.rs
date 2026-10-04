@@ -22,7 +22,9 @@ use crate::{
         membership::MembershipService,
         organizations::{DbOrganizationDirectory, OrganizationService},
         recurrence::RecurrenceService,
+        rtc_control::RtcControl,
         rtc_provider::{LiveKitProvider, RtcProvider},
+        rtc_webhooks::RtcWebhookService,
         RedisService,
     },
 };
@@ -65,6 +67,10 @@ pub struct MeetingDomain {
     pub invitations: InvitationService,
     pub compat: CompatService,
     pub organizations: OrganizationService,
+    /// Part E RTC control plane (provider lifecycle, commands, mute).
+    pub rtc: RtcControl,
+    /// Part E provider webhook processing.
+    pub rtc_webhooks: RtcWebhookService,
 }
 
 impl MeetingDomain {
@@ -98,6 +104,8 @@ impl MeetingDomain {
             invitations: InvitationService::new(core.clone()),
             compat: CompatService::new(core.clone()),
             organizations: OrganizationService::new(core.clone()),
+            rtc: RtcControl::new(core.clone()),
+            rtc_webhooks: RtcWebhookService::new(core.clone()),
             core,
         }
     }

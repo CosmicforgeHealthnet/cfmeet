@@ -43,6 +43,12 @@ pub struct Model {
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
     pub version: i32,
+    /// Per-conference realtime event sequence counter.
+    pub event_seq: i64,
+    /// Provider confirmed the room exists (PREPARING → WAITING requires it).
+    pub rtc_room_ready_at: Option<DateTimeUtc>,
+    /// Provider confirmed termination / absence (ENDING → ENDED requires it).
+    pub rtc_room_terminated_at: Option<DateTimeUtc>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

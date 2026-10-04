@@ -12,7 +12,7 @@ use backend::{
     state::AppState,
     swagger,
     workers::{
-        outbox_relay::{spawn_outbox_relay, LogPublisher, OutboxRelay},
+        outbox_relay::{spawn_outbox_relay, OutboxRelay},
         spawn_conference_scheduler, spawn_email_worker, spawn_meeting_auto_end_worker,
         spawn_meeting_auto_start_worker,
     },
@@ -113,14 +113,39 @@ async fn main() -> anyhow::Result<()> {
     let _conference_scheduler = flags
         .meeting_v2_enabled
         .then(|| spawn_conference_scheduler(state.meeting.clone()));
-    // The outbox relay only runs once the Part E realtime/control-plane consumer exists;
-    // until then events stay durably PENDING in PostgreSQL.
-    let _outbox_relay = flags.conference_realtime_enabled.then(|| {
-        spawn_outbox_relay(
-            OutboxRelay::new(db.clone(), std::sync::Arc::new(LogPublisher)),
-            2,
+    // Part E: the outbox relay delivers client realtime events to Redis fanout (when
+    // `conference_realtime_enabled`) and executes provider commands through the RTC
+    // control plane (when `rtc_provider_control_v2`). Without a consumer, rows stay
+    // durably PENDING in PostgreSQL.
+    let _outbox_relay = (flags.conference_realtime_enabled || flags.rtc_provider_control_v2)
+        .then(|| {
+            let publisher: Option<std::sync::Arc<dyn backend::workers::outbox_relay::EventPublisher>> =
+                flags.conference_realtime_enabled.then(|| {
+                    std::sync::Arc::new(backend::services::realtime::RedisPublisher::new(
+                        state.redis.clone(),
+                    )) as std::sync::Arc<dyn backend::workers::outbox_relay::EventPublisher>
+                });
+            let control = flags.rtc_provider_control_v2.then(|| {
+                std::sync::Arc::new(backend::services::rtc_control::RtcControl::new(
+                    state.meeting.core.clone(),
+                ))
+            });
+            spawn_outbox_relay(OutboxRelay::with_control(db.clone(), publisher, control), 2)
+        });
+    let _conference_reconciler = flags.rtc_provider_control_v2.then(|| {
+        let poll = state.meeting.core.config.reconciler_poll_secs;
+        backend::workers::spawn_conference_reconciler(
+            backend::workers::ConferenceReconciler::new(state.meeting.core.clone()),
+            poll,
         )
     });
+    tracing::info!(
+        "Part E: realtime={} provider_control={} provider={} capabilities={:?}",
+        flags.conference_realtime_enabled,
+        flags.rtc_provider_control_v2,
+        state.meeting.core.rtc.name(),
+        state.meeting.core.rtc.capabilities()
+    );
 
     // Configure CORS - allow frontend(s) to access API
     let allowed_origins: Vec<axum::http::HeaderValue> = app_config

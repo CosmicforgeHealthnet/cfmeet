@@ -14,7 +14,7 @@ use axum::{
 use crate::{
     error::{ApiError, ErrorCode},
     handlers::v2::{
-        compat, conferences, invitations, members, organizations, participants, spaces,
+        compat, conferences, invitations, members, organizations, participants, realtime, spaces,
     },
     state::AppState,
 };
@@ -158,6 +158,17 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             "/conferences/:id/participants/:participant_id/ban",
             post(participants::ban),
         )
+        .route(
+            "/conferences/:id/participants/:participant_id/mute",
+            post(participants::mute),
+        )
+        // Realtime (Part E)
+        .route(
+            "/conferences/:id/realtime/ticket",
+            post(realtime::create_ticket),
+        )
+        .route("/conferences/:id/realtime", get(realtime::subscribe))
+        .route("/conferences/:id/events", get(realtime::replay_events))
         // Compatibility (platform admin)
         .route(
             "/admin/compat/legacy-meetings/:id/shadow",

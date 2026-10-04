@@ -3,14 +3,21 @@
 //! Both are written on the caller's transaction so business state, audit and the
 //! delivery event commit atomically. Events are delivery, never authority.
 //! Never pass raw passcodes, invitation tokens or credentials in metadata/payloads.
+//!
+//! Part E: `rtc.*` rows are internal provider commands (`PROVIDER_COMMAND` channel) and
+//! are never delivered to clients. Client events of a conference get a gap-free,
+//! commit-ordered `conference_seq`, allocated by incrementing
+//! `conference_sessions.event_seq` — that row update holds the conference row lock
+//! until commit, so sequence order equals commit order for each conference. Callers
+//! must therefore follow the lock order conference → participant → invitation.
 
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ConnectionTrait, Set};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, DbBackend, Set, Statement};
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::{
-    domain::OutboxStatus,
+    domain::{OutboxChannel, OutboxStatus},
     error::ApiResult,
     middleware::request_id::current_request_id,
     models::{conference_audit_events, outbox_events},
@@ -25,10 +32,14 @@ pub mod event {
     pub const SPACE_OWNER_TRANSFERRED: &str = "meeting_space.owner_transferred";
     pub const CONFERENCE_CREATED: &str = "conference.created";
     pub const CONFERENCE_PREPARING: &str = "conference.preparing";
+    /// PREPARING → WAITING once the provider confirmed the room.
+    pub const CONFERENCE_READY: &str = "conference.ready";
     pub const CONFERENCE_STARTED: &str = "conference.started";
     pub const CONFERENCE_LOCKED: &str = "conference.locked";
     pub const CONFERENCE_UNLOCKED: &str = "conference.unlocked";
     pub const CONFERENCE_ENDING: &str = "conference.ending";
+    /// ENDING → ENDED once the provider confirmed termination / room absence.
+    pub const CONFERENCE_ENDED: &str = "conference.ended";
     pub const CONFERENCE_CANCELLED: &str = "conference.cancelled";
     pub const CONFERENCE_RESCHEDULED: &str = "conference.rescheduled";
     pub const CONFERENCE_FAILED: &str = "conference.failed";
@@ -40,10 +51,19 @@ pub mod event {
     pub const PARTICIPANT_REMOVED: &str = "participant.removed";
     pub const PARTICIPANT_BANNED: &str = "participant.banned";
     pub const PARTICIPANT_LEFT: &str = "participant.left";
+    /// The RTC/media session actually connected (provider-confirmed) — not admission.
+    pub const PARTICIPANT_JOINED: &str = "participant.joined";
+    pub const PARTICIPANT_MEDIA_PERMISSION_CHANGED: &str = "participant.media_permission_changed";
     /// Provider enforcement intents consumed by the Part E control plane.
     pub const RTC_ROOM_TERMINATE_REQUESTED: &str = "rtc.room_terminate_requested";
     pub const RTC_PARTICIPANT_REMOVE_REQUESTED: &str = "rtc.participant_remove_requested";
     pub const RTC_PERMISSIONS_UPDATE_REQUESTED: &str = "rtc.permissions_update_requested";
+    pub const RTC_ROOM_PREPARE_REQUESTED: &str = "rtc.room_prepare_requested";
+
+    /// Internal provider-control command (never delivered to clients).
+    pub fn is_provider_command(event_type: &str) -> bool {
+        event_type.starts_with("rtc.")
+    }
 }
 
 /// Audit actions.
@@ -65,6 +85,8 @@ pub mod action {
     pub const INVITATION_USE: &str = "INVITATION_USE";
     pub const CONFERENCE_CREATE: &str = "CONFERENCE_CREATE";
     pub const CONFERENCE_PREPARE: &str = "CONFERENCE_PREPARE";
+    pub const CONFERENCE_READY: &str = "CONFERENCE_READY";
+    pub const CONFERENCE_END_COMPLETE: &str = "CONFERENCE_END_COMPLETE";
     pub const CONFERENCE_START: &str = "CONFERENCE_START";
     pub const CONFERENCE_LOCK: &str = "CONFERENCE_LOCK";
     pub const CONFERENCE_UNLOCK: &str = "CONFERENCE_UNLOCK";
@@ -81,6 +103,8 @@ pub mod action {
     pub const ROLE_CHANGE: &str = "ROLE_CHANGE";
     pub const REMOVE: &str = "REMOVE";
     pub const BAN: &str = "BAN";
+    pub const MEDIA_MUTE: &str = "MEDIA_MUTE";
+    pub const PROVIDER_PARTICIPANT_EVICTED: &str = "PROVIDER_PARTICIPANT_EVICTED";
 }
 
 /// Who performed an audited action.
@@ -171,8 +195,33 @@ pub struct OutboxRecord<'a> {
     pub payload: Value,
 }
 
+/// Next gap-free sequence number for a conference's client events. The row update
+/// keeps the conference row locked until the caller's transaction commits.
+async fn next_conference_seq<C: ConnectionTrait>(
+    conn: &C,
+    conference_id: Uuid,
+) -> ApiResult<Option<i64>> {
+    let row = conn
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE conference_sessions SET event_seq = event_seq + 1 WHERE id = $1 RETURNING event_seq",
+            [conference_id.into()],
+        ))
+        .await?;
+    Ok(row.and_then(|r| r.try_get_by_index::<i64>(0).ok()))
+}
+
 pub async fn emit<C: ConnectionTrait>(conn: &C, record: OutboxRecord<'_>) -> ApiResult<()> {
     let now = Utc::now();
+    let channel = if event::is_provider_command(record.event_type) {
+        OutboxChannel::ProviderCommand
+    } else {
+        OutboxChannel::Realtime
+    };
+    let conference_seq = match (channel, record.conference_id) {
+        (OutboxChannel::Realtime, Some(cid)) => next_conference_seq(conn, cid).await?,
+        _ => None,
+    };
     outbox_events::ActiveModel {
         id: Set(Uuid::new_v4()),
         aggregate_type: Set(record.aggregate_type.to_string()),
@@ -188,6 +237,9 @@ pub async fn emit<C: ConnectionTrait>(conn: &C, record: OutboxRecord<'_>) -> Api
         last_error: Set(None),
         request_id: Set(current_request_id()),
         created_at: Set(now),
+        channel: Set(channel),
+        conference_seq: Set(conference_seq),
+        locked_by: Set(None),
     }
     .insert(conn)
     .await?;

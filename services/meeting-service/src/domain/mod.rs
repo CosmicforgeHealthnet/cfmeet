@@ -252,6 +252,14 @@ text_enum!(OutboxStatus {
     Failed = "FAILED",
 });
 
+text_enum!(
+    /// Client realtime events vs internal provider-control commands (never sent to clients).
+    OutboxChannel {
+        Realtime = "REALTIME",
+        ProviderCommand = "PROVIDER_COMMAND",
+    }
+);
+
 text_enum!(OrganizationStatus {
     Active = "ACTIVE",
     Suspended = "SUSPENDED",

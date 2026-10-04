@@ -420,7 +420,20 @@ pub struct ConferenceListResponse {
 pub enum ProviderEnforcement {
     /// Business state committed; provider intent queued in the outbox for the RTC control plane.
     PendingProviderControl,
+    /// The RTC provider confirmed the enforcement (room ready / terminated, media disconnected).
+    Enforced,
     NotRequired,
+}
+
+impl From<crate::services::rtc_control::Enforcement> for ProviderEnforcement {
+    fn from(e: crate::services::rtc_control::Enforcement) -> Self {
+        use crate::services::rtc_control::Enforcement;
+        match e {
+            Enforcement::Enforced => ProviderEnforcement::Enforced,
+            Enforcement::Pending => ProviderEnforcement::PendingProviderControl,
+            Enforcement::NotRequired => ProviderEnforcement::NotRequired,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -808,4 +821,56 @@ pub struct RecurrenceExceptionResponse {
     /// Set when the occurrence was already materialized and has been updated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub applied_to_conference_id: Option<Uuid>,
+}
+
+// ---------------------------------------------------------------------------
+// Part E — media control & realtime
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MuteRequest {
+    pub track_kind: crate::services::rtc_provider::TrackKind,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MuteResponse {
+    pub participant_id: Uuid,
+    pub track_kind: crate::services::rtc_provider::TrackKind,
+    /// Connected device sessions examined.
+    pub sessions: u32,
+    /// Published tracks the provider muted.
+    pub muted_tracks: u32,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RealtimeTicketResponse {
+    /// One-shot, short-lived ticket for `GET …/realtime?ticket=` (browser WebSockets).
+    pub ticket: String,
+    pub expires_at: DateTime<Utc>,
+    /// WebSocket path relative to the API origin.
+    pub websocket_path: String,
+    /// Current conference event sequence (start cursor for a fresh subscriber).
+    pub cursor: i64,
+    /// `FULL` (admitted / members) or `SELF_ONLY` (waiting participants).
+    pub scope: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Default, ToSchema)]
+pub struct EventReplayQuery {
+    /// Last sequence the client processed.
+    pub after: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EventReplayResponse {
+    pub events: Vec<crate::services::realtime::RealtimeEnvelope>,
+    /// Cursor to resume from.
+    pub cursor: i64,
+    /// True when the cursor cannot be served: refetch `canonical` and resume from `cursor`.
+    pub resync_required: bool,
+    pub canonical: String,
 }

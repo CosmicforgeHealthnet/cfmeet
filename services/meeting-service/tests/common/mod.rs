@@ -7,6 +7,8 @@
 //! SKIPPED line (never a silent pass).
 #![allow(dead_code)]
 
+pub mod livekit_mock;
+
 use std::{
     collections::HashMap,
     sync::{
@@ -37,8 +39,8 @@ use backend::{
         meeting_permissions::MediaPermissions,
         organizations::DbOrganizationDirectory,
         rtc_provider::{
-            JoinCredentialRequest, JoinCredentials, RoomInfo, RoomSpec, RtcError, RtcParticipant,
-            RtcProvider, RtcResult,
+            JoinCredentialRequest, JoinCredentials, LiveKitProvider, RoomInfo, RoomSpec, RtcError,
+            RtcParticipant, RtcParticipantRef, RtcProvider, RtcResult, RtcRoomRef, TrackKind,
         },
         RedisService,
     },
@@ -222,6 +224,7 @@ impl Drop for TestDb {
 // ---------------------------------------------------------------------------
 
 /// Records provider interactions; issues obviously fake (test-only) credentials.
+/// Credential-only double (no provider capabilities) — keeps the Parts A–D semantics.
 #[derive(Default)]
 pub struct FakeRtc {
     pub issued: AtomicUsize,
@@ -235,15 +238,15 @@ impl RtcProvider for FakeRtc {
     fn name(&self) -> &'static str {
         "FAKE"
     }
-    async fn create_room(&self, _s: &RoomSpec) -> RtcResult<RoomInfo> {
+    async fn create_room(&self, _r: &RtcRoomRef, _s: &RoomSpec) -> RtcResult<RoomInfo> {
         self.other_calls.fetch_add(1, Ordering::SeqCst);
         Err(RtcError::NotSupported("fake"))
     }
-    async fn get_room(&self, _r: &str) -> RtcResult<Option<RoomInfo>> {
+    async fn get_room(&self, _r: &RtcRoomRef) -> RtcResult<Option<RoomInfo>> {
         self.other_calls.fetch_add(1, Ordering::SeqCst);
         Ok(None)
     }
-    async fn terminate_room(&self, _r: &str) -> RtcResult<()> {
+    async fn terminate_room(&self, _r: &RtcRoomRef, _reason: &str) -> RtcResult<()> {
         self.other_calls.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
@@ -259,33 +262,34 @@ impl RtcProvider for FakeRtc {
         Ok(JoinCredentials {
             provider: "LIVEKIT",
             url: "wss://rtc.test".into(),
-            credential: format!("test-credential-for-{}", req.media_identity),
+            credential: format!("test-credential-for-{}", req.participant.media_identity),
             expires_at: Utc::now() + chrono::Duration::from_std(req.ttl).unwrap(),
         })
     }
-    async fn remove_participant(&self, _r: &str, _m: &str) -> RtcResult<()> {
+    async fn remove_participant(&self, _p: &RtcParticipantRef, _reason: &str) -> RtcResult<()> {
         self.other_calls.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
-    async fn update_permissions(&self, _r: &str, _m: &str, _p: &MediaPermissions) -> RtcResult<()> {
+    async fn update_permissions(
+        &self,
+        _p: &RtcParticipantRef,
+        _m: &MediaPermissions,
+    ) -> RtcResult<()> {
         self.other_calls.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
-    async fn mute_track(&self, _r: &str, _m: &str, _t: &str, _x: bool) -> RtcResult<()> {
+    async fn mute_track(&self, _p: &RtcParticipantRef, _k: TrackKind) -> RtcResult<u32> {
         self.other_calls.fetch_add(1, Ordering::SeqCst);
-        Ok(())
+        Ok(0)
     }
-    async fn list_participants(&self, _r: &str) -> RtcResult<Vec<RtcParticipant>> {
+    async fn list_participants(&self, _r: &RtcRoomRef) -> RtcResult<Vec<RtcParticipant>> {
         Ok(vec![])
     }
-    async fn start_recording(&self, _r: &str) -> RtcResult<String> {
+    async fn start_recording(&self, _r: &RtcRoomRef, _profile: &str) -> RtcResult<String> {
         Err(RtcError::NotSupported("fake"))
     }
-    async fn stop_recording(&self, _r: &str, _id: &str) -> RtcResult<()> {
+    async fn stop_recording(&self, _r: &RtcRoomRef) -> RtcResult<()> {
         Err(RtcError::NotSupported("fake"))
-    }
-    async fn reconcile(&self, _r: &str) -> RtcResult<Option<RoomInfo>> {
-        Ok(None)
     }
 }
 
@@ -353,8 +357,26 @@ pub enum RedisMode {
     Unreachable,
 }
 
+/// Which RTC provider the app talks to.
+#[derive(Clone, PartialEq, Eq)]
+pub enum RtcMode {
+    /// Credential-only fake (Parts A–D suites).
+    Fake,
+    /// The real `LiveKitProvider` against the in-process mock LiveKit RoomService.
+    LiveKitMock,
+    /// The real `LiveKitProvider` against a real livekit-server (certification).
+    RealLiveKit {
+        url: String,
+        api_key: String,
+        api_secret: String,
+    },
+}
+
 pub struct TestOptions {
     pub flags: FeatureFlags,
+    pub rtc: RtcMode,
+    /// Provider admin-call timeout (LiveKit modes).
+    pub rtc_timeout: Duration,
     /// Non-empty → static directory; empty → the production `DbOrganizationDirectory`.
     pub organizations: HashMap<Uuid, Vec<Uuid>>,
     pub custom_allow: Vec<Uuid>,
@@ -370,6 +392,8 @@ impl Default for TestOptions {
                 rtc_provider_control_v2: true,
                 ..FeatureFlags::all_v2_enabled()
             },
+            rtc: RtcMode::Fake,
+            rtc_timeout: Duration::from_secs(3),
             organizations: HashMap::new(),
             custom_allow: vec![],
             appointments: None,
@@ -384,6 +408,8 @@ pub struct TestApp {
     pub state: AppState,
     pub router: Router,
     pub rtc: Arc<FakeRtc>,
+    /// Mock LiveKit server (RtcMode::LiveKitMock).
+    pub lk: Option<Arc<livekit_mock::MockLiveKit>>,
 }
 
 pub struct User {
@@ -406,10 +432,38 @@ impl TestApp {
 
     pub async fn with(opts: TestOptions) -> Option<Self> {
         let db = TestDb::new().await?;
-        Some(Self::on(db, opts))
+        let lk = match opts.rtc {
+            RtcMode::LiveKitMock => Some(livekit_mock::start().await),
+            _ => None,
+        };
+        let mut app = Self::on_with_lk(db, opts, lk.clone());
+        app.lk = lk;
+        Some(app)
+    }
+
+    /// Mock-LiveKit app with Part E realtime enabled.
+    pub async fn livekit() -> Option<Self> {
+        Self::with(TestOptions {
+            rtc: RtcMode::LiveKitMock,
+            flags: FeatureFlags {
+                rtc_provider_control_v2: true,
+                conference_realtime_enabled: true,
+                ..FeatureFlags::all_v2_enabled()
+            },
+            ..TestOptions::default()
+        })
+        .await
     }
 
     pub fn on(db: TestDb, opts: TestOptions) -> Self {
+        Self::on_with_lk(db, opts, None)
+    }
+
+    fn on_with_lk(
+        db: TestDb,
+        opts: TestOptions,
+        lk: Option<Arc<livekit_mock::MockLiveKit>>,
+    ) -> Self {
         let app_config = AppConfig {
             database_url: db.url.clone(),
             jwt_secret: "test-jwt-secret".into(),
@@ -442,6 +496,31 @@ impl TestApp {
         })
         .unwrap();
         let rtc = Arc::new(FakeRtc::default());
+        let (livekit, provider): (LiveKitConfig, Arc<dyn RtcProvider>) = match (&opts.rtc, &lk) {
+            (RtcMode::LiveKitMock, Some(mock)) => {
+                let cfg = LiveKitConfig {
+                    url: mock.ws_url(),
+                    api_key: livekit_mock::API_KEY.into(),
+                    api_secret: livekit_mock::API_SECRET.into(),
+                };
+                let p = LiveKitProvider::with_api_url(&cfg, &mock.http_url(), opts.rtc_timeout);
+                (cfg, Arc::new(p))
+            }
+            (RtcMode::RealLiveKit { url, api_key, api_secret }, _) => {
+                let cfg = LiveKitConfig {
+                    url: url.clone(),
+                    api_key: api_key.clone(),
+                    api_secret: api_secret.clone(),
+                };
+                let p = LiveKitProvider::with_api_url(
+                    &cfg,
+                    &backend::services::rtc_provider::admin_url_from(url),
+                    opts.rtc_timeout,
+                );
+                (cfg, Arc::new(p))
+            }
+            _ => (livekit, rtc.clone()),
+        };
         let mut adapters = AccessAdapterRegistry::default();
         adapters.register(
             "custom-allowlist",
@@ -462,7 +541,7 @@ impl TestApp {
                 ..MeetingV2Config::default()
             },
             organizations,
-            rtc: rtc.clone(),
+            rtc: provider,
             adapters,
             appointments: opts.appointments.unwrap_or_else(|| {
                 Arc::new(backend::services::appointment_authorization::UnconfiguredAppointmentAuthorization)
@@ -482,7 +561,48 @@ impl TestApp {
             state,
             router,
             rtc,
+            lk,
         }
+    }
+
+    /// Serve the router on a real TCP port (WebSocket / provider webhook tests).
+    pub async fn serve(&self) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let router = self.router.clone();
+        tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        addr
+    }
+
+    /// POST a raw provider webhook to the internal route.
+    pub async fn webhook(&self, body: &str, authorization: Option<&str>) -> (StatusCode, Value) {
+        let mut req = Request::builder()
+            .method(Method::POST)
+            .uri("/internal/rtc/livekit/webhook")
+            .header("content-type", "application/webhook+json");
+        if let Some(a) = authorization {
+            req = req.header("authorization", a);
+        }
+        let resp = self
+            .router
+            .clone()
+            .oneshot(req.body(Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap();
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    /// Signed (valid) mock-LiveKit webhook.
+    pub async fn signed_webhook(&self, body: &str) -> (StatusCode, Value) {
+        let auth = livekit_mock::sign_webhook(body, livekit_mock::API_KEY, livekit_mock::API_SECRET);
+        self.webhook(body, Some(&auth)).await
     }
 
     pub async fn user(&self, name: &str) -> User {

@@ -95,6 +95,14 @@ fn every_v2_route_is_documented() {
         ("get", "/api/v2/organizations/{id}/members"),
         ("put", "/api/v2/organizations/{id}/members/{userId}"),
         ("get", "/api/v2/me/organizations"),
+        // Part E — provider media control & realtime
+        (
+            "post",
+            "/api/v2/conferences/{id}/participants/{participantId}/mute",
+        ),
+        ("post", "/api/v2/conferences/{id}/realtime/ticket"),
+        ("get", "/api/v2/conferences/{id}/realtime"),
+        ("get", "/api/v2/conferences/{id}/events"),
     ];
     for (method, path) in expected {
         assert!(

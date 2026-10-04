@@ -345,5 +345,6 @@ async fn i07_migrations_idempotent() {
     let pending = Migrator::get_pending_migrations(&db.conn).await.unwrap();
     assert!(pending.is_empty());
     let applied = Migrator::get_applied_migrations(&db.conn).await.unwrap();
-    assert_eq!(applied.len(), 18);
+    // 18 through Parts A–D + 1 additive Part E migration (rtc control plane).
+    assert_eq!(applied.len(), 19);
 }

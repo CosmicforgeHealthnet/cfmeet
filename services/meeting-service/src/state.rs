@@ -7,6 +7,7 @@ use crate::services::auth::JwtService;
 use crate::services::email::EmailService;
 use crate::services::livekit::LiveKitService;
 use crate::services::meeting_domain::{MeetingDomain, MeetingDomainDeps};
+use crate::services::realtime::RealtimeService;
 use crate::services::{OtpService, RateLimiterService, RedisService, TokenBlacklistService};
 
 #[derive(Clone)]
@@ -33,6 +34,8 @@ pub struct AppState {
     pub meeting: Arc<MeetingDomain>,
     /// Verified organization membership source (shared with the meeting domain)
     pub organization_directory: SharedOrganizationDirectory,
+    /// Part E conference realtime (subscription authorization, tickets, replay)
+    pub realtime: Arc<RealtimeService>,
 }
 
 impl AppState {
@@ -60,6 +63,12 @@ impl AppState {
         let redis = Arc::new(redis);
         let organization_directory = deps.organizations.clone();
         let meeting = Arc::new(MeetingDomain::new(db.clone(), Some(redis.clone()), deps));
+        let realtime = Arc::new(RealtimeService::new(
+            meeting.core.clone(),
+            Some(redis.clone()),
+            &app_config.jwt_secret,
+            app_config.require_email_verification,
+        ));
         let otp_service = Arc::new(OtpService::new(redis.clone()));
         let token_blacklist = Arc::new(TokenBlacklistService::new(redis.clone()));
         let rate_limiter = Arc::new(RateLimiterService::new(redis.clone()));
@@ -80,6 +89,7 @@ impl AppState {
             require_email_verification: app_config.require_email_verification,
             meeting,
             organization_directory,
+            realtime,
         }
     }
 

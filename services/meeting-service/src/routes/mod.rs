@@ -33,6 +33,15 @@ pub fn create_routes(state: AppState) -> Router {
         )
         .nest("/api/v1/admin", admin::admin_routes(state.clone()))
         .nest("/api/v2", v2::v2_routes(state.clone()))
+        // Internal provider routes (signature / internal-token protected; Part E).
+        .route(
+            "/internal/rtc/livekit/webhook",
+            axum::routing::post(handlers::internal::livekit_webhook),
+        )
+        .route(
+            "/internal/rtc/metrics",
+            get(handlers::internal::rtc_metrics),
+        )
         .layer(axum::middleware::from_fn(
             crate::middleware::request_id::request_id_middleware,
         ))

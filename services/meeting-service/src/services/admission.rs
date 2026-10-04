@@ -45,7 +45,9 @@ use crate::{
             can_moderate, check_role_change, MediaPermissions, Permission, PermissionContext,
         },
         meeting_space::access_config,
-        rtc_provider::{JoinCredentialRequest, JoinCredentials},
+        rtc_control::{Enforcement, RtcControl},
+        rtc_metrics::{inc, RTC_METRICS as M},
+        rtc_provider::{JoinCredentialRequest, JoinCredentials, RtcParticipantRef},
         secrets,
     },
 };
@@ -155,6 +157,8 @@ pub struct BulkOutcome {
 pub struct ModerationOutcome {
     pub participant: conference_participants::Model,
     pub ban_id: Option<Uuid>,
+    /// Provider enforcement (media disconnect) of the committed decision.
+    pub enforcement: Enforcement,
 }
 
 fn participant_payload(p: &conference_participants::Model) -> serde_json::Value {
@@ -200,6 +204,7 @@ pub struct AdmissionService {
     core: Core,
     access: MeetingAccessService,
     invitations: InvitationService,
+    rtc: RtcControl,
 }
 
 impl AdmissionService {
@@ -207,8 +212,21 @@ impl AdmissionService {
         Self {
             access: MeetingAccessService::new(core.clone()),
             invitations: InvitationService::new(core.clone()),
+            rtc: RtcControl::new(core.clone()),
             core,
         }
+    }
+
+    /// After a moderation commit: execute queued provider commands (Part E).
+    async fn enforce(&self, conference_id: Uuid, queued: bool) -> Enforcement {
+        if !queued {
+            return if self.rtc.room_control() {
+                Enforcement::NotRequired
+            } else {
+                Enforcement::Pending
+            };
+        }
+        self.rtc.dispatch_for_conference(conference_id).await
     }
 
     fn not_live(status: ConferenceStatus) -> ApiError {
@@ -831,15 +849,37 @@ impl AdmissionService {
                 RtcOutcome::ProviderControlDisabled
             }
             Some(s) => {
+                // Part E: a credential is only minted for a provider-confirmed room.
+                if self.rtc.room_control() && conference.rtc_room_ready_at.is_none() {
+                    if let Err(e) = self.rtc.ensure_room(conference_id).await {
+                        inc(&M.credentials_refused);
+                        self.close_session(
+                            s.id,
+                            SessionState::Terminated,
+                            "RTC_PROVIDER_UNAVAILABLE",
+                        )
+                        .await?;
+                        return Err(match e.code() {
+                            Some(ErrorCode::ConferenceStateConflict) => Self::not_live(
+                                find_conference(&self.core.db, conference_id).await?.status,
+                            ),
+                            _ => e,
+                        });
+                    }
+                }
+                let ttl = if self.rtc.room_control() {
+                    self.rtc.credential_ttl()
+                } else {
+                    StdDuration::from_secs(self.core.config.session_ttl_secs as u64)
+                };
                 let creds = self
                     .core
                     .rtc
                     .issue_join_credentials(&JoinCredentialRequest {
-                        room_name: conference.rtc_room_name.clone().unwrap_or_default(),
-                        media_identity: s.media_identity.clone(),
+                        participant: RtcParticipantRef::new(&conference, s),
                         display_name: participant.display_name.clone(),
                         permissions,
-                        ttl: StdDuration::from_secs(self.core.config.session_ttl_secs as u64),
+                        ttl,
                     })
                     .await;
                 let creds = match creds {
@@ -855,13 +895,28 @@ impl AdmissionService {
                         return Err(e.into());
                     }
                 };
-                // Fail closed if the conference left LIVE while credentials were minted.
+                // Fail closed if the conference left LIVE (or the session/participant was
+                // revoked) while credentials were minted.
                 let current = find_conference(&self.core.db, conference_id).await?;
                 if current.status != ConferenceStatus::Live {
                     self.close_session(s.id, SessionState::Terminated, "CONFERENCE_CLOSING")
                         .await?;
+                    inc(&M.credentials_refused);
                     return Err(Self::not_live(current.status));
                 }
+                let still_active = participant_sessions::Entity::find_by_id(s.id)
+                    .one(&self.core.db)
+                    .await?
+                    .map(|row| row.state.is_active())
+                    .unwrap_or(false);
+                if !still_active {
+                    inc(&M.credentials_refused);
+                    return Err(ApiError::domain(
+                        ErrorCode::MeetingAccessDenied,
+                        "Your access to this conference changed while joining",
+                    ));
+                }
+                inc(&M.credentials_issued);
                 RtcOutcome::Issued(creds)
             }
         };
@@ -919,7 +974,8 @@ impl AdmissionService {
         session_id: Option<Uuid>,
     ) -> ApiResult<u64> {
         let txn = self.core.db.begin().await?;
-        let conference = find_conference(&txn, conference_id).await?;
+        // Lock order: conference → participant (the event sequence also locks the row).
+        let conference = lock_conference(&txn, conference_id).await?;
         let participant = own_participant(&txn, conference_id, ctx, true)
             .await?
             .ok_or_else(not_found_participant)?;
@@ -1274,7 +1330,7 @@ impl AdmissionService {
         ctx: &ActorContext,
         conference_id: Uuid,
         participant_id: Uuid,
-    ) -> ApiResult<conference_participants::Model> {
+    ) -> ApiResult<ModerationOutcome> {
         self.require_waiting_room_feature()?;
         let (txn, conference, space, authority, _) = self
             .begin_management(ctx, conference_id, Permission::ParticipantReturnToWaiting)
@@ -1283,7 +1339,11 @@ impl AdmissionService {
         Self::check_target(&authority, &target)?;
         if target.admission_state == AdmissionState::Waiting {
             txn.commit().await?;
-            return Ok(target);
+            return Ok(ModerationOutcome {
+                participant: target,
+                ban_id: None,
+                enforcement: Enforcement::NotRequired,
+            });
         }
         if target.admission_state != AdmissionState::Admitted {
             return Err(ApiError::domain(
@@ -1328,7 +1388,12 @@ impl AdmissionService {
         )
         .await?;
         txn.commit().await?;
-        Ok(updated)
+        let enforcement = self.enforce(conference_id, !sessions.is_empty()).await;
+        Ok(ModerationOutcome {
+            participant: updated,
+            ban_id: None,
+            enforcement,
+        })
     }
 
     pub async fn change_role(
@@ -1397,6 +1462,23 @@ impl AdmissionService {
             participant_event(space.id, &updated, event::PARTICIPANT_ROLE_CHANGED),
         )
         .await?;
+        let (before, after) = (pctx.media(previous), pctx.media(req.role));
+        if before != after {
+            let mut payload = participant_payload(&updated);
+            payload["mediaPermissions"] = json!(after);
+            emit(
+                &txn,
+                OutboxRecord {
+                    aggregate_type: "conference_participant",
+                    aggregate_id: target.id,
+                    event_type: event::PARTICIPANT_MEDIA_PERMISSION_CHANGED,
+                    meeting_space_id: Some(space.id),
+                    conference_id: Some(conference.id),
+                    payload,
+                },
+            )
+            .await?;
+        }
         let sessions = Self::active_sessions(&txn, target.id).await?;
         if !sessions.is_empty() {
             emit(
@@ -1418,6 +1500,8 @@ impl AdmissionService {
             .await?;
         }
         txn.commit().await?;
+        // Provider grants follow the committed role (executor re-reads the role).
+        self.enforce(conference_id, !sessions.is_empty()).await;
         Ok(updated)
     }
 
@@ -1439,6 +1523,7 @@ impl AdmissionService {
                 return Ok(ModerationOutcome {
                     participant: target,
                     ban_id: None,
+                    enforcement: Enforcement::NotRequired,
                 });
             }
             _ => {}
@@ -1473,9 +1558,11 @@ impl AdmissionService {
         )
         .await?;
         txn.commit().await?;
+        let enforcement = self.enforce(conference_id, !sessions.is_empty()).await;
         Ok(ModerationOutcome {
             participant: updated,
             ban_id: None,
+            enforcement,
         })
     }
 
@@ -1501,6 +1588,7 @@ impl AdmissionService {
             return Ok(ModerationOutcome {
                 participant: target,
                 ban_id: None,
+                enforcement: Enforcement::NotRequired,
             });
         }
         let (subject_type, subject_ref) =
@@ -1559,9 +1647,11 @@ impl AdmissionService {
         )
         .await?;
         txn.commit().await?;
+        let enforcement = self.enforce(conference_id, !sessions.is_empty()).await;
         Ok(ModerationOutcome {
             participant: updated,
             ban_id: Some(ban.id),
+            enforcement,
         })
     }
 }

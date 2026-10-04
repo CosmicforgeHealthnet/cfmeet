@@ -485,6 +485,21 @@ impl MeetingSpaceService {
         )
         .await?;
         txn.commit().await?;
+        // Part E: an instant conference is LIVE immediately; ensure its provider room now
+        // (best effort — the first join and the reconciler retry, and no credential is
+        // ever issued before the room is confirmed).
+        let control = crate::services::rtc_control::RtcControl::new(self.core.clone());
+        let conference = if control.room_control() {
+            match control.ensure_room(conference.id).await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(conference_id = %conference.id, "instant meeting room not ready yet: {e}");
+                    conference
+                }
+            }
+        } else {
+            conference
+        };
         Ok((space, conference))
     }
 

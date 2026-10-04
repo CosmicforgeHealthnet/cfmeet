@@ -116,15 +116,15 @@ pub async fn return_to_waiting(
     actor: ActorContext,
     V2Path((id, pid)): V2Path<(Uuid, Uuid)>,
 ) -> ApiResult<Json<ModerationResponse>> {
-    let p = state
+    let o = state
         .meeting
         .admission
         .return_to_waiting(&actor, id, pid)
         .await?;
     Ok(Json(ModerationResponse {
-        participant: views::participant(&p),
+        participant: views::participant(&o.participant),
         ban_id: None,
-        provider_enforcement: ProviderEnforcement::PendingProviderControl,
+        provider_enforcement: o.enforcement.into(),
     }))
 }
 
@@ -155,7 +155,7 @@ pub async fn change_role(
     Ok(Json(views::participant(&p)))
 }
 
-/// Remove a participant (business authority; media disconnect is enforced in Part E).
+/// Remove a participant (business authority; media disconnect enforced by the RTC provider).
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/participants/{participantId}/remove", tag = "Participants (v2)", operation_id = "v2_remove",
     params(("id" = Uuid, Path, description = "Conference id"), ("participantId" = Uuid, Path, description = "Participant id")),
@@ -177,7 +177,7 @@ pub async fn remove(
     Ok(Json(ModerationResponse {
         participant: views::participant(&o.participant),
         ban_id: None,
-        provider_enforcement: ProviderEnforcement::PendingProviderControl,
+        provider_enforcement: o.enforcement.into(),
     }))
 }
 
@@ -199,6 +199,40 @@ pub async fn ban(
     Ok(Json(ModerationResponse {
         participant: views::participant(&o.participant),
         ban_id: o.ban_id,
-        provider_enforcement: ProviderEnforcement::PendingProviderControl,
+        provider_enforcement: o.enforcement.into(),
+    }))
+}
+
+/// Server-side mute of a participant's published tracks (provider-enforced primitive).
+/// Authorization and conference scoping are checked before any provider call.
+#[utoipa::path(
+    post, path = "/api/v2/conferences/{id}/participants/{participantId}/mute", tag = "Participants (v2)", operation_id = "v2_mute_participant",
+    params(("id" = Uuid, Path, description = "Conference id"), ("participantId" = Uuid, Path, description = "Participant id")),
+    request_body = MuteRequest,
+    responses(
+        (status = 200, description = "Muted", body = MuteResponse),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "PARTICIPANT_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "CONFERENCE_NOT_LIVE", body = ErrorEnvelope),
+        (status = 503, description = "RTC_PROVIDER_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []), ("participant_token" = []))
+)]
+pub async fn mute(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path((id, pid)): V2Path<(Uuid, Uuid)>,
+    V2Json(req): V2Json<MuteRequest>,
+) -> ApiResult<Json<MuteResponse>> {
+    let o = state
+        .meeting
+        .rtc
+        .mute(&actor, id, pid, req.track_kind)
+        .await?;
+    Ok(Json(MuteResponse {
+        participant_id: pid,
+        track_kind: req.track_kind,
+        sessions: o.sessions,
+        muted_tracks: o.muted_tracks,
     }))
 }

@@ -19,7 +19,7 @@ chrono-tz = "0.10"
 rrule = "0.14"
 async-trait = "0.1"
 serde_json = "1.0"
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 utoipa = { version = "4.2", features = ["axum_extras", "chrono", "uuid"] }
@@ -47,8 +47,9 @@ reqwest = { version = "0.11", features = ["json"] }
 base64 = "0.21"
 urlencoding = "2.1"
 
-# LiveKit
-livekit-api = "0.4"
+# LiveKit (RoomService admin API over Twirp; rustls so https LiveKit endpoints work)
+livekit-api = { version = "0.4", features = ["rustls-tls-webpki-roots"] }
+livekit-protocol = "0.6"
 
 # Redis
 redis = { version = "0.25", features = ["tokio-comp", "connection-manager"] }
@@ -66,3 +67,6 @@ test-db = "TEST_DATABASE_URL=postgres://postgres@127.0.0.1:5432/postgres cargo t
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }
+# Mock LiveKit RoomService (decodes the same protobuf messages as livekit-server)
+prost = "0.12"
+tokio-tungstenite = "0.24"

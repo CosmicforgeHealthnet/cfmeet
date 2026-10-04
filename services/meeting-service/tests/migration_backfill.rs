@@ -294,9 +294,10 @@ async fn m02_rollback_and_reapply() {
     let c = &db.conn;
     Migrator::up(c, None).await.unwrap();
     let spaces = count(c, "SELECT count(*) FROM meeting_spaces").await;
-    // All four Phase 2 migrations (schema, backfill, organizations, recurrence exceptions).
-    Migrator::down(c, Some(4)).await.unwrap();
-    assert_eq!(count(c, "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('meeting_spaces','conference_sessions','participant_sessions','outbox_events','organizations','meeting_recurrence_exceptions')").await, 0);
+    // All five Phase 2 migrations (schema, backfill, organizations, recurrence
+    // exceptions, Part E rtc control plane).
+    Migrator::down(c, Some(5)).await.unwrap();
+    assert_eq!(count(c, "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('meeting_spaces','conference_sessions','participant_sessions','outbox_events','organizations','meeting_recurrence_exceptions','rtc_webhook_events','rtc_drift_events','worker_leases')").await, 0);
     assert_eq!(count(c, "SELECT count(*) FROM meetings").await, 5);
     assert_eq!(count(c, "SELECT count(*) FROM participants").await, 8);
     Migrator::up(c, None).await.unwrap();

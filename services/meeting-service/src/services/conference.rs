@@ -1,15 +1,21 @@
 //! ConferenceService — occurrences and the conference state machine (spec §C9–§C14).
 //!
 //! ```text
-//! CREATED ─prepare→ PREPARING ─(provider ready, Part E)→ WAITING
+//! CREATED ─prepare→ PREPARING ─(provider room confirmed)→ WAITING
 //! PREPARING|WAITING ─start→ LIVE          (CREATED start = prepare+start atomically)
-//! LIVE ─end→ ENDING ─(provider terminated, Part E)→ ENDED
+//! LIVE ─end→ ENDING ─(provider terminated + absence confirmed)→ ENDED
 //! CREATED|PREPARING|WAITING ─cancel→ CANCELLED
 //! PREPARING|LIVE|ENDING ─fail→ FAILED
 //! ```
 //!
 //! Every transition runs under `SELECT … FOR UPDATE` on the conference row; a partial
 //! unique index guarantees one LIVE v2 conference per meeting space.
+//!
+//! Part E: with provider control active (`rtc_provider_control_v2` + a provider that
+//! controls rooms), WAITING and ENDED are only reached through [`RtcControl`] after the
+//! provider confirmed the room / its termination. Provider calls never run inside the
+//! business transaction; `rtc.*` commands are committed with the transition and
+//! dispatched right after commit (retried by the outbox relay and reconciler).
 
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{
@@ -34,6 +40,7 @@ use crate::{
         meeting_events::{action, audit, emit, event, AuditActor, AuditRecord, OutboxRecord},
         meeting_permissions::{space_allows, Permission, PermissionContext, SpacePermission},
         meeting_space::schedule_policy,
+        rtc_control::{Enforcement, RtcControl},
     },
 };
 
@@ -133,6 +140,9 @@ pub async fn insert_conference<C: ConnectionTrait>(
         created_at: Set(now),
         updated_at: Set(now),
         version: Set(1),
+        event_seq: Set(0),
+        rtc_room_ready_at: Set(None),
+        rtc_room_terminated_at: Set(None),
     };
     let conference = model.insert(conn).await.map_err(|e| {
         if is_unique_violation(&e) {
@@ -199,15 +209,56 @@ pub fn conference_event<'a>(
 pub struct ConferenceOutcome {
     pub conference: conference_sessions::Model,
     pub changed: bool,
+    /// Provider enforcement of the committed transition (Part E).
+    pub enforcement: Enforcement,
+}
+
+impl ConferenceOutcome {
+    fn unchanged(conference: conference_sessions::Model) -> Self {
+        Self {
+            conference,
+            changed: false,
+            enforcement: Enforcement::NotRequired,
+        }
+    }
+
+    fn changed(conference: conference_sessions::Model, enforcement: Enforcement) -> Self {
+        Self {
+            conference,
+            changed: true,
+            enforcement,
+        }
+    }
 }
 
 pub struct ConferenceService {
     core: Core,
+    rtc: RtcControl,
 }
 
 impl ConferenceService {
     pub fn new(core: Core) -> Self {
-        Self { core }
+        Self {
+            rtc: RtcControl::new(core.clone()),
+            core,
+        }
+    }
+
+    /// After commit: execute this conference's queued provider commands and reload.
+    async fn enforce(&self, id: Uuid) -> ApiResult<(conference_sessions::Model, Enforcement)> {
+        let enforcement = self.rtc.dispatch_for_conference(id).await;
+        Ok((find_conference(&self.core.db, id).await?, enforcement))
+    }
+
+    fn terminate_command(c: &conference_sessions::Model) -> OutboxRecord<'static> {
+        OutboxRecord {
+            aggregate_type: "conference",
+            aggregate_id: c.id,
+            event_type: event::RTC_ROOM_TERMINATE_REQUESTED,
+            meeting_space_id: Some(c.meeting_space_id),
+            conference_id: Some(c.id),
+            payload: json!({ "conferenceId": c.id, "terminationReason": c.termination_reason }),
+        }
     }
 
     fn legacy_guard(c: &conference_sessions::Model) -> ApiResult<()> {
@@ -396,10 +447,13 @@ impl ConferenceService {
         let next = next_status(conference.status, Transition::Prepare).map_err(state_conflict)?;
         let Some(next) = next else {
             txn.commit().await?;
-            return Ok(ConferenceOutcome {
-                conference,
-                changed: false,
-            });
+            if conference.status == ConferenceStatus::Preparing && self.rtc.room_control() {
+                // Re-prepare retries provider confirmation (idempotent).
+                if let Ok(ready) = self.rtc.ensure_room(id).await {
+                    return Ok(ConferenceOutcome::changed(ready, Enforcement::Enforced));
+                }
+            }
+            return Ok(ConferenceOutcome::unchanged(conference));
         };
         let mut am: conference_sessions::ActiveModel = conference.clone().into();
         am.status = Set(next);
@@ -409,20 +463,31 @@ impl ConferenceService {
             &authority.audit,
             &updated,
             action::CONFERENCE_PREPARE,
-            &[event::CONFERENCE_PREPARING],
+            &[event::CONFERENCE_PREPARING, event::RTC_ROOM_PREPARE_REQUESTED],
             json!({}),
         )
         .await?;
         txn.commit().await?;
-        Ok(ConferenceOutcome {
-            conference: updated,
-            changed: true,
-        })
+        if !self.rtc.room_control() {
+            return Ok(ConferenceOutcome::changed(updated, Enforcement::Pending));
+        }
+        // Provider confirmation (PREPARING → WAITING) happens only in RtcControl; on
+        // provider failure the conference stays PREPARING and the command is retried.
+        let (current, enforcement) = self.enforce(id).await?;
+        let enforcement = if current.status == ConferenceStatus::Preparing {
+            Enforcement::Pending
+        } else {
+            enforcement
+        };
+        Ok(ConferenceOutcome::changed(current, enforcement))
     }
 
     /// PREPARING|WAITING (or CREATED, prepared atomically) → LIVE. Concurrent starts
     /// serialize on the row lock: exactly one wins, the rest are idempotent no-ops.
     pub async fn start(&self, ctx: &ActorContext, id: Uuid) -> ApiResult<ConferenceOutcome> {
+        if self.rtc.room_control() {
+            self.ensure_ready_for_start(ctx, id).await?;
+        }
         let txn = self.core.db.begin().await?;
         let conference = lock_conference(&txn, id).await?;
         Self::legacy_guard(&conference)?;
@@ -433,10 +498,7 @@ impl ConferenceService {
         let next = next_status(conference.status, Transition::Start).map_err(state_conflict)?;
         let Some(next) = next else {
             txn.commit().await?;
-            return Ok(ConferenceOutcome {
-                conference,
-                changed: false,
-            });
+            return Ok(ConferenceOutcome::unchanged(conference));
         };
         if space.status != SpaceStatus::Active {
             return Err(state_conflict(
@@ -465,10 +527,43 @@ impl ConferenceService {
         )
         .await?;
         txn.commit().await?;
-        Ok(ConferenceOutcome {
-            conference: updated,
-            changed: true,
-        })
+        let enforcement = if updated.rtc_room_ready_at.is_some() {
+            Enforcement::Enforced
+        } else {
+            Enforcement::NotRequired
+        };
+        Ok(ConferenceOutcome::changed(updated, enforcement))
+    }
+
+    /// Provider control: a conference only goes LIVE on a provider-confirmed room.
+    /// Authorization and the start window are checked BEFORE any provider call; a
+    /// provider failure leaves the conference PREPARING (RTC_PROVIDER_UNAVAILABLE).
+    async fn ensure_ready_for_start(&self, ctx: &ActorContext, id: Uuid) -> ApiResult<()> {
+        let conference = find_conference(&self.core.db, id).await?;
+        Self::legacy_guard(&conference)?;
+        if !matches!(
+            conference.status,
+            ConferenceStatus::Created | ConferenceStatus::Preparing | ConferenceStatus::Waiting
+        ) {
+            return Ok(());
+        }
+        let space = find_space(&self.core.db, conference.meeting_space_id).await?;
+        self.authority_for(&self.core.db, &space, id, ctx, Permission::ConferenceStart)
+            .await?;
+        if space.status != SpaceStatus::Active {
+            return Err(state_conflict(
+                "Archived meeting spaces cannot start conferences",
+            ));
+        }
+        check_start_window(&conference, &schedule_policy(&space), Utc::now())?;
+        if conference.status == ConferenceStatus::Created {
+            self.prepare(ctx, id).await?;
+        }
+        let current = find_conference(&self.core.db, id).await?;
+        if current.status == ConferenceStatus::Preparing || current.rtc_room_ready_at.is_none() {
+            self.rtc.ensure_room(id).await?;
+        }
+        Ok(())
     }
 
     /// LIVE + locked. Join/admission consult this authoritative flag.
@@ -493,10 +588,7 @@ impl ConferenceService {
         }
         if conference.is_locked == locked {
             txn.commit().await?;
-            return Ok(ConferenceOutcome {
-                conference,
-                changed: false,
-            });
+            return Ok(ConferenceOutcome::unchanged(conference));
         }
         let mut am: conference_sessions::ActiveModel = conference.clone().into();
         am.is_locked = Set(locked);
@@ -511,10 +603,7 @@ impl ConferenceService {
         self.record(&txn, &authority.audit, &updated, a, &[e], json!({}))
             .await?;
         txn.commit().await?;
-        Ok(ConferenceOutcome {
-            conference: updated,
-            changed: true,
-        })
+        Ok(ConferenceOutcome::changed(updated, Enforcement::NotRequired))
     }
 
     /// LIVE → ENDING (atomic). From this commit on no admission and no new usable join
@@ -542,10 +631,21 @@ impl ConferenceService {
         })?;
         let Some(next) = next else {
             txn.commit().await?;
-            return Ok(ConferenceOutcome {
-                conference,
-                changed: false,
-            });
+            if conference.status == ConferenceStatus::Ending && self.rtc.room_control() {
+                // Repeated END retries provider termination (idempotent).
+                let (current, _) = self.enforce(id).await?;
+                let enforcement = if current.status == ConferenceStatus::Ended {
+                    Enforcement::Enforced
+                } else {
+                    Enforcement::Pending
+                };
+                return Ok(ConferenceOutcome {
+                    changed: false,
+                    enforcement,
+                    conference: current,
+                });
+            }
+            return Ok(ConferenceOutcome::unchanged(conference));
         };
         let mut am: conference_sessions::ActiveModel = conference.clone().into();
         am.status = Set(next);
@@ -566,10 +666,19 @@ impl ConferenceService {
         )
         .await?;
         txn.commit().await?;
-        Ok(ConferenceOutcome {
-            conference: updated,
-            changed: true,
-        })
+        if !self.rtc.room_control() {
+            // Credential-only provider: ENDING is never faked into ENDED.
+            return Ok(ConferenceOutcome::changed(updated, Enforcement::Pending));
+        }
+        // terminate room → confirm absence → finalize sessions → ENDED. On failure the
+        // conference stays ENDING (joins/credentials refused) and the relay retries.
+        let (current, _) = self.enforce(id).await?;
+        let enforcement = if current.status == ConferenceStatus::Ended {
+            Enforcement::Enforced
+        } else {
+            Enforcement::Pending
+        };
+        Ok(ConferenceOutcome::changed(current, enforcement))
     }
 
     /// CREATED|PREPARING|WAITING → CANCELLED. For a recurring occurrence this is a
@@ -585,10 +694,7 @@ impl ConferenceService {
         let next = next_status(conference.status, Transition::Cancel).map_err(state_conflict)?;
         let Some(next) = next else {
             txn.commit().await?;
-            return Ok(ConferenceOutcome {
-                conference,
-                changed: false,
-            });
+            return Ok(ConferenceOutcome::unchanged(conference));
         };
         let mut am: conference_sessions::ActiveModel = conference.clone().into();
         am.status = Set(next);
@@ -607,6 +713,7 @@ impl ConferenceService {
             )
             .await?;
         }
+        let had_room = conference.rtc_room_ready_at.is_some();
         let updated = self.apply(&txn, conference, am).await?;
         self.record(
             &txn,
@@ -617,11 +724,15 @@ impl ConferenceService {
             json!({}),
         )
         .await?;
+        if had_room {
+            emit(&txn, Self::terminate_command(&updated)).await?;
+        }
         txn.commit().await?;
-        Ok(ConferenceOutcome {
-            conference: updated,
-            changed: true,
-        })
+        if had_room && self.rtc.room_control() {
+            let (current, enforcement) = self.enforce(id).await?;
+            return Ok(ConferenceOutcome::changed(current, enforcement));
+        }
+        Ok(ConferenceOutcome::changed(updated, Enforcement::NotRequired))
     }
 
     /// One-off reschedule of an unstarted occurrence (series untouched).
@@ -674,10 +785,7 @@ impl ConferenceService {
         )
         .await?;
         txn.commit().await?;
-        Ok(ConferenceOutcome {
-            conference: updated,
-            changed: true,
-        })
+        Ok(ConferenceOutcome::changed(updated, Enforcement::NotRequired))
     }
 
     /// PREPARING|LIVE|ENDING → FAILED with a safe internal classification. Recovery is
@@ -690,10 +798,7 @@ impl ConferenceService {
         let next = next_status(conference.status, Transition::Fail).map_err(state_conflict)?;
         let Some(next) = next else {
             txn.commit().await?;
-            return Ok(ConferenceOutcome {
-                conference,
-                changed: false,
-            });
+            return Ok(ConferenceOutcome::unchanged(conference));
         };
         let reason: String = failure_reason
             .chars()
@@ -718,11 +823,16 @@ impl ConferenceService {
             json!({ "failureReason": reason }),
         )
         .await?;
+        if updated.rtc_room_ready_at.is_some() {
+            emit(&txn, Self::terminate_command(&updated)).await?;
+        }
         txn.commit().await?;
-        Ok(ConferenceOutcome {
-            conference: updated,
-            changed: true,
-        })
+        let (current, enforcement) = if self.rtc.room_control() {
+            self.enforce(id).await?
+        } else {
+            (updated, Enforcement::Pending)
+        };
+        Ok(ConferenceOutcome::changed(current, enforcement))
     }
 }
 
@@ -837,6 +947,9 @@ mod tests {
             created_at: now,
             updated_at: now,
             version: 1,
+            event_seq: 0,
+            rtc_room_ready_at: None,
+            rtc_room_terminated_at: None,
         }
     }
 

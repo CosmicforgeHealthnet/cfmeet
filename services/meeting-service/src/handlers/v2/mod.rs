@@ -10,6 +10,7 @@ pub mod invitations;
 pub mod members;
 pub mod organizations;
 pub mod participants;
+pub mod realtime;
 pub mod spaces;
 pub mod views;
 

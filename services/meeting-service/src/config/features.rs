@@ -119,6 +119,13 @@ pub struct MeetingV2Config {
     pub scheduler_poll_secs: u64,
     /// Maximum concurrent active device sessions for one logical participant.
     pub max_sessions_per_participant: u64,
+    /// Part E: RTC credential lifetime (bounded; never longer than the session).
+    pub rtc_credential_ttl_secs: i64,
+    /// Part E: conference reconciler cadence and batch bound.
+    pub reconciler_poll_secs: u64,
+    pub reconciler_batch: u64,
+    /// Part E: grace before a CONNECTED session absent at the provider is closed.
+    pub reconciler_presence_grace_secs: i64,
 }
 
 impl Default for MeetingV2Config {
@@ -133,6 +140,10 @@ impl Default for MeetingV2Config {
             occurrence_max_per_run: 50,
             scheduler_poll_secs: 30,
             max_sessions_per_participant: 5,
+            rtc_credential_ttl_secs: 10 * 60,
+            reconciler_poll_secs: 30,
+            reconciler_batch: 50,
+            reconciler_presence_grace_secs: 30,
         }
     }
 }
@@ -166,6 +177,16 @@ impl MeetingV2Config {
                 "MEETING_MAX_SESSIONS_PER_PARTICIPANT",
                 d.max_sessions_per_participant,
             ),
+            rtc_credential_ttl_secs: env_num("RTC_CREDENTIAL_TTL_SECS", d.rtc_credential_ttl_secs)
+                .clamp(60, 6 * 60 * 60),
+            reconciler_poll_secs: env_num("CONFERENCE_RECONCILER_POLL_SECS", d.reconciler_poll_secs)
+                .max(1),
+            reconciler_batch: env_num("CONFERENCE_RECONCILER_BATCH", d.reconciler_batch).clamp(1, 1000),
+            reconciler_presence_grace_secs: env_num(
+                "CONFERENCE_RECONCILER_PRESENCE_GRACE_SECS",
+                d.reconciler_presence_grace_secs,
+            )
+            .max(0),
         }
     }
 }

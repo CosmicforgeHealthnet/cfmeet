@@ -209,6 +209,9 @@ pub async fn materialize<C: ConnectionTrait>(
             created_at: Set(ts),
             updated_at: Set(ts),
             version: Set(1),
+            event_seq: Set(0),
+            rtc_room_ready_at: Set(None),
+            rtc_room_terminated_at: Set(None),
         };
         inserted += conference_sessions::Entity::insert(model)
             .on_conflict(
