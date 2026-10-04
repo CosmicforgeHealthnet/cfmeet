@@ -101,6 +101,10 @@ resolver accepts v2 id, v2 code, legacy id and legacy code.
 
 ## A–D closure additions
 
+**Status:** Part A PASS · Part B PASS · Part C PASS · Part D PASS · Overall A–D PASS.
+HEALTHCARE_APPOINTMENT is integration-ready; the production HealthNet connection is a deferred
+external integration (see below). Next: Part E — RTC control plane & realtime state.
+
 ### Legacy v1 join identity
 `POST /api/v1/meetings/{id}/join` and `/api/v1/meetings/join/{code}` resolve identity through
 `ActorContext`. The body `user_id` is a compatibility claim only: 401 without a bearer token,
@@ -134,9 +138,21 @@ ACTIVE status when email verification is required). Request-body email/domain ar
 `AppointmentAuthorizationAdapter::authorize(actor, space, conference, external_context)` →
 Authorized | Denied. `HttpAppointmentAuthorizationAdapter` implements the HealthNet contract
 (see `services/appointment_authorization.rs`) and fails closed on errors, timeouts, malformed or
-inactive appointments; roles are capped below OWNER. **Blocked dependency:** the authoritative
-HealthNet appointment service is not in this repository; until `HEALTHNET_APPOINTMENT_AUTHZ_URL`
-points at it, `UnconfiguredAppointmentAuthorization` denies all appointment joins.
+inactive appointments; roles are capped below OWNER.
+
+**HEALTHCARE_APPOINTMENT external integration: READY — integration contract implemented.**
+Adapter abstraction, HTTP adapter, configurable URL (`HEALTHNET_APPOINTMENT_AUTHZ_URL`),
+service-to-service credential (`HEALTHNET_APPOINTMENT_AUTHZ_TOKEN`), timeout
+(`HEALTHNET_APPOINTMENT_AUTHZ_TIMEOUT_MS`), fail-closed behaviour, `appointmentRef` /
+`externalContext` forwarding, server-resolved actor sent to the authority, validity window,
+server-side role mapping with OWNER never grantable, and deny-all when unconfigured — all covered
+by mocked-HTTP tests in `tests/appointment_revocation.rs` (allow, deny, 5xx, malformed, timeout,
+expired / not-yet-valid, wrong service credential, unconfigured).
+
+**PRODUCTION HEALTHNET CONNECTION: DEFERRED — will be wired when HealthNet integrates with CF
+Meet.** This is an external integration/deployment task, not unfinished CF Meet A–D architecture.
+CF Meet stores no HealthNet appointment data and embeds no clinical rules; until the URL is
+configured, `UnconfiguredAppointmentAuthorization` denies all appointment-based joins.
 
 ### Token revocation
 Per-token revocation (logout) lives only in Redis (`TokenBlacklistService`); account deactivation
