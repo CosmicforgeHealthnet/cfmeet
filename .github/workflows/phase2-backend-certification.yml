@@ -8,6 +8,12 @@ name: Phase 2 backend certification
 # lines only. Never uploaded: secrets, signed artefact URLs, recording content, raw
 # provider / egress / object-storage logs, or any real (clinical) data. All data used
 # here is synthetic.
+#
+# Disk safety: each heavy concern runs on its own runner (Rust suite, contract /
+# migration, real provider, load); CI builds carry no debug info and no incremental
+# state (debug assertions stay on); unused preinstalled toolchains are removed first;
+# the multi-GB Egress / MinIO images are pruned only after the provider certification
+# that needs them has finished. Disk usage is printed at each checkpoint.
 
 on:
   workflow_dispatch:
@@ -41,12 +47,20 @@ defaults:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
   TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
   TEST_REDIS_URL: redis://127.0.0.1:6379
+  # Exact images certified in Phase 2 Part G (pinned by digest, not floating tags):
+  # livekit/egress v1.14.1 and the pgsty/minio build of MinIO RELEASE.2026-08-04T00-00-00Z
+  # (the official minio/minio repository no longer serves public community images).
+  EGRESS_IMAGE: livekit/egress@sha256:bf2b648b947349c3e9ff7aa8c718f00378d5c06af7624652a3653318e00333ce
+  MINIO_IMAGE: pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
 
 jobs:
   full-suite:
-    name: Full suite, coverage, OpenAPI, migration up/reset/up
+    name: Full suite, fmt, clippy, v2 operation coverage
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -65,21 +79,33 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@v4
+      - name: Free unused runner toolchains (Android, .NET, GHC, CodeQL)
+        working-directory: .
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: services/meeting-service -> target
+          key: cert-full-suite
       - run: mkdir -p target/certification
       - name: rustfmt (no new drift)
         run: bash scripts/certification/check-fmt.sh | tee target/certification/fmt.txt
       - name: clippy
         run: cargo clippy --workspace --all-targets 2>&1 | tee target/certification/clippy.txt
+      - name: Disk usage (before cargo test)
+        run: df -h / && (du -sh target 2>/dev/null || true)
       - name: cargo test --workspace --no-fail-fast
         run: |
           set -o pipefail
           cargo test --workspace --no-fail-fast 2>&1 | tee target/certification/test-output.txt
+      - name: Disk usage (after cargo test)
+        if: always()
+        run: df -h / && (du -sh target 2>/dev/null || true)
       - name: Test summary
         if: always()
         run: |
@@ -90,17 +116,6 @@ jobs:
           python3 scripts/certification/route_coverage.py --strict \
             --openapi ../../packages/contracts/openapi/meeting-service.json \
             --json target/certification/route-coverage.json --markdown target/certification/route-coverage.md
-      - name: OpenAPI parity
-        run: |
-          cargo run -q --bin export_openapi > target/certification/meeting-service.json
-          diff -u ../../packages/contracts/openapi/meeting-service.json target/certification/meeting-service.json | tee target/certification/openapi-diff.txt
-      - name: Migration up / reset / up
-        env:
-          PGPASSWORD: postgres
-        run: |
-          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE cfmeet_migration_cert"
-          export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/cfmeet_migration_cert
-          { cargo run -q -p migration -- up && cargo run -q -p migration -- reset && cargo run -q -p migration -- up && cargo run -q -p migration -- status; } 2>&1 | tee target/certification/migration-up-reset-up.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -109,6 +124,51 @@ jobs:
             services/meeting-service/target/certification/*.txt
             services/meeting-service/target/certification/*.json
             services/meeting-service/target/certification/*.md
+
+  contract-migration:
+    name: OpenAPI parity, build, migration up/reset/up
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/meeting-service -> target
+          key: cert-contract
+      - run: mkdir -p target/certification
+      - name: cargo build
+        run: cargo build --workspace
+      - name: OpenAPI parity
+        run: |
+          cargo run -q --bin export_openapi > target/certification/meeting-service.json
+          diff -u ../../packages/contracts/openapi/meeting-service.json target/certification/meeting-service.json | tee target/certification/openapi-diff.txt
+      - name: Migration up / reset / up
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -o pipefail
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE cfmeet_migration_cert"
+          export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/cfmeet_migration_cert
+          { cargo run -q -p migration -- up && cargo run -q -p migration -- reset && cargo run -q -p migration -- up && cargo run -q -p migration -- status; } 2>&1 | tee target/certification/migration-up-reset-up.txt
+      - name: Disk usage (end of job)
+        if: always()
+        run: df -h / && (du -sh target 2>/dev/null || true)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: certification-contract-migration
+          path: |
+            services/meeting-service/target/certification/*.txt
+            services/meeting-service/target/certification/*.json
 
   real-provider:
     name: Real LiveKit + WebRTC + Egress + S3 certification
@@ -130,10 +190,17 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@v4
+      - name: Free unused runner toolchains (Android, .NET, GHC, CodeQL)
+        working-directory: .
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: services/meeting-service -> target
+          key: cert-real-provider
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
@@ -145,9 +212,15 @@ jobs:
           /tmp/cert-bin/livekit-server --version
       - name: rtcprobe
         working-directory: services/meeting-service/scripts/livekit-certification/rtcprobe
-        run: CGO_ENABLED=0 go build -o /tmp/cert-bin/rtcprobe .
-      - name: Egress + MinIO images
-        run: docker pull livekit/egress:latest && docker pull minio/minio:latest
+        run: |
+          CGO_ENABLED=0 go build -o /tmp/cert-bin/rtcprobe .
+          go clean -cache
+      - name: Build the certification test binary
+        run: cargo test --test livekit_certification --no-run
+      - name: Disk usage (before provider image pulls)
+        run: df -h / && (du -sh target 2>/dev/null || true) && docker system df
+      - name: Egress + MinIO images (pinned)
+        run: docker pull "$EGRESS_IMAGE" && docker pull "$MINIO_IMAGE" && docker system df
       - name: Certification (E–I + M scenarios, recording + object storage)
         env:
           LIVEKIT_SERVER_BIN: /tmp/cert-bin/livekit-server
@@ -161,6 +234,22 @@ jobs:
           set -o pipefail
           mkdir -p "$CFMEET_CERT_OUT"
           bash scripts/livekit-certification/run.sh 2>&1 | grep -E '^(CERT|MEDIA_LOAD|test |test result)' | tee "$CFMEET_CERT_OUT/provider-certification.txt"
+      # Egress lifecycle / failure reason only (the raw log stays on the runner).
+      - name: Egress outcome lines (no URLs or credentials)
+        if: failure()
+        run: |
+          grep -oE 'egress_(started|active|ending|complete|failed)|failed to launch chrome|page load error[^"]{0,120}' /tmp/livekit-egress.log | sort | uniq -c || true
+      - name: Disk usage (after provider certification)
+        if: always()
+        run: df -h / && docker system df
+      # The Egress / MinIO images are no longer needed (media load uses LiveKit only).
+      - name: Release provider containers and images
+        if: always()
+        run: |
+          docker container prune -f
+          docker image prune -af
+          docker volume prune -f
+          df -h /
       - name: Media load
         env:
           LIVEKIT_SERVER_BIN: /tmp/cert-bin/livekit-server
@@ -172,7 +261,6 @@ jobs:
         run: |
           for run in ${{ inputs.media_load }}; do
             export MEDIA_LOAD_PUBLISHERS="${run%x*}" MEDIA_LOAD_SUBSCRIBERS="${run#*x}"
-            sleep 5
             bash scripts/livekit-certification/run.sh 2>&1 | grep -E '^(CERT|MEDIA_LOAD|test result)' | tee -a "$CFMEET_CERT_OUT/media-load.txt"
           done
       - uses: actions/upload-artifact@v4
@@ -203,10 +291,17 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@v4
+      - name: Free unused runner toolchains (Android, .NET, GHC, CodeQL)
+        working-directory: .
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: services/meeting-service -> target
+          key: cert-load
       - name: Load certification
         env:
           LOAD_SELECTION: ${{ inputs.load_selection }}
@@ -215,6 +310,9 @@ jobs:
           LOAD_SOAK_SECS: ${{ inputs.soak_secs }}
           CFMEET_CERT_OUT: ${{ github.workspace }}/services/meeting-service/target/certification
         run: bash scripts/certification/run-load.sh
+      - name: Disk usage (end of job)
+        if: always()
+        run: df -h / && (du -sh target 2>/dev/null || true)
       - uses: actions/upload-artifact@v4
         if: always()
         with:

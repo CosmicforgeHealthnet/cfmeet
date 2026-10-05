@@ -44,20 +44,35 @@ if [[ -n "${EGRESS_BIN:-}" && -n "${MINIO_BIN:-}" ]]; then
   export CFMEET_REAL_EGRESS=1
 fi
 
+# A livekit-server from a previous run may still be releasing its ports (back-to-back
+# media-load runs); never start against a half-stopped server.
+for _ in $(seq 1 60); do
+  curl -sf http://127.0.0.1:7880/ >/dev/null || break
+  sleep 1
+done
 "$LIVEKIT_SERVER_BIN" --config "$lk_config" >"$log" 2>&1 &
 pids+=($!)
-for _ in $(seq 1 50); do
-  curl -sf http://127.0.0.1:7880/ >/dev/null && break
+ready=""
+for _ in $(seq 1 150); do
+  curl -sf http://127.0.0.1:7880/ >/dev/null && { ready=1; break; }
   sleep 0.2
 done
+[[ -n "$ready" ]] || { echo "livekit-server did not become ready on 127.0.0.1:7880" >&2; exit 1; }
 if [[ -n "${CFMEET_REAL_EGRESS:-}" ]]; then
-  EGRESS_CONFIG_FILE="$work/egress.yaml" "$EGRESS_BIN" >"${EGRESS_LOG:-/tmp/livekit-egress.log}" 2>&1 &
-  pids+=($!)
   for _ in $(seq 1 100); do
     curl -sf "http://127.0.0.1:${CFMEET_CERT_S3_PORT:-9100}/minio/health/live" >/dev/null && break
     sleep 0.2
   done
-  sleep 3 # egress registers with livekit-server over Redis
+  EGRESS_CONFIG_FILE="$work/egress.yaml" "$EGRESS_BIN" >"${EGRESS_LOG:-/tmp/livekit-egress.log}" 2>&1 &
+  pids+=($!)
+  # Egress (a large container on a cold runner) is ready when its health port answers
+  # (`health_port` in egress.yaml.tmpl); then give it a moment to register with
+  # livekit-server over Redis.
+  for _ in $(seq 1 180); do
+    curl -s -o /dev/null "http://127.0.0.1:7981/" && break
+    sleep 1
+  done
+  sleep 3
 fi
 export CFMEET_REAL_LIVEKIT_URL=ws://127.0.0.1:7880
 export CFMEET_REAL_LIVEKIT_KEY=cfmeet-cert-key

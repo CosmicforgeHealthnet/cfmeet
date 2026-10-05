@@ -29,8 +29,11 @@ EGRESS_BIN=$PWD/docker-egress.sh MINIO_BIN=$PWD/docker-minio.sh \
 LIVEKIT_SERVER_BIN=/path/livekit-server RTCPROBE_BIN=/path/rtcprobe ./run.sh
 ```
 
-`EGRESS_IMAGE` / `MINIO_IMAGE` override the images (default `livekit/egress:latest`,
-`minio/minio:latest`; any S3-compatible MinIO build works).
+`EGRESS_IMAGE` / `MINIO_IMAGE` override the images. Defaults are the exact images certified
+in Phase 2, pinned by digest: `livekit/egress` v1.14.1 and the `pgsty/minio` build of MinIO
+RELEASE.2026-08-04T00-00-00Z (the official `minio/minio` repository no longer serves public
+community images; any S3-compatible build works). `run.sh` waits for a previous
+`livekit-server` to release port 7880 and for Egress's health port before running tests.
 
 Part M real scenarios (`CERT M …` lines):
 

@@ -47,8 +47,9 @@ callbacks, one READY)`, `CERT G delete + absence confirmed in object storage` �
   otherwise identical.
 
 **Required follow-up:** re-run Part G in the manual CI workflow
-(`phase2-backend-certification.yml`, job `real-provider`, official `livekit/egress` and
-`minio/minio` images) or in staging, and attach the result to this document. Until then
+(`phase2-backend-certification.yml`, job `real-provider`, which runs the exact certified
+images pinned by digest: `livekit/egress` v1.14.1 and `pgsty/minio` RELEASE.2026-08-04 — the
+official `minio/minio` repository no longer serves public community images) or in staging, and attach the result to this document. Until then
 DoD §66 rests on the J–L real run.
 
 ## §8 requirements

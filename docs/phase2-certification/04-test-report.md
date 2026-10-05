@@ -103,3 +103,18 @@ index's down / up). One rollback-drill expectation was corrected from "recording
 `RECORDING_DISABLED`" to the implemented, documented behaviour (capture start / stop →
 `RECORDING_DISABLED`, existing records stay readable to authorised users and denied to
 outsiders — assertions added, none removed).
+
+## CI disk safety (post-closure fix)
+
+The first GitHub run of the fast gate on `staging` (run 37344646914, commit `2c2e637`) failed
+with `No space left on device (os error 28)` while linking test binaries — a runner storage
+failure, not a test failure. Cause: one job ran check, clippy, ~50 test binaries, build and
+two `cargo run`s into one `target/` with full debug info (locally ≈ 23 GB including split
+`.dwp` debug packages) on a runner with ≈ 14 GB free. Fix (`.github/workflows/backend.yml`,
+`phase2-backend-certification.yml`): gates split across jobs (fresh disk each), CI builds
+without debug info or incremental state (`CARGO_PROFILE_DEV_DEBUG=0`,
+`CARGO_PROFILE_TEST_DEBUG=0`, `CARGO_INCREMENTAL=0`; debug assertions and overflow checks
+unchanged), per-job cache keys, unused runner toolchains removed in the heaviest jobs, disk
+telemetry at checkpoints, Docker images pruned only after the provider certification, and
+certification images pinned by digest. Measured with the CI settings: check + clippy + all
+test binaries + build = 5.5 GB. No gate was removed or relaxed.
