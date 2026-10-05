@@ -88,6 +88,8 @@ pub fn conference(c: &conference_sessions::Model, full: bool) -> ConferenceRespo
         original_start_at: full.then_some(c.original_start_at).flatten(),
         is_legacy: full.then_some(c.origin == RecordOrigin::Legacy),
         version: full.then_some(c.version),
+        recording_state: full.then(|| c.recording_state.clone()),
+        transcription_state: full.then(|| c.transcription_state.clone()),
     }
 }
 

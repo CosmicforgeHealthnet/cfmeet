@@ -1,24 +1,67 @@
 #!/usr/bin/env bash
-# Real self-hosted LiveKit certification for meeting-service Part E.
+# Real self-hosted LiveKit certification for meeting-service Parts E–I.
 #
 # Requirements: a livekit-server binary (LIVEKIT_SERVER_BIN), the rtcprobe WebRTC client
 # (RTCPROBE_BIN, `go build ./rtcprobe`), PostgreSQL (TEST_DATABASE_URL) and Redis
 # (TEST_REDIS_URL). No Docker needed.
+#
+# Part G (real composite recording + real object storage) additionally needs:
+#   EGRESS_BIN  livekit egress binary (`go build ./cmd/server` in livekit/egress; Chrome +
+#               PulseAudio available on the host)
+#   MINIO_BIN   MinIO server binary (S3-compatible object storage)
+# When both are set, livekit-server is started with Redis (required by Egress), MinIO
+# and Egress are started on loopback, and the Part G tests run against them.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 : "${LIVEKIT_SERVER_BIN:?set LIVEKIT_SERVER_BIN to a livekit-server binary}"
 : "${RTCPROBE_BIN:?set RTCPROBE_BIN to the rtcprobe binary}"
 log="${LIVEKIT_LOG:-/tmp/livekit-certification.log}"
-"$LIVEKIT_SERVER_BIN" --config "$here/livekit.yaml" >"$log" 2>&1 &
-lk_pid=$!
-trap 'kill $lk_pid 2>/dev/null || true' EXIT
+work="$(mktemp -d)"
+pids=()
+cleanup() { for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done; rm -rf "$work"; }
+trap cleanup EXIT
+
+lk_config="$here/livekit.yaml"
+if [[ -n "${EGRESS_BIN:-}" && -n "${MINIO_BIN:-}" ]]; then
+  redis_hostport="$(echo "${TEST_REDIS_URL:?TEST_REDIS_URL required for egress}" | sed -E 's#^redis://([^/]+).*#\1#')"
+  s3_port="${CFMEET_CERT_S3_PORT:-9100}"
+  s3_key=cfmeetcert
+  s3_secret=cfmeetcert-secret-0123456789
+  s3_bucket=cfmeet-artifacts
+  { cat "$here/livekit.yaml"; printf 'redis:\n  address: %s\n  db: 3\n' "$redis_hostport"; } >"$work/livekit.yaml"
+  lk_config="$work/livekit.yaml"
+  MINIO_ROOT_USER="$s3_key" MINIO_ROOT_PASSWORD="$s3_secret" \
+    "$MINIO_BIN" server "$work/minio" --address "127.0.0.1:$s3_port" --console-address 127.0.0.1:0 \
+    >"$work/minio.log" 2>&1 &
+  pids+=($!)
+  sed -e "s#@REDIS@#$redis_hostport#" -e "s#@S3_ENDPOINT@#http://127.0.0.1:$s3_port#" \
+      -e "s#@S3_KEY@#$s3_key#" -e "s#@S3_SECRET@#$s3_secret#" -e "s#@S3_BUCKET@#$s3_bucket#" \
+      "$here/egress.yaml.tmpl" >"$work/egress.yaml"
+  export CFMEET_REAL_S3_ENDPOINT="http://127.0.0.1:$s3_port"
+  export CFMEET_REAL_S3_BUCKET="$s3_bucket"
+  export CFMEET_REAL_S3_ACCESS_KEY="$s3_key"
+  export CFMEET_REAL_S3_SECRET_KEY="$s3_secret"
+  export CFMEET_REAL_EGRESS=1
+fi
+
+"$LIVEKIT_SERVER_BIN" --config "$lk_config" >"$log" 2>&1 &
+pids+=($!)
 for _ in $(seq 1 50); do
   curl -sf http://127.0.0.1:7880/ >/dev/null && break
   sleep 0.2
 done
+if [[ -n "${CFMEET_REAL_EGRESS:-}" ]]; then
+  EGRESS_CONFIG_FILE="$work/egress.yaml" "$EGRESS_BIN" >"${EGRESS_LOG:-/tmp/livekit-egress.log}" 2>&1 &
+  pids+=($!)
+  for _ in $(seq 1 100); do
+    curl -sf "http://127.0.0.1:${CFMEET_CERT_S3_PORT:-9100}/minio/health/live" >/dev/null && break
+    sleep 0.2
+  done
+  sleep 3 # egress registers with livekit-server over Redis
+fi
 export CFMEET_REAL_LIVEKIT_URL=ws://127.0.0.1:7880
 export CFMEET_REAL_LIVEKIT_KEY=cfmeet-cert-key
 export CFMEET_REAL_LIVEKIT_SECRET=cfmeet-local-certification-secret-0123456789
 export CFMEET_REAL_LIVEKIT_WEBHOOK_PORT=18089
 cd "$here/../.."
-cargo test --test livekit_certification -- --ignored --nocapture --test-threads=1
+cargo test --test livekit_certification -- --ignored --nocapture --test-threads=1 ${CERT_FILTER:-}

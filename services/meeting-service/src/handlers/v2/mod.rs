@@ -4,6 +4,7 @@
 //! call one service method, and serialize. No role checks, transactions, policy
 //! orchestration or provider calls live here.
 
+pub mod artifacts;
 pub mod breakouts;
 pub mod collaboration;
 pub mod compat;
@@ -13,8 +14,10 @@ pub mod invitations;
 pub mod members;
 pub mod organizations;
 pub mod participants;
+pub mod quality;
 pub mod realtime;
 pub mod spaces;
+pub mod specialized;
 pub mod views;
 
 use axum::{
@@ -42,6 +45,12 @@ where
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         match axum::Json::<T>::from_request(req, state).await {
             Ok(axum::Json(v)) => Ok(V2Json(v)),
+            Err(rejection) if rejection.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE => {
+                Err(ApiError::domain(
+                    ErrorCode::RequestTooLarge,
+                    "Request body is too large",
+                ))
+            }
             Err(rejection) => Err(ApiError::domain(
                 ErrorCode::ValidationError,
                 json_message(rejection),

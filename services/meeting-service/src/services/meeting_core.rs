@@ -166,6 +166,10 @@ pub struct DomainCore {
     pub redis: Option<Arc<RedisService>>,
     /// Part F: participant-scoped collaboration rate limits.
     pub collab_limiter: crate::services::collaboration::CollabLimiter,
+    /// Part G provider backends (recording, storage, transcription, intelligence).
+    pub artifacts: crate::services::artifacts::ArtifactBackends,
+    /// Part I vendor-neutral telemetry sink (failures never affect meetings).
+    pub telemetry: Arc<dyn crate::services::quality::sink::QualityTelemetrySink>,
 }
 
 pub type Core = Arc<DomainCore>;

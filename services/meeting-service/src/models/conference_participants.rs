@@ -54,6 +54,15 @@ pub struct Model {
     /// Privileged host/co-host breakout visit (not an assignment).
     pub breakout_visit_room_id: Option<Uuid>,
     pub collab_version: i32,
+    /// Part H: external (e.g. clinical) role token mapped by the profile resolver.
+    pub external_role: Option<String>,
+    /// Opaque external authorization reference + validity window (no clinical data).
+    #[serde(skip_serializing)]
+    pub external_authz_ref: Option<String>,
+    pub external_authz_valid_until: Option<DateTimeUtc>,
+    /// Part H: participant is in the backstage context.
+    pub backstage_at: Option<DateTimeUtc>,
+    pub registration_id: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

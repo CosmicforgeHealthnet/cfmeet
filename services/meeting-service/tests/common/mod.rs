@@ -7,6 +7,7 @@
 //! SKIPPED line (never a silent pass).
 #![allow(dead_code)]
 
+pub mod artifacts;
 pub mod collab;
 pub mod livekit_mock;
 pub mod rtc;
@@ -321,7 +322,10 @@ impl AppointmentAuthorizationAdapter for AllowListAppointments {
         _external_context: Option<&str>,
     ) -> AppointmentDecision {
         match actor.user_id() {
-            Some(u) if self.0.contains(&u) => AppointmentDecision::Authorized { role: None },
+            Some(u) if self.0.contains(&u) => AppointmentDecision::Authorized {
+                role: None,
+                context: None,
+            },
             _ => AppointmentDecision::Denied {
                 reason: "not listed".into(),
             },
@@ -387,6 +391,12 @@ pub struct TestOptions {
     pub appointments: Option<Arc<dyn AppointmentAuthorizationAdapter>>,
     pub require_email_verification: bool,
     pub redis: RedisMode,
+    /// Part G: replace the test artefact backends (real certification: S3 + egress).
+    pub artifact_backends: Option<backend::services::artifacts::ArtifactBackends>,
+    /// Part I: replace the telemetry sink (failure injection).
+    pub telemetry: Option<Arc<dyn backend::services::quality::sink::QualityTelemetrySink>>,
+    /// Part G/I tunables.
+    pub config: Option<MeetingV2Config>,
 }
 
 impl Default for TestOptions {
@@ -404,6 +414,9 @@ impl Default for TestOptions {
             appointments: None,
             require_email_verification: true,
             redis: RedisMode::FromEnv,
+            artifact_backends: None,
+            telemetry: None,
+            config: None,
         }
     }
 }
@@ -415,6 +428,13 @@ pub struct TestApp {
     pub rtc: Arc<FakeRtc>,
     /// Mock LiveKit server (RtcMode::LiveKitMock).
     pub lk: Option<Arc<livekit_mock::MockLiveKit>>,
+    /// Part G test backends.
+    pub storage: Arc<backend::services::artifacts::storage::MemoryArtifactStorage>,
+    pub transcription: Arc<artifacts::TestTranscription>,
+    pub translation: Arc<artifacts::TestTranslation>,
+    pub intelligence: Arc<artifacts::TestIntelligence>,
+    /// Part I in-process Prometheus sink (when not replaced).
+    pub sink: Arc<backend::services::quality::sink::PrometheusSink>,
 }
 
 pub struct User {
@@ -481,6 +501,30 @@ impl TestApp {
             ..TestOptions::default()
         })
         .await
+    }
+
+    /// Mock-LiveKit app with Parts E–I enabled (recording through the mock Egress,
+    /// in-memory storage, test transcription / intelligence providers).
+    pub async fn artifacts() -> Option<Self> {
+        Self::with(TestOptions {
+            rtc: RtcMode::LiveKitMock,
+            flags: Self::ghi_flags(),
+            ..TestOptions::default()
+        })
+        .await
+    }
+
+    pub fn ghi_flags() -> FeatureFlags {
+        FeatureFlags {
+            rtc_provider_control_v2: true,
+            conference_realtime_enabled: true,
+            collaboration_v2_enabled: true,
+            recording_v2_enabled: true,
+            transcription_v2_enabled: true,
+            intelligence_v2_enabled: true,
+            quality_telemetry_enabled: true,
+            ..FeatureFlags::all_v2_enabled()
+        }
     }
 
     pub fn on(db: TestDb, opts: TestOptions) -> Self {
@@ -568,13 +612,46 @@ impl TestApp {
                 memberships: opts.organizations,
             })
         };
+        let storage = Arc::new(backend::services::artifacts::storage::MemoryArtifactStorage::new());
+        let transcription = Arc::new(artifacts::TestTranscription::default());
+        let translation = Arc::new(artifacts::TestTranslation::default());
+        let intelligence = Arc::new(artifacts::TestIntelligence::default());
+        let recorder: Arc<dyn backend::services::artifacts::recorder::RecordingProvider> =
+            match (&opts.rtc, &lk) {
+                (RtcMode::LiveKitMock, Some(mock)) => Arc::new(
+                    backend::services::artifacts::recorder::LiveKitEgressRecorder::with_api_url(
+                        &livekit,
+                        &mock.http_url(),
+                        opts.rtc_timeout,
+                        backend::config::operations::RecordingEncoding::H264Opus,
+                    ),
+                ),
+                _ => Arc::new(backend::services::artifacts::recorder::UnconfiguredRecorder),
+            };
+        let artifact_backends = opts.artifact_backends.clone().unwrap_or_else(|| {
+            backend::services::artifacts::ArtifactBackends {
+                recorder,
+                storage: storage.clone(),
+                transcription: transcription.clone(),
+                translation: translation.clone(),
+                intelligence: intelligence.clone(),
+            }
+        });
+        let sink = Arc::new(backend::services::quality::sink::PrometheusSink::new());
+        let mut config = opts.config.clone().unwrap_or_else(|| MeetingV2Config {
+            passcode_hash_cost: 4,
+            passcode_max_attempts: 5,
+            ..MeetingV2Config::default()
+        });
+        if config.artifacts.transcription_webhook_secret.is_none() {
+            config.artifacts.transcription_webhook_secret =
+                Some(artifacts::TRANSCRIPTION_SECRET.to_string());
+        }
         let deps = MeetingDomainDeps {
             flags: opts.flags,
-            config: MeetingV2Config {
-                passcode_hash_cost: 4,
-                passcode_max_attempts: 5,
-                ..MeetingV2Config::default()
-            },
+            config,
+            artifacts: artifact_backends,
+            telemetry: opts.telemetry.clone().unwrap_or_else(|| sink.clone()),
             organizations,
             rtc: provider,
             adapters,
@@ -597,7 +674,45 @@ impl TestApp {
             router,
             rtc,
             lk,
+            storage,
+            transcription,
+            translation,
+            intelligence,
+            sink,
         }
+    }
+
+    /// Raw request with extra headers (internal routes).
+    pub async fn call_with_headers(
+        &self,
+        method: Method,
+        uri: &str,
+        headers: &[(&str, &str)],
+        body: String,
+    ) -> (StatusCode, Value) {
+        let mut req = Request::builder().method(method).uri(uri);
+        for (k, v) in headers {
+            req = req.header(*k, *v);
+        }
+        let req = req
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        let resp = tokio::time::timeout(Duration::from_secs(30), self.router.clone().oneshot(req))
+            .await
+            .expect("request timed out")
+            .unwrap();
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value = if bytes.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(&bytes)
+                .unwrap_or_else(|_| json!({ "raw": String::from_utf8_lossy(&bytes) }))
+        };
+        (status, value)
     }
 
     /// Serve the router on a real TCP port (WebSocket / provider webhook tests).

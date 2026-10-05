@@ -19,7 +19,15 @@
 //! { "meetingSpaceId", "conferenceId", "appointmentRef", "externalContext",
 //!   "actor": { "userId", "verifiedEmail" } }
 //! → 200 { "authorized": bool, "role"?: "HOST"|"CO_HOST"|…|"PARTICIPANT",
+//!         "clinicalRole"?: "DOCTOR"|"PATIENT"|…, "authorizationRef"?: string,
 //!         "validFrom"?: RFC3339, "validUntil"?: RFC3339 }
+//! ```
+//!
+//! Any other field in the response (e.g. clinical details) is ignored at parse time
+//! and therefore never persisted. CF Meet keeps the final decision: admission,
+//! participant creation, session issuance, permissions and RTC credentials.
+//!
+//! ```text
 //! ```
 
 use std::time::Duration;
@@ -35,11 +43,23 @@ use crate::{
     services::{actor::ActorContext, meeting_space::access_config},
 };
 
+/// Authorization context returned by the external authority (Part H §50). Only
+/// references are kept: an external role token (mapped to a generic meeting role by
+/// the profile resolver), an opaque authorization / audit reference and the validity
+/// window. Clinical payloads are never parsed, stored or forwarded.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExternalAuthorization {
+    pub external_role: Option<String>,
+    pub reference: Option<String>,
+    pub valid_until: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppointmentDecision {
     /// Active appointment verified by the authority. `role` is capped below OWNER.
     Authorized {
         role: Option<Role>,
+        context: Option<ExternalAuthorization>,
     },
     Denied {
         reason: String,
@@ -97,6 +117,10 @@ struct AuthorizeRequest<'a> {
 struct AuthorizeResponse {
     authorized: bool,
     role: Option<Role>,
+    #[serde(default)]
+    clinical_role: Option<String>,
+    #[serde(default)]
+    authorization_ref: Option<String>,
     valid_from: Option<DateTime<Utc>>,
     valid_until: Option<DateTime<Utc>>,
 }
@@ -190,11 +214,26 @@ impl AppointmentAuthorizationAdapter for HttpAppointmentAuthorizationAdapter {
         {
             return denied("appointment is not currently active");
         }
+        let token = |v: Option<String>, max: usize| {
+            v.map(|s| s.trim().to_ascii_uppercase()).filter(|s| {
+                !s.is_empty()
+                    && s.len() <= max
+                    && s.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            })
+        };
         AppointmentDecision::Authorized {
             // The appointment authority can never mint ownership.
             role: decision
                 .role
                 .map(|r| if r == Role::Owner { Role::Host } else { r }),
+            context: Some(ExternalAuthorization {
+                external_role: token(decision.clinical_role, 32),
+                reference: decision
+                    .authorization_ref
+                    .filter(|r| !r.is_empty() && r.len() <= 128),
+                valid_until: decision.valid_until,
+            }),
         }
     }
 }

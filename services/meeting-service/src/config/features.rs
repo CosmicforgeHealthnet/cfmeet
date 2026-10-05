@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 use uuid::Uuid;
 
-fn env_bool(name: &str, default: bool) -> bool {
+pub(crate) fn env_bool(name: &str, default: bool) -> bool {
     std::env::var(name)
         .ok()
         .map(|v| {
@@ -18,7 +18,7 @@ fn env_bool(name: &str, default: bool) -> bool {
         .unwrap_or(default)
 }
 
-fn env_num<T: std::str::FromStr>(name: &str, default: T) -> T {
+pub(crate) fn env_num<T: std::str::FromStr>(name: &str, default: T) -> T {
     std::env::var(name)
         .ok()
         .and_then(|v| v.trim().parse().ok())
@@ -44,6 +44,12 @@ pub struct FeatureFlags {
     pub recording_v2_enabled: bool,
     pub webinar_mode_enabled: bool,
     pub healthcare_profile_enabled: bool,
+    /// Part G: transcription / captions (external processing impact → default off).
+    pub transcription_v2_enabled: bool,
+    /// Part G: intelligence (AI) processing — disabled by default.
+    pub intelligence_v2_enabled: bool,
+    /// Part I: client quality-sample ingestion.
+    pub quality_telemetry_enabled: bool,
     /// Prepared for legacy write retirement. Not honoured during Parts A–D.
     pub legacy_meeting_write_disabled: bool,
 }
@@ -77,6 +83,9 @@ impl FeatureFlags {
             recording_v2_enabled: env_bool("FEATURE_RECORDING_V2_ENABLED", false),
             webinar_mode_enabled: env_bool("FEATURE_WEBINAR_MODE_ENABLED", false),
             healthcare_profile_enabled: env_bool("FEATURE_HEALTHCARE_PROFILE_ENABLED", false),
+            transcription_v2_enabled: env_bool("FEATURE_TRANSCRIPTION_V2_ENABLED", false),
+            intelligence_v2_enabled: env_bool("FEATURE_INTELLIGENCE_V2_ENABLED", false),
+            quality_telemetry_enabled: env_bool("FEATURE_QUALITY_TELEMETRY_ENABLED", false),
             legacy_meeting_write_disabled: false,
         }
     }
@@ -126,6 +135,9 @@ pub struct MeetingV2Config {
     pub reconciler_batch: u64,
     /// Part E: grace before a CONNECTED session absent at the provider is closed.
     pub reconciler_presence_grace_secs: i64,
+    /// Parts G–I: artefact storage / recording / quality tunables.
+    pub artifacts: super::operations::ArtifactConfig,
+    pub quality: super::operations::QualityConfig,
 }
 
 impl Default for MeetingV2Config {
@@ -144,6 +156,8 @@ impl Default for MeetingV2Config {
             reconciler_poll_secs: 30,
             reconciler_batch: 50,
             reconciler_presence_grace_secs: 30,
+            artifacts: super::operations::ArtifactConfig::default(),
+            quality: super::operations::QualityConfig::default(),
         }
     }
 }
@@ -191,6 +205,8 @@ impl MeetingV2Config {
                 d.reconciler_presence_grace_secs,
             )
             .max(0),
+            artifacts: super::operations::ArtifactConfig::from_env(),
+            quality: super::operations::QualityConfig::from_env(),
         }
     }
 }

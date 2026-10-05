@@ -143,6 +143,11 @@ pub enum MediaContext {
         room_name: String,
         visit: bool,
     },
+    /// Part H: webinar / town-hall backstage (preparation area of the SAME
+    /// conference; its own provider room, never a separate MeetingSpace).
+    Backstage {
+        room_name: String,
+    },
 }
 
 impl MediaContext {
@@ -150,12 +155,13 @@ impl MediaContext {
         match self {
             MediaContext::Main => RtcRoomRef::for_conference(conference).room_name,
             MediaContext::Breakout { room_name, .. } => room_name.clone(),
+            MediaContext::Backstage { room_name } => room_name.clone(),
         }
     }
 
     pub fn breakout_id(&self) -> Option<Uuid> {
         match self {
-            MediaContext::Main => None,
+            MediaContext::Main | MediaContext::Backstage { .. } => None,
             MediaContext::Breakout { breakout_id, .. } => Some(*breakout_id),
         }
     }
@@ -177,6 +183,14 @@ pub async fn media_context<C: ConnectionTrait>(
     conference: &conference_sessions::Model,
     participant: &conference_participants::Model,
 ) -> ApiResult<MediaContext> {
+    // Part H: backstage wins (panelists preparing are not on the audience stage).
+    if participant.backstage_at.is_some() {
+        if let Some(room_name) = &conference.backstage_room_name {
+            return Ok(MediaContext::Backstage {
+                room_name: room_name.clone(),
+            });
+        }
+    }
     if let Some(visit) = participant.breakout_visit_room_id {
         if let Some(room) = breakout_rooms::Entity::find_by_id(visit)
             .filter(breakout_rooms::Column::ConferenceId.eq(conference.id))
@@ -228,6 +242,9 @@ pub async fn conference_rooms<C: ConnectionTrait>(
     conference: &conference_sessions::Model,
 ) -> ApiResult<Vec<String>> {
     let mut rooms = vec![RtcRoomRef::for_conference(conference).room_name];
+    if let Some(backstage) = &conference.backstage_room_name {
+        rooms.push(backstage.clone());
+    }
     for r in breakout_rooms::Entity::find()
         .filter(breakout_rooms::Column::ConferenceId.eq(conference.id))
         .filter(breakout_rooms::Column::Status.is_in(["OPEN", "CLOSING"]))
@@ -337,7 +354,7 @@ pub struct BreakoutView {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaContextView {
-    /// MAIN or BREAKOUT.
+    /// MAIN, BREAKOUT or BACKSTAGE.
     pub kind: String,
     pub breakout_id: Option<Uuid>,
     pub visit: bool,
@@ -357,6 +374,11 @@ impl From<&MediaContext> for MediaContextView {
                 kind: "BREAKOUT".into(),
                 breakout_id: Some(*breakout_id),
                 visit: *visit,
+            },
+            MediaContext::Backstage { .. } => Self {
+                kind: "BACKSTAGE".into(),
+                breakout_id: None,
+                visit: false,
             },
         }
     }
@@ -722,6 +744,9 @@ pub async fn ensure_context_room(
             let room = scoped_room(&core.db, conference.id, *breakout_id).await?;
             ensure_breakout_room(core, &room).await
         }
+        MediaContext::Backstage { .. } => {
+            crate::services::specialized::ensure_backstage_room(core, conference).await
+        }
     }
 }
 
@@ -795,7 +820,13 @@ pub async fn execute_command(
                     return CommandResult::Dead("participant is not part of this conference".into())
                 }
             };
+            let from_backstage = p["fromBackstage"].as_bool() == Some(true);
             let from_room = match uuid_field(p, "fromBreakoutId") {
+                // Part H: leaving the backstage room.
+                None if from_backstage => match &conference.backstage_room_name {
+                    Some(r) => r.clone(),
+                    None => return CommandResult::Done,
+                },
                 None => RtcRoomRef::for_conference(conference).room_name,
                 Some(bid) => match scoped_room(&core.db, conference.id, bid).await {
                     Ok(r) => room_ref(&r).room_name,

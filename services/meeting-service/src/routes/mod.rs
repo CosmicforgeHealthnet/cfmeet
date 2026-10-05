@@ -42,6 +42,24 @@ pub fn create_routes(state: AppState) -> Router {
             "/internal/rtc/metrics",
             get(handlers::internal::rtc_metrics),
         )
+        // Parts G–I internal routes.
+        .route(
+            "/internal/transcription/events",
+            axum::routing::post(handlers::internal::transcription_events),
+        )
+        .route("/internal/metrics", get(handlers::internal::prometheus_metrics))
+        .route(
+            "/internal/operations/conferences/health",
+            get(handlers::internal::operations_conferences),
+        )
+        .route(
+            "/internal/operations/conferences/:id/health",
+            get(handlers::internal::operations_conference),
+        )
+        .route(
+            "/internal/operations/incidents",
+            get(handlers::internal::operations_incidents),
+        )
         .layer(axum::middleware::from_fn(
             crate::middleware::request_id::request_id_middleware,
         ))

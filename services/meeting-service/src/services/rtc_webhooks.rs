@@ -46,6 +46,10 @@ pub enum WebhookOutcome {
     UnknownIdentityEvicted,
     StaleSessionEvicted,
     Ignored,
+    /// Part G: recording evidence without a matching recording (no mutation).
+    UnknownRecording,
+    /// Part G: recording evidence whose room does not match (cross-conference guard).
+    Rejected,
 }
 
 impl WebhookOutcome {
@@ -57,6 +61,8 @@ impl WebhookOutcome {
             WebhookOutcome::UnknownIdentityEvicted => "UNKNOWN_IDENTITY_EVICTED",
             WebhookOutcome::StaleSessionEvicted => "STALE_SESSION_EVICTED",
             WebhookOutcome::Ignored => "IGNORED",
+            WebhookOutcome::UnknownRecording => "UNKNOWN_RECORDING",
+            WebhookOutcome::Rejected => "REJECTED",
         }
     }
 }
@@ -99,6 +105,15 @@ impl RtcWebhookService {
 
     pub async fn handle(&self, e: &ProviderEvent) -> ApiResult<WebhookOutcome> {
         inc(&M.webhooks_received);
+        if let (
+            ProviderEventKind::RecordingStarted
+            | ProviderEventKind::RecordingUpdated
+            | ProviderEventKind::RecordingEnded,
+            Some(recording),
+        ) = (e.kind, &e.recording)
+        {
+            return self.recording_event(e, recording).await;
+        }
         let txn = self.core.db.begin().await?;
         let inserted = txn
             .execute(Statement::from_sql_and_values(
@@ -122,6 +137,7 @@ impl RtcWebhookService {
         // Map provider room → ConferenceSession (opaque mapping, never client input).
         // Part F: a breakout room maps to its parent conference.
         let mut breakout = None;
+        let mut backstage = false;
         let conference = match &e.room_name {
             Some(name) => {
                 match conference_sessions::Entity::find()
@@ -130,15 +146,26 @@ impl RtcWebhookService {
                     .await?
                 {
                     Some(c) => Some(c),
-                    None => match breakouts::breakout_by_room(&txn, name).await? {
-                        Some(room) => {
-                            let c = conference_sessions::Entity::find_by_id(room.conference_id)
-                                .one(&txn)
-                                .await?;
-                            breakout = Some(room);
-                            c
+                    // Part H: the backstage room maps to its own conference.
+                    None => match conference_sessions::Entity::find()
+                        .filter(conference_sessions::Column::BackstageRoomName.eq(name.clone()))
+                        .one(&txn)
+                        .await?
+                    {
+                        Some(c) => {
+                            backstage = true;
+                            Some(c)
                         }
-                        None => None,
+                        None => match breakouts::breakout_by_room(&txn, name).await? {
+                            Some(room) => {
+                                let c = conference_sessions::Entity::find_by_id(room.conference_id)
+                                    .one(&txn)
+                                    .await?;
+                                breakout = Some(room);
+                                c
+                            }
+                            None => None,
+                        },
                     },
                 }
             }
@@ -162,6 +189,13 @@ impl RtcWebhookService {
                 | ProviderEventKind::Other,
                 Some(_),
             ) => WebhookOutcome::Ignored,
+            // Backstage room lifecycle never touches the conference either.
+            (
+                ProviderEventKind::RoomStarted
+                | ProviderEventKind::RoomFinished
+                | ProviderEventKind::Other,
+                None,
+            ) if backstage => WebhookOutcome::Ignored,
             (ProviderEventKind::RoomStarted, None) => {
                 if conference.rtc_room_id.is_none() {
                     if let Some(sid) = &e.room_id {
@@ -186,6 +220,12 @@ impl RtcWebhookService {
                 self.track_event(&txn, &conference, e).await?
             }
             (ProviderEventKind::Other, None) => WebhookOutcome::Ignored,
+            (
+                ProviderEventKind::RecordingStarted
+                | ProviderEventKind::RecordingUpdated
+                | ProviderEventKind::RecordingEnded,
+                _,
+            ) => WebhookOutcome::Ignored,
         };
         self.finish(&txn, e, Some(conference.id), outcome).await?;
         txn.commit().await?;
@@ -197,6 +237,61 @@ impl RtcWebhookService {
         ) {
             // Execute queued evictions / permission syncs immediately (relay retries).
             self.control.dispatch_for_conference(conference.id).await;
+        }
+        Ok(outcome)
+    }
+
+    /// Part G: recording (egress) evidence. Application is idempotent (forward-only
+    /// transitions keyed by the internal provider reference and checked against the
+    /// conference's room), so the dedupe row is written after a successful apply: a
+    /// transient failure makes the provider retry instead of losing the evidence.
+    async fn recording_event(
+        &self,
+        e: &ProviderEvent,
+        recording: &crate::services::artifacts::recorder::ProviderRecording,
+    ) -> ApiResult<WebhookOutcome> {
+        use crate::services::artifacts::recording::{EvidenceOutcome, RecordingService};
+        let seen = self
+            .core
+            .db
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT 1 FROM rtc_webhook_events WHERE event_id = $1",
+                [e.id.clone().into()],
+            ))
+            .await?;
+        if seen.is_some() {
+            inc(&M.webhooks_duplicate);
+            return Ok(WebhookOutcome::Duplicate);
+        }
+        let applied =
+            RecordingService::apply_evidence(&self.core, recording, e.room_name.as_deref()).await?;
+        let outcome = match applied {
+            EvidenceOutcome::Applied(_) => WebhookOutcome::Applied,
+            EvidenceOutcome::Ignored => WebhookOutcome::Ignored,
+            EvidenceOutcome::Unknown => WebhookOutcome::UnknownRecording,
+            EvidenceOutcome::Rejected => WebhookOutcome::Rejected,
+        };
+        let inserted = self
+            .core
+            .db
+            .execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "INSERT INTO rtc_webhook_events (event_id, provider, event_type, room_name, outcome)
+                 VALUES ($1, $2, $3, $4, $5) ON CONFLICT (event_id) DO NOTHING",
+                [
+                    e.id.clone().into(),
+                    self.core.rtc.name().into(),
+                    e.event_type.clone().into(),
+                    e.room_name.clone().into(),
+                    outcome.as_str().into(),
+                ],
+            ))
+            .await?
+            .rows_affected();
+        if inserted == 0 {
+            inc(&M.webhooks_duplicate);
+            return Ok(WebhookOutcome::Duplicate);
         }
         Ok(outcome)
     }
@@ -356,6 +451,11 @@ impl RtcWebhookService {
         let Some(identity) = e.media_identity.as_deref().filter(|i| !i.is_empty()) else {
             return Ok(WebhookOutcome::Ignored);
         };
+        // The recorder (LiveKit Egress) is not a meeting participant: never evicted by
+        // the session rules; unowned captures are escalated by recording reconciliation.
+        if e.provider_service_participant {
+            return Ok(WebhookOutcome::Ignored);
+        }
         let session = self.find_session(txn, conference, identity).await?;
         let Some(session) = session else {
             if conference.status == ConferenceStatus::Live {
@@ -415,6 +515,14 @@ impl RtcWebhookService {
         ));
         am.updated_at = Set(now);
         let session = am.update(txn).await?;
+        // Part I: join latency to usable media + reconnect accounting (once).
+        crate::services::quality::service::record_media_connected(
+            txn,
+            &self.core,
+            session.id,
+            conference.id,
+        )
+        .await?;
         emit(
             txn,
             OutboxRecord {

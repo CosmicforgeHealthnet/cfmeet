@@ -322,6 +322,17 @@ impl RtcControl {
         }
         let room = RtcRoomRef::for_conference(&c);
         let reason = c.termination_reason.map(|r| r.as_str()).unwrap_or("CLOSED");
+        // Part H: the backstage room belongs to the conference and ends with it.
+        if let Some(backstage) = &c.backstage_room_name {
+            let b = RtcRoomRef {
+                conference_id: c.id,
+                room_name: backstage.clone(),
+            };
+            if let Err(e) = self.core.rtc.terminate_room(&b, reason).await {
+                tracing::warn!(conference_id = %conference_id, "backstage room termination failed (retried): {e}");
+                return Err(e.into());
+            }
+        }
         if let Err(e) = self.core.rtc.terminate_room(&room, reason).await {
             inc(&M.room_terminate_failures);
             inc(&M.provider_errors);
@@ -525,6 +536,15 @@ impl RtcControl {
                     }) => CommandResult::Dead("participant is not part of this conference".into()),
                     Err(e) => retry(e),
                 }
+            }
+            // Part G: recording commands (re-read authoritative artefact state first).
+            event::RTC_RECORDING_START_REQUESTED | event::RTC_RECORDING_STOP_REQUESTED => {
+                crate::services::artifacts::recording::RecordingService::execute_command(
+                    &self.core,
+                    &conference,
+                    row,
+                )
+                .await
             }
             other => CommandResult::Dead(format!("unknown provider command {other}")),
         }

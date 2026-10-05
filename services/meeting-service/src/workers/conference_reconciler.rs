@@ -46,6 +46,7 @@ use crate::{
         meeting_events::{emit, event, OutboxRecord},
         meeting_permissions::PermissionContext,
         outbox,
+        quality::incidents::{self, Incident, IncidentAction},
         rtc_control::RtcControl,
         rtc_metrics::{inc, RTC_METRICS as M},
         rtc_provider::{ProviderGrants, RoomSpec, RtcParticipantRef, RtcRoomRef},
@@ -152,23 +153,34 @@ impl ConferenceReconciler {
                 "FAILED"
             }
         };
-        let _ = self
-            .core
-            .db
-            .execute(Statement::from_sql_and_values(
-                DbBackend::Postgres,
-                "INSERT INTO rtc_drift_events (id, conference_id, room_name, kind, action, detail)
-                 VALUES ($1, $2, $3, $4, $5, $6)",
-                [
-                    Uuid::new_v4().into(),
-                    conference_id.into(),
-                    room_name.map(str::to_string).into(),
-                    kind.into(),
-                    action_str.into(),
-                    detail.into(),
-                ],
-            ))
-            .await;
+        // Part I: findings are operational incidents (ESCALATED / FAILED deduplicated
+        // as OPEN incidents; REPAIRED resolves them).
+        let incident_action = match action_str {
+            "REPAIRED" => IncidentAction::Repaired,
+            "ESCALATED" => IncidentAction::Escalated,
+            _ => IncidentAction::Failed,
+        };
+        let subject = detail
+            .get("participantSessionId")
+            .or_else(|| detail.get("participantId"))
+            .or_else(|| detail.get("breakoutId"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let _ = incidents::record(
+            &self.core.db,
+            &Incident {
+                kind,
+                category: "RTC",
+                conference_id,
+                room_name,
+                subject,
+                action: incident_action,
+                critical: false,
+                detail,
+            },
+        )
+        .await;
+        let _ = self.core.telemetry.record_provider_drift("rtc");
     }
 
     async fn conferences(
@@ -430,7 +442,129 @@ impl ConferenceReconciler {
                 }
             }
         }
+
+        // Parts G–I: recording / transcription drift, unowned captures, backstage
+        // routing, join timeouts and health evaluation. Each step is isolated: a
+        // failure is logged and never aborts the tick.
+        self.reconcile_operations(&mut report).await;
         Ok(report)
+    }
+
+    async fn reconcile_operations(&self, report: &mut ReconcileReport) {
+        use crate::services::artifacts::{
+            recording::RecordingService, transcription::TranscriptionService,
+        };
+        let batch = self.core.config.reconciler_batch;
+        match RecordingService::reconcile(&self.core, batch).await {
+            Ok(n) => report.repaired += n,
+            Err(e) => tracing::warn!("recording reconcile failed: {e}"),
+        }
+        match TranscriptionService::reconcile(&self.core, batch).await {
+            Ok(n) => report.repaired += n,
+            Err(e) => tracing::warn!("transcription reconcile failed: {e}"),
+        }
+        if let Err(e) =
+            crate::services::quality::operations::OperationsService::record_join_timeouts(
+                &self.core.db,
+                &self.core,
+            )
+            .await
+        {
+            tracing::warn!("join timeout accounting failed: {e}");
+        }
+        let live = match self.conferences(&[ConferenceStatus::Live], None).await {
+            Ok(l) => l,
+            Err(e) => {
+                tracing::warn!("live conference scan failed: {e}");
+                return;
+            }
+        };
+        let ops = crate::services::quality::operations::OperationsService::new(self.core.clone());
+        for c in &live {
+            if let Ok(n) = RecordingService::detect_unowned(&self.core, c).await {
+                report.escalated += n;
+            }
+            if c.backstage_room_name.is_some() {
+                if let Err(e) = self.reconcile_backstage(c, report).await {
+                    tracing::warn!(conference_id = %c.id, "backstage reconcile failed: {e}");
+                }
+            }
+            if let Err(e) = ops.evaluate(c.id).await {
+                tracing::warn!(conference_id = %c.id, "health evaluation failed: {e}");
+            }
+        }
+    }
+
+    /// Part H: provider participants in the backstage room must hold the backstage
+    /// context (demoted / removed / unknown identities are evicted).
+    async fn reconcile_backstage(
+        &self,
+        c: &conference_sessions::Model,
+        report: &mut ReconcileReport,
+    ) -> ApiResult<()> {
+        let Some(name) = c.backstage_room_name.clone() else {
+            return Ok(());
+        };
+        let room = RtcRoomRef {
+            conference_id: c.id,
+            room_name: name.clone(),
+        };
+        let Ok(participants) = self.core.rtc.list_participants(&room).await else {
+            return Ok(());
+        };
+        for p in participants.into_iter().filter(|p| !p.provider_service) {
+            let session = participant_sessions::Entity::find()
+                .filter(participant_sessions::Column::ConferenceId.eq(c.id))
+                .filter(participant_sessions::Column::MediaIdentity.eq(p.media_identity.clone()))
+                .one(&self.core.db)
+                .await?;
+            let authorized = match &session {
+                Some(s) if s.state.is_active() => {
+                    match conference_participants::Entity::find_by_id(s.conference_participant_id)
+                        .filter(conference_participants::Column::ConferenceId.eq(c.id))
+                        .one(&self.core.db)
+                        .await?
+                    {
+                        Some(part) if part.admission_state == AdmissionState::Admitted => {
+                            breakouts::media_context(&self.core.db, c, &part)
+                                .await?
+                                .room_name(c)
+                                == name
+                        }
+                        _ => false,
+                    }
+                }
+                _ => false,
+            };
+            if authorized {
+                continue;
+            }
+            let target = RtcParticipantRef {
+                conference_id: c.id,
+                room_name: name.clone(),
+                participant_session_id: session.as_ref().map(|s| s.id).unwrap_or_else(Uuid::nil),
+                media_identity: p.media_identity.clone(),
+            };
+            let action = match self
+                .core
+                .rtc
+                .remove_participant(&target, "BACKSTAGE_CONTEXT")
+                .await
+            {
+                Ok(()) => Action::Repaired,
+                Err(_) => Action::Failed,
+            };
+            self.record(
+                report,
+                Some(c.id),
+                Some(&name),
+                incidents::kind::BACKSTAGE_CONTEXT_DRIFT,
+                action,
+                json!({ "participantSessionId": session.map(|s| s.id.to_string()) }),
+            )
+            .await;
+        }
+        Ok(())
     }
 
     async fn reconcile_live(
@@ -455,6 +589,20 @@ impl ConferenceReconciler {
             }
         };
         if snapshot.room.is_none() {
+            // Part I §75: never ENDED by guess — record + alert, then recreate.
+            let room_incident = |action| Incident {
+                kind: incidents::kind::RTC_ROOM_MISSING,
+                category: "RTC",
+                conference_id: Some(c.id),
+                room_name: Some(&room.room_name),
+                subject: None,
+                action,
+                critical: true,
+                detail: json!({ "reason": "LIVE conference without provider room" }),
+            };
+            let _ =
+                incidents::record(&self.core.db, &room_incident(IncidentAction::Escalated)).await;
+            tracing::error!(conference_id = %c.id, alert = "RTC_ROOM_MISSING", "live conference lost its provider room");
             // Deterministic: the conference is LIVE, so its room must exist.
             let action = match self.core.rtc.create_room(&room, &RoomSpec::default()).await {
                 Ok(info) => {
@@ -472,6 +620,10 @@ impl ConferenceReconciler {
                 }
                 Err(_) => Action::Failed,
             };
+            if matches!(action, Action::Repaired) {
+                let _ = incidents::record(&self.core.db, &room_incident(IncidentAction::Repaired))
+                    .await;
+            }
             self.record(
                 report,
                 Some(c.id),
@@ -516,7 +668,13 @@ impl ConferenceReconciler {
                 .collect();
 
         let mut present = HashSet::new();
-        for p in snapshot.participants.iter().filter(|p| p.connected) {
+        // Provider service participants (Egress recorder) are governed by recording
+        // reconciliation, not by session presence rules.
+        for p in snapshot
+            .participants
+            .iter()
+            .filter(|p| p.connected && !p.provider_service)
+        {
             present.insert(p.media_identity.clone());
             let session = by_identity.get(p.media_identity.as_str()).copied();
             let participant = session.and_then(|s| participants.get(&s.conference_participant_id));
@@ -686,7 +844,11 @@ impl ConferenceReconciler {
                 .await;
                 continue;
             }
-            for p in snapshot.participants.iter().filter(|p| p.connected) {
+            for p in snapshot
+                .participants
+                .iter()
+                .filter(|p| p.connected && !p.provider_service)
+            {
                 let session = by_identity.get(p.media_identity.as_str()).copied();
                 let participant =
                     session.and_then(|s| participants.get(&s.conference_participant_id));

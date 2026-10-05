@@ -46,6 +46,8 @@ pub struct AccessDecision {
     pub membership: Option<meeting_members::Model>,
     pub invitation: Option<meeting_invitations::Model>,
     pub adapter_role: Option<Role>,
+    /// Part H: external (e.g. clinical) authorization context — references only.
+    pub external: Option<crate::services::appointment_authorization::ExternalAuthorization>,
 }
 
 pub struct AccessRequest<'a> {
@@ -168,6 +170,7 @@ impl MeetingAccessService {
             membership: None,
             invitation: None,
             adapter_role: None,
+            external: None,
         };
 
         // Explicit grants.
@@ -288,8 +291,9 @@ impl MeetingAccessService {
                     )
                     .await;
                 match decision {
-                    AppointmentDecision::Authorized { role } => Ok(AccessDecision {
+                    AppointmentDecision::Authorized { role, context } => Ok(AccessDecision {
                         adapter_role: role,
+                        external: context,
                         ..base(AccessGrant::Adapter)
                     }),
                     AppointmentDecision::Denied { reason } => {

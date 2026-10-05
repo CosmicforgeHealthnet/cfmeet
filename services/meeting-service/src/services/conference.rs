@@ -146,6 +146,9 @@ pub async fn insert_conference<C: ConnectionTrait>(
         rtc_room_terminated_at: Set(None),
         collaboration_policy: Set(json!({})),
         collaboration_version: Set(1),
+        profile_policy: Set(json!({})),
+        backstage_room_name: Set(None),
+        backstage_ready_at: Set(None),
     };
     let conference = model.insert(conn).await.map_err(|e| {
         if is_unique_violation(&e) {
@@ -666,6 +669,15 @@ impl ConferenceService {
         am.ended_by = Set(Some(authority.audit.reference()));
         am.termination_reason = Set(Some(reason));
         let updated = self.apply(&txn, conference, am).await?;
+        // Part G: stop capture first (queued before the room terminate command); the
+        // recording may finish PROCESSING after the conference ended.
+        crate::services::artifacts::recording::RecordingService::stop_all_in_txn(
+            &txn,
+            &self.core,
+            &updated,
+            &authority.audit,
+        )
+        .await?;
         self.record(
             &txn,
             &authority.audit,
@@ -972,6 +984,9 @@ mod tests {
             rtc_room_terminated_at: None,
             collaboration_policy: serde_json::json!({}),
             collaboration_version: 1,
+            profile_policy: serde_json::json!({}),
+            backstage_room_name: None,
+            backstage_ready_at: None,
         }
     }
 

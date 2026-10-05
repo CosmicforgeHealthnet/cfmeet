@@ -226,6 +226,58 @@ fn every_v2_route_is_documented() {
         ("post", "/api/v2/conferences/{id}/polls/{pollId}/open"),
         ("post", "/api/v2/conferences/{id}/polls/{pollId}/close"),
         ("post", "/api/v2/conferences/{id}/polls/{pollId}/archive"),
+        // Parts G–I — recording, artefacts, consent, transcription, intelligence
+        ("post", "/api/v2/conferences/{id}/recordings"),
+        ("get", "/api/v2/conferences/{id}/recordings"),
+        ("get", "/api/v2/conferences/{id}/recordings/{recordingId}"),
+        (
+            "post",
+            "/api/v2/conferences/{id}/recordings/{recordingId}/stop",
+        ),
+        ("get", "/api/v2/conferences/{id}/artifacts"),
+        ("post", "/api/v2/conferences/{id}/artifacts/reports"),
+        ("get", "/api/v2/conferences/{id}/artifacts/{artifactId}"),
+        ("delete", "/api/v2/conferences/{id}/artifacts/{artifactId}"),
+        (
+            "post",
+            "/api/v2/conferences/{id}/artifacts/{artifactId}/access",
+        ),
+        ("get", "/api/v2/conferences/{id}/consents/requirements"),
+        ("post", "/api/v2/conferences/{id}/consents"),
+        (
+            "post",
+            "/api/v2/conferences/{id}/consents/{consentType}/withdraw",
+        ),
+        ("post", "/api/v2/conferences/{id}/transcription"),
+        (
+            "post",
+            "/api/v2/conferences/{id}/transcription/{jobId}/stop",
+        ),
+        ("get", "/api/v2/conferences/{id}/transcripts"),
+        ("get", "/api/v2/conferences/{id}/transcripts/{artifactId}"),
+        (
+            "post",
+            "/api/v2/conferences/{id}/transcripts/{artifactId}/translations",
+        ),
+        ("post", "/api/v2/conferences/{id}/intelligence/requests"),
+        // Part H — profiles, registration, backstage
+        ("get", "/api/v2/meeting-spaces/{id}/profile-policy"),
+        ("patch", "/api/v2/meeting-spaces/{id}/profile-policy"),
+        ("post", "/api/v2/meeting-spaces/{id}/registrations"),
+        ("get", "/api/v2/meeting-spaces/{id}/registrations"),
+        (
+            "get",
+            "/api/v2/meeting-spaces/{id}/registrations/{registrationId}",
+        ),
+        (
+            "delete",
+            "/api/v2/meeting-spaces/{id}/registrations/{registrationId}",
+        ),
+        ("post", "/api/v2/conferences/{id}/backstage"),
+        ("delete", "/api/v2/conferences/{id}/backstage"),
+        // Part I — quality
+        ("post", "/api/v2/conferences/{id}/quality/samples"),
+        ("get", "/api/v2/conferences/{id}/quality"),
     ];
     for (method, path) in expected {
         assert!(

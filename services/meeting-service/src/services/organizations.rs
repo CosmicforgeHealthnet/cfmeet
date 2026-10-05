@@ -165,6 +165,7 @@ impl OrganizationService {
             created_by: Set(Some(actor.user_id)),
             created_at: Set(now),
             updated_at: Set(now),
+            profile_policy: Set(serde_json::json!({})),
         }
         .insert(&txn)
         .await

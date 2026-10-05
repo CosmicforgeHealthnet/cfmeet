@@ -406,7 +406,9 @@ pub async fn record_consents(
             .execute(Statement::from_sql_and_values(
                 DbBackend::Postgres,
                 "INSERT INTO meeting_consents (id, conference_id, participant_id, consent_type, consent_version, decision) \
-                 VALUES ($1,$2,$3,$4,$5,'GRANTED') ON CONFLICT (participant_id, consent_type, consent_version) DO NOTHING",
+                 VALUES ($1,$2,$3,$4,$5,'GRANTED') ON CONFLICT (participant_id, consent_type, consent_version) \
+                 DO UPDATE SET decision = 'GRANTED', decided_at = now(), withdrawn_at = NULL, updated_at = now() \
+                 WHERE meeting_consents.decision <> 'GRANTED'",
                 [Uuid::new_v4().into(), conference_id.into(), participant_id.into(), k.as_str().into(), version.into()],
             ))
             .await?

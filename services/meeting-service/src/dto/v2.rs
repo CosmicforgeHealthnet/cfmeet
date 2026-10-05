@@ -414,6 +414,13 @@ pub struct ConferenceResponse {
     pub is_legacy: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<i32>,
+    /// Part G: recording indicator (`OFF` / `REQUESTED` / `RECORDING` / `STOPPING`) —
+    /// the authoritative recovery source after a reconnect.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recording_state: Option<String>,
+    /// Part G: live transcription indicator.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcription_state: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -888,3 +895,4 @@ pub struct EventReplayResponse {
 }
 
 pub use super::v2_collab::*;
+pub use super::v2_ghi::*;

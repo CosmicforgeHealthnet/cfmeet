@@ -41,6 +41,8 @@ pub const API_SECRET: &str = "mock-secret-mock-secret-mock-secret-0123";
 pub struct MockParticipant {
     pub sid: String,
     pub identity: String,
+    /// LiveKit participant kind (`STANDARD` = 0, `EGRESS` = 2).
+    pub kind: i32,
     pub permission: proto::ParticipantPermission,
     pub tracks: Vec<proto::TrackInfo>,
 }
@@ -63,6 +65,11 @@ pub struct Faults {
     pub fail_update: AtomicBool,
     /// Respond after this many milliseconds (timeout testing).
     pub delay_ms: AtomicU64,
+    /// Part G: Egress outage / rejection injection.
+    pub fail_egress: AtomicBool,
+    pub reject_egress: AtomicBool,
+    /// StopEgress answers OK but the job keeps running.
+    pub egress_stop_noop: AtomicBool,
 }
 
 #[derive(Default)]
@@ -72,6 +79,8 @@ pub struct MockLiveKit {
     pub faults: Faults,
     seq: AtomicU64,
     pub url: Mutex<String>,
+    /// Part G: egress jobs (mock LiveKit Egress service).
+    pub egresses: Mutex<BTreeMap<String, proto::EgressInfo>>,
 }
 
 fn twirp_error(status: StatusCode, code: &str, msg: &str) -> Response {
@@ -186,6 +195,7 @@ impl MockLiveKit {
                 MockParticipant {
                     sid,
                     identity: identity.to_string(),
+                    kind: 0,
                     permission,
                     tracks: vec![],
                 },
@@ -223,6 +233,7 @@ impl MockLiveKit {
             MockParticipant {
                 sid,
                 identity: claims.sub.clone(),
+                kind: 0,
                 permission: proto::ParticipantPermission {
                     can_subscribe: claims.video.can_subscribe,
                     can_publish: claims.video.can_publish,
@@ -326,6 +337,7 @@ impl MockLiveKit {
         proto::ParticipantInfo {
             sid: p.sid.clone(),
             identity: p.identity.clone(),
+            kind: p.kind,
             state: proto::participant_info::State::Active as i32,
             tracks: p.tracks.clone(),
             permission: Some(p.permission.clone()),
@@ -535,6 +547,15 @@ impl MockLiveKit {
     }
 }
 
+async fn egress_route(
+    State(mock): State<Arc<MockLiveKit>>,
+    Path(method): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    mock.handle_egress(method, headers, body).await
+}
+
 async fn route(
     State(mock): State<Arc<MockLiveKit>>,
     Path(method): Path<String>,
@@ -549,6 +570,7 @@ pub async fn start() -> Arc<MockLiveKit> {
     let mock = Arc::new(MockLiveKit::default());
     let app = Router::new()
         .route("/twirp/livekit.RoomService/:method", post(route))
+        .route("/twirp/livekit.Egress/:method", post(egress_route))
         .with_state(mock.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -644,4 +666,294 @@ impl MockLiveKit {
             })
             .unwrap_or_default()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Part G: mock LiveKit Egress (Twirp) + egress webhooks
+// ---------------------------------------------------------------------------
+
+fn now_ns() -> i64 {
+    chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+}
+
+impl MockLiveKit {
+    #[allow(clippy::result_large_err)]
+    fn authorize_record(&self, headers: &HeaderMap) -> Result<(), Response> {
+        let token = headers
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .ok_or_else(|| {
+                twirp_error(StatusCode::UNAUTHORIZED, "unauthenticated", "missing token")
+            })?;
+        let claims = TokenVerifier::with_api_key(API_KEY, API_SECRET)
+            .verify(token)
+            .map_err(|_| {
+                twirp_error(StatusCode::UNAUTHORIZED, "unauthenticated", "invalid token")
+            })?;
+        if claims.video.room_record {
+            Ok(())
+        } else {
+            Err(twirp_error(
+                StatusCode::FORBIDDEN,
+                "permission_denied",
+                "insufficient grants",
+            ))
+        }
+    }
+
+    async fn handle_egress(
+        self: Arc<Self>,
+        method: String,
+        headers: HeaderMap,
+        body: Bytes,
+    ) -> Response {
+        let delay = self.faults.delay_ms.load(Ordering::SeqCst);
+        if delay > 0 {
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+        }
+        if self.faults.fail_all.load(Ordering::SeqCst)
+            || self.faults.fail_egress.load(Ordering::SeqCst)
+        {
+            return twirp_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "unavailable",
+                "injected egress outage",
+            );
+        }
+        if let Err(r) = self.authorize_record(&headers) {
+            return r;
+        }
+        match method.as_str() {
+            "StartRoomCompositeEgress" => {
+                let Ok(req) = proto::RoomCompositeEgressRequest::decode(body) else {
+                    return twirp_error(StatusCode::BAD_REQUEST, "malformed", "bad protobuf");
+                };
+                if self.faults.reject_egress.load(Ordering::SeqCst) {
+                    return twirp_error(
+                        StatusCode::BAD_REQUEST,
+                        "invalid_argument",
+                        "injected rejection",
+                    );
+                }
+                let filepath = req
+                    .file_outputs
+                    .first()
+                    .map(|f| f.filepath.clone())
+                    .unwrap_or_default();
+                self.calls.lock().unwrap().push((
+                    method.clone(),
+                    req.room_name.clone(),
+                    filepath.clone(),
+                ));
+                let info = proto::EgressInfo {
+                    egress_id: self.next("EG"),
+                    room_name: req.room_name.clone(),
+                    status: proto::EgressStatus::EgressStarting as i32,
+                    updated_at: now_ns(),
+                    file_results: vec![proto::FileInfo {
+                        filename: filepath,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                };
+                self.egresses
+                    .lock()
+                    .unwrap()
+                    .insert(info.egress_id.clone(), info.clone());
+                ok(info)
+            }
+            "StopEgress" => {
+                let Ok(req) = proto::StopEgressRequest::decode(body) else {
+                    return twirp_error(StatusCode::BAD_REQUEST, "malformed", "bad protobuf");
+                };
+                self.calls.lock().unwrap().push((
+                    method.clone(),
+                    String::new(),
+                    req.egress_id.clone(),
+                ));
+                let mut map = self.egresses.lock().unwrap();
+                let Some(info) = map.get_mut(&req.egress_id) else {
+                    return twirp_error(StatusCode::NOT_FOUND, "not_found", "egress not found");
+                };
+                let active = matches!(
+                    proto::EgressStatus::try_from(info.status),
+                    Ok(proto::EgressStatus::EgressStarting | proto::EgressStatus::EgressActive)
+                );
+                if !active {
+                    return twirp_error(
+                        StatusCode::PRECONDITION_FAILED,
+                        "failed_precondition",
+                        "egress is not active",
+                    );
+                }
+                if !self.faults.egress_stop_noop.load(Ordering::SeqCst) {
+                    info.status = proto::EgressStatus::EgressEnding as i32;
+                    info.updated_at = now_ns();
+                }
+                ok(info.clone())
+            }
+            "ListEgress" => {
+                let Ok(req) = proto::ListEgressRequest::decode(body) else {
+                    return twirp_error(StatusCode::BAD_REQUEST, "malformed", "bad protobuf");
+                };
+                let items = self
+                    .egresses
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .filter(|e| req.egress_id.is_empty() || e.egress_id == req.egress_id)
+                    .filter(|e| req.room_name.is_empty() || e.room_name == req.room_name)
+                    .filter(|e| {
+                        !req.active
+                            || matches!(
+                                proto::EgressStatus::try_from(e.status),
+                                Ok(proto::EgressStatus::EgressStarting
+                                    | proto::EgressStatus::EgressActive
+                                    | proto::EgressStatus::EgressEnding)
+                            )
+                    })
+                    .cloned()
+                    .collect();
+                ok(proto::ListEgressResponse { items })
+            }
+            _ => twirp_error(StatusCode::NOT_FOUND, "bad_route", "unknown method"),
+        }
+    }
+
+    pub fn egress(&self, id: &str) -> Option<proto::EgressInfo> {
+        self.egresses.lock().unwrap().get(id).cloned()
+    }
+
+    pub fn egress_ids(&self) -> Vec<String> {
+        self.egresses.lock().unwrap().keys().cloned().collect()
+    }
+
+    /// Egress jobs of a room.
+    pub fn egresses_of(&self, room: &str) -> Vec<proto::EgressInfo> {
+        self.egresses
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|e| e.room_name == room)
+            .cloned()
+            .collect()
+    }
+
+    /// Insert an egress the platform does not own (unowned provider capture).
+    pub fn insert_egress(&self, room: &str, status: proto::EgressStatus) -> String {
+        let info = proto::EgressInfo {
+            egress_id: self.next("EG"),
+            room_name: room.to_string(),
+            status: status as i32,
+            started_at: now_ns(),
+            updated_at: now_ns(),
+            ..Default::default()
+        };
+        let id = info.egress_id.clone();
+        self.egresses.lock().unwrap().insert(id.clone(), info);
+        id
+    }
+
+    /// Provider reports the capture active. Returns the `egress_started` webhook body.
+    pub fn egress_activate(&self, id: &str) -> String {
+        let mut map = self.egresses.lock().unwrap();
+        let info = map.get_mut(id).expect("egress");
+        info.status = proto::EgressStatus::EgressActive as i32;
+        info.started_at = now_ns();
+        info.updated_at = now_ns();
+        egress_webhook_body("egress_started", info)
+    }
+
+    /// Provider finishes the capture: the file is written to `storage` at the
+    /// requested key (unless `write` is false) and `egress_ended` is returned.
+    pub fn egress_complete(
+        &self,
+        id: &str,
+        storage: Option<&backend::services::artifacts::storage::MemoryArtifactStorage>,
+        bytes: &[u8],
+        reported_size: Option<i64>,
+    ) -> String {
+        let mut map = self.egresses.lock().unwrap();
+        let info = map.get_mut(id).expect("egress");
+        info.status = proto::EgressStatus::EgressComplete as i32;
+        info.ended_at = now_ns();
+        info.updated_at = now_ns();
+        if info.started_at == 0 {
+            info.started_at = info.ended_at - 5_000_000_000;
+        }
+        let filename = info
+            .file_results
+            .first()
+            .map(|f| f.filename.clone())
+            .unwrap_or_default();
+        if let Some(st) = storage {
+            st.put_raw(&filename, bytes.to_vec(), "video/mp4");
+        }
+        info.file_results = vec![proto::FileInfo {
+            filename,
+            started_at: info.started_at,
+            ended_at: info.ended_at,
+            duration: info.ended_at - info.started_at,
+            size: reported_size.unwrap_or(bytes.len() as i64),
+            location: String::new(),
+        }];
+        egress_webhook_body("egress_ended", info)
+    }
+
+    /// Provider capture fails (`egress_ended` with EGRESS_FAILED).
+    pub fn egress_fail(&self, id: &str, error: &str) -> String {
+        let mut map = self.egresses.lock().unwrap();
+        let info = map.get_mut(id).expect("egress");
+        info.status = proto::EgressStatus::EgressFailed as i32;
+        info.error = error.to_string();
+        info.ended_at = now_ns();
+        info.updated_at = now_ns();
+        egress_webhook_body("egress_ended", info)
+    }
+}
+
+/// LiveKit egress webhook JSON (protojson), as livekit-server sends it.
+pub fn egress_webhook_body(event: &str, info: &proto::EgressInfo) -> String {
+    let ev = proto::WebhookEvent {
+        event: event.to_string(),
+        id: format!("EV_{}", uuid::Uuid::new_v4().simple()),
+        created_at: chrono::Utc::now().timestamp(),
+        egress_info: Some(info.clone()),
+        ..Default::default()
+    };
+    serde_json::to_string(&ev).unwrap()
+}
+
+impl MockLiveKit {
+    /// The Egress recorder joining a room (participant kind `EGRESS`).
+    pub fn insert_recorder(&self, room: &str, identity: &str) {
+        self.insert_participant(
+            room,
+            identity,
+            proto::ParticipantPermission {
+                can_subscribe: true,
+                ..Default::default()
+            },
+        );
+        if let Some(r) = self.rooms.lock().unwrap().get_mut(room) {
+            if let Some(p) = r.participants.get_mut(identity) {
+                p.kind = proto::participant_info::Kind::Egress as i32;
+            }
+        }
+    }
+}
+
+/// `participant_joined` for the Egress recorder (kind `EGRESS`), as livekit-server sends it.
+pub fn recorder_joined_body(id: &str, room: &str, identity: &str) -> String {
+    let mut v: serde_json::Value = serde_json::from_str(&webhook_body(
+        "participant_joined",
+        id,
+        room,
+        None,
+        Some(identity),
+    ))
+    .unwrap();
+    v["participant"]["kind"] = json!("EGRESS");
+    v.to_string()
 }

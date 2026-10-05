@@ -201,6 +201,10 @@ pub enum RateAction {
     QnaSubmit,
     QnaVote,
     Announcement,
+    /// Part H: registration submissions per meeting space.
+    Registration,
+    /// Part I: client quality-sample batches per participant session.
+    QualitySamples,
 }
 
 impl RateAction {
@@ -214,6 +218,8 @@ impl RateAction {
             RateAction::QnaSubmit => (5, 60),
             RateAction::QnaVote => (30, 60),
             RateAction::Announcement => (5, 60),
+            RateAction::Registration => (60, 60),
+            RateAction::QualitySamples => (12, 60),
         }
     }
 
@@ -226,6 +232,8 @@ impl RateAction {
             RateAction::QnaSubmit => "qna_submit",
             RateAction::QnaVote => "qna_vote",
             RateAction::Announcement => "announce",
+            RateAction::Registration => "registration",
+            RateAction::QualitySamples => "quality",
         }
     }
 }

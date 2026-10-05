@@ -52,6 +52,11 @@ pub struct Model {
     /// Part F: sparse conference-level collaboration policy overrides.
     pub collaboration_policy: Json,
     pub collaboration_version: i32,
+    /// Part H: sparse conference-level profile policy overrides.
+    pub profile_policy: Json,
+    /// Part H: backstage provider room (opaque; created on first backstage entry).
+    pub backstage_room_name: Option<String>,
+    pub backstage_ready_at: Option<DateTimeUtc>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

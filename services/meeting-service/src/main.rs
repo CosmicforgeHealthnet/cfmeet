@@ -141,6 +141,17 @@ async fn main() -> anyhow::Result<()> {
             2,
         )
     });
+    // Part G: artefact finalization retries + retention deletion (row-leased).
+    let _artifact_worker =
+        (flags.recording_v2_enabled || flags.transcription_v2_enabled).then(|| {
+            let poll = state.meeting.core.config.artifacts.retention_poll_secs;
+            backend::services::artifacts::retention::spawn_artifact_worker(
+                backend::services::artifacts::retention::ArtifactRetentionWorker::new(
+                    state.meeting.core.clone(),
+                ),
+                poll,
+            )
+        });
     let _conference_reconciler = flags.rtc_provider_control_v2.then(|| {
         let poll = state.meeting.core.config.reconciler_poll_secs;
         backend::workers::spawn_conference_reconciler(

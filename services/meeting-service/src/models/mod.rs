@@ -30,6 +30,9 @@ pub mod organization_memberships;
 pub mod organizations;
 pub mod outbox_events;
 pub mod participant_sessions;
+pub mod transcript_segments;
+pub mod transcription_jobs;
+pub mod webinar_registrations;
 
 // Note: email_jobs and oauth_states have been migrated to Redis
 // See: services/otp.rs for OTP tokens

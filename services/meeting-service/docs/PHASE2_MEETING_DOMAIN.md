@@ -1,4 +1,4 @@
-# Phase 2 Meeting Domain (`/api/v2`) — Parts A–F
+# Phase 2 Meeting Domain (`/api/v2`) — Parts A–I
 
 Spec: *CF Meet Phase 2 Backend Implementation Specification v1.1*. Current→target map:
 [`docs/phases/phase-02/parts-a-d-implementation-map.md`](../../../docs/phases/phase-02/parts-a-d-implementation-map.md).
@@ -461,3 +461,154 @@ Every host action is audited (`MEDIA_*_LOCK/UNLOCK`, `SCREEN_SHARE_STOP`, `SPOTL
 the same transaction as the state change and its outbox row. Audit metadata never carries message
 bodies, poll answers or anonymous identities. Counters: `GET /internal/rtc/metrics` →
 `collaboration`.
+
+## Parts G–I — Artefacts, meeting profiles, operations
+
+All three parts are internal modules of meeting-service (`services/artifacts/*`,
+`services/profiles.rs`, `services/specialized.rs`, `services/quality/*`); no new deployable
+service exists. Authorities are unchanged: PostgreSQL owns business state, LiveKit (RoomService
++ Egress) only executes media work, object storage only holds bytes, Redis / WebSocket only
+deliver, the outbox carries durable events and provider commands. One additive migration
+(`m20261005_000005_artifacts_profiles_operations`, verified up → down → up).
+
+### Part G — Recording, artefacts, consent, transcription, intelligence
+
+**Recording state machine** (`meeting_artifacts`, type `RECORDING`):
+`REQUESTED → RECORDING → STOPPING → PROCESSING → READY → DELETED`, plus `FAILED`.
+
+- `POST /conferences/{id}/recordings` checks permission (`recording.start`), the meeting profile
+  (`recording.allowed`), configured provider + storage, and explicit consent; it commits
+  `REQUESTED` with a server-chosen object key and the outbox command
+  `rtc.recording_start_requested`, then dispatches. A partial unique index allows one active
+  composite recording per conference. Consent and the profile are re-checked under the space
+  (shared) and conference locks, so a concurrent withdrawal or profile restriction can never be
+  bypassed.
+- The start command (`RecordingService::execute_command`) first adopts an active, unowned egress
+  of the room (provider-side idempotency), otherwise calls `StartRoomCompositeEgress`
+  (H.264 + Opus MP4 with `RECORDING_ENCODING=h264-opus`, provider default otherwise).
+- `RECORDING` only on provider evidence (`egress_started` / active egress); `STOPPING → PROCESSING`
+  only on provider completion with an output file; `READY` only after storage verification
+  (HEAD, provider-reported size, streamed SHA-256, MD5 vs ETag where applicable) — retried by the
+  artefact worker with backoff, `FAILED` (`ARTIFACT_MISSING` / integrity) after
+  `ARTIFACT_FINALIZE_MAX_ATTEMPTS`. Provider callbacks arrive through the verified LiveKit webhook,
+  are applied idempotently and deduplicated by event id; evidence whose room does not match the
+  recording's conference is rejected without mutation.
+- Ending a conference stops every active capture in the same transaction (never waits).
+- Reconciliation: stale `REQUESTED` (start timeout), lost completion callbacks (provider query),
+  vanished provider jobs and unowned provider captures (escalated, never stopped by guess).
+
+**Artefacts**: `GET /conferences/{id}/artifacts[?artifactType=]`, `GET …/artifacts/{artifactId}`,
+`POST …/artifacts/{artifactId}/access` (authorize → short-lived signed URL, never stored, audited,
+`ARTIFACT_SIGNED_URL_TTL_SECS` default 300), `DELETE …/artifacts/{artifactId}` (request →
+storage delete → confirmed absence → `DELETED`; never `DELETED` before absence is confirmed),
+`POST …/artifacts/reports` (`ATTENDANCE_REPORT`, `POLL_REPORT` — anonymous polls stay aggregate,
+`CHAT_EXPORT` — main chat only, never private messages). Lookups are always scoped by conference
+id; storage keys, buckets and provider ids are never returned. Retention: `retention_at` from the
+profile (`recording.retentionDays`, `transcription.retentionDays`, …); the `ArtifactRetentionWorker`
+(lease per row, restart-safe) deletes due artefacts.
+
+**Storage**: `ArtifactStorage` trait; `S3ArtifactStorage` (SigV4, S3 / MinIO / R2,
+`ARTIFACT_STORAGE_*`), `MemoryArtifactStorage` for tests. The Egress service writes into the same
+bucket using its own storage configuration.
+
+**Consent** (`meeting_consents`): independent types `RECORDING`, `TRANSCRIPTION`, `AI_PROCESSING`,
+`DATA_SHARING`. `GET …/consents/requirements`, `POST …/consents {consentVersion, decisions}` (the
+caller's own decisions only), `POST …/consents/{consentType}/withdraw`. `NOTICE_ONLY` never blocks;
+`EXPLICIT_CONSENT_REQUIRED` blocks the provider start until every active participant consented
+(targeted `consent.required` to the missing participants) and requires the active capture's
+consent at join. Withdrawal modes: `STOP_FUTURE_PROCESSING` (stops an explicit-consent capture),
+`REQUIRE_PARTICIPANT_EXIT` (participant returned to the waiting room), `STOP_PROCESSING_MODE`,
+`NO_RETROACTIVE_DELETION`. A withdrawal never deletes retained artefacts.
+
+**Transcription — classification: NOT REQUIRED for this release** (README "Future |
+Intelligence: transcription, translation…", platform overview "Communications intelligence |
+future"). The provider-neutral path is implemented and disabled by default
+(`FEATURE_TRANSCRIPTION_V2_ENABLED=false`, no provider configured): `POST …/transcription`
+(`LIVE` / `POST_MEETING` from a READY recording), `POST …/transcription/{jobId}/stop`,
+`GET …/transcripts`, `GET …/transcripts/{artifactId}` (paged segments), translation
+(`POST …/transcripts/{artifactId}/translations`, never overwrites the original), WebVTT caption
+track. Provider callbacks: `POST /internal/transcription/events`, HMAC
+(`X-CF-Timestamp`, `X-CF-Signature: sha256=…`, `TRANSCRIPTION_WEBHOOK_SECRET`), segments
+idempotent per `(job, provider segment id)`, speaker identity resolved only to a participant of
+the same conference.
+
+**Intelligence**: `POST …/intelligence/requests {sourceArtifactId, kind}` over a READY transcript,
+gated by `FEATURE_INTELLIGENCE_V2_ENABLED` (off), the profile processing location
+(`DISABLED` / `SELF_HOSTED_ONLY` / `EXTERNAL_ALLOWED` checked against the provider's declared
+location before any call) and AI consent. Speakers reach the provider as opaque labels.
+Production AI summarization is not part of this release (no provider is configured).
+
+### Part H — Meeting profiles, webinar / town hall, healthcare
+
+**Profile resolver** (`MeetingProfileResolver`): base → meeting type → security profile (hard
+ceilings) → organization (explicit values become ceilings) → space
+(`meeting_spaces.profile_policy`) → conference → clamp. A stored layer that fails validation
+switches to the restrictive fallback (`misconfigured: true`). `GET|PATCH
+/meeting-spaces/{id}/profile-policy` (optimistic `profilePolicyVersion`; clamped fields are
+reported). A tightened policy stops processing it no longer permits.
+
+**Webinar / town hall**: attendees default to `VIEWER` (subscribe-only grant; Q&A, polls,
+reactions and hand raise per policy). Promotion / demotion re-push provider grants
+(`participant.promoted` / `participant.demoted`); stage limits (`stage.maxStageParticipants`,
+`stage.maxPresenters`) return `STAGE_CAPACITY_REACHED`. Registration:
+`POST /meeting-spaces/{id}/registrations` (public when enabled; only policy-approved fields;
+idempotency key) returns a one-time `reg_…` admission token = a hash-only, VIEWER-role,
+use-limited invitation consumed by the normal join pipeline (never an RTC grant).
+`GET|DELETE …/registrations/{registrationId}` for organizers (cancel revokes the token).
+Backstage: `POST|DELETE /conferences/{id}/backstage` (hosts and presenters only) routes the
+participant into its own provider room `cfbs-<uuid>` (created before routing; a provider failure
+leaves the context unchanged); demotion / removal evicts from it (re-checked under lock), the
+webhook evicts stale backstage credentials, the reconciler repairs drift.
+
+**Healthcare**: public / passcode entry is rejected (`PROFILE_POLICY_DENIED`); the waiting room is
+forced; recording / transcription off with explicit consent, intelligence `DISABLED`, chat export
+off, enhanced semantic audit. The appointment authority returns only references: an external role
+token (mapped by policy — `DOCTOR→HOST`, `PATIENT→PARTICIPANT`, `NURSE→PRESENTER`,
+`SPECIALIST→CO_HOST`, … — never OWNER), an opaque authorization reference and a validity window
+that caps the session. Clinical payloads are dropped at parse time and never persisted; CF Meet
+keeps the final admission decision; adapter errors and timeouts fail closed.
+
+### Part I — Quality telemetry, health, incidents, operations
+
+- **Join SLI**: every join records an outcome (success / waiting / denied / provider failure /
+  timeout / client failure) on `conference_sessions` counters and the sink; denials are excluded
+  from the failure rate. Join latency ends at the verified provider media connection
+  (PENDING → CONNECTED, measured at callback receipt because provider timestamps have whole-second
+  precision); reconnects count once per provider-confirmed reconnect.
+- **Quality samples**: `POST /conferences/{id}/quality/samples` — technical metrics only (RTT,
+  jitter, loss, bitrate, resolution, fps, publish / subscribe health, failure kind), bounded per
+  sample, per batch (`QUALITY_MAX_SAMPLES_PER_BATCH`=20), per body (`QUALITY_MAX_BODY_BYTES`=16 KiB,
+  `413 REQUEST_TOO_LARGE`) and per session rate (12/min, `QUALITY_RATE_LIMITED`); session resolved
+  server-side; `batchId` makes retries idempotent; one row-locked aggregate update per batch on
+  `participant_sessions`. `GET /conferences/{id}/quality` for holders of `quality.view`
+  (no infrastructure identifiers).
+- **Health**: `OperationsService` classifies conferences HEALTHY / DEGRADED / UNHEALTHY / UNKNOWN
+  from PostgreSQL aggregates and open incidents using `QUALITY_*_DEGRADED|UNHEALTHY` thresholds.
+- **Incidents**: `rtc_drift_events` generalised (status OPEN / RESOLVED, category, severity,
+  `dedupe_key`, occurrences); one OPEN incident per dedupe key.
+- **Telemetry sink**: `QualityTelemetrySink` trait; `PrometheusSink` with bounded labels only (no
+  ids, names, emails). Sink failures never affect meetings or relational aggregates.
+- **Internal operations routes** (require `X-Internal-Token` = `INTERNAL_API_TOKEN`, otherwise
+  404): `GET /internal/metrics` (Prometheus text), `GET /internal/operations/conferences/health
+  [?state=]`, `GET /internal/operations/conferences/{id}/health`, `GET
+  /internal/operations/incidents[?status=]`.
+
+### Parts G–I feature flags
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `FEATURE_RECORDING_V2_ENABLED` | false | Recording API (`RECORDING_DISABLED` otherwise) |
+| `FEATURE_TRANSCRIPTION_V2_ENABLED` | false | Transcription / captions / translation |
+| `FEATURE_INTELLIGENCE_V2_ENABLED` | false | Intelligence requests |
+| `FEATURE_WEBINAR_MODE_ENABLED` | false | Registration, backstage |
+| `FEATURE_HEALTHCARE_PROFILE_ENABLED` | false | HEALTHCARE meeting type / profile |
+| `FEATURE_QUALITY_TELEMETRY_ENABLED` | false | Client quality-sample ingestion |
+
+### Real certification
+
+`scripts/livekit-certification/run.sh` with `EGRESS_BIN` and `MINIO_BIN` additionally starts
+MinIO and LiveKit Egress and runs `real_livekit_part_g_recording_and_object_storage` (real
+composite capture, start/stop, real callbacks, real MP4 in object storage, signed access,
+unauthorized rejection, callback dedupe, delete + confirmed absence, plus direct S3 object /
+metadata / checksum / signed read / delete / absence checks), `real_livekit_part_h_stage_and_backstage`
+and `real_livekit_part_i_presence_and_mapping`.

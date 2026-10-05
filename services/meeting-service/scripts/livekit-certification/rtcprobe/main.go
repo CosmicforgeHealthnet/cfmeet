@@ -4,7 +4,7 @@
 // It connects with a CF Meet-issued credential, optionally publishes tracks, and
 // prints one JSON line per observation:
 //
-//	{"event":"connected"}
+//	{"event":"connected","identity":"…","serverNode":"…","serverRegion":"…"}
 //	{"event":"publish_ok","source":"MICROPHONE","trackSid":"…"} | {"event":"publish_denied","source":"…","error":"…"}
 //	{"event":"track_muted","source":"…"} / {"event":"track_unmuted","source":"…"}
 //	{"event":"track_unpublished","source":"…","trackSid":"…"}   (server-side unpublish)
@@ -98,7 +98,14 @@ func main() {
 		emit(map[string]any{"event": "connect_failed", "error": err.Error()})
 		os.Exit(1)
 	}
-	emit(map[string]any{"event": "connected", "identity": room.LocalParticipant.Identity()})
+	connected := map[string]any{"event": "connected", "identity": room.LocalParticipant.Identity()}
+	// Provider edge metadata (Part I node / region mapping) as the SFU reports it.
+	if info := room.ServerInfo(); info != nil {
+		connected["serverNode"] = info.NodeId
+		connected["serverRegion"] = info.Region
+		connected["serverVersion"] = info.Version
+	}
+	emit(connected)
 
 	publish := func(name string) {
 		src, label, ok := sourceOf(name)

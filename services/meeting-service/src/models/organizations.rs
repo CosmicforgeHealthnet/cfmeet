@@ -16,6 +16,8 @@ pub struct Model {
     pub created_by: Option<Uuid>,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
+    /// Part H: sparse organization profile policy (restrictions bind every space).
+    pub profile_policy: Json,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

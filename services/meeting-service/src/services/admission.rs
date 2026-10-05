@@ -437,6 +437,7 @@ impl AdmissionService {
         participant: &conference_participants::Model,
         previous_session_id: Option<Uuid>,
         client_kind: Option<String>,
+        expires_cap: Option<DateTime<Utc>>,
     ) -> ApiResult<participant_sessions::Model> {
         Self::expire_stale_sessions(txn, participant.id).await?;
         let now = Utc::now();
@@ -477,9 +478,12 @@ impl AdmissionService {
             established_at: Set(now),
             connected_at: Set(None),
             disconnected_at: Set(None),
-            expires_at: Set(Some(
-                now + Duration::seconds(self.core.config.session_ttl_secs),
-            )),
+            // Part H: regulated profiles bound guest / externally-authorized sessions
+            // (shorter TTL, never beyond the external authorization window).
+            expires_at: Set(Some({
+                let default = now + Duration::seconds(self.core.config.session_ttl_secs);
+                expires_cap.map(|c| c.min(default)).unwrap_or(default)
+            })),
             end_reason: Set(None),
             reconnect_of_session_id: Set(reconnect_of),
             client_kind: Set(client_kind),
@@ -493,8 +497,53 @@ impl AdmissionService {
         .await?)
     }
 
-    /// `POST /api/v2/conferences/{id}/join`
+    /// `POST /api/v2/conferences/{id}/join` — the join pipeline plus the Part I join
+    /// SLI (attempt, credential issued, denial vs infrastructure failure; latency to
+    /// the media connection is completed by the provider webhook).
     pub async fn join(
+        &self,
+        ctx: &ActorContext,
+        conference_id: Uuid,
+        req: JoinConferenceRequest,
+    ) -> ApiResult<JoinOutcome> {
+        use crate::services::quality::{service as qs, sink::JoinOutcome as Sli};
+        let started = Utc::now();
+        let result = self.join_inner(ctx, conference_id, req).await;
+        let known = conference_sessions::Entity::find_by_id(conference_id)
+            .one(&self.core.db)
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        if known {
+            let (outcome, latency) = match &result {
+                Ok(o) => match (&o.rtc, &o.session) {
+                    (RtcOutcome::Issued(_), Some(s)) => {
+                        let _ = self
+                            .core
+                            .db
+                            .execute(sea_orm::Statement::from_sql_and_values(
+                                sea_orm::DbBackend::Postgres,
+                                "UPDATE participant_sessions SET join_requested_at = $2 WHERE id = $1",
+                                [s.id.into(), started.into()],
+                            ))
+                            .await;
+                        (
+                            Sli::Success,
+                            Some((Utc::now() - started).num_milliseconds() as f64),
+                        )
+                    }
+                    (RtcOutcome::NotIssuedWaiting, _) => (Sli::Waiting, None),
+                    _ => (Sli::Success, None),
+                },
+                Err(e) => (qs::classify_join_error(e.code()), None),
+            };
+            qs::record_join(&self.core.db, &self.core, conference_id, outcome, latency).await;
+        }
+        result
+    }
+
+    async fn join_inner(
         &self,
         ctx: &ActorContext,
         conference_id: Uuid,
@@ -557,6 +606,66 @@ impl AdmissionService {
                 external_context: req.external_context.as_deref(),
             })
             .await?;
+        // Part H: the effective profile policy (meeting type → security profile →
+        // organization → space → conference) gates regulated entry.
+        let profile = crate::services::profiles::MeetingProfileResolver::load(
+            &self.core.db,
+            &space,
+            Some(&conference),
+        )
+        .await?;
+        let mut decision = decision;
+        if !profile.policy.access.public_access_allowed {
+            use crate::services::meeting_access::AccessGrant;
+            let uncontrolled =
+                matches!(decision.grant, AccessGrant::Public | AccessGrant::Passcode)
+                    || (decision.grant == AccessGrant::ExistingParticipant
+                        && ctx.registered().is_none()
+                        && existing
+                            .as_ref()
+                            .map(|p| p.invitation_id.is_none())
+                            .unwrap_or(true)
+                        && matches!(
+                            space.access_policy,
+                            crate::domain::AccessPolicy::Public
+                                | crate::domain::AccessPolicy::PublicPasscode
+                        ));
+            if uncontrolled {
+                crate::services::ops_metrics::inc(
+                    &crate::services::ops_metrics::OPS_METRICS.profile_policy_denials,
+                );
+                return Err(ApiError::domain(
+                    ErrorCode::ProfilePolicyDenied,
+                    "This meeting does not allow uncontrolled public entry",
+                ));
+            }
+        }
+        // Part H §49: an external (e.g. clinical) role maps into the generic role model
+        // through policy — never OWNER, never from the client.
+        if let Some(external) = decision.external.as_ref() {
+            if let Some(mapped) = external
+                .external_role
+                .as_deref()
+                .and_then(|r| profile.map_external_role(r))
+            {
+                decision.adapter_role = Some(mapped);
+            }
+        }
+        // Part H: guest / externally-authorized sessions are bounded by policy and by
+        // the external authorization window.
+        let session_cap = {
+            let mut cap = None;
+            if ctx.registered().is_none() || decision.external.is_some() {
+                cap = Some(
+                    Utc::now()
+                        + Duration::seconds(profile.policy.access.guest_session_ttl_secs as i64),
+                );
+            }
+            if let Some(until) = decision.external.as_ref().and_then(|x| x.valid_until) {
+                cap = Some(cap.map(|c: DateTime<Utc>| c.min(until)).unwrap_or(until));
+            }
+            cap
+        };
         let collab = self.core.flags.collaboration_v2_enabled;
         // Part F §18: a display name is presentation only; registered users in sensitive
         // meetings always present under their profile name.
@@ -575,24 +684,42 @@ impl AdmissionService {
             }
         };
 
-        // Part F §19: explicit consents required by policy must exist before admission.
-        let consent_policy = if collab {
+        // Part F §19 + Part G §21: explicit consents required by policy — and, while a
+        // capture runs under EXPLICIT_CONSENT_REQUIRED, that capture's consent — must
+        // exist before admission.
+        let consent_policy = {
             let c = find_conference(&self.core.db, conference_id).await?;
-            Some(crate::services::collaboration::effective_policy(&space, &c))
-        } else {
-            None
+            let collab_policy = crate::services::collaboration::effective_policy(&space, &c);
+            let mut required = if collab {
+                collab_policy.required_consents.clone()
+            } else {
+                vec![]
+            };
+            if self.core.flags.recording_v2_enabled || self.core.flags.transcription_v2_enabled {
+                use crate::services::collaboration::policy::ConsentKind;
+                for (active, kind) in [
+                    (c.recording_state != "OFF", ConsentKind::Recording),
+                    (c.transcription_state != "OFF", ConsentKind::Transcription),
+                ] {
+                    if active
+                        && crate::services::artifacts::consent::mode_for(&profile, kind)
+                            == crate::services::profiles::ConsentMode::ExplicitConsentRequired
+                        && !required.contains(&kind)
+                    {
+                        required.push(kind);
+                    }
+                }
+            }
+            (!required.is_empty()).then_some((required, collab_policy.consent_version))
         };
         let mut consents_to_record = vec![];
-        if let Some(policy) = consent_policy
-            .as_ref()
-            .filter(|p| !p.required_consents.is_empty())
-        {
+        if let Some((required, version)) = consent_policy.as_ref() {
             let already = match &existing {
                 Some(p) => {
                     crate::services::collaboration::prejoin::granted_consents(
                         &self.core.db,
                         p.id,
-                        &policy.consent_version,
+                        version,
                     )
                     .await?
                 }
@@ -600,18 +727,14 @@ impl AdmissionService {
             };
             let request = req.consents.clone().unwrap_or_default();
             let missing = crate::services::collaboration::prejoin::missing_consents(
-                &policy.required_consents,
-                &policy.consent_version,
-                &already,
-                &request,
+                required, version, &already, &request,
             );
             if !missing.is_empty() {
                 return Err(
                     crate::services::collaboration::prejoin::consent_required_error(&missing),
                 );
             }
-            consents_to_record = policy
-                .required_consents
+            consents_to_record = required
                 .iter()
                 .copied()
                 .filter(|k| !already.contains(k))
@@ -733,7 +856,14 @@ impl AdmissionService {
             (None, None, None) => IdentityType::Guest,
         };
         let wait = must_wait(&WaitingInput {
-            policy: space.waiting_room_policy,
+            // Part H: regulated profiles force the waiting room (hosts stay exempt).
+            policy: if profile.policy.access.waiting_room_forced
+                && space.waiting_room_policy == WaitingRoomPolicy::Off
+            {
+                WaitingRoomPolicy::Everyone
+            } else {
+                space.waiting_room_policy
+            },
             identity_type,
             exempt,
             is_member: decision.is_owner || decision.membership.is_some(),
@@ -769,12 +899,28 @@ impl AdmissionService {
         let participant = match existing.clone() {
             Some(p) => {
                 let mut am: conference_participants::ActiveModel = p.clone().into();
-                let changed =
-                    p.role != role || p.admission_state != target || p.display_name != display_name;
+                let external_changed = decision
+                    .external
+                    .as_ref()
+                    .map(|x| {
+                        p.external_role != x.external_role
+                            || p.external_authz_ref != x.reference
+                            || p.external_authz_valid_until != x.valid_until
+                    })
+                    .unwrap_or(false);
+                let changed = p.role != role
+                    || p.admission_state != target
+                    || p.display_name != display_name
+                    || external_changed;
                 am.role = Set(role);
                 am.role_source = Set(role_source);
                 am.display_name = Set(display_name.clone());
                 am.admission_state = Set(target);
+                if let Some(x) = decision.external.as_ref() {
+                    am.external_role = Set(x.external_role.clone());
+                    am.external_authz_ref = Set(x.reference.clone());
+                    am.external_authz_valid_until = Set(x.valid_until);
+                }
                 if newly_admitted {
                     am.admitted_at = Set(Some(now));
                     am.admitted_by = Set(Some("system:admission-policy".into()));
@@ -848,6 +994,20 @@ impl AdmissionService {
                     spotlighted_by: Set(None),
                     breakout_visit_room_id: Set(None),
                     collab_version: Set(1),
+                    external_role: Set(decision
+                        .external
+                        .as_ref()
+                        .and_then(|x| x.external_role.clone())),
+                    external_authz_ref: Set(decision
+                        .external
+                        .as_ref()
+                        .and_then(|x| x.reference.clone())),
+                    external_authz_valid_until: Set(decision
+                        .external
+                        .as_ref()
+                        .and_then(|x| x.valid_until)),
+                    backstage_at: Set(None),
+                    registration_id: Set(None),
                 }
                 .insert(&txn)
                 .await?
@@ -901,7 +1061,54 @@ impl AdmissionService {
             emit(&txn, participant_event(space.id, &participant, e)).await?;
         }
 
-        if let Some(policy) = &consent_policy {
+        // Part H §55: regulated profiles keep an enhanced semantic audit of access /
+        // join (identifiers and references only — never clinical data).
+        if profile.policy.audit.enhanced {
+            audit(
+                &txn,
+                &AuditActor::participant(participant.id),
+                AuditRecord {
+                    meeting_space_id: space.id,
+                    conference_id: Some(conference_id),
+                    action: action::PARTICIPANT_JOIN,
+                    target_type: Some("PARTICIPANT"),
+                    target_ref: Some(participant.id.to_string()),
+                    metadata: json!({
+                        "identityType": participant.identity_type,
+                        "role": participant.role,
+                        "admissionState": participant.admission_state,
+                        "grant": format!("{:?}", decision.grant),
+                        "profile": profile.profile,
+                    }),
+                },
+            )
+            .await?;
+            if let Some(x) = &decision.external {
+                audit(
+                    &txn,
+                    &AuditActor::participant(participant.id),
+                    AuditRecord {
+                        meeting_space_id: space.id,
+                        conference_id: Some(conference_id),
+                        action: action::EXTERNAL_AUTHORIZATION,
+                        target_type: Some("PARTICIPANT"),
+                        target_ref: Some(participant.id.to_string()),
+                        metadata: json!({
+                            "externalRole": x.external_role,
+                            "authorizationRef": x.reference,
+                            "validUntil": x.valid_until,
+                            "mappedRole": participant.role,
+                        }),
+                    },
+                )
+                .await?;
+            }
+            crate::services::ops_metrics::inc(
+                &crate::services::ops_metrics::OPS_METRICS.enhanced_audit_records,
+            );
+        }
+
+        if let Some((_, version)) = &consent_policy {
             if !consents_to_record.is_empty() {
                 crate::services::collaboration::prejoin::record_consents(
                     &txn,
@@ -909,7 +1116,7 @@ impl AdmissionService {
                     conference_id,
                     participant.id,
                     &consents_to_record,
-                    &policy.consent_version,
+                    version,
                 )
                 .await?;
             }
@@ -923,6 +1130,7 @@ impl AdmissionService {
                     &participant,
                     req.previous_session_id,
                     ctx.client_kind.clone(),
+                    session_cap,
                 )
                 .await?,
             )
@@ -1513,6 +1721,66 @@ impl AdmissionService {
         })
     }
 
+    /// Part G §22 (`REQUIRE_PARTICIPANT_EXIT`): policy-driven return to the waiting
+    /// room by the system (no host authority involved; the decision was the
+    /// participant's own consent withdrawal).
+    pub async fn system_return_to_waiting(
+        &self,
+        conference_id: Uuid,
+        participant_id: Uuid,
+        reason: &str,
+    ) -> ApiResult<()> {
+        let txn = self.core.db.begin().await?;
+        let conference = lock_conference(&txn, conference_id).await?;
+        let target = find_scoped_participant(&txn, conference_id, participant_id, true).await?;
+        if target.admission_state != AdmissionState::Admitted {
+            txn.commit().await?;
+            return Ok(());
+        }
+        let sessions = Self::active_sessions(&txn, target.id).await?;
+        let now = Utc::now();
+        let mut am: conference_participants::ActiveModel = target.clone().into();
+        am.admission_state = Set(AdmissionState::Waiting);
+        am.requested_at = Set(now);
+        am.version = Set(target.version + 1);
+        am.updated_at = Set(now);
+        let updated = am.update(&txn).await?;
+        Self::queue_session_removal(
+            &txn,
+            conference.meeting_space_id,
+            &conference,
+            target.id,
+            &sessions,
+            reason,
+        )
+        .await?;
+        audit(
+            &txn,
+            &AuditActor::system("consent-policy"),
+            AuditRecord {
+                meeting_space_id: conference.meeting_space_id,
+                conference_id: Some(conference_id),
+                action: action::RETURN_TO_WAITING,
+                target_type: Some("PARTICIPANT"),
+                target_ref: Some(target.id.to_string()),
+                metadata: json!({ "reason": reason, "terminatedSessions": sessions.len() }),
+            },
+        )
+        .await?;
+        emit(
+            &txn,
+            participant_event(
+                conference.meeting_space_id,
+                &updated,
+                event::PARTICIPANT_RETURNED_TO_WAITING,
+            ),
+        )
+        .await?;
+        txn.commit().await?;
+        self.enforce(conference_id, !sessions.is_empty()).await;
+        Ok(())
+    }
+
     pub async fn change_role(
         &self,
         ctx: &ActorContext,
@@ -1553,6 +1821,21 @@ impl AdmissionService {
             txn.commit().await?;
             return Ok(target);
         }
+        // Part H §47: the interactive stage stays small (audience = VIEWER).
+        let profile = crate::services::profiles::MeetingProfileResolver::load(
+            &txn,
+            &space,
+            Some(&conference),
+        )
+        .await?;
+        crate::services::specialized::check_stage_capacity(
+            &txn,
+            &profile,
+            conference_id,
+            &target,
+            req.role,
+        )
+        .await?;
         let previous = target.role;
         let now = Utc::now();
         let mut am: conference_participants::ActiveModel = target.clone().into();
@@ -1579,6 +1862,43 @@ impl AdmissionService {
             participant_event(space.id, &updated, event::PARTICIPANT_ROLE_CHANGED),
         )
         .await?;
+        // Part H §44: promotion to / demotion from the stage is explicit and audited.
+        let promotion = match (previous == Role::Viewer, req.role == Role::Viewer) {
+            (true, false) => Some((event::PARTICIPANT_PROMOTED, action::PARTICIPANT_PROMOTE)),
+            (false, true) => Some((event::PARTICIPANT_DEMOTED, action::PARTICIPANT_DEMOTE)),
+            _ => None,
+        };
+        if let Some((promotion_event, promotion_action)) = promotion {
+            audit(
+                &txn,
+                &authority.audit,
+                AuditRecord {
+                    meeting_space_id: space.id,
+                    conference_id: Some(conference_id),
+                    action: promotion_action,
+                    target_type: Some("PARTICIPANT"),
+                    target_ref: Some(target.id.to_string()),
+                    metadata: json!({ "from": previous, "to": req.role }),
+                },
+            )
+            .await?;
+            emit(&txn, participant_event(space.id, &updated, promotion_event)).await?;
+            crate::services::ops_metrics::inc(if req.role == Role::Viewer {
+                &crate::services::ops_metrics::OPS_METRICS.demotions
+            } else {
+                &crate::services::ops_metrics::OPS_METRICS.promotions
+            });
+        }
+        // Part H: a role that loses backstage access leaves the backstage now.
+        let updated = crate::services::specialized::clear_backstage_if_unauthorized(
+            &txn,
+            &conference,
+            &updated,
+            &pctx,
+            &authority.audit,
+        )
+        .await?
+        .unwrap_or(updated);
         // Part F: compare the effective projections (role ∧ policy ∧ locks).
         let collab_policy = crate::services::collaboration::effective_policy(&space, &conference);
         let restrictions = crate::services::collaboration::media::MediaRestrictions::of(&updated);
@@ -1906,6 +2226,7 @@ mod tests {
             membership: None,
             invitation: None,
             adapter_role: None,
+            external: None,
         }
     }
 

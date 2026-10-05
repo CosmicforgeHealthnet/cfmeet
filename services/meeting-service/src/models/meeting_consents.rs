@@ -1,6 +1,5 @@
-//! MeetingConsent — per-participant consent decisions (Part G).
-//!
-//! Schema foundation only — behaviour is delivered by a later Phase 2 part.
+//! MeetingConsent — the current per-participant consent decision per type and policy
+//! version (Part G). History is kept in the audit log; types are independent.
 
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -14,9 +13,14 @@ pub struct Model {
     pub participant_id: Uuid,
     pub consent_type: String,
     pub consent_version: String,
+    /// GRANTED (API: ACCEPTED) / DECLINED / WITHDRAWN.
     pub decision: String,
     pub decided_at: DateTimeUtc,
     pub created_at: DateTimeUtc,
+    pub withdrawn_at: Option<DateTimeUtc>,
+    pub source: Option<String>,
+    pub request_id: Option<String>,
+    pub updated_at: DateTimeUtc,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

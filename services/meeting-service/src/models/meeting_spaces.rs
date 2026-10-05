@@ -43,6 +43,9 @@ pub struct Model {
     pub version: i32,
     /// Part F: sparse space-level collaboration policy defaults.
     pub collaboration_policy: Json,
+    /// Part H: sparse space-level profile policy overrides.
+    pub profile_policy: Json,
+    pub profile_policy_version: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -67,6 +67,8 @@ pub enum ConsentKind {
     Recording,
     Transcription,
     AiProcessing,
+    /// Part G: sharing meeting data with a third party (independent of the others).
+    DataSharing,
     HealthcareTerms,
     PrivacyNotice,
 }
@@ -77,6 +79,7 @@ impl ConsentKind {
             ConsentKind::Recording => "RECORDING",
             ConsentKind::Transcription => "TRANSCRIPTION",
             ConsentKind::AiProcessing => "AI_PROCESSING",
+            ConsentKind::DataSharing => "DATA_SHARING",
             ConsentKind::HealthcareTerms => "HEALTHCARE_TERMS",
             ConsentKind::PrivacyNotice => "PRIVACY_NOTICE",
         }

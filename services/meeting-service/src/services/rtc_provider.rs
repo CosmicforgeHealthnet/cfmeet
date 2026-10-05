@@ -222,6 +222,10 @@ pub struct RtcPublishedTrack {
 pub struct RtcParticipant {
     pub media_identity: String,
     pub connected: bool,
+    /// Provider service participant (LiveKit `EGRESS` recorder). Such identities are
+    /// minted only with the API secret and are governed by recording reconciliation,
+    /// never by the session rules (they are not meeting participants).
+    pub provider_service: bool,
     pub grants: Option<ProviderGrants>,
     pub tracks: Vec<RtcPublishedTrack>,
 }
@@ -242,6 +246,10 @@ pub enum ProviderEventKind {
     /// Part F: a track was published / unpublished (screen-share evidence).
     TrackPublished,
     TrackUnpublished,
+    /// Part G: recording (egress) lifecycle evidence.
+    RecordingStarted,
+    RecordingUpdated,
+    RecordingEnded,
     Other,
 }
 
@@ -258,6 +266,10 @@ pub struct ProviderEvent {
     /// Part F: provider track reference (internal, never projected).
     pub track_id: Option<String>,
     pub track_kind: Option<TrackKind>,
+    /// Part G: provider recording status (internal reference, never projected).
+    pub recording: Option<crate::services::artifacts::recorder::ProviderRecording>,
+    /// Part G: the participant is a provider service (LiveKit Egress recorder).
+    pub provider_service_participant: bool,
 }
 
 #[async_trait]
@@ -463,6 +475,7 @@ impl LiveKitProvider {
         RtcParticipant {
             media_identity: p.identity.clone(),
             connected: p.state != proto::participant_info::State::Disconnected as i32,
+            provider_service: p.kind == proto::participant_info::Kind::Egress as i32,
             grants: p.permission.as_ref().map(Self::grants_from_permission),
             tracks: p
                 .tracks
@@ -718,6 +731,9 @@ impl RtcProvider for LiveKitProvider {
             }
             "track_published" => ProviderEventKind::TrackPublished,
             "track_unpublished" => ProviderEventKind::TrackUnpublished,
+            "egress_started" => ProviderEventKind::RecordingStarted,
+            "egress_updated" => ProviderEventKind::RecordingUpdated,
+            "egress_ended" => ProviderEventKind::RecordingEnded,
             _ => ProviderEventKind::Other,
         };
         let id = if event.id.is_empty() {
@@ -736,7 +752,13 @@ impl RtcProvider for LiveKitProvider {
             id,
             kind,
             event_type: event.event.chars().take(64).collect(),
-            room_name: event.room.as_ref().map(|r| r.name.clone()),
+            room_name: event.room.as_ref().map(|r| r.name.clone()).or_else(|| {
+                event
+                    .egress_info
+                    .as_ref()
+                    .filter(|e| !e.room_name.is_empty())
+                    .map(|e| e.room_name.clone())
+            }),
             room_id: event
                 .room
                 .as_ref()
@@ -759,6 +781,15 @@ impl RtcProvider for LiveKitProvider {
                     _ => Self::track_kind(t),
                 }
             }),
+            recording: event
+                .egress_info
+                .as_ref()
+                .map(crate::services::artifacts::recorder::from_egress_info),
+            provider_service_participant: event
+                .participant
+                .as_ref()
+                .map(|p| p.kind == proto::participant_info::Kind::Egress as i32)
+                .unwrap_or(false),
         })
     }
 }

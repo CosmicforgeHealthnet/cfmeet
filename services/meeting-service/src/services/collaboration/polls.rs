@@ -1241,6 +1241,22 @@ impl PollService {
             .collect())
     }
 
+    /// Part G POLL_REPORT: aggregate results only. Anonymous polls never carry
+    /// identity, and results of polls that are not closed are not exported.
+    pub async fn report_results<C: ConnectionTrait>(
+        &self,
+        conn: &C,
+        poll: &meeting_polls::Model,
+    ) -> ApiResult<Option<PollResults>> {
+        if !matches!(
+            PollStatus::parse(&poll.status),
+            PollStatus::Closed | PollStatus::Archived
+        ) {
+            return Ok(None);
+        }
+        Ok(Some(self.results_for(conn, poll, true, true, None).await?))
+    }
+
     async fn results_for<C: ConnectionTrait>(
         &self,
         conn: &C,

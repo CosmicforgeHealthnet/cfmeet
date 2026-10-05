@@ -55,6 +55,11 @@ livekit-protocol = "0.6"
 redis = { version = "0.25", features = ["tokio-comp", "connection-manager"] }
 deadpool-redis = "0.15"
 sha2 = "0.10"
+# Part G: S3-compatible SigV4 signing + integrity digests (artefact storage)
+hmac = "0.12"
+md-5 = "0.10"
+hex = "0.4"
+url = "2"
 
 [[bin]]
 name = "test_email"

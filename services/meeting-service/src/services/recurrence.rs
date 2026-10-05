@@ -214,6 +214,9 @@ pub async fn materialize<C: ConnectionTrait>(
             rtc_room_terminated_at: Set(None),
             collaboration_policy: Set(json!({})),
             collaboration_version: Set(1),
+            profile_policy: Set(serde_json::json!({})),
+            backstage_room_name: Set(None),
+            backstage_ready_at: Set(None),
         };
         inserted += conference_sessions::Entity::insert(model)
             .on_conflict(

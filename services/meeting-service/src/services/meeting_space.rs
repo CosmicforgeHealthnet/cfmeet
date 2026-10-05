@@ -357,6 +357,8 @@ impl MeetingSpaceService {
                 archived_at: Set(None),
                 version: Set(1),
                 collaboration_policy: Set(draft.collaboration_policy.to_json()),
+                profile_policy: Set(serde_json::json!({})),
+                profile_policy_version: Set(1),
             };
             let savepoint = conn.begin().await?;
             match model.insert(&savepoint).await {

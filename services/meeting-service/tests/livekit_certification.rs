@@ -575,3 +575,518 @@ async fn collab_version(app: &TestApp, base: &str, token: &str) -> i64 {
         .as_i64()
         .unwrap()
 }
+
+// ===========================================================================
+// Parts G–I real certification
+// ===========================================================================
+
+async fn eventually_for<F, Fut>(what: &str, secs: u64, f: F)
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    while tokio::time::Instant::now() < deadline {
+        if f().await {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    panic!("timed out after {secs}s waiting for: {what}");
+}
+
+/// Real S3-compatible storage from `run.sh` (MinIO). Without it Part G is PENDING.
+fn real_s3() -> backend::config::operations::ObjectStorageConfig {
+    let get = |k: &str| {
+        std::env::var(k).unwrap_or_else(|_| {
+            panic!("PENDING: Part G certification needs {k} (run.sh with EGRESS_BIN and MINIO_BIN)")
+        })
+    };
+    backend::config::operations::ObjectStorageConfig {
+        endpoint: Some(get("CFMEET_REAL_S3_ENDPOINT")),
+        public_endpoint: None,
+        region: "us-east-1".into(),
+        bucket: get("CFMEET_REAL_S3_BUCKET"),
+        access_key: get("CFMEET_REAL_S3_ACCESS_KEY"),
+        secret_key: get("CFMEET_REAL_S3_SECRET_KEY"),
+        path_style: true,
+        prefix: "artifacts".into(),
+    }
+}
+
+async fn app_for_ghi(
+    r: &Real,
+    backends: Option<backend::services::artifacts::ArtifactBackends>,
+) -> TestApp {
+    let app = TestApp::with(TestOptions {
+        rtc: RtcMode::RealLiveKit {
+            url: r.url.clone(),
+            api_key: r.key.clone(),
+            api_secret: r.secret.clone(),
+        },
+        flags: TestApp::ghi_flags(),
+        artifact_backends: backends,
+        ..TestOptions::default()
+    })
+    .await
+    .expect("database");
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", r.webhook_port))
+        .await
+        .expect("webhook port free");
+    let router = app.router.clone();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    app
+}
+
+async fn artifact_col(app: &TestApp, id: Uuid, col: &str) -> String {
+    use sea_orm::ConnectionTrait;
+    let row = app
+        .db
+        .conn
+        .query_one(sea_orm::Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            format!("SELECT coalesce({col}::text, '') FROM meeting_artifacts WHERE id='{id}'"),
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    row.try_get_by_index::<String>(0).unwrap()
+}
+
+/// Part G: real composite capture through LiveKit Egress into real S3-compatible
+/// storage (MinIO), real provider callbacks, verified finalization, signed access,
+/// deletion with confirmed absence. Plus a direct object-storage certification.
+#[tokio::test]
+#[ignore = "requires livekit-server + egress + MinIO (scripts/livekit-certification/run.sh)"]
+async fn real_livekit_part_g_recording_and_object_storage() {
+    use backend::services::artifacts::storage::{ArtifactStorage, S3ArtifactStorage};
+    use sha2::Digest;
+    let r = real();
+    let s3 = real_s3();
+    let storage = std::sync::Arc::new(S3ArtifactStorage::new(s3).expect("s3 config"));
+    storage.ensure_bucket().await.expect("bucket");
+
+    // --- Real object storage certification -------------------------------
+    let key = storage.object_key(&format!("cert/{}.bin", Uuid::new_v4().simple()));
+    let bytes: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+    storage
+        .put(&key, bytes.clone(), "application/octet-stream")
+        .await
+        .expect("PUT");
+    let meta = storage
+        .head(&key)
+        .await
+        .expect("HEAD")
+        .expect("object exists");
+    assert_eq!(meta.size, bytes.len() as u64, "{meta:?}");
+    assert_eq!(
+        meta.content_type.as_deref(),
+        Some("application/octet-stream")
+    );
+    println!(
+        "CERT S3 object exists + metadata: PASS ({} bytes, etag {:?})",
+        meta.size, meta.etag
+    );
+    let digest = storage.digest(&key, 10_000_000).await.unwrap().unwrap();
+    assert_eq!(digest.sha256, hex::encode(sha2::Sha256::digest(&bytes)));
+    println!("CERT S3 checksum (streamed SHA-256 + MD5/ETag): PASS");
+    let signed = storage
+        .signed_read_url(&key, Duration::from_secs(120), Some("cert.bin"))
+        .unwrap();
+    let got = reqwest::get(&signed.url).await.unwrap();
+    assert_eq!(got.status(), 200);
+    assert_eq!(got.bytes().await.unwrap().to_vec(), bytes);
+    let tampered = signed.url.replace("cert/", "cert/x");
+    assert_eq!(
+        reqwest::get(&tampered).await.unwrap().status(),
+        403,
+        "object-scoped signature"
+    );
+    let unsigned = signed.url.split('?').next().unwrap().to_string();
+    assert_eq!(
+        reqwest::get(&unsigned).await.unwrap().status(),
+        403,
+        "no anonymous read"
+    );
+    println!("CERT S3 signed read (scoped, expiring, no anonymous access): PASS");
+    storage.delete(&key).await.expect("DELETE");
+    assert!(storage.head(&key).await.unwrap().is_none());
+    println!("CERT S3 delete + absence confirmed: PASS");
+
+    // --- Real composite recording -----------------------------------------
+    let lk_config = backend::config::LiveKitConfig {
+        url: r.url.clone(),
+        api_key: r.key.clone(),
+        api_secret: r.secret.clone(),
+    };
+    let recorder = backend::services::artifacts::recorder::LiveKitEgressRecorder::with_api_url(
+        &lk_config,
+        &backend::services::rtc_provider::admin_url_from(&r.url),
+        Duration::from_secs(15),
+        backend::config::operations::RecordingEncoding::H264Opus,
+    );
+    let backends = backend::services::artifacts::ArtifactBackends {
+        recorder: std::sync::Arc::new(recorder),
+        storage: storage.clone(),
+        ..Default::default()
+    };
+    let app = app_for_ghi(&r, Some(backends)).await;
+    let owner = app.user("owner").await;
+    let (_, cid) = app
+        .live_conference(
+            &owner,
+            json!({ "title": "cert-g", "accessPolicy": "PUBLIC" }),
+        )
+        .await;
+    let speaker = join_guest(&app, cid, "speaker").await;
+    let mut probe = Probe::spawn_with(&r.probe, &r.url, &speaker.credential, "mic,camera", 180);
+    probe.wait_for("connected", Duration::from_secs(20)).await;
+    probe
+        .next_for(&["publish_ok"], "CAMERA", Duration::from_secs(20))
+        .await;
+    eventually("session CONNECTED", || async {
+        session_state(&app, speaker.session_id).await == "CONNECTED"
+    })
+    .await;
+
+    let base = format!("/api/v2/conferences/{cid}");
+    let (s, v) = app
+        .post(
+            format!("{base}/recordings"),
+            Auth::Bearer(&owner.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::ACCEPTED, "{v}");
+    assert_eq!(
+        v["recording"]["status"], "REQUESTED",
+        "never RECORDING without evidence"
+    );
+    let rid = uuid(&v["recording"]["id"]);
+    eventually_for("egress reference stored", 30, || async {
+        !artifact_col(&app, rid, "provider_ref").await.is_empty()
+    })
+    .await;
+    println!(
+        "CERT G real composite capture start (egress {}): PASS",
+        artifact_col(&app, rid, "provider_ref").await
+    );
+    eventually_for("real egress_started webhook → RECORDING", 90, || async {
+        artifact_col(&app, rid, "status").await == "RECORDING"
+    })
+    .await;
+    println!("CERT G real provider callback (egress_started → RECORDING): PASS");
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    let (s, v) = app
+        .post(
+            format!("{base}/recordings/{rid}/stop"),
+            Auth::Bearer(&owner.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["recording"]["status"], "STOPPING");
+    println!("CERT G real stop (STOPPING): PASS");
+    eventually_for(
+        "egress_ended + storage verification → READY",
+        120,
+        || async { artifact_col(&app, rid, "status").await == "READY" },
+    )
+    .await;
+    let (_, rec) = app
+        .get(
+            format!("{base}/recordings/{rid}"),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    let size = rec["sizeBytes"].as_i64().unwrap();
+    assert!(size > 1000, "{rec}");
+    let object_key = artifact_col(&app, rid, "storage_key").await;
+    let head = storage
+        .head(&object_key)
+        .await
+        .unwrap()
+        .expect("real file in object storage");
+    assert_eq!(head.size as i64, size);
+    println!(
+        "CERT G real media file READY ({size} bytes, {} ms, key verified in MinIO): PASS",
+        rec["durationMs"]
+    );
+    let (s, a) = app
+        .post(
+            format!("{base}/artifacts/{rid}/access"),
+            Auth::Bearer(&owner.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{a}");
+    let file = reqwest::get(a["url"].as_str().unwrap())
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    assert_eq!(file.len() as i64, size);
+    assert_eq!(&file[4..8], b"ftyp", "MP4 container");
+    assert_eq!(
+        rec["checksumSha256"],
+        json!(hex::encode(sha2::Sha256::digest(&file)))
+    );
+    println!("CERT G signed artefact access + checksum: PASS");
+    let (s, _) = app
+        .post(
+            format!("{base}/artifacts/{rid}/access"),
+            speaker.auth(),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    println!("CERT G unauthorized access rejected: PASS");
+    assert_eq!(
+        app.scalar(&format!("SELECT count(*) FROM outbox_events WHERE conference_id='{cid}' AND event_type='recording.ready'")).await,
+        1
+    );
+    let egress_events = app
+        .scalar("SELECT count(*) FROM rtc_webhook_events WHERE event_type LIKE 'egress_%'")
+        .await;
+    assert!(
+        egress_events >= 2,
+        "real egress callbacks stored once each: {egress_events}"
+    );
+    println!("CERT G callback dedupe ({egress_events} unique egress callbacks, one READY): PASS");
+    let (s, v) = app
+        .delete(
+            format!("{base}/artifacts/{rid}"),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["status"], "DELETED");
+    assert!(storage.head(&object_key).await.unwrap().is_none());
+    println!("CERT G delete + absence confirmed in object storage: PASS");
+}
+
+/// Part H: webinar VIEWER publish denial, promotion grants publish, demotion removes
+/// publish, backstage isolation through a separate provider room.
+#[tokio::test]
+#[ignore = "requires a real livekit-server (scripts/livekit-certification/run.sh)"]
+async fn real_livekit_part_h_stage_and_backstage() {
+    let r = real();
+    let app = app_for_ghi(&r, None).await;
+    let owner = app.user("owner").await;
+    let (_, cid) = app
+        .live_conference(
+            &owner,
+            json!({ "title": "cert-h", "accessPolicy": "PUBLIC", "meetingType": "WEBINAR" }),
+        )
+        .await;
+    let provider = app.state.meeting.core.rtc.clone();
+    let main = RtcRoomRef {
+        conference_id: cid,
+        room_name: room(cid),
+    };
+    let a = join_guest(&app, cid, "attendee").await;
+    assert_eq!(a.body["participant"]["role"], "VIEWER");
+    let mut probe = Probe::spawn_with(&r.probe, &r.url, &a.credential, "camera", 180);
+    probe.wait_for("connected", Duration::from_secs(20)).await;
+    probe
+        .next_for(&["publish_denied"], "CAMERA", Duration::from_secs(45))
+        .await;
+    println!("CERT H VIEWER publish denial (real SFU): PASS");
+    eventually("CONNECTED", || async {
+        session_state(&app, a.session_id).await == "CONNECTED"
+    })
+    .await;
+    let (s, v) = change_role(&app, cid, &owner, a.participant_id, "PRESENTER").await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    eventually("provider grants follow PRESENTER", || async {
+        provider
+            .list_participants(&main)
+            .await
+            .unwrap()
+            .iter()
+            .any(|p| {
+                p.media_identity == a.identity
+                    && p.grants
+                        .as_ref()
+                        .map(|g| g.can_publish_video)
+                        .unwrap_or(false)
+            })
+    })
+    .await;
+    probe.publish("camera").await;
+    probe
+        .next_for(&["publish_ok"], "CAMERA", Duration::from_secs(45))
+        .await;
+    println!("CERT H promotion to PRESENTER grants publish: PASS");
+    let (s, _) = change_role(&app, cid, &owner, a.participant_id, "VIEWER").await;
+    assert_eq!(s, StatusCode::OK);
+    eventually("publish removed after demotion", || async {
+        provider
+            .list_participants(&main)
+            .await
+            .unwrap()
+            .iter()
+            .any(|p| {
+                p.media_identity == a.identity
+                    && p.grants
+                        .as_ref()
+                        .map(|g| !g.can_publish_video && !g.can_publish_audio)
+                        .unwrap_or(false)
+            })
+    })
+    .await;
+    probe.publish("camera").await;
+    probe
+        .next_for(&["publish_denied"], "CAMERA", Duration::from_secs(45))
+        .await;
+    println!("CERT H demotion removes publish: PASS");
+    drop(probe);
+
+    // Backstage isolation: a panelist routed into its own provider room.
+    let p = join_guest(&app, cid, "panelist").await;
+    change_role(&app, cid, &owner, p.participant_id, "PRESENTER").await;
+    let (s, v) = app
+        .post(
+            format!("/api/v2/conferences/{cid}/backstage"),
+            p.auth(),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, cred) = app
+        .post(
+            format!("/api/v2/conferences/{cid}/media-credential"),
+            p.auth(),
+            json!({ "participantSessionId": p.session_id }),
+        )
+        .await;
+    let bs = RtcRoomRef {
+        conference_id: cid,
+        room_name: backend::services::specialized::backstage_room_name(cid),
+    };
+    assert!(
+        provider.get_room(&bs).await.unwrap().is_some(),
+        "real backstage room"
+    );
+    let mut bp = Probe::spawn_with(
+        &r.probe,
+        &r.url,
+        cred["rtc"]["credential"].as_str().unwrap(),
+        "mic",
+        60,
+    );
+    bp.wait_for("connected", Duration::from_secs(20)).await;
+    eventually("panelist present backstage only", || async {
+        let back = provider.list_participants(&bs).await.unwrap();
+        let front = provider.list_participants(&main).await.unwrap();
+        back.iter().any(|x| x.media_identity == p.identity)
+            && !front.iter().any(|x| x.media_identity == p.identity)
+    })
+    .await;
+    println!("CERT H backstage routing + isolation (separate provider room): PASS");
+    let (s, _) = change_role(&app, cid, &owner, p.participant_id, "VIEWER").await;
+    assert_eq!(s, StatusCode::OK);
+    eventually("demoted panelist evicted from backstage", || async {
+        !provider
+            .list_participants(&bs)
+            .await
+            .unwrap()
+            .iter()
+            .any(|x| x.media_identity == p.identity)
+    })
+    .await;
+    println!("CERT H demotion evicts from backstage: PASS");
+}
+
+/// Part I: provider presence → session state, join latency to media, provider
+/// node / region mapping, disconnect state, reconciliation without false drift.
+#[tokio::test]
+#[ignore = "requires a real livekit-server (scripts/livekit-certification/run.sh)"]
+async fn real_livekit_part_i_presence_and_mapping() {
+    let r = real();
+    let app = app_for_ghi(&r, None).await;
+    let owner = app.user("owner").await;
+    let (_, cid) = app
+        .live_conference(
+            &owner,
+            json!({ "title": "cert-i", "accessPolicy": "PUBLIC" }),
+        )
+        .await;
+    let g = join_guest(&app, cid, "member").await;
+    let mut probe = Probe::spawn_with(&r.probe, &r.url, &g.credential, "mic", 60);
+    let connected = probe.wait_for("connected", Duration::from_secs(20)).await;
+    eventually("provider presence → CONNECTED", || async {
+        session_state(&app, g.session_id).await == "CONNECTED"
+    })
+    .await;
+    let latency = app
+        .scalar(&format!(
+            "SELECT coalesce(join_latency_ms,0)::bigint FROM participant_sessions WHERE id='{}'",
+            g.session_id
+        ))
+        .await;
+    assert!(latency > 0, "join latency measured to real media connect");
+    println!("CERT I provider presence + join latency ({latency} ms): PASS");
+    let node = connected["serverNode"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    let region = connected["serverRegion"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(!node.is_empty(), "SFU reports its node id: {connected}");
+    let sanitized: String = node
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(64)
+        .collect();
+    let mut body = json!({ "providerNode": sanitized, "samples": [{ "timestamp": chrono::Utc::now(), "rttMs": 20.0 }] });
+    if !region.is_empty() {
+        body["providerRegion"] = json!(region);
+    }
+    let (s, v) = app
+        .post(
+            format!("/api/v2/conferences/{cid}/quality/samples"),
+            g.auth(),
+            body,
+        )
+        .await;
+    assert_eq!(s, StatusCode::ACCEPTED, "{v}");
+    let mapped = app
+        .scalar(&format!(
+            "SELECT count(*) FROM participant_sessions WHERE id='{}' AND provider_node='{}'",
+            g.session_id, sanitized
+        ))
+        .await;
+    assert_eq!(mapped, 1);
+    println!(
+        "CERT I node mapping (node {sanitized}, region {:?}): PASS",
+        if region.is_empty() {
+            "not reported by single-node SFU"
+        } else {
+            region.as_str()
+        }
+    );
+    let rep = backend::workers::ConferenceReconciler::new(app.state.meeting.core.clone())
+        .tick()
+        .await
+        .unwrap();
+    assert!(
+        !rep.kinds
+            .iter()
+            .any(|k| k.contains("ABSENT") || k.contains("WITHOUT_SESSION")),
+        "no false drift: {rep:?}"
+    );
+    println!("CERT I reconciliation against real presence (no false drift): PASS");
+    drop(probe);
+    eventually_for("participant_left → session closed", 40, || async {
+        session_state(&app, g.session_id).await != "CONNECTED"
+    })
+    .await;
+    println!(
+        "CERT I participant disconnect state: PASS ({})",
+        session_state(&app, g.session_id).await
+    );
+}

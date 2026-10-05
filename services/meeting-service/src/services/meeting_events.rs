@@ -112,6 +112,38 @@ pub mod event {
     pub const QNA_QUESTION_PINNED: &str = "qna.question_pinned";
     pub const QNA_QUESTION_UNPINNED: &str = "qna.question_unpinned";
 
+    // Part G — recording / artefacts / consent / transcription
+    pub const RTC_RECORDING_START_REQUESTED: &str = "rtc.recording_start_requested";
+    pub const RTC_RECORDING_STOP_REQUESTED: &str = "rtc.recording_stop_requested";
+    pub const RECORDING_REQUESTED: &str = "recording.requested";
+    pub const RECORDING_STARTED: &str = "recording.started";
+    pub const RECORDING_STOPPING: &str = "recording.stopping";
+    pub const RECORDING_PROCESSING: &str = "recording.processing";
+    pub const RECORDING_READY: &str = "recording.ready";
+    pub const RECORDING_FAILED: &str = "recording.failed";
+    pub const RECORDING_DELETED: &str = "recording.deleted";
+    pub const ARTIFACT_READY: &str = "artifact.ready";
+    pub const ARTIFACT_DELETED: &str = "artifact.deleted";
+    pub const ARTIFACT_FAILED: &str = "artifact.failed";
+    pub const CONSENT_REQUIRED: &str = "consent.required";
+    pub const CONSENT_RECORDED: &str = "consent.recorded";
+    pub const CONSENT_WITHDRAWN: &str = "consent.withdrawn";
+    pub const TRANSCRIPTION_STARTED: &str = "transcription.started";
+    pub const TRANSCRIPTION_SEGMENT_PARTIAL: &str = "transcription.segment_partial";
+    pub const TRANSCRIPTION_SEGMENT_FINAL: &str = "transcription.segment_final";
+    pub const TRANSCRIPTION_PROCESSING: &str = "transcription.processing";
+    pub const TRANSCRIPTION_READY: &str = "transcription.ready";
+    pub const TRANSCRIPTION_FAILED: &str = "transcription.failed";
+    pub const CAPTION_SEGMENT: &str = "caption.segment";
+    // Part H — profiles / webinar / backstage
+    pub const RTC_BACKSTAGE_PREPARE_REQUESTED: &str = "rtc.backstage_prepare_requested";
+    pub const REGISTRATION_CREATED: &str = "registration.created";
+    pub const PARTICIPANT_PROMOTED: &str = "participant.promoted";
+    pub const PARTICIPANT_DEMOTED: &str = "participant.demoted";
+    pub const BACKSTAGE_PARTICIPANT_JOINED: &str = "backstage.participant_joined";
+    pub const BACKSTAGE_PARTICIPANT_LEFT: &str = "backstage.participant_left";
+    pub const PROFILE_POLICY_CHANGED: &str = "profile.policy_changed";
+
     /// Internal provider-control command (never delivered to clients).
     pub fn is_provider_command(event_type: &str) -> bool {
         event_type.starts_with("rtc.")
@@ -191,6 +223,33 @@ pub mod action {
     pub const QNA_UNPIN: &str = "QNA_UNPIN";
     pub const QNA_ARCHIVE: &str = "QNA_ARCHIVE";
     pub const CONSENT_RECORDED: &str = "CONSENT_RECORDED";
+    // Parts G–I
+    pub const RECORDING_START: &str = "RECORDING_START";
+    pub const RECORDING_STOP: &str = "RECORDING_STOP";
+    pub const RECORDING_PROVIDER_STARTED: &str = "RECORDING_PROVIDER_STARTED";
+    pub const RECORDING_FINALIZED: &str = "RECORDING_FINALIZED";
+    pub const RECORDING_FAILED: &str = "RECORDING_FAILED";
+    pub const ARTIFACT_ACCESS: &str = "ARTIFACT_ACCESS";
+    pub const ARTIFACT_DELETE_REQUEST: &str = "ARTIFACT_DELETE_REQUEST";
+    pub const ARTIFACT_DELETED: &str = "ARTIFACT_DELETED";
+    pub const ARTIFACT_GENERATE: &str = "ARTIFACT_GENERATE";
+    pub const CONSENT_DECLINED: &str = "CONSENT_DECLINED";
+    pub const CONSENT_WITHDRAWN: &str = "CONSENT_WITHDRAWN";
+    pub const TRANSCRIPTION_START: &str = "TRANSCRIPTION_START";
+    pub const TRANSCRIPTION_STOP: &str = "TRANSCRIPTION_STOP";
+    pub const TRANSLATION_REQUEST: &str = "TRANSLATION_REQUEST";
+    pub const INTELLIGENCE_REQUEST: &str = "INTELLIGENCE_REQUEST";
+    pub const PROFILE_POLICY_UPDATE: &str = "PROFILE_POLICY_UPDATE";
+    pub const REGISTRATION_CREATE: &str = "REGISTRATION_CREATE";
+    pub const REGISTRATION_CANCEL: &str = "REGISTRATION_CANCEL";
+    pub const PARTICIPANT_PROMOTE: &str = "PARTICIPANT_PROMOTE";
+    pub const PARTICIPANT_DEMOTE: &str = "PARTICIPANT_DEMOTE";
+    pub const BACKSTAGE_ENTER: &str = "BACKSTAGE_ENTER";
+    pub const BACKSTAGE_LEAVE: &str = "BACKSTAGE_LEAVE";
+    /// Enhanced (regulated-profile) semantic audit.
+    pub const PARTICIPANT_JOIN: &str = "PARTICIPANT_JOIN";
+    pub const EXTERNAL_AUTHORIZATION: &str = "EXTERNAL_AUTHORIZATION";
+    pub const OPERATIONS_ACCESS: &str = "OPERATIONS_ACCESS";
 }
 
 /// Server-side realtime audience of a client event (Part F §57). Stored in

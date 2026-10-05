@@ -38,6 +38,10 @@ pub struct MeetingDomainDeps {
     pub adapters: AccessAdapterRegistry,
     /// HEALTHCARE_APPOINTMENT authority (denies everything until configured).
     pub appointments: Arc<dyn AppointmentAuthorizationAdapter>,
+    /// Part G provider backends.
+    pub artifacts: crate::services::artifacts::ArtifactBackends,
+    /// Part I telemetry sink.
+    pub telemetry: Arc<dyn crate::services::quality::sink::QualityTelemetrySink>,
 }
 
 impl MeetingDomainDeps {
@@ -52,8 +56,34 @@ impl MeetingDomainDeps {
                 Some(a) => Arc::new(a),
                 None => Arc::new(UnconfiguredAppointmentAuthorization),
             },
+            artifacts: artifact_backends_from_env(livekit),
+            telemetry: Arc::new(crate::services::quality::sink::PrometheusSink::new()),
         }
     }
+}
+
+/// Production backends: LiveKit Egress composite recording + S3-compatible storage
+/// when configured; transcription / translation / intelligence stay unconfigured
+/// until a provider adapter is registered (no vendor is called by default).
+fn artifact_backends_from_env(
+    livekit: &LiveKitConfig,
+) -> crate::services::artifacts::ArtifactBackends {
+    use crate::services::artifacts::{recorder::LiveKitEgressRecorder, storage::S3ArtifactStorage};
+    let config = crate::config::operations::ArtifactConfig::from_env();
+    let mut backends = crate::services::artifacts::ArtifactBackends::default();
+    if config.storage.is_configured() {
+        match S3ArtifactStorage::new(config.storage.clone()) {
+            Ok(s) => backends.storage = Arc::new(s),
+            Err(e) => tracing::error!("artifact storage misconfigured: {e}"),
+        }
+    }
+    if !livekit.api_key.is_empty() {
+        backends.recorder = Arc::new(LiveKitEgressRecorder::new(
+            livekit,
+            config.recording_encoding,
+        ));
+    }
+    backends
 }
 
 pub struct MeetingDomain {
@@ -79,6 +109,19 @@ pub struct MeetingDomain {
     pub polls: crate::services::collaboration::polls::PollService,
     pub questions: crate::services::collaboration::questions::QuestionService,
     pub prejoin: crate::services::collaboration::prejoin::PreJoinService,
+    // Part G — recording, artefacts, consent, transcription, intelligence.
+    pub recordings: crate::services::artifacts::recording::RecordingService,
+    pub artifacts: crate::services::artifacts::service::ArtifactService,
+    pub consents: crate::services::artifacts::consent::ConsentService,
+    pub transcription: crate::services::artifacts::transcription::TranscriptionService,
+    pub intelligence: crate::services::artifacts::intelligence::IntelligenceService,
+    // Part H — profiles, registration, backstage.
+    pub profile_policies: crate::services::specialized::ProfilePolicyService,
+    pub registrations: crate::services::specialized::RegistrationService,
+    pub backstage: crate::services::specialized::BackstageService,
+    // Part I — quality telemetry and operations.
+    pub quality: crate::services::quality::service::QualityService,
+    pub operations: crate::services::quality::operations::OperationsService,
 }
 
 impl MeetingDomain {
@@ -102,6 +145,8 @@ impl MeetingDomain {
             appointments: deps.appointments,
             passcode_limiter,
             collab_limiter: crate::services::collaboration::CollabLimiter::new(redis.clone()),
+            artifacts: deps.artifacts,
+            telemetry: deps.telemetry,
             redis,
         });
         Self {
@@ -131,6 +176,20 @@ impl MeetingDomain {
                 core.clone(),
             ),
             prejoin: crate::services::collaboration::prejoin::PreJoinService::new(core.clone()),
+            recordings: crate::services::artifacts::recording::RecordingService::new(core.clone()),
+            artifacts: crate::services::artifacts::service::ArtifactService::new(core.clone()),
+            consents: crate::services::artifacts::consent::ConsentService::new(core.clone()),
+            transcription: crate::services::artifacts::transcription::TranscriptionService::new(
+                core.clone(),
+            ),
+            intelligence: crate::services::artifacts::intelligence::IntelligenceService::new(
+                core.clone(),
+            ),
+            profile_policies: crate::services::specialized::ProfilePolicyService::new(core.clone()),
+            registrations: crate::services::specialized::RegistrationService::new(core.clone()),
+            backstage: crate::services::specialized::BackstageService::new(core.clone()),
+            quality: crate::services::quality::service::QualityService::new(core.clone()),
+            operations: crate::services::quality::operations::OperationsService::new(core.clone()),
             core,
         }
     }

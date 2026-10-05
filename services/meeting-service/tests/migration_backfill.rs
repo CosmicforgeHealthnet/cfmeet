@@ -294,7 +294,13 @@ async fn m02_rollback_and_reapply() {
     let c = &db.conn;
     Migrator::up(c, None).await.unwrap();
     let spaces = count(c, "SELECT count(*) FROM meeting_spaces").await;
-    // Part F down-migration alone first: v2 core stays, collaboration objects go.
+    // Parts G–I down-migration alone first: Part F and the v2 core stay.
+    Migrator::down(c, Some(1)).await.unwrap();
+    assert_eq!(count(c, "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('transcription_jobs','transcript_segments','transcript_translations','webinar_registrations')").await, 0);
+    assert_eq!(count(c, "SELECT count(*) FROM information_schema.columns WHERE table_name='meeting_artifacts' AND column_name IN ('status','storage_key','retention_at')").await, 0);
+    assert_eq!(count(c, "SELECT count(*) FROM information_schema.columns WHERE table_name='rtc_drift_events' AND column_name IN ('status','dedupe_key')").await, 0);
+    assert_eq!(count(c, "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('conference_messages','meeting_poll_ballots')").await, 2);
+    // Then the Part F down-migration: v2 core stays, collaboration objects go.
     Migrator::down(c, Some(1)).await.unwrap();
     assert_eq!(count(c, "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('conference_messages','meeting_poll_ballots')").await, 0);
     assert_eq!(count(c, "SELECT count(*) FROM information_schema.columns WHERE table_name='conference_participants' AND column_name='hand_raised_at'").await, 0);
@@ -303,10 +309,10 @@ async fn m02_rollback_and_reapply() {
         spaces
     );
     Migrator::up(c, None).await.unwrap();
-    // All six Phase 2 migrations (schema, backfill, organizations, recurrence
-    // exceptions, Part E rtc control plane, Part F collaboration).
-    Migrator::down(c, Some(6)).await.unwrap();
-    assert_eq!(count(c, "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('meeting_spaces','conference_sessions','participant_sessions','outbox_events','organizations','meeting_recurrence_exceptions','rtc_webhook_events','rtc_drift_events','worker_leases','conference_messages','meeting_poll_ballots')").await, 0);
+    // All seven Phase 2 migrations (schema, backfill, organizations, recurrence
+    // exceptions, Part E rtc control plane, Part F collaboration, Parts G–I).
+    Migrator::down(c, Some(7)).await.unwrap();
+    assert_eq!(count(c, "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('meeting_spaces','conference_sessions','participant_sessions','outbox_events','organizations','meeting_recurrence_exceptions','rtc_webhook_events','rtc_drift_events','worker_leases','conference_messages','meeting_poll_ballots','transcription_jobs','webinar_registrations')").await, 0);
     assert_eq!(count(c, "SELECT count(*) FROM meetings").await, 5);
     assert_eq!(count(c, "SELECT count(*) FROM participants").await, 8);
     Migrator::up(c, None).await.unwrap();

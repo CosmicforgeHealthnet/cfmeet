@@ -1,0 +1,27 @@
+# LiveKit Egress for meeting-service Part G certification (rendered by run.sh).
+# NOT a production configuration (dev key, loopback only, insecure websocket).
+api_key: cfmeet-cert-key
+api_secret: cfmeet-local-certification-secret-0123456789
+ws_url: ws://127.0.0.1:7880
+insecure: true
+redis:
+  address: @REDIS@
+  db: 3
+health_port: 7981
+template_port: 7980
+log_level: debug
+# Chrome console output in the egress log (diagnostics for the composite template).
+debug:
+  enable_chrome_logging: true
+storage:
+  s3:
+    access_key: @S3_KEY@
+    secret: @S3_SECRET@
+    region: us-east-1
+    endpoint: @S3_ENDPOINT@
+    bucket: @S3_BUCKET@
+    force_path_style: true
+# Loopback WebRTC inside headless Chrome (local certification only).
+chrome_flags:
+  allow-loopback-in-peer-connection: true
+  disable-features: WebRtcHideLocalIpsWithMdns

@@ -14,8 +14,8 @@ use axum::{
 use crate::{
     error::{ApiError, ErrorCode},
     handlers::v2::{
-        breakouts, collaboration as collab, compat, conferences, engagement, invitations, members,
-        organizations, participants, realtime, spaces,
+        artifacts, breakouts, collaboration as collab, compat, conferences, engagement,
+        invitations, members, organizations, participants, quality, realtime, spaces, specialized,
     },
     state::AppState,
 };
@@ -33,6 +33,7 @@ async fn require_meeting_v2(
 }
 
 pub fn v2_routes(state: AppState) -> Router<AppState> {
+    let quality_body_limit = state.meeting.core.config.quality.max_body_bytes;
     Router::new()
         // Meeting spaces
         .route(
@@ -324,6 +325,94 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             "/conferences/:id/questions/:qid/pin",
             post(engagement::pin).delete(engagement::unpin),
         )
+        // Part G — recording and artefacts
+        .route(
+            "/conferences/:id/recordings",
+            get(artifacts::list_recordings).post(artifacts::start_recording),
+        )
+        .route(
+            "/conferences/:id/recordings/:rid",
+            get(artifacts::get_recording),
+        )
+        .route(
+            "/conferences/:id/recordings/:rid/stop",
+            post(artifacts::stop_recording),
+        )
+        .route("/conferences/:id/artifacts", get(artifacts::list_artifacts))
+        .route(
+            "/conferences/:id/artifacts/reports",
+            post(artifacts::generate_report),
+        )
+        .route(
+            "/conferences/:id/artifacts/:aid",
+            get(artifacts::get_artifact).delete(artifacts::delete_artifact),
+        )
+        .route(
+            "/conferences/:id/artifacts/:aid/access",
+            post(artifacts::artifact_access),
+        )
+        // Part G — consent
+        .route(
+            "/conferences/:id/consents/requirements",
+            get(artifacts::consent_requirements),
+        )
+        .route(
+            "/conferences/:id/consents",
+            post(artifacts::record_consents),
+        )
+        .route(
+            "/conferences/:id/consents/:consent_type/withdraw",
+            post(artifacts::withdraw_consent),
+        )
+        // Part G — transcription and intelligence
+        .route(
+            "/conferences/:id/transcription",
+            post(artifacts::start_transcription),
+        )
+        .route(
+            "/conferences/:id/transcription/:jid/stop",
+            post(artifacts::stop_transcription),
+        )
+        .route(
+            "/conferences/:id/transcripts",
+            get(artifacts::list_transcripts),
+        )
+        .route(
+            "/conferences/:id/transcripts/:aid",
+            get(artifacts::get_transcript),
+        )
+        .route(
+            "/conferences/:id/transcripts/:aid/translations",
+            post(artifacts::translate_transcript),
+        )
+        .route(
+            "/conferences/:id/intelligence/requests",
+            post(artifacts::request_intelligence),
+        )
+        // Part H — profiles, registration, backstage
+        .route(
+            "/meeting-spaces/:id/profile-policy",
+            get(specialized::get_profile_policy).patch(specialized::update_profile_policy),
+        )
+        .route(
+            "/meeting-spaces/:id/registrations",
+            get(specialized::list_registrations).post(specialized::register),
+        )
+        .route(
+            "/meeting-spaces/:id/registrations/:rid",
+            get(specialized::get_registration).delete(specialized::cancel_registration),
+        )
+        .route(
+            "/conferences/:id/backstage",
+            post(specialized::enter_backstage).delete(specialized::leave_backstage),
+        )
+        // Part I — quality
+        .route(
+            "/conferences/:id/quality/samples",
+            post(quality::submit_samples)
+                .layer(axum::extract::DefaultBodyLimit::max(quality_body_limit)),
+        )
+        .route("/conferences/:id/quality", get(quality::conference_quality))
         // Compatibility (platform admin)
         .route(
             "/admin/compat/legacy-meetings/:id/shadow",

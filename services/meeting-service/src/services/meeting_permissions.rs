@@ -12,7 +12,7 @@ use utoipa::ToSchema;
 use crate::domain::{MediaCapturePolicy, Role};
 
 /// v2 adds the Part F collaboration permissions; v1 cells are unchanged.
-pub const BASELINE_VERSION: &str = "baseline-v2";
+pub const BASELINE_VERSION: &str = "baseline-v3";
 
 /// Semantic conference permissions (stable identifiers for later parts).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -71,6 +71,17 @@ pub enum Permission {
     QnaAnswer,
     QnaDismiss,
     QnaPin,
+    // Parts G–I (baseline-v3)
+    ArtifactList,
+    ArtifactDelete,
+    ArtifactManageRetention,
+    ArtifactExport,
+    TranscriptionStop,
+    TranscriptRead,
+    IntelligenceRequest,
+    DataShareManage,
+    BackstageEnter,
+    QualityView,
 }
 
 impl Permission {
@@ -128,6 +139,16 @@ impl Permission {
         Permission::QnaAnswer,
         Permission::QnaDismiss,
         Permission::QnaPin,
+        Permission::ArtifactList,
+        Permission::ArtifactDelete,
+        Permission::ArtifactManageRetention,
+        Permission::ArtifactExport,
+        Permission::TranscriptionStop,
+        Permission::TranscriptRead,
+        Permission::IntelligenceRequest,
+        Permission::DataShareManage,
+        Permission::BackstageEnter,
+        Permission::QualityView,
     ];
 
     pub fn key(&self) -> &'static str {
@@ -185,6 +206,16 @@ impl Permission {
             Permission::QnaAnswer => "qna.answer",
             Permission::QnaDismiss => "qna.dismiss",
             Permission::QnaPin => "qna.pin",
+            Permission::ArtifactList => "artifact.list",
+            Permission::ArtifactDelete => "artifact.delete",
+            Permission::ArtifactManageRetention => "artifact.manage_retention",
+            Permission::ArtifactExport => "artifact.export",
+            Permission::TranscriptionStop => "transcription.stop",
+            Permission::TranscriptRead => "transcript.read",
+            Permission::IntelligenceRequest => "intelligence.request",
+            Permission::DataShareManage => "data_share.manage",
+            Permission::BackstageEnter => "backstage.enter",
+            Permission::QualityView => "quality.view",
         }
     }
 
@@ -226,13 +257,15 @@ pub fn baseline(role: Role, permission: Permission) -> Cell {
         | ParticipantVideoLock
         | ParticipantScreenShareStop
         | ParticipantSpotlight
-        | HandLowerOther => 8,
+        | HandLowerOther
+        | QualityView => 8,
         ScreensharePublish => 9,
         BreakoutManage | BreakoutCreate | BreakoutAssign | BreakoutMove | BreakoutEnterAny
         | BreakoutAnnounce | BreakoutClose => 10,
         PollManage | QnaManage | ChatModerate | PollCreate | PollOpen | PollClose
         | PollViewResults | QnaAnswer | QnaDismiss | QnaPin => 11,
-        RecordingStart | RecordingStop | TranscriptionStart => 12,
+        RecordingStart | RecordingStop | TranscriptionStart | TranscriptionStop
+        | IntelligenceRequest => 12,
         AudioPublish | VideoPublish => 13,
         MediaSubscribe => 14,
         // Attendee collaboration: everyone by default; VIEWER is POLICY so view-only
@@ -247,11 +280,39 @@ pub fn baseline(role: Role, permission: Permission) -> Cell {
         }
         // Lowering one's own hand is always allowed.
         HandLowerSelf => return Y,
-        ArtifactRead => {
+        ArtifactRead | ArtifactList | TranscriptRead => {
             return match role {
                 Role::Owner | Role::Host => Y,
                 Role::CoHost => P(true),
                 _ => P(false),
+            }
+        }
+        // Destructive / retention / export management stays with the host hierarchy.
+        ArtifactDelete | ArtifactManageRetention => {
+            return match role {
+                Role::Owner | Role::Host => Y,
+                Role::CoHost => P(false),
+                _ => N,
+            }
+        }
+        ArtifactExport => {
+            return match role {
+                Role::Owner | Role::Host => Y,
+                Role::CoHost => P(true),
+                _ => N,
+            }
+        }
+        DataShareManage => {
+            return match role {
+                Role::Owner | Role::Host => Y,
+                _ => N,
+            }
+        }
+        // Panelists (presenters) and the host hierarchy prepare backstage.
+        BackstageEnter => {
+            return match role {
+                Role::Owner | Role::Host | Role::CoHost | Role::Moderator | Role::Presenter => Y,
+                Role::Participant | Role::Viewer => N,
             }
         }
     };
@@ -380,7 +441,7 @@ impl PermissionContext {
             Permission::RecordingStart | Permission::RecordingStop => {
                 self.recording_policy != MediaCapturePolicy::Disabled
             }
-            Permission::TranscriptionStart => {
+            Permission::TranscriptionStart | Permission::TranscriptionStop => {
                 self.transcription_policy != MediaCapturePolicy::Disabled
             }
             _ => true,
@@ -653,7 +714,35 @@ mod tests {
             ..ctx()
         };
         assert!(!narrowed.allows(Role::Viewer, Permission::ChatSend));
-        assert_eq!(BASELINE_VERSION, "baseline-v2");
+        assert_eq!(BASELINE_VERSION, "baseline-v3");
+    }
+
+    #[test]
+    fn parts_g_to_i_permissions_follow_host_hierarchy() {
+        let c = ctx();
+        for p in [
+            Permission::ArtifactDelete,
+            Permission::ArtifactManageRetention,
+            Permission::DataShareManage,
+        ] {
+            assert!(c.allows(Role::Host, p));
+            assert!(!c.allows(Role::Participant, p));
+            assert!(!c.allows(Role::Viewer, p));
+        }
+        assert!(!c.allows(Role::Participant, Permission::ArtifactRead));
+        assert!(!c.allows(Role::Viewer, Permission::TranscriptRead));
+        assert!(c.allows(Role::Presenter, Permission::BackstageEnter));
+        assert!(!c.allows(Role::Viewer, Permission::BackstageEnter));
+        assert!(!c.allows(Role::Participant, Permission::BackstageEnter));
+        assert!(!c.allows(Role::Participant, Permission::QualityView));
+        assert!(!c.allows(Role::Participant, Permission::IntelligenceRequest));
+        // Fixed cells cannot be granted by policy.
+        let mut bad = RolePolicy::default();
+        bad.overrides
+            .entry(Role::Viewer)
+            .or_default()
+            .insert("backstage.enter".into(), true);
+        assert!(bad.validate().is_err());
     }
 
     #[test]
