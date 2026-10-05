@@ -36,6 +36,14 @@ on:
       livekit_version:
         description: "livekit-server release"
         default: "1.8.4"
+  # Temporary: GitHub only dispatches workflows present on the default branch, and this
+  # workflow lives on `staging` only. A push to `staging` that changes THIS FILE runs the
+  # certification (normal backend pushes do not). On push events `inputs` are empty, so
+  # every input below falls back to the same default as workflow_dispatch.
+  push:
+    branches: [staging]
+    paths:
+      - ".github/workflows/phase2-backend-certification.yml"
 
 concurrency:
   group: phase2-certification-${{ github.ref }}
@@ -205,10 +213,10 @@ jobs:
         with:
           go-version: "1.24"
           cache-dependency-path: services/meeting-service/scripts/livekit-certification/rtcprobe/go.sum
-      - name: livekit-server ${{ inputs.livekit_version }}
+      - name: livekit-server ${{ inputs.livekit_version || '1.8.4' }}
         run: |
           mkdir -p /tmp/cert-bin
-          curl -fsSL "https://github.com/livekit/livekit/releases/download/v${{ inputs.livekit_version }}/livekit_${{ inputs.livekit_version }}_linux_amd64.tar.gz" | tar -xz -C /tmp/cert-bin livekit-server
+          curl -fsSL "https://github.com/livekit/livekit/releases/download/v${{ inputs.livekit_version || '1.8.4' }}/livekit_${{ inputs.livekit_version || '1.8.4' }}_linux_amd64.tar.gz" | tar -xz -C /tmp/cert-bin livekit-server
           /tmp/cert-bin/livekit-server --version
       - name: rtcprobe
         working-directory: services/meeting-service/scripts/livekit-certification/rtcprobe
@@ -259,7 +267,7 @@ jobs:
           MEDIA_LOAD_SECS: "45"
           CFMEET_CERT_OUT: ${{ github.workspace }}/services/meeting-service/target/certification
         run: |
-          for run in ${{ inputs.media_load }}; do
+          for run in ${{ inputs.media_load || '4x16 4x50 6x50 6x75' }}; do
             export MEDIA_LOAD_PUBLISHERS="${run%x*}" MEDIA_LOAD_SUBSCRIBERS="${run#*x}"
             bash scripts/livekit-certification/run.sh 2>&1 | grep -E '^(CERT|MEDIA_LOAD|test result)' | tee -a "$CFMEET_CERT_OUT/media-load.txt"
           done
@@ -304,10 +312,10 @@ jobs:
           key: cert-load
       - name: Load certification
         env:
-          LOAD_SELECTION: ${{ inputs.load_selection }}
-          LOAD_JOIN_LEVELS: ${{ inputs.join_levels }}
-          LOAD_WS_LEVELS: ${{ inputs.ws_levels }}
-          LOAD_SOAK_SECS: ${{ inputs.soak_secs }}
+          LOAD_SELECTION: ${{ inputs.load_selection || 'burst fanout churn scheduler soak migration plans' }}
+          LOAD_JOIN_LEVELS: ${{ inputs.join_levels || '25,50,100,250,500' }}
+          LOAD_WS_LEVELS: ${{ inputs.ws_levels || '25,50,100,250,500' }}
+          LOAD_SOAK_SECS: ${{ inputs.soak_secs || '600' }}
           CFMEET_CERT_OUT: ${{ github.workspace }}/services/meeting-service/target/certification
         run: bash scripts/certification/run-load.sh
       - name: Disk usage (end of job)
