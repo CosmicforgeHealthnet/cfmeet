@@ -18,7 +18,10 @@ here="$(cd "$(dirname "$0")" && pwd)"
 log="${LIVEKIT_LOG:-/tmp/livekit-certification.log}"
 work="$(mktemp -d)"
 pids=()
-cleanup() { for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done; rm -rf "$work"; }
+# Teardown is best-effort and never decides the result: the exit status is the test run's.
+# (The MinIO container writes root-owned files into $work, which a non-root CI user cannot
+# remove; under `set -e` a failing `rm` here would turn a passing run into exit 1.)
+cleanup() { for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done; rm -rf "$work" 2>/dev/null || true; }
 trap cleanup EXIT
 
 lk_config="$here/livekit.yaml"

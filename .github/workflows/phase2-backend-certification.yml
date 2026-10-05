@@ -241,10 +241,10 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p "$CFMEET_CERT_OUT"
-          # CERT / test lines plus each failing test's panic message (3 lines), with any
-          # signed-URL query string dropped; the raw output stays on the runner.
+          # CERT / test lines, each failing test's panic message (3 lines) and harness errors,
+          # with any signed-URL query string dropped; the raw output stays on the runner.
           bash scripts/livekit-certification/run.sh 2>&1 \
-            | awk '/^(CERT|MEDIA_LOAD|test |test result|failures:|---- )/ { print; next } /panicked at/ { n = 4 } n > 0 { print; n-- }' \
+            | awk '/^(CERT|MEDIA_LOAD|test |test result|failures:|---- )|did not become ready|cannot remove|No space left/ { print; next } /panicked at/ { n = 4 } n > 0 { print; n-- }' \
             | grep -vE 'X-Amz-|Signature=' | tee "$CFMEET_CERT_OUT/provider-certification.txt"
       # Egress lifecycle / admission / failure reason only (the raw log stays on the runner).
       - name: Egress outcome lines (no URLs or credentials)
