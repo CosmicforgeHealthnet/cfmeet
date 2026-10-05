@@ -241,12 +241,17 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p "$CFMEET_CERT_OUT"
-          bash scripts/livekit-certification/run.sh 2>&1 | grep -E '^(CERT|MEDIA_LOAD|test |test result)' | tee "$CFMEET_CERT_OUT/provider-certification.txt"
-      # Egress lifecycle / failure reason only (the raw log stays on the runner).
+          # CERT / test lines plus each failing test's panic message (3 lines), with any
+          # signed-URL query string dropped; the raw output stays on the runner.
+          bash scripts/livekit-certification/run.sh 2>&1 \
+            | awk '/^(CERT|MEDIA_LOAD|test |test result|failures:|---- )/ { print; next } /panicked at/ { n = 4 } n > 0 { print; n-- }' \
+            | grep -vE 'X-Amz-|Signature=' | tee "$CFMEET_CERT_OUT/provider-certification.txt"
+      # Egress lifecycle / admission / failure reason only (the raw log stays on the runner).
       - name: Egress outcome lines (no URLs or credentials)
         if: failure()
         run: |
-          grep -oE 'egress_(started|active|ending|complete|failed)|failed to launch chrome|page load error[^"]{0,120}' /tmp/livekit-egress.log | sort | uniq -c || true
+          grep -oE 'egress_(started|active|ending|complete|failed)|failed to launch chrome|page load error[^"]{0,120}|not enough CPU|cpu check.{0,240}|can not accept request' /tmp/livekit-egress.log | grep -vE 'X-Amz-|Signature=|secret' | sort | uniq -c || true
+          echo "runner CPUs: $(nproc)"
       - name: Disk usage (after provider certification)
         if: always()
         run: df -h / && docker system df

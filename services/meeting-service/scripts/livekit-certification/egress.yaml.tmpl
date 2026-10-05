@@ -7,6 +7,13 @@ insecure: true
 redis:
   address: @REDIS@
   db: 3
+# Egress v1.14 reserves 4 CPUs per video room-composite request by default and, when idle,
+# offers exactly the host CPU count; on a 2-vCPU GitHub runner every request is refused
+# (ErrNotEnoughCPU) before any capture starts. The certification records one short
+# composite, so the admission cost is set to fit the runner. Certification host only —
+# not a production sizing or capacity claim.
+cpu_cost:
+  room_composite_cpu_cost: 1.5
 health_port: 7981
 template_port: 7980
 log_level: debug
