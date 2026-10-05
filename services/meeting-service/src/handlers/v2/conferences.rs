@@ -294,6 +294,10 @@ pub async fn join_conference(
             transcription_active: o.transcription_active,
         },
         media_context: (&o.media_context).into(),
+        realtime: JoinRealtimeInfo::for_conference(
+            o.conference.id,
+            state.meeting.core.flags.conference_realtime_enabled,
+        ),
     }))
 }
 

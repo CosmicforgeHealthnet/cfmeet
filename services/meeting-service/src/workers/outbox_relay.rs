@@ -19,10 +19,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use sea_orm::DatabaseConnection;
 use tokio::sync::watch;
+use tracing::Instrument;
 
 use crate::{
     domain::OutboxChannel,
     error::ApiResult,
+    middleware::request_id::with_request_id,
     models::outbox_events,
     services::{
         outbox,
@@ -126,7 +128,19 @@ impl OutboxRelay {
                 )
                 .await?;
                 for row in rows {
-                    match control.process(&row, &self.holder).await {
+                    // Provider calls and any audit/outbox rows they write carry the
+                    // correlation ID of the request that committed the command.
+                    let span = tracing::info_span!(
+                        "provider_command",
+                        event_type = %row.event_type,
+                        correlation_id = row.request_id.as_deref().unwrap_or(""),
+                    );
+                    let run = control.process(&row, &self.holder).instrument(span);
+                    let result = match row.request_id.clone() {
+                        Some(id) => with_request_id(id, run).await,
+                        None => run.await,
+                    };
+                    match result {
                         CommandResult::Done => ok += 1,
                         _ => failed += 1,
                     }

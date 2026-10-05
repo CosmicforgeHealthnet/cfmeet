@@ -2992,6 +2992,78 @@
         ]
       }
     },
+    "/api/v2/conferences/{id}/attendance": {
+      "get": {
+        "tags": [
+          "Artifacts (v2)"
+        ],
+        "summary": "Conference attendance (Part J). Thin read over the same aggregation as the",
+        "description": "`ATTENDANCE_REPORT` export; nothing is stored and no artefact is created.",
+        "operationId": "v2_conference_attendance",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attendance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttendanceReport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED / PROFILE_POLICY_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "CONFERENCE_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
     "/api/v2/conferences/{id}/backstage": {
       "post": {
         "tags": [
@@ -4747,6 +4819,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HandRaiseResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "HAND_RAISE_DISABLED / PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -8212,6 +8304,16 @@
           "101": {
             "description": "Switching protocols (WebSocket)"
           },
+          "400": {
+            "description": "VALIDATION_ERROR (not a WebSocket upgrade / invalid query)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "401": {
             "description": "AUTHENTICATION_REQUIRED",
             "content": {
@@ -11539,14 +11641,14 @@
       "AccessPolicy": {
         "type": "string",
         "enum": [
-          "Public",
-          "PublicPasscode",
-          "Authenticated",
-          "InviteOnly",
-          "OrganizationOnly",
-          "DomainRestricted",
-          "HealthcareAppointment",
-          "Custom"
+          "PUBLIC",
+          "PUBLIC_PASSCODE",
+          "AUTHENTICATED",
+          "INVITE_ONLY",
+          "ORGANIZATION_ONLY",
+          "DOMAIN_RESTRICTED",
+          "HEALTHCARE_APPOINTMENT",
+          "CUSTOM"
         ]
       },
       "AccessProfile": {
@@ -11877,11 +11979,11 @@
       "AdmissionState": {
         "type": "string",
         "enum": [
-          "Waiting",
-          "Admitted",
-          "Denied",
-          "Removed",
-          "Banned"
+          "WAITING",
+          "ADMITTED",
+          "DENIED",
+          "REMOVED",
+          "BANNED"
         ]
       },
       "AdmitRequest": {
@@ -12041,7 +12143,6 @@
       },
       "ArtifactAccess": {
         "type": "object",
-        "description": "Signed, short-lived, single-object read access (never persisted).",
         "required": [
           "artifactId",
           "url",
@@ -12092,29 +12193,27 @@
       },
       "ArtifactStatus": {
         "type": "string",
-        "description": "Authoritative artefact / recording lifecycle (Part G §6).",
         "enum": [
-          "Requested",
-          "Recording",
-          "Stopping",
-          "Processing",
-          "Ready",
-          "Failed",
-          "Deleted"
+          "REQUESTED",
+          "RECORDING",
+          "STOPPING",
+          "PROCESSING",
+          "READY",
+          "FAILED",
+          "DELETED"
         ]
       },
       "ArtifactType": {
         "type": "string",
-        "description": "Unified artefact types (Part G §23). Not every generator is active yet.",
         "enum": [
-          "Recording",
-          "Transcript",
-          "CaptionTrack",
-          "AttendanceReport",
-          "ChatExport",
-          "PollReport",
-          "MeetingSummary",
-          "WhiteboardSnapshot"
+          "RECORDING",
+          "TRANSCRIPT",
+          "CAPTION_TRACK",
+          "ATTENDANCE_REPORT",
+          "CHAT_EXPORT",
+          "POLL_REPORT",
+          "MEETING_SUMMARY",
+          "WHITEBOARD_SNAPSHOT"
         ]
       },
       "ArtifactView": {
@@ -12312,6 +12411,75 @@
           }
         }
       },
+      "AttendanceEntry": {
+        "type": "object",
+        "required": [
+          "participantId",
+          "displayName",
+          "role",
+          "identityType",
+          "admissionState",
+          "attendanceSeconds"
+        ],
+        "properties": {
+          "admissionState": {
+            "$ref": "#/components/schemas/AdmissionState"
+          },
+          "admittedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "attendanceSeconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "identityType": {
+            "$ref": "#/components/schemas/IdentityType"
+          },
+          "participantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          }
+        }
+      },
+      "AttendanceReport": {
+        "type": "object",
+        "description": "Signed, short-lived, single-object read access (never persisted).\nConference attendance (Part J attendance contract). Attendance time is merged from\nparticipant-session intervals, so multi-device presence is never double counted.",
+        "required": [
+          "conferenceId",
+          "generatedAt",
+          "sessionCount",
+          "participants"
+        ],
+        "properties": {
+          "conferenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttendanceEntry"
+            }
+          },
+          "sessionCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "AuditProfile": {
         "type": "object",
         "required": [
@@ -12472,16 +12640,16 @@
       "BanScope": {
         "type": "string",
         "enum": [
-          "Space",
-          "Conference"
+          "SPACE",
+          "CONFERENCE"
         ]
       },
       "BanSubjectType": {
         "type": "string",
         "enum": [
-          "User",
-          "External",
-          "Guest"
+          "USER",
+          "EXTERNAL",
+          "GUEST"
         ]
       },
       "BreakoutAnnouncementRequest": {
@@ -12672,27 +12840,6 @@
               "format": "uuid"
             },
             "description": "Already in the requested state (idempotent retry)."
-          }
-        }
-      },
-      "CallbackAck": {
-        "type": "object",
-        "description": "Internal callback acknowledgement.",
-        "required": [
-          "received",
-          "outcome"
-        ],
-        "properties": {
-          "jobId": {
-            "type": "string",
-            "format": "uuid",
-            "nullable": true
-          },
-          "outcome": {
-            "type": "string"
-          },
-          "received": {
-            "type": "boolean"
           }
         }
       },
@@ -13173,208 +13320,13 @@
           }
         }
       },
-      "ConferenceHealthListResponse": {
-        "type": "object",
-        "required": [
-          "conferences"
-        ],
-        "properties": {
-          "conferences": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ConferenceHealthSummary"
-            }
-          }
-        }
-      },
-      "ConferenceHealthSummary": {
-        "type": "object",
-        "required": [
-          "conferenceId",
-          "meetingSpaceId",
-          "lifecycleState",
-          "healthState",
-          "reasons",
-          "activeParticipants",
-          "healthySessions",
-          "degradedSessions",
-          "unhealthySessions",
-          "joinAttempts",
-          "joinSuccesses",
-          "joinMediaConnected",
-          "joinDenials",
-          "joinProviderFailures",
-          "joinTimeouts",
-          "reconnects",
-          "publishFailures",
-          "subscribeFailures",
-          "providerRegions",
-          "providerNodes",
-          "providerDriftCount",
-          "openIncidents",
-          "recordingStatus",
-          "recordingFailures",
-          "transcriptionStatus",
-          "transcriptionFailures",
-          "evaluatedAt"
-        ],
-        "properties": {
-          "activeParticipants": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "avgJitterMs": {
-            "type": "number",
-            "format": "double",
-            "nullable": true
-          },
-          "avgJoinLatencyMs": {
-            "type": "number",
-            "format": "double",
-            "nullable": true
-          },
-          "avgPacketLossRatio": {
-            "type": "number",
-            "format": "double",
-            "nullable": true
-          },
-          "avgRttMs": {
-            "type": "number",
-            "format": "double",
-            "nullable": true
-          },
-          "conferenceId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "degradedSessions": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "evaluatedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "healthState": {
-            "type": "string"
-          },
-          "healthySessions": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "joinAttempts": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "joinDenials": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "joinFailureRate": {
-            "type": "number",
-            "format": "double",
-            "description": "Infrastructure join failures / (credentials issued + provider failures).",
-            "nullable": true
-          },
-          "joinMediaConnected": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "joinProviderFailures": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "joinSuccesses": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "joinTimeouts": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "lastIncidentAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          },
-          "lifecycleState": {
-            "type": "string"
-          },
-          "maxJoinLatencyMs": {
-            "type": "number",
-            "format": "double",
-            "nullable": true
-          },
-          "meetingSpaceId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "openIncidents": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "providerDriftCount": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "providerNodes": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "providerRegions": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Sanitized provider regions / nodes seen by this conference's sessions."
-          },
-          "publishFailures": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "reasons": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/HealthReason"
-            }
-          },
-          "reconnects": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "recordingFailures": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "recordingStatus": {
-            "type": "string"
-          },
-          "subscribeFailures": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "transcriptionFailures": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "transcriptionStatus": {
-            "type": "string"
-          },
-          "unhealthySessions": {
-            "type": "integer",
-            "format": "int64"
-          }
-        }
-      },
       "ConferenceKind": {
         "type": "string",
         "enum": [
-          "Instant",
-          "Scheduled",
-          "Recurring",
-          "Legacy"
+          "INSTANT",
+          "SCHEDULED",
+          "RECURRING",
+          "LEGACY"
         ]
       },
       "ConferenceListResponse": {
@@ -13557,14 +13509,14 @@
       "ConferenceStatus": {
         "type": "string",
         "enum": [
-          "Created",
-          "Preparing",
-          "Waiting",
-          "Live",
-          "Ending",
-          "Ended",
-          "Cancelled",
-          "Failed"
+          "CREATED",
+          "PREPARING",
+          "WAITING",
+          "LIVE",
+          "ENDING",
+          "ENDED",
+          "CANCELLED",
+          "FAILED"
         ]
       },
       "ConsentDecision": {
@@ -14331,15 +14283,23 @@
         ],
         "properties": {
           "code": {
-            "type": "string",
-            "description": "Stable semantic code, e.g. `MEETING_ACCESS_DENIED`."
+            "$ref": "#/components/schemas/ErrorCode"
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "description": "Safe, human-readable message (never SQL, provider bodies, secrets or paths)."
           },
           "requestId": {
             "type": "string",
+            "description": "Server-generated correlation ID (also in the `x-request-id` response header).",
             "nullable": true
+          },
+          "retryAfterSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Present on `RATE_LIMITED` only.",
+            "nullable": true,
+            "minimum": 0
           }
         }
       },
@@ -14424,7 +14384,13 @@
           "QUALITY_SAMPLE_INVALID",
           "QUALITY_RATE_LIMITED",
           "OPERATIONS_ACCESS_DENIED",
-          "REQUEST_TOO_LARGE"
+          "REQUEST_TOO_LARGE",
+          "ENDPOINT_NOT_FOUND",
+          "METHOD_NOT_ALLOWED",
+          "LEGACY_WRITE_DISABLED",
+          "SERVICE_UNAVAILABLE",
+          "DATABASE_ERROR",
+          "INTERNAL_ERROR"
         ]
       },
       "ErrorEnvelope": {
@@ -14573,106 +14539,16 @@
           }
         }
       },
-      "HealthReason": {
-        "type": "object",
-        "required": [
-          "signal",
-          "state"
-        ],
-        "properties": {
-          "signal": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string"
-          }
-        }
-      },
       "IdentityType": {
         "type": "string",
         "enum": [
-          "RegisteredUser",
-          "InvitedExternal",
-          "Guest",
-          "Phone",
-          "Service",
-          "Bot"
+          "REGISTERED_USER",
+          "INVITED_EXTERNAL",
+          "GUEST",
+          "PHONE",
+          "SERVICE",
+          "BOT"
         ]
-      },
-      "IncidentListResponse": {
-        "type": "object",
-        "required": [
-          "incidents"
-        ],
-        "properties": {
-          "incidents": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/IncidentView"
-            }
-          }
-        }
-      },
-      "IncidentView": {
-        "type": "object",
-        "required": [
-          "id",
-          "kind",
-          "category",
-          "severity",
-          "status",
-          "action",
-          "occurrences",
-          "detail",
-          "detectedAt",
-          "lastSeenAt"
-        ],
-        "properties": {
-          "action": {
-            "type": "string"
-          },
-          "category": {
-            "type": "string"
-          },
-          "conferenceId": {
-            "type": "string",
-            "format": "uuid",
-            "nullable": true
-          },
-          "detail": {
-            "type": "object"
-          },
-          "detectedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "lastSeenAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "occurrences": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "resolvedAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          },
-          "severity": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          }
-        }
       },
       "InstantMeetingApiResponse": {
         "type": "object",
@@ -14843,8 +14719,8 @@
       "InvitationStatus": {
         "type": "string",
         "enum": [
-          "Active",
-          "Revoked"
+          "ACTIVE",
+          "REVOKED"
         ]
       },
       "JoinConferenceRequest": {
@@ -14893,7 +14769,8 @@
           "rtcStatus",
           "permissions",
           "policy",
-          "mediaContext"
+          "mediaContext",
+          "realtime"
         ],
         "properties": {
           "conference": {
@@ -14923,6 +14800,9 @@
           },
           "policy": {
             "$ref": "#/components/schemas/JoinPolicy"
+          },
+          "realtime": {
+            "$ref": "#/components/schemas/JoinRealtimeInfo"
           },
           "rtc": {
             "allOf": [
@@ -15085,6 +14965,44 @@
           }
         }
       },
+      "JoinRealtimeInfo": {
+        "type": "object",
+        "description": "Realtime subscription and recovery resources for a joined (or waiting) participant.\nPaths are relative to the API origin; authorization is re-evaluated on every call.",
+        "required": [
+          "enabled",
+          "conferencePath",
+          "participantPath"
+        ],
+        "properties": {
+          "conferencePath": {
+            "type": "string",
+            "description": "Canonical conference state — the primary recovery resource."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the conference WebSocket stream is available (`FEATURE_CONFERENCE_REALTIME_ENABLED`)."
+          },
+          "eventsPath": {
+            "type": "string",
+            "description": "REST replay of missed events (`?after=<sequence>`; present when `enabled`).",
+            "nullable": true
+          },
+          "participantPath": {
+            "type": "string",
+            "description": "The caller's own participant state (admission decision fallback when polling)."
+          },
+          "streamPath": {
+            "type": "string",
+            "description": "WebSocket stream (`?ticket=…&cursor=…`; present when `enabled`).",
+            "nullable": true
+          },
+          "ticketPath": {
+            "type": "string",
+            "description": "`POST` → one-shot WebSocket ticket (present when `enabled`).",
+            "nullable": true
+          }
+        }
+      },
       "LeaveConferenceRequest": {
         "type": "object",
         "properties": {
@@ -15199,12 +15117,11 @@
       },
       "MediaCapturePolicy": {
         "type": "string",
-        "description": "Recording and transcription policy share one representation.",
         "enum": [
-          "Disabled",
-          "HostOptional",
-          "AutoStart",
-          "OrganizationControlled"
+          "DISABLED",
+          "HOST_OPTIONAL",
+          "AUTO_START",
+          "ORGANIZATION_CONTROLLED"
         ]
       },
       "MediaContextResponse": {
@@ -15722,11 +15639,11 @@
       "MeetingType": {
         "type": "string",
         "enum": [
-          "Standard",
-          "Healthcare",
-          "Webinar",
-          "TownHall",
-          "Training"
+          "STANDARD",
+          "HEALTHCARE",
+          "WEBINAR",
+          "TOWN_HALL",
+          "TRAINING"
         ]
       },
       "MemberListResponse": {
@@ -15804,8 +15721,8 @@
       "MemberStatus": {
         "type": "string",
         "enum": [
-          "Active",
-          "Revoked"
+          "ACTIVE",
+          "REVOKED"
         ]
       },
       "MessageKind": {
@@ -16126,9 +16043,9 @@
       "OrganizationMemberStatus": {
         "type": "string",
         "enum": [
-          "Active",
-          "Suspended",
-          "Removed"
+          "ACTIVE",
+          "SUSPENDED",
+          "REMOVED"
         ]
       },
       "OrganizationResponse": {
@@ -16163,24 +16080,16 @@
       "OrganizationRole": {
         "type": "string",
         "enum": [
-          "Owner",
-          "Admin",
-          "Member"
+          "OWNER",
+          "ADMIN",
+          "MEMBER"
         ]
       },
       "OrganizationStatus": {
         "type": "string",
         "enum": [
-          "Active",
-          "Suspended"
-        ]
-      },
-      "OutboxStatus": {
-        "type": "string",
-        "enum": [
-          "Pending",
-          "Published",
-          "Failed"
+          "ACTIVE",
+          "SUSPENDED"
         ]
       },
       "OwnerTransferRequest": {
@@ -17049,8 +16958,8 @@
       "PrincipalType": {
         "type": "string",
         "enum": [
-          "User",
-          "Email"
+          "USER",
+          "EMAIL"
         ]
       },
       "PrivateChatMode": {
@@ -17180,99 +17089,6 @@
           "ENFORCED",
           "NOT_REQUIRED"
         ]
-      },
-      "ProviderTranscriptionEvent": {
-        "oneOf": [
-          {
-            "type": "object",
-            "required": [
-              "jobRef",
-              "status",
-              "type"
-            ],
-            "properties": {
-              "error": {
-                "type": "string",
-                "nullable": true
-              },
-              "jobRef": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "JOB_STATUS"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "jobRef",
-              "segmentId",
-              "sequence",
-              "startMs",
-              "endMs",
-              "language",
-              "text",
-              "final",
-              "type"
-            ],
-            "properties": {
-              "confidence": {
-                "type": "number",
-                "format": "float",
-                "nullable": true
-              },
-              "endMs": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "final": {
-                "type": "boolean"
-              },
-              "jobRef": {
-                "type": "string"
-              },
-              "language": {
-                "type": "string"
-              },
-              "segmentId": {
-                "type": "string"
-              },
-              "sequence": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "speakerIdentity": {
-                "type": "string",
-                "description": "Server-generated media identity of the speaker (never trusted beyond a\nsame-conference lookup).",
-                "nullable": true
-              },
-              "startMs": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "text": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "SEGMENT"
-                ]
-              }
-            }
-          }
-        ],
-        "description": "Provider-neutral callback payload (`POST /internal/transcription/events`).",
-        "discriminator": {
-          "propertyName": "type"
-        }
       },
       "PublicMeetingInfoApiResponse": {
         "type": "object",
@@ -17829,7 +17645,7 @@
         "type": "string",
         "enum": [
           "V2",
-          "Legacy"
+          "LEGACY"
         ]
       },
       "RecordingListResponse": {
@@ -17912,8 +17728,8 @@
       "RecurrenceExceptionKind": {
         "type": "string",
         "enum": [
-          "Cancelled",
-          "Rescheduled"
+          "CANCELLED",
+          "RESCHEDULED"
         ]
       },
       "RecurrenceExceptionRequest": {
@@ -18049,8 +17865,8 @@
       "RecurrenceStatus": {
         "type": "string",
         "enum": [
-          "Active",
-          "Ended"
+          "ACTIVE",
+          "ENDED"
         ]
       },
       "RefreshTokenRequest": {
@@ -18489,15 +18305,14 @@
       },
       "Role": {
         "type": "string",
-        "description": "Built-in Phase 2 roles, ordered from most to least privileged.",
         "enum": [
-          "Owner",
-          "Host",
-          "CoHost",
-          "Moderator",
-          "Presenter",
-          "Participant",
-          "Viewer"
+          "OWNER",
+          "HOST",
+          "CO_HOST",
+          "MODERATOR",
+          "PRESENTER",
+          "PARTICIPANT",
+          "VIEWER"
         ]
       },
       "RoleChangeRequest": {
@@ -18553,12 +18368,12 @@
       "RoleSource": {
         "type": "string",
         "enum": [
-          "Owner",
-          "Membership",
-          "Invitation",
-          "Default",
-          "Assigned",
-          "Legacy"
+          "OWNER",
+          "MEMBERSHIP",
+          "INVITATION",
+          "DEFAULT",
+          "ASSIGNED",
+          "LEGACY"
         ]
       },
       "RoomAssignmentsPatch": {
@@ -18676,11 +18491,11 @@
       "SecurityProfile": {
         "type": "string",
         "enum": [
-          "Standard",
-          "Business",
-          "Enterprise",
-          "Healthcare",
-          "HighSecurity"
+          "STANDARD",
+          "BUSINESS",
+          "ENTERPRISE",
+          "HEALTHCARE",
+          "HIGH_SECURITY"
         ]
       },
       "SegmentView": {
@@ -18788,13 +18603,13 @@
       "SessionState": {
         "type": "string",
         "enum": [
-          "Pending",
-          "Connected",
-          "Disconnected",
-          "Replaced",
-          "Terminated",
-          "Expired",
-          "Historical"
+          "PENDING",
+          "CONNECTED",
+          "DISCONNECTED",
+          "REPLACED",
+          "TERMINATED",
+          "EXPIRED",
+          "HISTORICAL"
         ]
       },
       "SetRecurrenceRequest": {
@@ -18868,9 +18683,9 @@
       "SpaceStatus": {
         "type": "string",
         "enum": [
-          "Active",
-          "Archived",
-          "Deleted"
+          "ACTIVE",
+          "ARCHIVED",
+          "DELETED"
         ]
       },
       "SpotlightListResponse": {
@@ -19057,13 +18872,13 @@
       "TerminationReason": {
         "type": "string",
         "enum": [
-          "HostEnded",
-          "ScheduledEnd",
-          "Admin",
-          "Failure",
-          "EmptyTimeout",
-          "Cancelled",
-          "Legacy"
+          "HOST_ENDED",
+          "SCHEDULED_END",
+          "ADMIN",
+          "FAILURE",
+          "EMPTY_TIMEOUT",
+          "CANCELLED",
+          "LEGACY"
         ]
       },
       "TextAnswer": {
@@ -19689,13 +19504,13 @@
       "WaitingRoomPolicy": {
         "type": "string",
         "enum": [
-          "Off",
-          "Everyone",
-          "GuestsOnly",
-          "UnauthenticatedOnly",
-          "NonMembersOnly",
-          "ExternalOnly",
-          "Custom"
+          "OFF",
+          "EVERYONE",
+          "GUESTS_ONLY",
+          "UNAUTHENTICATED_ONLY",
+          "NON_MEMBERS_ONLY",
+          "EXTERNAL_ONLY",
+          "CUSTOM"
         ]
       },
       "WaitingRoomResponse": {

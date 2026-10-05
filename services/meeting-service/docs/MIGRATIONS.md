@@ -233,6 +233,22 @@ The migration CLI loads `.env` from the backend root directory (`../`). Make sur
 DATABASE_URL=postgres://user:password@localhost:5432/cosmicforge?sslmode=require
 ```
 
+## Phase 2 migrations and the legacy backfill
+
+Phase 2 migrations (`m20261003_000001` … `m20261005_000005`) are additive: legacy `meetings` /
+`participants` tables and columns are never dropped. `m20261003_000002_phase2_legacy_backfill`
+runs `migration/src/phase2_backfill.rs`, which is also used by the compatibility resolver
+(single legacy meeting) and by `cargo run --bin phase2_backfill` (evidence + rerun).
+
+- Idempotent and restart-safe: stable mappings (`legacy_meeting_id`, `legacy_participant_id`,
+  `(conference_id, user_id)`, `(conference_id, media_identity)`) + `ON CONFLICT DO NOTHING`, all
+  runs serialized by a transaction-scoped advisory lock. A partially completed run resumes
+  without duplicates.
+- A rerun refreshes legacy-managed rows only: conference status, never-v2-edited space fields
+  (`version = 1`), and (Parts J–L) legacy-managed participant admission state / role.
+- Parts J–L added **no** migration. Certification: fresh `up` → `down 7` → `up`
+  (`tests/migration_backfill.rs::m02_rollback_and_reapply`) and the K-E2E backfill tests.
+
 ---
 
-**Last Updated**: 2026-01-17
+**Last Updated**: 2026-10-05

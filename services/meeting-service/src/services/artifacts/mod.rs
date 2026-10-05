@@ -102,8 +102,25 @@ impl Default for ArtifactBackends {
 macro_rules! str_enum {
     ($(#[$meta:meta])* $name:ident { $($variant:ident = $s:literal),+ $(,)? }) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, serde::Deserialize, ToSchema)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
         pub enum $name { $(#[serde(rename = $s)] $variant),+ }
+        // Hand-written schema: `#[serde(rename = $s)]` inside a macro is invisible to the
+        // `ToSchema` derive, which would otherwise publish the Rust variant names instead
+        // of the wire values (Part J contract defect).
+        impl<'__s> utoipa::ToSchema<'__s> for $name {
+            fn schema() -> (
+                &'__s str,
+                utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>,
+            ) {
+                (
+                    stringify!($name),
+                    utoipa::openapi::ObjectBuilder::new()
+                        .schema_type(utoipa::openapi::SchemaType::String)
+                        .enum_values(Some([$($s),+]))
+                        .into(),
+                )
+            }
+        }
         impl $name {
             pub const ALL: &'static [$name] = &[$($name::$variant),+];
             pub fn as_str(&self) -> &'static str { match self { $($name::$variant => $s),+ } }

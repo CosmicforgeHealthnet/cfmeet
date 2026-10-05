@@ -1,7 +1,8 @@
 //! Phase 2 feature flags and meeting-v2 tunables (spec v1.1 §7).
 //!
 //! Loaded from the environment (`FEATURE_*`). Defaults are rollout-safe: v2 is off
-//! unless enabled, and `legacy_meeting_write_disabled` is never enabled during A–D.
+//! unless enabled, and `legacy_meeting_write_disabled` is off unless explicitly set
+//! (legacy write retirement is a rollout decision, Parts J–L §38–§39).
 
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -50,7 +51,9 @@ pub struct FeatureFlags {
     pub intelligence_v2_enabled: bool,
     /// Part I: client quality-sample ingestion.
     pub quality_telemetry_enabled: bool,
-    /// Prepared for legacy write retirement. Not honoured during Parts A–D.
+    /// Legacy write retirement switch (`FEATURE_LEGACY_MEETING_WRITE_DISABLED`). When on,
+    /// every state-changing `/api/v1` meeting / participant / chat / third-party meeting
+    /// route answers `410 LEGACY_WRITE_DISABLED`; legacy reads and `/api/v2` keep working.
     pub legacy_meeting_write_disabled: bool,
 }
 
@@ -68,8 +71,8 @@ impl FeatureFlags {
         let legacy_write_disabled = env_bool("FEATURE_LEGACY_MEETING_WRITE_DISABLED", false);
         if legacy_write_disabled {
             tracing::warn!(
-                "FEATURE_LEGACY_MEETING_WRITE_DISABLED is set but legacy write retirement is not part of \
-                 Phase 2 Parts A–D; legacy writes remain enabled"
+                "FEATURE_LEGACY_MEETING_WRITE_DISABLED is on: legacy /api/v1 meeting writes \
+                 answer 410 LEGACY_WRITE_DISABLED (reads and /api/v2 unaffected)"
             );
         }
         Self {
@@ -86,7 +89,7 @@ impl FeatureFlags {
             transcription_v2_enabled: env_bool("FEATURE_TRANSCRIPTION_V2_ENABLED", false),
             intelligence_v2_enabled: env_bool("FEATURE_INTELLIGENCE_V2_ENABLED", false),
             quality_telemetry_enabled: env_bool("FEATURE_QUALITY_TELEMETRY_ENABLED", false),
-            legacy_meeting_write_disabled: false,
+            legacy_meeting_write_disabled: legacy_write_disabled,
         }
     }
 

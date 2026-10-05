@@ -15,12 +15,12 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::{
-    domain::{AccessPolicy, AdmissionState, ConferenceStatus, RecordOrigin},
+    domain::{AccessPolicy, AdmissionState, ConferenceStatus, RecordOrigin, Role},
     error::ApiResult,
     models::{
         conference_participants, conference_sessions, meeting_spaces,
         meetings::{self, MeetingStatus},
-        participants::{self, ParticipantStatus},
+        participants::{self, ParticipantRole, ParticipantStatus},
     },
     services::{
         actor::ActorContext,
@@ -274,13 +274,29 @@ impl CompatService {
                 ParticipantStatus::Joined => AdmissionState::Admitted,
                 ParticipantStatus::Kicked => AdmissionState::Removed,
             };
+            // Same mapping as the backfill (`PARTICIPANT_ROLE`).
+            let expected_role = match p.role {
+                ParticipantRole::Host if Some(legacy.host_id) == p.user_id => Role::Owner,
+                ParticipantRole::Host => Role::Host,
+                ParticipantRole::Viewer => Role::Viewer,
+                ParticipantRole::Participant => Role::Participant,
+            };
             match v2_participants.iter().find(|v| v.user_id == Some(*user)) {
                 None => diffs.push(format!("registered user {user} missing in v2")),
-                Some(v) if v.admission_state != expected => diffs.push(format!(
-                    "user {user}: v2 {} != legacy-derived {}",
-                    v.admission_state, expected
-                )),
-                _ => {}
+                Some(v) => {
+                    if v.admission_state != expected {
+                        diffs.push(format!(
+                            "user {user}: v2 {} != legacy-derived {}",
+                            v.admission_state, expected
+                        ));
+                    }
+                    if v.role != expected_role {
+                        diffs.push(format!(
+                            "user {user}: v2 role {} != legacy-derived role {}",
+                            v.role, expected_role
+                        ));
+                    }
+                }
             }
         }
         let legacy_guests = legacy_participants
@@ -299,16 +315,24 @@ impl CompatService {
         Ok((Some(space.id), diffs))
     }
 
-    /// Shadow-read hook for legacy reads: logs drift, never changes the response.
+    /// Shadow-read hook for legacy reads: logs drift and counts it (operations metrics
+    /// `shadow_reads` / `shadow_mismatches` / `shadow_failures`); never changes the
+    /// response and never reaches the client.
     pub async fn shadow_log(&self, legacy_meeting_id: Uuid) {
+        use crate::services::ops_metrics::{inc, OPS_METRICS as OM};
+        inc(&OM.shadow_reads);
         match self.shadow_compare(legacy_meeting_id).await {
             Ok((_, diffs)) if diffs.is_empty() => {
                 tracing::debug!(%legacy_meeting_id, "meeting v2 shadow read consistent")
             }
             Ok((space, diffs)) => {
+                inc(&OM.shadow_mismatches);
                 tracing::warn!(%legacy_meeting_id, ?space, ?diffs, "meeting v2 shadow read drift")
             }
-            Err(e) => tracing::warn!(%legacy_meeting_id, "meeting v2 shadow read failed: {e}"),
+            Err(e) => {
+                inc(&OM.shadow_failures);
+                tracing::warn!(%legacy_meeting_id, "meeting v2 shadow read failed: {e}")
+            }
         }
     }
 }

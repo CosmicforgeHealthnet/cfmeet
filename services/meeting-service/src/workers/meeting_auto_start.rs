@@ -15,8 +15,9 @@
 //! - Logs a MeetingStart event in session_logs
 
 use sea_orm::{
+    sea_query::{Alias, Expr},
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set,
+    QuerySelect, Set, TransactionTrait,
 };
 use tokio::sync::watch;
 use tokio::time::{sleep, Duration};
@@ -69,8 +70,9 @@ impl MeetingAutoStartWorker {
         }
     }
 
-    /// Process a batch of scheduled meetings whose start time has been reached
-    async fn process_batch(&self) -> Result<(), String> {
+    /// Process a batch of scheduled meetings whose start time has been reached.
+    /// Multi-instance safe: returns how many meetings THIS call transitioned.
+    pub async fn process_batch(&self) -> Result<u64, String> {
         let now = now_utc();
 
         let meetings = Meetings::find()
@@ -84,36 +86,53 @@ impl MeetingAutoStartWorker {
 
         if meetings.is_empty() {
             tracing::debug!("No meetings to auto-start");
-            return Ok(());
+            return Ok(0);
         }
 
-        tracing::info!("Auto-starting {} meeting(s)", meetings.len());
-
+        let mut started = 0;
         for meeting in meetings {
             let meeting_id = meeting.id;
-            if let Err(e) = self.start_meeting(meeting).await {
-                tracing::error!("Failed to auto-start meeting {}: {}", meeting_id, e);
+            match self.start_meeting(meeting).await {
+                Ok(true) => started += 1,
+                Ok(false) => {}
+                Err(e) => tracing::error!("Failed to auto-start meeting {}: {}", meeting_id, e),
             }
         }
-
-        Ok(())
+        if started > 0 {
+            tracing::info!("Auto-started {} meeting(s)", started);
+        }
+        Ok(started)
     }
 
-    /// Transition a single meeting from Scheduled to Ongoing
-    async fn start_meeting(&self, meeting: meetings::Model) -> Result<(), String> {
+    /// Transition a single meeting from Scheduled to Ongoing. The transition is a
+    /// conditional update (`status = 'scheduled'`) in one transaction with its log, so
+    /// concurrent worker instances start a meeting — and log it — exactly once.
+    async fn start_meeting(&self, meeting: meetings::Model) -> Result<bool, String> {
         let meeting_id = meeting.id;
         let meeting_identifier = meeting.meeting_identifier.clone();
         let now = now_utc();
-
-        // Update meeting status to ongoing
-        let mut meeting_update: meetings::ActiveModel = meeting.into();
-        meeting_update.status = Set(MeetingStatus::Ongoing);
-        meeting_update.updated_at = Set(now);
-
-        meeting_update
-            .update(&self.db)
+        let txn = self
+            .db
+            .begin()
             .await
-            .map_err(|e| format!("Failed to update meeting status: {}", e))?;
+            .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+
+        let claimed = Meetings::update_many()
+            .col_expr(
+                meetings::Column::Status,
+                Expr::val("ongoing").as_enum(Alias::new("meeting_status")),
+            )
+            .col_expr(meetings::Column::UpdatedAt, Expr::value(now))
+            .filter(meetings::Column::Id.eq(meeting_id))
+            .filter(meetings::Column::Status.eq(MeetingStatus::Scheduled))
+            .exec(&txn)
+            .await
+            .map_err(|e| format!("Failed to update meeting status: {}", e))?
+            .rows_affected;
+        if claimed == 0 {
+            // Another instance (or a host) already moved it on.
+            return Ok(false);
+        }
 
         // Log the meeting start event
         let session_log = session_logs::ActiveModel {
@@ -130,9 +149,12 @@ impl MeetingAutoStartWorker {
         };
 
         session_log
-            .insert(&self.db)
+            .insert(&txn)
             .await
             .map_err(|e| format!("Failed to log auto-start event: {}", e))?;
+        txn.commit()
+            .await
+            .map_err(|e| format!("Failed to commit auto-start: {}", e))?;
 
         tracing::info!(
             "Auto-started meeting {} ({}) at scheduled start time",
@@ -140,7 +162,7 @@ impl MeetingAutoStartWorker {
             meeting_identifier
         );
 
-        Ok(())
+        Ok(true)
     }
 }
 

@@ -562,7 +562,7 @@ pub async fn raise_hand(
 #[utoipa::path(
     delete, path = "/api/v2/conferences/{id}/hand-raise", tag = "Engagement (v2)", operation_id = "v2_lower_hand",
     params(("id" = Uuid, Path, description = "Conference id")),
-    responses((status = 200, description = "Lowered (idempotent)", body = HandRaiseResponse)),
+    responses((status = 200, description = "Lowered (idempotent)", body = HandRaiseResponse), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 403, description = "HAND_RAISE_DISABLED / PERMISSION_DENIED", body = ErrorEnvelope)),
     security(("bearer_auth" = []), ("participant_token" = []))
 )]
 pub async fn lower_hand(

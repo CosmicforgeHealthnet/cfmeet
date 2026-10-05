@@ -15,7 +15,7 @@ pub use crate::services::artifacts::{
     },
     intelligence::{IntelligenceKind, IntelligenceRequest},
     recording::{ProviderDispatch, RecordingResponse, StartRecordingRequest},
-    service::{ArtifactAccess, GenerateReportRequest},
+    service::{ArtifactAccess, AttendanceEntry, AttendanceReport, GenerateReportRequest},
     transcription::{
         ProviderTranscriptionEvent, SegmentView, StartTranscriptionRequest, TranscriptView,
         TranscriptionJobView, TranscriptionModeDto, TranslateRequest, TranslationResponse,

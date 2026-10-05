@@ -8,6 +8,7 @@ use crate::services::email::EmailService;
 use crate::services::livekit::LiveKitService;
 use crate::services::meeting_domain::{MeetingDomain, MeetingDomainDeps};
 use crate::services::realtime::RealtimeService;
+use crate::services::rtc_provider::LegacyRtcCredentials;
 use crate::services::{OtpService, RateLimiterService, RedisService, TokenBlacklistService};
 
 #[derive(Clone)]
@@ -15,7 +16,8 @@ pub struct AppState {
     pub db: DatabaseConnection,
     pub jwt_service: Arc<JwtService>,
     pub email_service: Arc<EmailService>,
-    pub livekit_service: Arc<LiveKitService>,
+    /// Legacy `/api/v1` media credentials (provider-neutral compatibility boundary).
+    pub legacy_rtc: Arc<dyn LegacyRtcCredentials>,
     pub redis: Arc<RedisService>,
     pub otp_service: Arc<OtpService>,
     pub token_blacklist: Arc<TokenBlacklistService>,
@@ -77,7 +79,7 @@ impl AppState {
             db,
             jwt_service: Arc::new(JwtService::new(app_config.jwt_secret.clone())),
             email_service: Arc::new(EmailService::new(redis.clone(), email_config)),
-            livekit_service: Arc::new(LiveKitService::new(livekit_config)),
+            legacy_rtc: Arc::new(LiveKitService::new(livekit_config)),
             redis,
             otp_service,
             token_blacklist,

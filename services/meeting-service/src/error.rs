@@ -95,6 +95,20 @@ pub enum ErrorCode {
     OperationsAccessDenied,
     /// Body exceeds the route's size limit (e.g. quality samples).
     RequestTooLarge,
+    // Parts J–L
+    /// No `/api/v2` operation exists at this path.
+    EndpointNotFound,
+    /// The path exists but does not accept this HTTP method.
+    MethodNotAllowed,
+    /// Legacy (v1) meeting writes are retired (`FEATURE_LEGACY_MEETING_WRITE_DISABLED`);
+    /// use the `/api/v2` equivalent.
+    LegacyWriteDisabled,
+    /// A required dependency (PostgreSQL) is unreachable; retry later. No state changed.
+    ServiceUnavailable,
+    /// Unexpected database failure (details are logged, never returned).
+    DatabaseError,
+    /// Unexpected internal failure (details are logged, never returned).
+    InternalError,
 }
 
 impl ErrorCode {
@@ -178,6 +192,12 @@ impl ErrorCode {
             ErrorCode::QualityRateLimited => "QUALITY_RATE_LIMITED",
             ErrorCode::OperationsAccessDenied => "OPERATIONS_ACCESS_DENIED",
             ErrorCode::RequestTooLarge => "REQUEST_TOO_LARGE",
+            ErrorCode::EndpointNotFound => "ENDPOINT_NOT_FOUND",
+            ErrorCode::MethodNotAllowed => "METHOD_NOT_ALLOWED",
+            ErrorCode::LegacyWriteDisabled => "LEGACY_WRITE_DISABLED",
+            ErrorCode::ServiceUnavailable => "SERVICE_UNAVAILABLE",
+            ErrorCode::DatabaseError => "DATABASE_ERROR",
+            ErrorCode::InternalError => "INTERNAL_ERROR",
         }
     }
 
@@ -261,6 +281,13 @@ impl ErrorCode {
             ErrorCode::QualityRateLimited => StatusCode::TOO_MANY_REQUESTS,
             ErrorCode::OperationsAccessDenied => StatusCode::FORBIDDEN,
             ErrorCode::RequestTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+            ErrorCode::EndpointNotFound => StatusCode::NOT_FOUND,
+            ErrorCode::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
+            ErrorCode::LegacyWriteDisabled => StatusCode::GONE,
+            ErrorCode::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::DatabaseError | ErrorCode::InternalError => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
         }
     }
 }
@@ -359,13 +386,21 @@ impl IntoResponse for ApiError {
         }
         let (status, error_code, message) = match self {
             ApiError::DatabaseError(e) => {
-                // Never expose SQL text / SeaORM internals to clients.
+                // Never expose SQL text / SeaORM internals / DSNs to clients.
                 tracing::error!("Database error: {:?}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "DATABASE_ERROR",
-                    "A database error occurred".to_string(),
-                )
+                if is_connectivity_error(&e) {
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        ErrorCode::ServiceUnavailable.as_str(),
+                        "The service is temporarily unavailable; retry later".to_string(),
+                    )
+                } else {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        ErrorCode::DatabaseError.as_str(),
+                        "A database error occurred".to_string(),
+                    )
+                }
             }
             ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, "NOT_FOUND", msg),
             ApiError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, "UNAUTHORIZED", msg),
@@ -376,7 +411,7 @@ impl IntoResponse for ApiError {
                 tracing::error!("Internal error: {}", msg);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    "INTERNAL_ERROR",
+                    ErrorCode::InternalError.as_str(),
                     "An internal error occurred".to_string(),
                 )
             }
@@ -401,6 +436,21 @@ impl IntoResponse for ApiError {
     }
 }
 
+/// PostgreSQL unreachable (pool exhausted / connection refused / connection lost):
+/// a retryable outage, reported as `503 SERVICE_UNAVAILABLE`. The authority is
+/// unavailable, so nothing was decided — callers retry; nothing falls back to Redis.
+fn is_connectivity_error(e: &sea_orm::DbErr) -> bool {
+    use sea_orm::{sqlx::Error as SqlxError, DbErr, RuntimeErr};
+    match e {
+        DbErr::ConnectionAcquire(_) | DbErr::Conn(_) => true,
+        DbErr::Query(RuntimeErr::SqlxError(x)) | DbErr::Exec(RuntimeErr::SqlxError(x)) => matches!(
+            x,
+            SqlxError::Io(_) | SqlxError::PoolTimedOut | SqlxError::PoolClosed
+        ),
+        _ => false,
+    }
+}
+
 /// OpenAPI description of the public error envelope.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorEnvelope {
@@ -411,10 +461,17 @@ pub struct ErrorEnvelope {
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorBody {
-    /// Stable semantic code, e.g. `MEETING_ACCESS_DENIED`.
-    pub code: String,
+    /// Stable semantic code, e.g. `MEETING_ACCESS_DENIED`. Every `/api/v2` error uses a
+    /// value of [`ErrorCode`]; legacy `/api/v1` endpoints may additionally return their
+    /// historical generic codes (`NOT_FOUND`, `UNAUTHORIZED`, …).
+    pub code: ErrorCode,
+    /// Safe, human-readable message (never SQL, provider bodies, secrets or paths).
     pub message: String,
+    /// Server-generated correlation ID (also in the `x-request-id` response header).
     pub request_id: Option<String>,
+    /// Present on `RATE_LIMITED` only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after_seconds: Option<u64>,
 }
 
 pub type ApiResult<T> = Result<T, ApiError>;

@@ -127,3 +127,22 @@ fn path_message(rejection: PathRejection) -> String {
         _ => "Invalid path".into(),
     }
 }
+
+/// Query-string extractor whose rejections use the standard error envelope.
+pub struct V2Query<T>(pub T);
+
+#[async_trait]
+impl<S, T> FromRequestParts<S> for V2Query<T>
+where
+    T: DeserializeOwned + Send,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        axum::extract::Query::<T>::from_request_parts(parts, state)
+            .await
+            .map(|axum::extract::Query(v)| V2Query(v))
+            .map_err(|_| ApiError::domain(ErrorCode::ValidationError, "Invalid query parameters"))
+    }
+}

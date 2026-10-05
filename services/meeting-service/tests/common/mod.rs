@@ -9,6 +9,7 @@
 
 pub mod artifacts;
 pub mod collab;
+pub mod contract;
 pub mod livekit_mock;
 pub mod rtc;
 

@@ -14,7 +14,10 @@
 //!   require `X-Internal-Token`.
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{
+        rejection::{PathRejection, QueryRejection},
+        Path, Query, State,
+    },
     http::{header::AUTHORIZATION, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
@@ -39,6 +42,10 @@ use crate::{
 
 fn not_found() -> Response {
     ApiError::NotFound("Not found".into()).into_response()
+}
+
+fn invalid_query() -> Response {
+    ApiError::domain(ErrorCode::ValidationError, "Invalid query parameters").into_response()
 }
 
 pub async fn livekit_webhook(
@@ -212,11 +219,14 @@ fn parse_health(state: Option<&str>) -> Option<Option<HealthState>> {
 pub async fn operations_conferences(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(q): Query<OperationsQuery>,
+    query: Result<Query<OperationsQuery>, QueryRejection>,
 ) -> Response {
     if !internal_token_ok(&headers) {
         return not_found();
     }
+    let Ok(Query(q)) = query else {
+        return invalid_query();
+    };
     let Some(filter) = parse_health(q.state.as_deref()) else {
         return ApiError::domain(
             ErrorCode::ValidationError,
@@ -239,11 +249,15 @@ pub async fn operations_conferences(
 pub async fn operations_conference(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(id): Path<uuid::Uuid>,
+    path: Result<Path<uuid::Uuid>, PathRejection>,
 ) -> Response {
     if !internal_token_ok(&headers) {
         return not_found();
     }
+    let Ok(Path(id)) = path else {
+        return ApiError::domain(ErrorCode::ValidationError, "Invalid path parameter")
+            .into_response();
+    };
     match state.meeting.operations.evaluate(id).await {
         Ok(s) => Json(s).into_response(),
         Err(e) => e.into_response(),
@@ -254,11 +268,14 @@ pub async fn operations_conference(
 pub async fn operations_incidents(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(q): Query<OperationsQuery>,
+    query: Result<Query<OperationsQuery>, QueryRejection>,
 ) -> Response {
     if !internal_token_ok(&headers) {
         return not_found();
     }
+    let Ok(Query(q)) = query else {
+        return invalid_query();
+    };
     match state
         .meeting
         .operations

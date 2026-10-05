@@ -272,6 +272,24 @@ pub struct ProviderEvent {
     pub provider_service_participant: bool,
 }
 
+/// Legacy `/api/v1` media credentials (compatibility boundary for legacy-managed
+/// meetings only). The v2 domain never uses this: it issues credentials through
+/// [`RtcProvider::issue_join_credentials`] after admission commits. Handlers depend on
+/// this provider-neutral trait; the provider-specific implementation lives in the
+/// adapter (`services::livekit::LiveKitService`).
+pub trait LegacyRtcCredentials: Send + Sync {
+    /// Short-lived credential for a legacy participant in the legacy room.
+    fn issue_legacy_join_credential(
+        &self,
+        room_name: &str,
+        participant_identity: &str,
+        participant_name: &str,
+        is_host: bool,
+    ) -> crate::error::ApiResult<String>;
+    /// Client media endpoint URL.
+    fn media_url(&self) -> &str;
+}
+
 #[async_trait]
 pub trait RtcProvider: Send + Sync {
     fn name(&self) -> &'static str;

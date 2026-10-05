@@ -339,6 +339,11 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(artifacts::stop_recording),
         )
         .route("/conferences/:id/artifacts", get(artifacts::list_artifacts))
+        // Part J — attendance contract (thin read over the attendance aggregation)
+        .route(
+            "/conferences/:id/attendance",
+            get(artifacts::conference_attendance),
+        )
         .route(
             "/conferences/:id/artifacts/reports",
             post(artifacts::generate_report),
@@ -438,4 +443,19 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         )
         .route("/me/organizations", get(organizations::my_organizations))
         .route_layer(middleware::from_fn_with_state(state, require_meeting_v2))
+        // Part J: unknown paths / methods keep the standard error envelope + requestId.
+        .method_not_allowed_fallback(method_not_allowed)
+        .fallback(endpoint_not_found)
+}
+
+async fn endpoint_not_found() -> Response {
+    ApiError::domain(ErrorCode::EndpointNotFound, "No such API endpoint").into_response()
+}
+
+async fn method_not_allowed() -> Response {
+    ApiError::domain(
+        ErrorCode::MethodNotAllowed,
+        "This endpoint does not accept this HTTP method",
+    )
+    .into_response()
 }

@@ -6,12 +6,11 @@
 
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
 
 macro_rules! text_enum {
     ($(#[$meta:meta])* $name:ident { $($variant:ident = $s:literal),+ $(,)? }) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter, DeriveActiveEnum, Serialize, Deserialize, ToSchema)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
         #[sea_orm(rs_type = "String", db_type = "Text")]
         pub enum $name {
             $(
@@ -30,6 +29,24 @@ macro_rules! text_enum {
 
             pub fn parse(value: &str) -> Option<Self> {
                 match value { $($s => Some($name::$variant),)+ _ => None }
+            }
+        }
+
+        // Hand-written schema: `#[serde(rename = $s)]` inside a macro is invisible to the
+        // `ToSchema` derive, which would otherwise publish the Rust variant names instead
+        // of the wire values (Part J contract defect).
+        impl<'__s> utoipa::ToSchema<'__s> for $name {
+            fn schema() -> (
+                &'__s str,
+                utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>,
+            ) {
+                (
+                    stringify!($name),
+                    utoipa::openapi::ObjectBuilder::new()
+                        .schema_type(utoipa::openapi::SchemaType::String)
+                        .enum_values(Some([$($s),+]))
+                        .into(),
+                )
             }
         }
 

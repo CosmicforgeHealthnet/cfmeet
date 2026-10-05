@@ -139,6 +139,7 @@ pub struct WsQuery {
     params(("id" = Uuid, Path, description = "Conference id"), ("ticket" = Option<String>, Query, description = "One-shot ticket"), ("cursor" = Option<i64>, Query, description = "Resume after this sequence")),
     responses(
         (status = 101, description = "Switching protocols (WebSocket)"),
+        (status = 400, description = "VALIDATION_ERROR (not a WebSocket upgrade / invalid query)", body = ErrorEnvelope),
         (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
         (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
         (status = 404, description = "CONFERENCE_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
@@ -150,7 +151,7 @@ pub async fn subscribe(
     actor: ActorContext,
     V2Path(id): V2Path<Uuid>,
     query: Result<Query<WsQuery>, axum::extract::rejection::QueryRejection>,
-    ws: WebSocketUpgrade,
+    ws: Result<WebSocketUpgrade, axum::extract::ws::rejection::WebSocketUpgradeRejection>,
 ) -> ApiResult<Response> {
     let Query(q) = query
         .map_err(|_| ApiError::domain(ErrorCode::ValidationError, "Invalid query parameters"))?;
@@ -180,6 +181,14 @@ pub async fn subscribe(
             return Err(e);
         }
     };
+    // Checked after authorization so a plain HTTP probe learns nothing extra; the
+    // rejection keeps the standard error envelope.
+    let ws = ws.map_err(|_| {
+        ApiError::domain(
+            ErrorCode::ValidationError,
+            "A WebSocket upgrade request is required",
+        )
+    })?;
     let cursor = q.cursor;
     Ok(ws.on_upgrade(move |socket| run_socket(rt, sub, cursor, socket)))
 }

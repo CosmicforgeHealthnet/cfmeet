@@ -555,3 +555,377 @@ async fn m07_legacy_v1_writes_still_work() {
     assert_eq!(r["conference"]["status"], "LIVE");
     assert_eq!(r["conference"]["isLegacy"], true);
 }
+
+// ---------------------------------------------------------------------------
+// Part K — backfill / compatibility / shadow certification (K-E2E-01..08)
+// ---------------------------------------------------------------------------
+
+async fn ids_of(conn: &DatabaseConnection, sql: &str) -> Vec<String> {
+    conn.query_all(Statement::from_string(
+        sea_orm::DbBackend::Postgres,
+        sql.to_string(),
+    ))
+    .await
+    .unwrap()
+    .iter()
+    .map(|r| r.try_get_by_index::<Uuid>(0).unwrap().to_string())
+    .collect()
+}
+
+/// K-E2E-01 / 02 / 05: legacy id and legacy code resolve to the canonical space and
+/// conference, the public code is preserved, and the logical-participant mapping is
+/// stable across reruns (same row ids, no duplicates).
+#[tokio::test]
+async fn k_e2e_01_02_05_resolution_code_and_participant_mapping_are_stable() {
+    let Some((db, f)) = legacy_db().await else {
+        return;
+    };
+    Migrator::up(&db.conn, None).await.unwrap();
+    let app = TestApp::on(db, TestOptions::default());
+    let c = &app.db.conn;
+    let space_by_code = {
+        let (s, v) = app.get("/api/v2/resolve/ENDD2345", Auth::None).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(v["matchedBy"], "LEGACY_CODE");
+        v
+    };
+    let (s, by_id) = app
+        .get(&format!("/api/v2/resolve/{}", f.ended), Auth::None)
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(by_id["matchedBy"], "LEGACY_ID");
+    assert_eq!(
+        by_id["meetingSpace"]["id"],
+        space_by_code["meetingSpace"]["id"]
+    );
+    assert_eq!(by_id["conference"]["id"], space_by_code["conference"]["id"]);
+    assert_eq!(
+        by_id["meetingSpace"]["meetingCode"], "ENDD2345",
+        "public code kept"
+    );
+    // Case-insensitive legacy codes resolve to the same space; v2-format codes never
+    // match a legacy row.
+    let (_, lower) = app.get("/api/v2/resolve/endd2345", Auth::None).await;
+    assert_eq!(lower["meetingSpace"]["id"], by_id["meetingSpace"]["id"]);
+    let (s, _) = app.get("/api/v2/resolve/end-d234-5ab", Auth::None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    let mapping_sql = format!(
+        "SELECT cp.id FROM conference_participants cp JOIN conference_sessions cs ON cs.id = cp.conference_id \
+         WHERE cs.legacy_meeting_id = '{}' ORDER BY cp.id",
+        f.ended
+    );
+    let before = ids_of(c, &mapping_sql).await;
+    for _ in 0..3 {
+        app.state.meeting.compat.backfill(None).await.unwrap();
+        app.state
+            .meeting
+            .compat
+            .backfill(Some(f.ended))
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        ids_of(c, &mapping_sql).await,
+        before,
+        "participant mapping stable"
+    );
+    assert_eq!(
+        count(
+            c,
+            "SELECT count(*) FROM meeting_spaces WHERE origin='LEGACY'"
+        )
+        .await,
+        5,
+        "one space per legacy meeting"
+    );
+    assert_eq!(
+        count(
+            c,
+            "SELECT count(*) FROM conference_sessions WHERE origin='LEGACY'"
+        )
+        .await,
+        5
+    );
+}
+
+/// K-E2E-03 / 04: a partially completed backfill (crash after spaces, or only some
+/// meetings mapped) resumes without duplicates and converges to the same result as a
+/// clean run; concurrent runs serialize on the advisory lock.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn k_e2e_03_04_partial_backfill_resumes_without_duplicates() {
+    let Some((db, f)) = legacy_db().await else {
+        return;
+    };
+    // Schema only (all Phase 2 migrations), then wipe the backfilled rows to simulate a
+    // run that crashed part-way: spaces for two meetings exist, nothing else.
+    Migrator::up(&db.conn, None).await.unwrap();
+    let c = &db.conn;
+    exec(c, "DELETE FROM participant_sessions; DELETE FROM conference_participants; DELETE FROM conference_sessions; DELETE FROM meeting_spaces;").await;
+    let txn = c.begin().await.unwrap();
+    phase2_backfill::run(&txn, Some(f.ended)).await.unwrap();
+    phase2_backfill::run(&txn, Some(f.private)).await.unwrap();
+    txn.commit().await.unwrap();
+    exec(c, &format!("DELETE FROM participant_sessions WHERE conference_id IN (SELECT id FROM conference_sessions WHERE legacy_meeting_id='{}')", f.ended)).await;
+    exec(c, &format!("DELETE FROM conference_sessions WHERE legacy_meeting_id='{}' AND NOT EXISTS (SELECT 1 FROM conference_participants cp WHERE cp.conference_id = conference_sessions.id)", f.private)).await;
+    assert_eq!(count(c, "SELECT count(*) FROM meeting_spaces").await, 2);
+
+    // Concurrent resumptions.
+    let url = db.url.clone();
+    let mut handles = vec![];
+    for _ in 0..4 {
+        let url = url.clone();
+        handles.push(tokio::spawn(async move {
+            let conn = sea_orm::Database::connect(url).await.unwrap();
+            let txn = conn.begin().await.unwrap();
+            let r = phase2_backfill::run(&txn, None).await.unwrap();
+            txn.commit().await.unwrap();
+            r
+        }));
+    }
+    for h in handles {
+        h.await.unwrap();
+    }
+    let txn = c.begin().await.unwrap();
+    let report = phase2_backfill::evidence(&txn, None).await.unwrap();
+    txn.commit().await.unwrap();
+    assert!(report.is_clean(), "{report:#?}");
+    assert_eq!(report.mapped_spaces, 5);
+    assert_eq!(report.legacy_conference_sessions, 5);
+    assert_eq!(report.conference_participant_rows_from_legacy, 6);
+    assert_eq!(report.participant_session_rows_from_legacy, 6);
+    assert_eq!(
+        count(
+            c,
+            "SELECT count(*) - count(DISTINCT legacy_meeting_id) FROM meeting_spaces"
+        )
+        .await,
+        0
+    );
+    assert_eq!(
+        count(c, "SELECT count(*) - count(DISTINCT legacy_participant_id) FROM participant_sessions WHERE legacy_participant_id IS NOT NULL").await,
+        0,
+        "no duplicate historical sessions"
+    );
+    // A final rerun is a no-op.
+    let txn = c.begin().await.unwrap();
+    let rerun = phase2_backfill::run(&txn, None).await.unwrap();
+    txn.commit().await.unwrap();
+    assert_eq!(
+        (
+            rerun.inserted_spaces,
+            rerun.inserted_conferences,
+            rerun.inserted_participants,
+            rerun.inserted_sessions,
+            rerun.refreshed_rows
+        ),
+        (0, 0, 0, 0, 0)
+    );
+}
+
+/// §34: missing optional legacy metadata maps safely, and invalid historical data
+/// (inverted times, orphan-free FK-protected rows) yields deterministic results.
+#[tokio::test]
+async fn k_backfill_handles_missing_and_inconsistent_legacy_metadata() {
+    let Some((db, f)) = legacy_db().await else {
+        return;
+    };
+    let c = &db.conn;
+    let odd = Uuid::new_v4();
+    // No end_time, no description, no session logs; a participant whose leave_time
+    // precedes join_time; a guest with an empty display name.
+    exec(c, &format!(
+        "INSERT INTO meetings (id, meeting_identifier, host_id, title, is_private, start_time, end_time, status) \
+         VALUES ('{odd}', 'ODDM2345', '{}', 'odd', false, now() - interval '1 hour', NULL, 'ongoing')",
+        f.host
+    )).await;
+    exec(c, &format!(
+        "INSERT INTO participants (meeting_id, user_id, role, join_time, leave_time, status, display_name) VALUES \
+         ('{odd}', '{}', 'participant', now(), now() - interval '1 hour', 'joined', 'Alice'), \
+         ('{odd}', NULL, 'participant', now(), NULL, 'joined', '')",
+        f.alice
+    )).await;
+    Migrator::up(c, None).await.unwrap();
+    let txn = c.begin().await.unwrap();
+    let report = phase2_backfill::evidence(&txn, None).await.unwrap();
+    txn.commit().await.unwrap();
+    assert!(report.is_clean(), "{report:#?}");
+    assert_eq!(count(c, &format!("SELECT count(*) FROM conference_sessions WHERE legacy_meeting_id='{odd}' AND scheduled_end_at IS NULL AND started_at IS NULL AND status='LIVE'")).await, 1);
+    assert_eq!(count(c, &format!("SELECT count(*) FROM participant_sessions ps JOIN conference_sessions cs ON cs.id = ps.conference_id WHERE cs.legacy_meeting_id='{odd}' AND ps.disconnected_at IS NULL")).await, 2, "inverted leave time is not imported as a disconnect");
+    assert_eq!(count(c, &format!("SELECT count(*) FROM meeting_spaces WHERE legacy_meeting_id='{odd}' AND description IS NULL")).await, 1);
+}
+
+/// K-E2E-06 / 07: a v2 write produces canonical v2 state, and compatibility reads
+/// (resolver, canonical GET) reflect that v2 state — never a stale legacy copy.
+#[tokio::test]
+async fn k_e2e_06_07_v2_writes_are_canonical_and_compat_reads_follow() {
+    let Some((db, f)) = legacy_db().await else {
+        return;
+    };
+    Migrator::up(&db.conn, None).await.unwrap();
+    let app = TestApp::on(db, TestOptions::default());
+    let host = app
+        .state
+        .jwt_service
+        .generate_access_token(f.host, "user")
+        .unwrap();
+    let (_, r) = app.get("/api/v2/resolve/SCHD2345", Auth::None).await;
+    let sid = uuid(&r["meetingSpace"]["id"]);
+    // v2 edit of a legacy-mapped space: v2 becomes the authority for that space and
+    // the legacy refresh no longer overwrites it (version > 1).
+    let (s, v) = app
+        .patch(
+            &format!("/api/v2/meeting-spaces/{sid}"),
+            Auth::Bearer(&host),
+            json!({ "version": 1, "title": "Edited in v2" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    exec(
+        &app.db.conn,
+        &format!(
+            "UPDATE meetings SET title='Legacy rename' WHERE id='{}'",
+            f.scheduled
+        ),
+    )
+    .await;
+    app.state.meeting.compat.backfill(None).await.unwrap();
+    let (_, r) = app
+        .get("/api/v2/resolve/SCHD2345", Auth::Bearer(&host))
+        .await;
+    assert_eq!(r["meetingSpace"]["title"], "Edited in v2", "{r}");
+    // A v2-native conference in that space is v2-managed end to end.
+    let (s, c) = app
+        .post(
+            &format!("/api/v2/meeting-spaces/{sid}/conferences"),
+            Auth::Bearer(&host),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED);
+    let cid = uuid(&c["id"]);
+    let (s, v) = app
+        .post(
+            &format!("/api/v2/conferences/{cid}/start"),
+            Auth::Bearer(&host),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, canonical) = app
+        .get(&format!("/api/v2/conferences/{cid}"), Auth::Bearer(&host))
+        .await;
+    assert_eq!(canonical["status"], "LIVE");
+    assert_eq!(canonical["isLegacy"], false);
+    let (_, r) = app
+        .get("/api/v2/resolve/SCHD2345", Auth::Bearer(&host))
+        .await;
+    assert_eq!(
+        uuid(&r["conference"]["id"]),
+        cid,
+        "resolver picks the LIVE v2 occurrence"
+    );
+    // The legacy row is not the authority for the v2 conference: a legacy refresh
+    // cannot touch it.
+    exec(
+        &app.db.conn,
+        &format!(
+            "UPDATE meetings SET status='cancelled' WHERE id='{}'",
+            f.scheduled
+        ),
+    )
+    .await;
+    app.state.meeting.compat.backfill(None).await.unwrap();
+    let (_, canonical) = app
+        .get(&format!("/api/v2/conferences/{cid}"), Auth::Bearer(&host))
+        .await;
+    assert_eq!(
+        canonical["status"], "LIVE",
+        "legacy refresh never overwrites v2 state"
+    );
+}
+
+/// K-E2E-08: the shadow comparison detects deliberately injected mismatches in space
+/// identity, conference status, access policy, admission state and role; a backfill
+/// rerun repairs legacy-managed drift; shadow results never reach the client.
+#[tokio::test]
+async fn k_e2e_08_shadow_comparison_detects_injected_mismatch() {
+    let Some((db, f)) = legacy_db().await else {
+        return;
+    };
+    Migrator::up(&db.conn, None).await.unwrap();
+    let app = TestApp::on(db, TestOptions::default());
+    let c = &app.db.conn;
+    let compat = &app.state.meeting.compat;
+    let (_, clean) = compat.shadow_compare(f.ended).await.unwrap();
+    assert!(clean.is_empty(), "{clean:?}");
+    // v2-side corruption (must be detected, must not be "repaired" by trusting v2).
+    exec(c, &format!("UPDATE meeting_spaces SET meeting_code='zzz-zzzz-zzz', version = 2 WHERE legacy_meeting_id='{}'", f.ended)).await;
+    exec(c, &format!("UPDATE conference_participants SET role='HOST' WHERE user_id='{}' AND conference_id = (SELECT id FROM conference_sessions WHERE legacy_meeting_id='{}')", f.alice, f.ended)).await;
+    // Legacy-side changes after the mapping (admission + role + access policy).
+    exec(
+        c,
+        &format!(
+            "UPDATE participants SET status='joined' WHERE meeting_id='{}' AND user_id='{}'",
+            f.private, f.bob
+        ),
+    )
+    .await;
+    exec(
+        c,
+        &format!(
+            "UPDATE meetings SET is_private=false WHERE id='{}'",
+            f.private
+        ),
+    )
+    .await;
+    let (_, d_ended) = compat.shadow_compare(f.ended).await.unwrap();
+    assert!(
+        d_ended.iter().any(|d| d.contains("meeting_code")),
+        "{d_ended:?}"
+    );
+    assert!(d_ended.iter().any(|d| d.contains("role")), "{d_ended:?}");
+    let (_, d_private) = compat.shadow_compare(f.private).await.unwrap();
+    assert!(
+        d_private.iter().any(|d| d.contains("access_policy")),
+        "{d_private:?}"
+    );
+    assert!(
+        d_private
+            .iter()
+            .any(|d| d.contains(&f.bob.to_string()) && d.contains("ADMITTED")),
+        "{d_private:?}"
+    );
+    // Shadow logging counts mismatches (operations metric) without any client effect.
+    use backend::services::ops_metrics::OPS_METRICS;
+    let before = OPS_METRICS
+        .shadow_mismatches
+        .load(std::sync::atomic::Ordering::Relaxed);
+    compat.shadow_log(f.private).await;
+    assert!(
+        OPS_METRICS
+            .shadow_mismatches
+            .load(std::sync::atomic::Ordering::Relaxed)
+            > before
+    );
+    // Rerun repairs legacy-managed drift (admission state, role, access policy).
+    let report = compat.backfill(None).await.unwrap();
+    assert!(report.refreshed_rows >= 3, "{report:#?}");
+    let (_, d_private) = compat.shadow_compare(f.private).await.unwrap();
+    assert!(d_private.is_empty(), "{d_private:?}");
+    let (_, d_ended) = compat.shadow_compare(f.ended).await.unwrap();
+    assert!(
+        d_ended.iter().any(|d| d.contains("meeting_code")),
+        "a v2-edited code is reported, never silently overwritten: {d_ended:?}"
+    );
+    assert!(!d_ended.iter().any(|d| d.contains("role")), "{d_ended:?}");
+    // The shadow comparison is platform-admin only over HTTP.
+    let user = app.user("u").await;
+    let (s, _) = app
+        .get(
+            &format!("/api/v2/admin/compat/legacy-meetings/{}/shadow", f.private),
+            Auth::Bearer(&user.token),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+}

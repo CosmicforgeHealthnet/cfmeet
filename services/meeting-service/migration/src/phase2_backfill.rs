@@ -206,6 +206,57 @@ ON CONFLICT DO NOTHING
     )
 }
 
+/// Legacy-managed participants follow later legacy changes (waiting → joined,
+/// joined → kicked, role changes) so a re-run repairs dual-read drift reported by the
+/// shadow comparison. Only rows still owned by the legacy mapping (`role_source =
+/// 'LEGACY'` in a LEGACY-origin conference) are touched; the `IS DISTINCT FROM` guard
+/// keeps an idempotent re-run at zero updates.
+fn refresh_participants_sql(registered: bool) -> String {
+    let (source, matcher) = if registered {
+        (
+            "(SELECT DISTINCT ON (lp.meeting_id, lp.user_id) lp.* \
+               FROM participants lp \
+              WHERE lp.user_id IS NOT NULL AND ($1::uuid IS NULL OR lp.meeting_id = $1::uuid) \
+              ORDER BY lp.meeting_id, lp.user_id, lp.join_time DESC)",
+            "cp.user_id = p.user_id",
+        )
+    } else {
+        (
+            "(SELECT lp.* FROM participants lp \
+              WHERE lp.user_id IS NULL AND ($1::uuid IS NULL OR lp.meeting_id = $1::uuid))",
+            "cp.legacy_participant_id = p.id",
+        )
+    };
+    format!(
+        r#"
+UPDATE conference_participants cp
+   SET admission_state = {state},
+       role = {role},
+       admitted_at = CASE WHEN {state} = 'ADMITTED'
+                          THEN COALESCE(cp.admitted_at, p.join_time AT TIME ZONE 'UTC')
+                          ELSE cp.admitted_at END,
+       admitted_by = CASE WHEN {state} = 'ADMITTED'
+                          THEN COALESCE(cp.admitted_by, 'system:legacy')
+                          ELSE cp.admitted_by END,
+       removed_at = CASE WHEN {state} = 'REMOVED'
+                         THEN COALESCE(cp.removed_at, p.leave_time AT TIME ZONE 'UTC', p.join_time AT TIME ZONE 'UTC')
+                         ELSE cp.removed_at END,
+       removed_by = CASE WHEN {state} = 'REMOVED'
+                         THEN COALESCE(cp.removed_by, 'system:legacy')
+                         ELSE cp.removed_by END,
+       updated_at = now(),
+       version = cp.version + 1
+  FROM {source} p
+  JOIN meetings m ON m.id = p.meeting_id
+  JOIN conference_sessions c ON c.legacy_meeting_id = p.meeting_id AND c.origin = 'LEGACY'
+ WHERE cp.conference_id = c.id AND {matcher} AND cp.role_source = 'LEGACY'
+   AND (cp.admission_state IS DISTINCT FROM {state} OR cp.role IS DISTINCT FROM {role})
+"#,
+        role = PARTICIPANT_ROLE,
+        state = PARTICIPANT_STATE,
+    )
+}
+
 /// Historical sessions only where legacy data proves a connection existed
 /// (admitted rows). Waiting-only rows never connected → no session. The legacy
 /// participant id was the LiveKit identity, so it is reused as media identity.
@@ -284,6 +335,12 @@ pub async fn run<C: ConnectionTrait>(
             .execute(stmt(&insert_guest_participants_sql(), filter))
             .await?
             .rows_affected();
+    for registered in [true, false] {
+        refreshed_rows += conn
+            .execute(stmt(&refresh_participants_sql(registered), filter))
+            .await?
+            .rows_affected();
+    }
     let inserted_sessions = conn
         .execute(stmt(INSERT_SESSIONS, filter))
         .await?

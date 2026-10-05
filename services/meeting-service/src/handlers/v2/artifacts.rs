@@ -2,14 +2,10 @@
 //! Every handler resolves identity server-side and delegates to the domain services;
 //! no handler mutates artefact tables directly.
 
-use axum::{
-    extract::{Query, State},
-    http::StatusCode,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, Json};
 use uuid::Uuid;
 
-use super::{V2Json, V2Path};
+use super::{V2Json, V2Path, V2Query};
 use crate::{
     dto::v2::*,
     error::{ApiError, ApiResult, ErrorCode},
@@ -115,7 +111,7 @@ pub async fn list_artifacts(
     State(state): State<AppState>,
     actor: ActorContext,
     V2Path(id): V2Path<Uuid>,
-    Query(q): Query<ArtifactListQuery>,
+    V2Query(q): V2Query<ArtifactListQuery>,
 ) -> ApiResult<Json<ArtifactListResponse>> {
     Ok(Json(ArtifactListResponse {
         artifacts: state
@@ -180,6 +176,29 @@ pub async fn delete_artifact(
     V2Path((id, aid)): V2Path<(Uuid, Uuid)>,
 ) -> ApiResult<Json<ArtifactView>> {
     Ok(Json(state.meeting.artifacts.delete(&actor, id, aid).await?))
+}
+
+/// Conference attendance (Part J). Thin read over the same aggregation as the
+/// `ATTENDANCE_REPORT` export; nothing is stored and no artefact is created.
+#[utoipa::path(
+    get, path = "/api/v2/conferences/{id}/attendance", tag = "Artifacts (v2)", operation_id = "v2_conference_attendance",
+    params(("id" = Uuid, Path, description = "Conference id")),
+    responses(
+        (status = 200, description = "Attendance", body = AttendanceReport),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED / PROFILE_POLICY_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "CONFERENCE_NOT_FOUND", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []), ("participant_token" = []))
+)]
+pub async fn conference_attendance(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(id): V2Path<Uuid>,
+) -> ApiResult<Json<AttendanceReport>> {
+    Ok(Json(
+        state.meeting.artifacts.attendance_for(&actor, id).await?,
+    ))
 }
 
 /// Generate an attendance report, poll report or chat export (policy-gated).
@@ -345,7 +364,7 @@ pub async fn get_transcript(
     State(state): State<AppState>,
     actor: ActorContext,
     V2Path((id, aid)): V2Path<(Uuid, Uuid)>,
-    Query(q): Query<TranscriptQuery>,
+    V2Query(q): V2Query<TranscriptQuery>,
 ) -> ApiResult<Json<TranscriptView>> {
     Ok(Json(
         state

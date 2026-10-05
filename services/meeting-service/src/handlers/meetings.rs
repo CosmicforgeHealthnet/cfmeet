@@ -147,7 +147,7 @@ pub async fn create_instant_meeting(
     join_log.insert(&state.db).await?;
 
     // Generate LiveKit join token
-    let join_token = state.livekit_service.generate_join_token(
+    let join_token = state.legacy_rtc.issue_legacy_join_credential(
         &meeting_identifier,
         &participant_id.to_string(),
         &user.username,
@@ -167,7 +167,7 @@ pub async fn create_instant_meeting(
         created_at: format_utc(meeting.created_at),
         participant_id,
         join_token,
-        livekit_url: state.livekit_service.get_url().to_string(),
+        livekit_url: state.legacy_rtc.media_url().to_string(),
         room_name: meeting.meeting_identifier,
     };
 
@@ -863,7 +863,7 @@ async fn join_meeting_internal(
             ParticipantStatus::Joined => {
                 // Already admitted - generate token and return
                 let room_name = &meeting.meeting_identifier;
-                let join_token = state.livekit_service.generate_join_token(
+                let join_token = state.legacy_rtc.issue_legacy_join_credential(
                     room_name,
                     &existing.id.to_string(),
                     &existing.display_name,
@@ -886,7 +886,7 @@ async fn join_meeting_internal(
                         participant_id: existing.id,
                         role: format_role(&existing.role),
                         join_token,
-                        livekit_url: state.livekit_service.get_url().to_string(),
+                        livekit_url: state.legacy_rtc.media_url().to_string(),
                         room_name: room_name.clone(),
                         access_token,
                         refresh_token,
@@ -1000,7 +1000,7 @@ async fn join_meeting_internal(
     // Generate LiveKit join token
     // Room name is the meeting identifier (human-friendly code)
     let room_name = &meeting.meeting_identifier;
-    let join_token = state.livekit_service.generate_join_token(
+    let join_token = state.legacy_rtc.issue_legacy_join_credential(
         room_name,
         &participant_id.to_string(),
         &display_name,
@@ -1021,7 +1021,7 @@ async fn join_meeting_internal(
         participant_id,
         role: format_role(&role),
         join_token,
-        livekit_url: state.livekit_service.get_url().to_string(),
+        livekit_url: state.legacy_rtc.media_url().to_string(),
         room_name: room_name.clone(),
         access_token,
         refresh_token,

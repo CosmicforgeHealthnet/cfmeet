@@ -23,6 +23,8 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use utoipa::ToSchema;
+
+use crate::domain::{AdmissionState, IdentityType, Role};
 use uuid::Uuid;
 
 use super::{
@@ -48,6 +50,29 @@ use crate::{
 };
 
 /// Signed, short-lived, single-object read access (never persisted).
+/// Conference attendance (Part J attendance contract). Attendance time is merged from
+/// participant-session intervals, so multi-device presence is never double counted.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AttendanceReport {
+    pub conference_id: Uuid,
+    pub generated_at: chrono::DateTime<Utc>,
+    pub session_count: u64,
+    pub participants: Vec<AttendanceEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AttendanceEntry {
+    pub participant_id: Uuid,
+    pub display_name: String,
+    pub role: Role,
+    pub identity_type: IdentityType,
+    pub admission_state: AdmissionState,
+    pub admitted_at: Option<chrono::DateTime<Utc>>,
+    pub attendance_seconds: i64,
+}
+
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ArtifactAccess {
@@ -986,6 +1011,26 @@ impl ArtifactService {
         &self,
         conference: &conference_sessions::Model,
     ) -> ApiResult<(Value, Value)> {
+        let report = self.attendance_report(conference).await?;
+        let metadata = json!({
+            "generatedAt": report.generated_at,
+            "participantCount": report.participants.len(),
+            "sessionCount": report.session_count,
+        });
+        let body = json!({
+            "conferenceId": report.conference_id,
+            "generatedAt": report.generated_at,
+            "participants": report.participants,
+        });
+        Ok((body, metadata))
+    }
+
+    /// Attendance derived from session intervals — the single computation behind both
+    /// `GET /conferences/{id}/attendance` and the `ATTENDANCE_REPORT` artefact.
+    async fn attendance_report(
+        &self,
+        conference: &conference_sessions::Model,
+    ) -> ApiResult<AttendanceReport> {
         let now = Utc::now();
         let seconds: std::collections::HashMap<Uuid, i64> =
             crate::services::admission::attendance_seconds(&self.core.db, conference.id, now)
@@ -997,39 +1042,53 @@ impl ArtifactService {
             .order_by_asc(conference_participants::Column::RequestedAt)
             .all(&self.core.db)
             .await?;
-        let rows: Vec<Value> = participants
-            .iter()
-            .map(|p| {
-                json!({
-                    "participantId": p.id,
-                    "displayName": p.display_name,
-                    "role": p.role,
-                    "identityType": p.identity_type,
-                    "admissionState": p.admission_state,
-                    "admittedAt": p.admitted_at,
-                    "attendanceSeconds": seconds.get(&p.id).copied().unwrap_or(0),
-                })
-            })
-            .collect();
-        let sessions = {
+        let session_count = {
             use sea_orm::PaginatorTrait;
             crate::models::participant_sessions::Entity::find()
                 .filter(crate::models::participant_sessions::Column::ConferenceId.eq(conference.id))
                 .count(&self.core.db)
                 .await?
         };
-        Ok((
-            json!({
-                "conferenceId": conference.id,
-                "generatedAt": now,
-                "participants": rows,
-            }),
-            json!({
-                "generatedAt": now,
-                "participantCount": participants.len(),
-                "sessionCount": sessions,
-            }),
-        ))
+        Ok(AttendanceReport {
+            conference_id: conference.id,
+            generated_at: now,
+            session_count,
+            participants: participants
+                .iter()
+                .map(|p| AttendanceEntry {
+                    participant_id: p.id,
+                    display_name: p.display_name.clone(),
+                    role: p.role,
+                    identity_type: p.identity_type,
+                    admission_state: p.admission_state,
+                    admitted_at: p.admitted_at,
+                    attendance_seconds: seconds.get(&p.id).copied().unwrap_or(0),
+                })
+                .collect(),
+        })
+    }
+
+    /// `GET /conferences/{id}/attendance` — the attendance contract without creating an
+    /// artefact. Same authorization as the attendance export (`ArtifactExport` +
+    /// profile `exports.attendanceReportAllowed`); nothing is stored.
+    pub async fn attendance_for(
+        &self,
+        ctx: &ActorContext,
+        conference_id: Uuid,
+    ) -> ApiResult<AttendanceReport> {
+        let c = ArtifactCtx::load(&self.core, ctx, conference_id).await?;
+        c.require(
+            Permission::ArtifactExport,
+            "You are not allowed to view attendance",
+        )?;
+        if !c.profile.policy.exports.attendance_report_allowed {
+            inc(&OM.profile_policy_denials);
+            return Err(ApiError::domain(
+                ErrorCode::ProfilePolicyDenied,
+                "Attendance reporting is disabled by the meeting policy",
+            ));
+        }
+        self.attendance_report(&c.conference).await
     }
 
     async fn poll_report(

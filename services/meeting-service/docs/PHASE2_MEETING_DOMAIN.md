@@ -1,4 +1,4 @@
-# Phase 2 Meeting Domain (`/api/v2`) — Parts A–I
+# Phase 2 Meeting Domain (`/api/v2`) — Parts A–L
 
 Spec: *CF Meet Phase 2 Backend Implementation Specification v1.1*. Current→target map:
 [`docs/phases/phase-02/parts-a-d-implementation-map.md`](../../../docs/phases/phase-02/parts-a-d-implementation-map.md).
@@ -101,7 +101,8 @@ are append-only; invitation `usage_count <= use_limit`.
 `FEATURE_CONFERENCE_REALTIME_ENABLED`), Part F (`FEATURE_COLLABORATION_V2_ENABLED`: media controls and
 collaboration routes, breakout closer worker, webinar attendee defaults), and placeholders
 (`FEATURE_RECORDING_V2_ENABLED`, `FEATURE_WEBINAR_MODE_ENABLED`, `FEATURE_HEALTHCARE_PROFILE_ENABLED`).
-`FEATURE_LEGACY_MEETING_WRITE_DISABLED` is not honoured during A–D.
+`FEATURE_LEGACY_MEETING_WRITE_DISABLED` was not honoured during A–I; since Parts J–L it retires legacy
+writes (see "Parts J–L" below; default off).
 
 ## Legacy compatibility
 
@@ -612,3 +613,168 @@ composite capture, start/stop, real callbacks, real MP4 in object storage, signe
 unauthorized rejection, callback dedupe, delete + confirmed absence, plus direct S3 object /
 metadata / checksum / signed read / delete / absence checks), `real_livekit_part_h_stage_and_backstage`
 and `real_livekit_part_i_presence_and_mapping`.
+
+## Parts J–L — API contract, backend map, security & failure closure
+
+J–L are a certification and hardening pass over the A–I implementation, not a rewrite. No new
+deployable service and **no new migration** (every change is code, contract or test; the
+existing additive migrations stay as they are — verified fresh up → down 7 → up).
+
+### Public v2 authority and route classification
+
+| Class | Routes | Contract |
+|---|---|---|
+| A. canonical `/api/v2` | 136 operations (`routes/v2.rs`) | OpenAPI (`packages/contracts/openapi/meeting-service.json`) |
+| B. legacy compatibility | `/api/v1/meetings/**`, `/api/v1/participants/**`, `/api/v1/api/meetings/**` | retained, documented as legacy; writes retire behind `FEATURE_LEGACY_MEETING_WRITE_DISABLED` |
+| C. internal / provider | `/internal/rtc/livekit/webhook`, `/internal/transcription/events`, `/internal/metrics`, `/internal/rtc/metrics`, `/internal/operations/**` | not published; signature- or `X-Internal-Token`-protected (`404` otherwise, even for malformed queries) |
+| D. accidental unversioned Phase 2 routes | none found | — |
+
+Non-meeting v1 surfaces (`/api/v1/auth`, `users`, `api-keys`, `webhooks`, `admin`) are account /
+platform APIs, not Phase 2 meeting APIs, and are unaffected.
+
+Equivalences documented instead of duplicate routes:
+
+| Part J name | Canonical route |
+|---|---|
+| `GET /meeting-spaces/{id}/occurrences` | `GET /meeting-spaces/{id}/conferences` (`from` / `to` window) |
+| `GET /meeting-spaces/{idOrCode}` | `GET /meeting-spaces/{id}` + `GET /resolve/{identifier}` (v2 id/code, legacy id/code) |
+| `PATCH /conferences/{id}/media-policy` | `PATCH /conferences/{id}/collaboration-policy` (+ per-participant `audio-lock` / `video-lock` / `screen-share-lock`, `mute`, `spotlights`) |
+| attendance | **new** thin `GET /conferences/{id}/attendance` over the same aggregation as the `ATTENDANCE_REPORT` export (`ArtifactExport` permission + `exports.attendanceReportAllowed`; stores nothing) |
+
+### Join response contract
+
+`POST /conferences/{id}/join` → `JoinConferenceResponse`: `conference {id, status, meetingSpaceId,
+isLocked}`, `participant`, `participantSession {id, expiresAt}` (null while waiting),
+`participantToken` (guests, only when newly issued), `rtc {provider, url, credential, expiresAt}`
+(null unless `rtcStatus = ISSUED`), `rtcStatus` (`ISSUED` | `NOT_ISSUED_WAITING` |
+`PROVIDER_CONTROL_DISABLED`), `permissions {audioPublish, videoPublish, screenSharePublish,
+dataPublish, subscribe}`, `policy {recordingActive, transcriptionActive}`, `mediaContext`, and
+(Part J) `realtime {enabled, ticketPath, streamPath, eventsPath, conferencePath,
+participantPath}`. A WAITING participant gets all-false publish permissions, no session, no
+credential, and the `realtime` block to follow admission (`SELF_ONLY` stream or polling
+`participants/me`). `recordingActive` stays true while a recording is `STOPPING` (the provider
+has not confirmed the capture ended). Runtime JSON is validated against the OpenAPI schema in
+`tests/api_contract_matrix.rs` (strict: no undocumented property).
+
+### Standard errors and request IDs
+
+Every `/api/v2` error — extractor rejections (JSON, path, query, WebSocket upgrade), unknown
+paths (`ENDPOINT_NOT_FOUND`) and methods (`METHOD_NOT_ALLOWED`), auth, domain, provider and
+infrastructure failures — is `{ "success": false, "error": { "code", "message", "requestId" } }`
+(+ `retryAfterSeconds` on `RATE_LIMITED`). `ErrorBody.code` references the published `ErrorCode`
+enum. PostgreSQL connectivity loss is `503 SERVICE_UNAVAILABLE` (retryable, nothing decided);
+other database faults `500 DATABASE_ERROR`; SQL, DSNs, provider bodies, secrets and paths are
+logged only.
+
+The request ID is **always server-generated** (`req_<uuid>`), returned in `x-request-id` and the
+error body, written to audit rows and outbox rows (→ realtime `correlationId`), attached to the
+request tracing span, and re-entered by the outbox relay when it executes a provider command. A
+well-formed client `x-request-id` is never adopted as authority; it is only logged and echoed as
+`x-client-request-id`.
+
+### OpenAPI authority
+
+Regenerated from code (`cargo run --bin export_openapi`). 187 operations (136 `/api/v2`, was
+186 / 135: +1 `GET /conferences/{id}/attendance`). Fixed contract defects: domain/artefact
+enums were published with Rust variant names (`Live`, `Admitted`) instead of the wire values
+(`LIVE`, `ADMITTED`) because the `ToSchema` derive cannot see `serde(rename)` inside the enum
+macros — the macros now emit the schema; internal callback / operations schemas
+(`ProviderTranscriptionEvent`, `CallbackAck`, `Incident*`, `ConferenceHealth*`, `OutboxStatus`)
+are no longer in the public components. `tests/openapi_contract.rs` derives the route table from
+`routes/v2.rs` and checks both directions, dangling refs, unique `v2_` operation ids, security
+requirements, JSON content types, an error response per operation, enum validity, and the
+absence of secret / storage / provider fields.
+
+### Existence disclosure (intentional distinctions)
+
+- Foreign participant ids (any moderation primitive, single or bulk) → `404 PARTICIPANT_NOT_FOUND`
+  before any mutation or provider call.
+- Foreign artefact / recording ids → `404` (conference-scoped lookup).
+- Foreign member ids → `404`; foreign / unknown invitation ids → identical `410 INVITATION_INVALID`.
+- `GET /meeting-spaces/{id}` without authority → the `SUMMARY` view (an id or code identifies,
+  never authorizes — A–D contract).
+- Anonymous moderation → `403 PERMISSION_DENIED`; anonymous collaboration / artefact routes →
+  `401 AUTHENTICATION_REQUIRED` (both stable, both carry a requestId).
+
+### Module ownership (Part K map)
+
+| Part K module | Implementation |
+|---|---|
+| `models/meeting_spaces.rs`, `conference_sessions.rs`, `conference_participants.rs`, `participant_sessions.rs`, `meeting_members.rs`, `meeting_invitations.rs`, `meeting_artifacts.rs`, `meeting_consents.rs`, `breakout_rooms.rs`, `meeting_polls.rs`, `meeting_questions.rs` | present, authoritative for v2 |
+| `models/meetings.rs`, `models/participants.rs` | legacy compatibility only (not extended; checked by `tests/architecture_boundaries.rs`) |
+| `services/meeting_space.rs`, `conference.rs`, `meeting_access.rs`, `meeting_permissions.rs`, `admission.rs`, `rtc_provider.rs`, `meeting_events.rs`, `recurrence.rs` | present |
+| recording / artefact orchestration | `services/artifacts/*` (`recording.rs`, `service.rs`, `consent.rs`, `transcription.rs`, `storage.rs`, `recorder.rs`) |
+| quality aggregation | `services/quality/*` |
+| conference scheduler / reconciler | `workers/conference_scheduler.rs`, `workers/conference_reconciler.rs` |
+| artifact finalizer / retention worker | `services/artifacts/retention.rs` (`ArtifactRetentionWorker`: finalization retries + retention deletes) |
+| outbox relay / breakout closer | `workers/outbox_relay.rs`, `workers/breakout_closer.rs` |
+| legacy workers | `workers/meeting_auto_start.rs`, `meeting_auto_end.rs` (legacy meetings only; now multi-instance safe) |
+
+Handlers are transport only (`tests/architecture_boundaries.rs` forbids transactions, entity
+access, permission matrices and provider calls in `handlers/v2`). The LiveKit SDK is confined to
+`services/rtc_provider.rs`, `services/livekit.rs` and `services/artifacts/recorder.rs`; concrete
+providers are built only in `services/meeting_domain.rs`.
+
+**K fix — legacy media credentials:** legacy v1 handlers minted LiveKit tokens directly through
+`LiveKitService`. They now call the provider-neutral `LegacyRtcCredentials` trait
+(`AppState::legacy_rtc`); the LiveKit implementation stays in the adapter. The legacy host token
+no longer carries `room_record` (a client-held recording grant would bypass the Part G
+recording authority — consent, profile, permission); `room_admin` for the legacy room is kept
+for legacy-client compatibility.
+
+### Migration sequence status
+
+| Step | Status |
+|---|---|
+| 1 schema only | done (`m20261003_000001`, additive) |
+| 2–4 backfill spaces / conferences / participants | done (`m20261003_000002` + `migration/src/phase2_backfill.rs`; idempotent, advisory-locked, restart-safe) |
+| 5 compatibility resolver | done (`services/compat.rs`, `GET /api/v2/resolve/{identifier}`) |
+| 6 dual-read shadow comparison | done; J–L: role drift detection + `shadow_reads` / `shadow_mismatches` / `shadow_failures` metrics; backfill rerun now repairs legacy-managed participant drift (admission state, role) |
+| 7 controlled v2 writes | `FEATURE_MEETING_V2_ENABLED` + `MEETING_V2_WRITE_ALLOWLIST` |
+| 8 consumer contract certification | done (Part J) |
+| 9 observe / certify | **pending production rollout observation** |
+| 10 retire legacy writes | code path ready (`FEATURE_LEGACY_MEETING_WRITE_DISABLED`), production retirement pending |
+
+Authority direction (no hybrid): v2-origin spaces / conferences are written only through
+`/api/v2`; legacy handlers address only legacy rows (a v2 id or code is unknown to them).
+Legacy-origin conferences stay legacy-managed (v2 refuses writes with
+`CONFERENCE_STATE_CONFLICT`) and are refreshed from the legacy row by the backfill; a legacy
+space edited through v2 (`version > 1`) is no longer overwritten by the refresh.
+
+### Legacy write retirement
+
+`FEATURE_LEGACY_MEETING_WRITE_DISABLED=true` → every non-GET/HEAD/OPTIONS route under
+`/api/v1/meetings`, `/api/v1/participants` and `/api/v1/api` answers `410 LEGACY_WRITE_DISABLED`
+before authentication or any database access (metric `legacy_writes_rejected`). Legacy reads
+(`GET` list / detail / participants / waiting / chat / public info), the resolver and all of
+`/api/v2` keep working. This includes legacy **join** (it creates legacy participant rows), so the
+web client must be on the v2 join before the flag is enabled. Default: off.
+
+- **LEGACY WRITE CODE PATH: TECHNICALLY READY TO DISABLE** (certified by `tests/legacy_retirement.rs`).
+- **PRODUCTION RETIREMENT: PENDING ROLLOUT OBSERVATION** — remaining legacy-only consumer: the web
+  client (`apps/web`) calls only v1 meeting routes (create / instant / update / delete / end, join,
+  waiting admit / deny, chat, screen share, audio / video) and no `/api/v2` route; third-party
+  `Api-Key` integrations use `/api/v1/api/meetings`. No production shadow-mismatch or traffic
+  data exists in this staging environment, and legacy-managed conferences have no v2 write path
+  until they are re-created as v2 occurrences.
+
+### Failure behaviour (summary)
+
+| Failure | Behaviour |
+|---|---|
+| PostgreSQL down | writes refused (`503 SERVICE_UNAVAILABLE` / `500 DATABASE_ERROR`), no session, credential, role grant, recording, artefact mutation or invitation use; no Redis fallback |
+| Redis down | REST authority continues; outbox rows stay PENDING (retried, never dropped, `outbox_retried` / `realtime_publish_failures`); REST replay + WebSocket PostgreSQL tailing |
+| LiveKit down on join | `503 RTC_PROVIDER_UNAVAILABLE`, no connected session, admission preserved, retry reuses the participant |
+| LiveKit termination failure | stays `ENDING`, joins refused, retried by END / relay / reconciler, `ENDED` only after confirmed absence |
+| outbox delayed | committed state authoritative; later relay delivers once |
+| recording provider failure | conference unaffected; `REQUESTED` → retry or `FAILED`, never fake `READY` |
+| WebSocket disconnect | RTC continues; cursor replay or canonical `GET /conferences/{id}` |
+| worker crash | leases (`worker_leases`, outbox `available_at` + `locked_by`, artefact row leases) expire and another instance resumes; legacy auto-start/auto-end now conditional + transactional |
+
+### Certification suites (J–L)
+
+`tests/openapi_contract.rs` (route ↔ contract parity, J-E2E-06/07/10), `tests/api_contract_matrix.rs`
+(API matrix, J-E2E-01..05, 08, 09, leave / end), `tests/migration_backfill.rs` (K-E2E-01..08),
+`tests/legacy_retirement.rs` (K-E2E-10, flag matrix), `tests/architecture_boundaries.rs`
+(K-E2E-09), `tests/platform_security.rs` (L-S1..L-S20), `tests/platform_concurrency.rs`
+(L-C1..L-C12), `tests/platform_failure.rs` (L-F1..L-F12).

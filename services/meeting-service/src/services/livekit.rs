@@ -1,12 +1,14 @@
-//! LiveKit Service
+//! LiveKit adapter for the legacy `/api/v1` meeting API.
 //!
-//! Service for generating LiveKit access tokens and managing rooms.
+//! Provider-specific implementation of [`LegacyRtcCredentials`]; handlers only see the
+//! provider-neutral trait. The Phase 2 domain uses [`crate::services::rtc_provider`].
 
 use livekit_api::access_token::{AccessToken, VideoGrants};
 use std::time::Duration;
 
 use crate::config::LiveKitConfig;
 use crate::error::{ApiError, ApiResult};
+use crate::services::rtc_provider::LegacyRtcCredentials;
 
 /// Token validity duration (default: 6 hours)
 const TOKEN_TTL_SECS: u64 = 6 * 60 * 60;
@@ -55,10 +57,11 @@ impl LiveKitService {
         grants.can_subscribe = true;
         grants.can_publish_data = true;
 
-        // Host-specific permissions
+        // Host-specific permissions. `room_record` is deliberately never granted: a
+        // client-held recording grant would bypass the Part G recording authority
+        // (permission, profile and consent checks). Recording is server-initiated only.
         if is_host {
             grants.room_admin = true;
-            grants.room_record = true;
         }
 
         let token = AccessToken::with_api_key(&self.api_key, &self.api_secret)
@@ -92,5 +95,51 @@ impl LiveKitService {
             })?;
 
         Ok(token)
+    }
+}
+
+impl LegacyRtcCredentials for LiveKitService {
+    fn issue_legacy_join_credential(
+        &self,
+        room_name: &str,
+        participant_identity: &str,
+        participant_name: &str,
+        is_host: bool,
+    ) -> ApiResult<String> {
+        self.generate_join_token(room_name, participant_identity, participant_name, is_host)
+    }
+
+    fn media_url(&self) -> &str {
+        self.get_url()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_host_token_never_carries_recording_grant() {
+        let svc = LiveKitService::new(&LiveKitConfig {
+            url: "wss://rtc.test".into(),
+            api_key: "key".into(),
+            api_secret: "secret-secret-secret-secret-secret".into(),
+        });
+        let token = svc
+            .issue_legacy_join_credential("ROOM2345", "p1", "Host", true)
+            .unwrap();
+        let claims = livekit_api::access_token::TokenVerifier::with_api_key(
+            "key",
+            "secret-secret-secret-secret-secret",
+        )
+        .verify(&token)
+        .unwrap();
+        assert!(claims.video.room_join && claims.video.room_admin);
+        assert!(
+            !claims.video.room_record,
+            "legacy host must not hold room_record"
+        );
+        assert!(!claims.video.room_create);
+        assert_eq!(claims.video.room, "ROOM2345");
     }
 }

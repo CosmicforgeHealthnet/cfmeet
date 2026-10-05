@@ -72,6 +72,11 @@ counters!(
     backstage_evictions,
     profile_policy_denials,
     enhanced_audit_records,
+    // Parts J–L: migration / compatibility observation
+    legacy_writes_rejected,
+    shadow_reads,
+    shadow_mismatches,
+    shadow_failures,
 );
 
 pub static OPS_METRICS: OpsMetrics = OpsMetrics::new();

@@ -606,6 +606,45 @@ pub struct JoinConferenceResponse {
     pub policy: JoinPolicy,
     /// Part F: the media context (main room or breakout) the credential targets.
     pub media_context: MediaContextView,
+    /// Part J: how to follow admission / denial and recover state. A WAITING
+    /// participant subscribes here (scope SELF_ONLY) instead of receiving media.
+    pub realtime: JoinRealtimeInfo,
+}
+
+/// Realtime subscription and recovery resources for a joined (or waiting) participant.
+/// Paths are relative to the API origin; authorization is re-evaluated on every call.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct JoinRealtimeInfo {
+    /// Whether the conference WebSocket stream is available (`FEATURE_CONFERENCE_REALTIME_ENABLED`).
+    pub enabled: bool,
+    /// `POST` → one-shot WebSocket ticket (present when `enabled`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ticket_path: Option<String>,
+    /// WebSocket stream (`?ticket=…&cursor=…`; present when `enabled`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_path: Option<String>,
+    /// REST replay of missed events (`?after=<sequence>`; present when `enabled`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub events_path: Option<String>,
+    /// Canonical conference state — the primary recovery resource.
+    pub conference_path: String,
+    /// The caller's own participant state (admission decision fallback when polling).
+    pub participant_path: String,
+}
+
+impl JoinRealtimeInfo {
+    pub fn for_conference(conference_id: Uuid, realtime_enabled: bool) -> Self {
+        let base = format!("/api/v2/conferences/{conference_id}");
+        Self {
+            enabled: realtime_enabled,
+            ticket_path: realtime_enabled.then(|| format!("{base}/realtime/ticket")),
+            stream_path: realtime_enabled.then(|| format!("{base}/realtime")),
+            events_path: realtime_enabled.then(|| format!("{base}/events")),
+            participant_path: format!("{base}/participants/me"),
+            conference_path: base,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
