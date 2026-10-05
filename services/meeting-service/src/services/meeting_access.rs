@@ -233,51 +233,23 @@ impl MeetingAccessService {
             }
         }
 
-        match space.access_policy {
-            AccessPolicy::Public => Ok(base(AccessGrant::Public)),
-            AccessPolicy::PublicPasscode => {
+        let verified_domain = registered.and_then(|r| r.verified_domain());
+        let allowed_domains = access_config(space).allowed_domains;
+        match policy_step(&PolicyInput {
+            policy: space.access_policy,
+            registered: registered.is_some(),
+            organization_id: space.organization_id,
+            verified_organizations: &req.actor.verified_organizations,
+            verified_domain: verified_domain.as_deref(),
+            allowed_domains: &allowed_domains,
+        }) {
+            PolicyStep::Grant(grant) => Ok(base(grant)),
+            PolicyStep::Deny(e) => Err(e),
+            PolicyStep::VerifyPasscode => {
                 self.verify_passcode(space, req.actor, req.passcode).await?;
                 Ok(base(AccessGrant::Passcode))
             }
-            AccessPolicy::Authenticated => match registered {
-                Some(_) => Ok(base(AccessGrant::Authenticated)),
-                None => Err(ApiError::domain(
-                    ErrorCode::AuthenticationRequired,
-                    "Sign in to join this meeting",
-                )),
-            },
-            AccessPolicy::InviteOnly => Err(denied("This meeting is invite-only")),
-            AccessPolicy::OrganizationOnly => {
-                // Membership comes only from the server-side OrganizationDirectory
-                // (ActorContext.verified_organizations); never from the request.
-                if registered.is_none() {
-                    return Err(ApiError::domain(
-                        ErrorCode::AuthenticationRequired,
-                        "Sign in with your organization account to join this meeting",
-                    ));
-                }
-                let org = space
-                    .organization_id
-                    .ok_or_else(|| denied("Organization not configured"))?;
-                if req.actor.verified_organizations.contains(&org) {
-                    Ok(base(AccessGrant::Organization))
-                } else {
-                    Err(denied("This meeting is restricted to its organization"))
-                }
-            }
-            AccessPolicy::DomainRestricted => {
-                let allowed = access_config(space).allowed_domains;
-                let domain = registered.and_then(|r| r.verified_domain());
-                match domain {
-                    Some(d) if allowed.iter().any(|a| a.eq_ignore_ascii_case(&d)) => {
-                        Ok(base(AccessGrant::Domain))
-                    }
-                    _ => Err(denied(
-                        "This meeting is restricted to verified accounts of specific domains",
-                    )),
-                }
-            }
-            AccessPolicy::HealthcareAppointment => {
+            PolicyStep::AppointmentAuthority => {
                 // Active appointment authorization is verified server-side by the
                 // appointment authority on every join/reconnect (fail closed).
                 let decision = self
@@ -304,13 +276,276 @@ impl MeetingAccessService {
                     }
                 }
             }
-            AccessPolicy::Custom => {
+            PolicyStep::CustomAdapter => {
                 let role = self.adapter(&req).await?;
                 Ok(AccessDecision {
                     adapter_role: role,
                     ..base(AccessGrant::Adapter)
                 })
             }
+        }
+    }
+}
+
+/// Inputs of the space-policy step (after explicit grants: owner, membership,
+/// invitation, reconnect). Everything here is server-resolved.
+pub struct PolicyInput<'a> {
+    pub policy: AccessPolicy,
+    pub registered: bool,
+    pub organization_id: Option<Uuid>,
+    pub verified_organizations: &'a [Uuid],
+    pub verified_domain: Option<&'a str>,
+    pub allowed_domains: &'a [String],
+}
+
+/// Outcome of the space-policy step. Steps that need I/O (passcode verification,
+/// appointment authority, custom adapter) are returned for the caller to run.
+#[derive(Debug)]
+pub enum PolicyStep {
+    Grant(AccessGrant),
+    Deny(ApiError),
+    VerifyPasscode,
+    AppointmentAuthority,
+    CustomAdapter,
+}
+
+/// Pure access-policy decision (deterministic; unit-tested below). Public and
+/// passcode spaces never grant a role; organization / domain membership comes only from
+/// the server-resolved actor, never from a request.
+pub fn policy_step(i: &PolicyInput<'_>) -> PolicyStep {
+    match i.policy {
+        AccessPolicy::Public => PolicyStep::Grant(AccessGrant::Public),
+        AccessPolicy::PublicPasscode => PolicyStep::VerifyPasscode,
+        AccessPolicy::Authenticated if i.registered => {
+            PolicyStep::Grant(AccessGrant::Authenticated)
+        }
+        AccessPolicy::Authenticated => PolicyStep::Deny(ApiError::domain(
+            ErrorCode::AuthenticationRequired,
+            "Sign in to join this meeting",
+        )),
+        AccessPolicy::InviteOnly => PolicyStep::Deny(denied("This meeting is invite-only")),
+        AccessPolicy::OrganizationOnly => {
+            if !i.registered {
+                return PolicyStep::Deny(ApiError::domain(
+                    ErrorCode::AuthenticationRequired,
+                    "Sign in with your organization account to join this meeting",
+                ));
+            }
+            match i.organization_id {
+                None => PolicyStep::Deny(denied("Organization not configured")),
+                Some(org) if i.verified_organizations.contains(&org) => {
+                    PolicyStep::Grant(AccessGrant::Organization)
+                }
+                Some(_) => {
+                    PolicyStep::Deny(denied("This meeting is restricted to its organization"))
+                }
+            }
+        }
+        AccessPolicy::DomainRestricted => match i.verified_domain {
+            Some(d) if i.allowed_domains.iter().any(|a| a.eq_ignore_ascii_case(d)) => {
+                PolicyStep::Grant(AccessGrant::Domain)
+            }
+            _ => PolicyStep::Deny(denied(
+                "This meeting is restricted to verified accounts of specific domains",
+            )),
+        },
+        AccessPolicy::HealthcareAppointment => PolicyStep::AppointmentAuthority,
+        AccessPolicy::Custom => PolicyStep::CustomAdapter,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input<'a>(
+        policy: AccessPolicy,
+        registered: bool,
+        orgs: &'a [Uuid],
+        org: Option<Uuid>,
+        domain: Option<&'a str>,
+        allowed: &'a [String],
+    ) -> PolicyInput<'a> {
+        PolicyInput {
+            policy,
+            registered,
+            organization_id: org,
+            verified_organizations: orgs,
+            verified_domain: domain,
+            allowed_domains: allowed,
+        }
+    }
+
+    fn code(step: PolicyStep) -> Option<ErrorCode> {
+        match step {
+            PolicyStep::Deny(e) => e.code(),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn public_and_passcode_never_grant_more_than_entry() {
+        assert!(matches!(
+            policy_step(&input(AccessPolicy::Public, false, &[], None, None, &[])),
+            PolicyStep::Grant(AccessGrant::Public)
+        ));
+        assert!(matches!(
+            policy_step(&input(
+                AccessPolicy::PublicPasscode,
+                true,
+                &[],
+                None,
+                None,
+                &[]
+            )),
+            PolicyStep::VerifyPasscode
+        ));
+    }
+
+    #[test]
+    fn authenticated_and_invite_only_are_distinct() {
+        assert!(matches!(
+            policy_step(&input(
+                AccessPolicy::Authenticated,
+                true,
+                &[],
+                None,
+                None,
+                &[]
+            )),
+            PolicyStep::Grant(AccessGrant::Authenticated)
+        ));
+        assert_eq!(
+            code(policy_step(&input(
+                AccessPolicy::Authenticated,
+                false,
+                &[],
+                None,
+                None,
+                &[]
+            ))),
+            Some(ErrorCode::AuthenticationRequired)
+        );
+        for registered in [true, false] {
+            assert_eq!(
+                code(policy_step(&input(
+                    AccessPolicy::InviteOnly,
+                    registered,
+                    &[],
+                    None,
+                    None,
+                    &[]
+                ))),
+                Some(ErrorCode::MeetingAccessDenied),
+                "invite-only without an invitation is denied even when signed in"
+            );
+        }
+    }
+
+    #[test]
+    fn organization_membership_is_server_resolved() {
+        let org = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        assert!(matches!(
+            policy_step(&input(
+                AccessPolicy::OrganizationOnly,
+                true,
+                &[org],
+                Some(org),
+                None,
+                &[]
+            )),
+            PolicyStep::Grant(AccessGrant::Organization)
+        ));
+        assert_eq!(
+            code(policy_step(&input(
+                AccessPolicy::OrganizationOnly,
+                true,
+                &[other],
+                Some(org),
+                None,
+                &[]
+            ))),
+            Some(ErrorCode::MeetingAccessDenied)
+        );
+        assert_eq!(
+            code(policy_step(&input(
+                AccessPolicy::OrganizationOnly,
+                false,
+                &[org],
+                Some(org),
+                None,
+                &[]
+            ))),
+            Some(ErrorCode::AuthenticationRequired)
+        );
+        assert_eq!(
+            code(policy_step(&input(
+                AccessPolicy::OrganizationOnly,
+                true,
+                &[org],
+                None,
+                None,
+                &[]
+            ))),
+            Some(ErrorCode::MeetingAccessDenied),
+            "misconfigured organization space fails closed"
+        );
+    }
+
+    #[test]
+    fn domain_restriction_requires_a_verified_domain() {
+        let allowed = vec!["cosmicforge.com".to_string()];
+        assert!(matches!(
+            policy_step(&input(
+                AccessPolicy::DomainRestricted,
+                true,
+                &[],
+                None,
+                Some("CosmicForge.com"),
+                &allowed
+            )),
+            PolicyStep::Grant(AccessGrant::Domain)
+        ));
+        for domain in [None, Some("evil.com")] {
+            assert_eq!(
+                code(policy_step(&input(
+                    AccessPolicy::DomainRestricted,
+                    true,
+                    &[],
+                    None,
+                    domain,
+                    &allowed
+                ))),
+                Some(ErrorCode::MeetingAccessDenied)
+            );
+        }
+    }
+
+    #[test]
+    fn external_authorities_are_delegated_not_granted() {
+        assert!(matches!(
+            policy_step(&input(
+                AccessPolicy::HealthcareAppointment,
+                true,
+                &[],
+                None,
+                None,
+                &[]
+            )),
+            PolicyStep::AppointmentAuthority
+        ));
+        assert!(matches!(
+            policy_step(&input(AccessPolicy::Custom, false, &[], None, None, &[])),
+            PolicyStep::CustomAdapter
+        ));
+    }
+
+    #[test]
+    fn every_policy_has_a_decision() {
+        for p in AccessPolicy::ALL {
+            let _ = policy_step(&input(*p, false, &[], None, None, &[]));
+            let _ = policy_step(&input(*p, true, &[], None, None, &[]));
         }
     }
 }

@@ -613,3 +613,70 @@ pub async fn upsert<C: ConnectionTrait>(
     .await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        domain::{MeetingType, SecurityProfile},
+        services::profiles::MeetingProfileResolver,
+    };
+    use serde_json::json;
+
+    fn profile(t: MeetingType, s: SecurityProfile, space: serde_json::Value) -> ResolvedProfile {
+        MeetingProfileResolver::resolve(t, s, None, &space, None)
+    }
+
+    #[test]
+    fn consent_types_are_independent_and_follow_the_profile() {
+        let std = profile(MeetingType::Standard, SecurityProfile::Standard, json!({}));
+        let hc = profile(
+            MeetingType::Healthcare,
+            SecurityProfile::Healthcare,
+            json!({}),
+        );
+        // Healthcare: every processing consent is explicit.
+        for kind in [
+            ConsentKind::Recording,
+            ConsentKind::Transcription,
+            ConsentKind::AiProcessing,
+            ConsentKind::DataSharing,
+        ] {
+            assert_eq!(
+                mode_for(&hc, kind),
+                ConsentMode::ExplicitConsentRequired,
+                "{kind:?} under HEALTHCARE"
+            );
+        }
+        // Terms / privacy notices are always explicit.
+        for kind in [ConsentKind::HealthcareTerms, ConsentKind::PrivacyNotice] {
+            assert_eq!(mode_for(&std, kind), ConsentMode::ExplicitConsentRequired);
+        }
+        // Recording mode comes from the recording profile, not from AI / sharing flags.
+        assert_eq!(
+            mode_for(&std, ConsentKind::Recording),
+            std.policy.recording.consent_mode
+        );
+        assert_eq!(
+            mode_for(&std, ConsentKind::Transcription),
+            std.policy.transcription.consent_mode
+        );
+    }
+
+    #[test]
+    fn space_override_switches_recording_to_explicit_consent() {
+        let p = profile(
+            MeetingType::Standard,
+            SecurityProfile::Standard,
+            json!({ "recording": { "consentMode": "EXPLICIT_CONSENT_REQUIRED" } }),
+        );
+        assert_eq!(
+            mode_for(&p, ConsentKind::Recording),
+            ConsentMode::ExplicitConsentRequired
+        );
+        assert_eq!(
+            withdrawal_mode_for(&p, ConsentKind::AiProcessing),
+            WithdrawalMode::StopFutureProcessing
+        );
+    }
+}

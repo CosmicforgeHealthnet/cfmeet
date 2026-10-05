@@ -5,7 +5,8 @@ name: Meeting service
 
 on:
   push:
-    branches: [main]
+    # `staging` carries Phase 2 backend work before release; it gets the same fast gate.
+    branches: [main, staging]
     paths:
       - "services/meeting-service/**"
       - "packages/contracts/openapi/**"
@@ -64,17 +65,36 @@ jobs:
         with:
           workspaces: services/meeting-service -> target
 
-      # Pre-existing formatting drift was imported from rtc_backend unchanged.
-      # Reported but non-blocking until a dedicated `cargo fmt` commit lands.
-      - name: cargo fmt --check
-        continue-on-error: true
-        run: cargo fmt --all -- --check
+      # Pre-existing formatting drift (imported from rtc_backend unchanged) is listed in
+      # scripts/certification/fmt-baseline.txt. Any NEW drift fails the build.
+      - name: rustfmt (no new drift beyond the documented baseline)
+        run: bash scripts/certification/check-fmt.sh
+
+      - name: cargo check
+        run: cargo check --workspace
 
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets
 
+      # Includes the security, IDOR, credential-replay, concurrency, failure-injection,
+      # system E2E, flag/rollback and migration-certification suites.
       - name: cargo test
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
+
+      # Every v2 operation must have a success-path and an authorization/error-path test
+      # (recorded at runtime by tests/common/route_coverage.rs).
+      - name: v2 operation coverage (success + error path per operation)
+        run: python3 scripts/certification/route_coverage.py --openapi ../../packages/contracts/openapi/meeting-service.json --strict
+
+      - name: Migration smoke (up / reset / up)
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE cfmeet_migration_smoke"
+          export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/cfmeet_migration_smoke
+          cargo run -q -p migration -- up
+          cargo run -q -p migration -- reset
+          cargo run -q -p migration -- up
 
       - name: cargo build
         run: cargo build --workspace

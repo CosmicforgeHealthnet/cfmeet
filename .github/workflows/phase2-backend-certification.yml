@@ -1,0 +1,222 @@
+name: Phase 2 backend certification
+
+# Part M §46/§48/§49 — the full, expensive certification path for meeting-service.
+# Manual only: real LiveKit / WebRTC / Egress / S3 and load runs are not executed on every
+# commit (the fast gate in backend.yml runs on main and staging).
+#
+# Artifacts contain test summaries, structured JSON reports and filtered certification
+# lines only. Never uploaded: secrets, signed artefact URLs, recording content, raw
+# provider / egress / object-storage logs, or any real (clinical) data. All data used
+# here is synthetic.
+
+on:
+  workflow_dispatch:
+    inputs:
+      load_selection:
+        description: "Load / migration / plan selection (run-load.sh LOAD_SELECTION)"
+        default: "burst fanout churn scheduler soak migration plans"
+      join_levels:
+        description: "Burst-join levels"
+        default: "25,50,100,250,500"
+      ws_levels:
+        description: "WebSocket fanout levels"
+        default: "25,50,100,250,500"
+      soak_secs:
+        description: "Resource-leak soak duration (seconds)"
+        default: "600"
+      media_load:
+        description: "Media load runs as PUBLISHERSxSUBSCRIBERS (space separated)"
+        default: "4x16 4x50 6x50 6x75"
+      livekit_version:
+        description: "livekit-server release"
+        default: "1.8.4"
+
+concurrency:
+  group: phase2-certification-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: services/meeting-service
+
+env:
+  CARGO_TERM_COLOR: always
+  TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+  TEST_REDIS_URL: redis://127.0.0.1:6379
+
+jobs:
+  full-suite:
+    name: Full suite, coverage, OpenAPI, migration up/reset/up
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/meeting-service -> target
+      - run: mkdir -p target/certification
+      - name: rustfmt (no new drift)
+        run: bash scripts/certification/check-fmt.sh | tee target/certification/fmt.txt
+      - name: clippy
+        run: cargo clippy --workspace --all-targets 2>&1 | tee target/certification/clippy.txt
+      - name: cargo test --workspace --no-fail-fast
+        run: |
+          set -o pipefail
+          cargo test --workspace --no-fail-fast 2>&1 | tee target/certification/test-output.txt
+      - name: Test summary
+        if: always()
+        run: |
+          grep -E "^(test result|     Running|failures:)" target/certification/test-output.txt > target/certification/test-summary.txt || true
+          awk '/^test result/ {p+=$4; f+=$6; i+=$8} END {print "passed=" p " failed=" f " ignored=" i}' target/certification/test-summary.txt | tee -a target/certification/test-summary.txt
+      - name: v2 operation coverage
+        run: |
+          python3 scripts/certification/route_coverage.py --strict \
+            --openapi ../../packages/contracts/openapi/meeting-service.json \
+            --json target/certification/route-coverage.json --markdown target/certification/route-coverage.md
+      - name: OpenAPI parity
+        run: |
+          cargo run -q --bin export_openapi > target/certification/meeting-service.json
+          diff -u ../../packages/contracts/openapi/meeting-service.json target/certification/meeting-service.json | tee target/certification/openapi-diff.txt
+      - name: Migration up / reset / up
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE cfmeet_migration_cert"
+          export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/cfmeet_migration_cert
+          { cargo run -q -p migration -- up && cargo run -q -p migration -- reset && cargo run -q -p migration -- up && cargo run -q -p migration -- status; } 2>&1 | tee target/certification/migration-up-reset-up.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: certification-full-suite
+          path: |
+            services/meeting-service/target/certification/*.txt
+            services/meeting-service/target/certification/*.json
+            services/meeting-service/target/certification/*.md
+
+  real-provider:
+    name: Real LiveKit + WebRTC + Egress + S3 certification
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/meeting-service -> target
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: services/meeting-service/scripts/livekit-certification/rtcprobe/go.sum
+      - name: livekit-server ${{ inputs.livekit_version }}
+        run: |
+          mkdir -p /tmp/cert-bin
+          curl -fsSL "https://github.com/livekit/livekit/releases/download/v${{ inputs.livekit_version }}/livekit_${{ inputs.livekit_version }}_linux_amd64.tar.gz" | tar -xz -C /tmp/cert-bin livekit-server
+          /tmp/cert-bin/livekit-server --version
+      - name: rtcprobe
+        working-directory: services/meeting-service/scripts/livekit-certification/rtcprobe
+        run: CGO_ENABLED=0 go build -o /tmp/cert-bin/rtcprobe .
+      - name: Egress + MinIO images
+        run: docker pull livekit/egress:latest && docker pull minio/minio:latest
+      - name: Certification (E–I + M scenarios, recording + object storage)
+        env:
+          LIVEKIT_SERVER_BIN: /tmp/cert-bin/livekit-server
+          RTCPROBE_BIN: /tmp/cert-bin/rtcprobe
+          EGRESS_BIN: ${{ github.workspace }}/services/meeting-service/scripts/livekit-certification/docker-egress.sh
+          MINIO_BIN: ${{ github.workspace }}/services/meeting-service/scripts/livekit-certification/docker-minio.sh
+          LIVEKIT_LOG: /tmp/livekit-server.log
+          EGRESS_LOG: /tmp/livekit-egress.log
+          CFMEET_CERT_OUT: ${{ github.workspace }}/services/meeting-service/target/certification
+        run: |
+          set -o pipefail
+          mkdir -p "$CFMEET_CERT_OUT"
+          bash scripts/livekit-certification/run.sh 2>&1 | grep -E '^(CERT|MEDIA_LOAD|test |test result)' | tee "$CFMEET_CERT_OUT/provider-certification.txt"
+      - name: Media load
+        env:
+          LIVEKIT_SERVER_BIN: /tmp/cert-bin/livekit-server
+          RTCPROBE_BIN: /tmp/cert-bin/rtcprobe
+          LIVEKIT_LOG: /tmp/livekit-load.log
+          CERT_FILTER: real_livekit_m_media_load
+          MEDIA_LOAD_SECS: "45"
+          CFMEET_CERT_OUT: ${{ github.workspace }}/services/meeting-service/target/certification
+        run: |
+          for run in ${{ inputs.media_load }}; do
+            export MEDIA_LOAD_PUBLISHERS="${run%x*}" MEDIA_LOAD_SUBSCRIBERS="${run#*x}"
+            sleep 5
+            bash scripts/livekit-certification/run.sh 2>&1 | grep -E '^(CERT|MEDIA_LOAD|test result)' | tee -a "$CFMEET_CERT_OUT/media-load.txt"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: certification-real-provider
+          path: |
+            services/meeting-service/target/certification/*.txt
+            services/meeting-service/target/certification/media-load-*.json
+
+  load:
+    name: Control-plane load, migration report, query plans
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/meeting-service -> target
+      - name: Load certification
+        env:
+          LOAD_SELECTION: ${{ inputs.load_selection }}
+          LOAD_JOIN_LEVELS: ${{ inputs.join_levels }}
+          LOAD_WS_LEVELS: ${{ inputs.ws_levels }}
+          LOAD_SOAK_SECS: ${{ inputs.soak_secs }}
+          CFMEET_CERT_OUT: ${{ github.workspace }}/services/meeting-service/target/certification
+        run: bash scripts/certification/run-load.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: certification-load
+          path: services/meeting-service/target/certification/*.json

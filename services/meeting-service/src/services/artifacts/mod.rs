@@ -162,6 +162,36 @@ impl ArtifactStatus {
         matches!(self, Self::Requested | Self::Recording | Self::Stopping)
     }
 
+    /// Terminal states: nothing leaves DELETED; FAILED / READY only to DELETED.
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Deleted)
+    }
+
+    /// The authoritative artefact lifecycle (Part G §6):
+    ///
+    /// ```text
+    /// REQUESTED → RECORDING → STOPPING → PROCESSING → READY → DELETED
+    ///     │           │          │           │
+    ///     └───────────┴──────────┴───────────┴──→ FAILED → DELETED
+    /// ```
+    ///
+    /// REQUESTED may go straight to STOPPING (stop before provider evidence) and
+    /// REQUESTED / RECORDING straight to PROCESSING (provider completion evidence without
+    /// a prior stop). READY is reachable only from PROCESSING (after storage
+    /// verification); an active capture is never deleted.
+    pub fn can_transition_to(&self, next: ArtifactStatus) -> bool {
+        use ArtifactStatus::*;
+        matches!(
+            (self, next),
+            (Requested, Recording | Stopping | Processing | Failed)
+                | (Recording, Stopping | Processing | Failed)
+                | (Stopping, Processing | Failed)
+                | (Processing, Ready | Failed | Deleted)
+                | (Ready, Deleted)
+                | (Failed, Deleted)
+        )
+    }
+
     /// Legacy `storage_state` kept in sync for Part B readers.
     pub fn storage_state(&self) -> &'static str {
         match self {
@@ -372,6 +402,52 @@ pub async fn bump<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn artifact_lifecycle_transition_table() {
+        use ArtifactStatus::*;
+        let allowed = [
+            (Requested, Recording),
+            (Requested, Stopping),
+            (Requested, Processing),
+            (Requested, Failed),
+            (Recording, Stopping),
+            (Recording, Processing),
+            (Recording, Failed),
+            (Stopping, Processing),
+            (Stopping, Failed),
+            (Processing, Ready),
+            (Processing, Failed),
+            (Processing, Deleted),
+            (Ready, Deleted),
+            (Failed, Deleted),
+        ];
+        for from in ArtifactStatus::ALL {
+            for to in ArtifactStatus::ALL {
+                assert_eq!(
+                    from.can_transition_to(*to),
+                    allowed.contains(&(*from, *to)),
+                    "{from:?} → {to:?}"
+                );
+            }
+        }
+        // READY only after processing (storage verification), never from a capture state.
+        for s in [Requested, Recording, Stopping] {
+            assert!(!s.can_transition_to(Ready));
+            assert!(
+                !s.can_transition_to(Deleted),
+                "active capture is never deleted"
+            );
+        }
+        assert!(Deleted.is_terminal());
+        assert!(ArtifactStatus::ALL
+            .iter()
+            .all(|s| !Deleted.can_transition_to(*s)));
+        assert!(
+            !Ready.can_transition_to(Failed),
+            "a verified object is not re-failed"
+        );
+    }
 
     #[test]
     fn statuses_map_to_legacy_storage_state() {

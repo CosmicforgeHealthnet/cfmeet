@@ -26,6 +26,16 @@ pub(crate) fn env_num<T: std::str::FromStr>(name: &str, default: T) -> T {
         .unwrap_or(default)
 }
 
+/// `MEETING_V2_WRITE_ALLOWLIST`: comma-separated user ids; malformed entries are ignored
+/// and an empty / all-malformed list means "no allowlist" (every authenticated user).
+pub(crate) fn parse_allowlist(raw: &str) -> Option<HashSet<Uuid>> {
+    let ids: HashSet<Uuid> = raw
+        .split(',')
+        .filter_map(|s| Uuid::parse_str(s.trim()).ok())
+        .collect();
+    (!ids.is_empty()).then_some(ids)
+}
+
 /// All flags default to off (rollout-safe).
 #[derive(Debug, Clone, Default)]
 pub struct FeatureFlags {
@@ -61,13 +71,7 @@ impl FeatureFlags {
     pub fn from_env() -> Self {
         let allowlist = std::env::var("MEETING_V2_WRITE_ALLOWLIST")
             .ok()
-            .and_then(|raw| {
-                let ids: HashSet<Uuid> = raw
-                    .split(',')
-                    .filter_map(|s| Uuid::parse_str(s.trim()).ok())
-                    .collect();
-                (!ids.is_empty()).then_some(ids)
-            });
+            .and_then(|raw| parse_allowlist(&raw));
         let legacy_write_disabled = env_bool("FEATURE_LEGACY_MEETING_WRITE_DISABLED", false);
         if legacy_write_disabled {
             tracing::warn!(
@@ -224,6 +228,66 @@ mod tests {
         assert!(!f.meeting_v2_enabled);
         assert!(!f.legacy_meeting_write_disabled);
         assert!(!FeatureFlags::all_v2_enabled().legacy_meeting_write_disabled);
+    }
+
+    #[test]
+    fn env_values_parse_strictly() {
+        // Unique variable names: no interference with other tests.
+        for (raw, expected) in [
+            ("1", true),
+            ("true", true),
+            (" YES ", true),
+            ("on", true),
+            ("0", false),
+            ("false", false),
+            ("enabled", false),
+            ("", false),
+        ] {
+            std::env::set_var("CFMEET_UNIT_FLAG_PARSE", raw);
+            assert_eq!(
+                env_bool("CFMEET_UNIT_FLAG_PARSE", false),
+                expected,
+                "{raw:?}"
+            );
+        }
+        std::env::remove_var("CFMEET_UNIT_FLAG_PARSE");
+        assert!(env_bool("CFMEET_UNIT_FLAG_PARSE", true), "unset → default");
+        assert!(!env_bool("CFMEET_UNIT_FLAG_PARSE", false));
+    }
+
+    #[test]
+    fn allowlist_parsing_ignores_malformed_entries() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let parsed = parse_allowlist(&format!(" {a}, nope ,{b},")).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert!(parsed.contains(&a) && parsed.contains(&b));
+        assert!(parse_allowlist("").is_none());
+        assert!(
+            parse_allowlist("not-a-uuid, also-not").is_none(),
+            "no accidental lockout"
+        );
+    }
+
+    #[test]
+    fn every_phase2_flag_defaults_off() {
+        let f = FeatureFlags::default();
+        assert!(
+            !(f.meeting_v2_enabled
+                || f.waiting_room_v2_enabled
+                || f.meeting_v2_shadow_read
+                || f.rtc_provider_control_v2
+                || f.conference_realtime_enabled
+                || f.collaboration_v2_enabled
+                || f.recording_v2_enabled
+                || f.webinar_mode_enabled
+                || f.healthcare_profile_enabled
+                || f.transcription_v2_enabled
+                || f.intelligence_v2_enabled
+                || f.quality_telemetry_enabled
+                || f.legacy_meeting_write_disabled)
+        );
+        assert!(f.v2_write_allowlist.is_none());
     }
 
     #[test]

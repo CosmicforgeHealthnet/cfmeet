@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Duration, Utc};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
+use sea_orm::{sea_query::Expr, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use tokio::sync::watch;
 
 use crate::{
@@ -28,6 +28,16 @@ use crate::{
 };
 
 const BATCH: u64 = 50;
+
+/// Auto-end eligibility of a LIVE conference, from its space's `schedule_policy`
+/// (`autoEnd` default true, `autoEndGraceMinutes` default 15 — see `SchedulePolicy`).
+const AUTO_END_DUE: &str = "EXISTS (SELECT 1 FROM meeting_spaces s \
+    WHERE s.id = conference_sessions.meeting_space_id \
+      AND CASE WHEN jsonb_typeof(s.schedule_policy -> 'autoEnd') = 'boolean' \
+               THEN (s.schedule_policy ->> 'autoEnd')::boolean ELSE true END \
+      AND conference_sessions.scheduled_end_at + make_interval(mins => \
+            CASE WHEN jsonb_typeof(s.schedule_policy -> 'autoEndGraceMinutes') = 'number' \
+                 THEN (s.schedule_policy ->> 'autoEndGraceMinutes')::int ELSE 15 END) <= $1)";
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct SchedulerTick {
@@ -55,10 +65,15 @@ impl ConferenceScheduler {
 
     async fn auto_end(&self, now: DateTime<Utc>) -> ApiResult<u64> {
         let db = &self.meeting.core.db;
+        // Eligibility (auto-end enabled, grace elapsed) is evaluated in SQL, mirroring
+        // `SchedulePolicy` defaults, so conferences that overrun but must keep running
+        // never occupy the bounded batch and starve due ones.
         let candidates = conference_sessions::Entity::find()
             .filter(conference_sessions::Column::Status.eq(ConferenceStatus::Live))
             .filter(conference_sessions::Column::Origin.eq(RecordOrigin::V2))
             .filter(conference_sessions::Column::ScheduledEndAt.lt(now))
+            .filter(Expr::cust_with_values(AUTO_END_DUE, [now]))
+            .order_by_asc(conference_sessions::Column::ScheduledEndAt)
             .limit(BATCH)
             .all(db)
             .await?;

@@ -457,6 +457,11 @@ impl ArtifactService {
             .delete_reason
             .clone()
             .unwrap_or_else(|| "RETENTION".into());
+        debug_assert!(
+            status_of(&a).can_transition_to(ArtifactStatus::Deleted),
+            "illegal artefact transition {} → DELETED",
+            a.status
+        );
         let mut am: meeting_artifacts::ActiveModel = a.clone().into();
         am.status = Set(ArtifactStatus::Deleted.as_str().into());
         am.storage_state = Set(ArtifactStatus::Deleted.storage_state().into());
@@ -672,6 +677,7 @@ impl ArtifactService {
         let now = Utc::now();
         let mut meta = a.metadata.clone();
         meta["integrity"] = json!({ "sha256": true, "md5": md5_verified });
+        debug_assert!(status_of(&a).can_transition_to(ArtifactStatus::Ready));
         let mut am: meeting_artifacts::ActiveModel = a.clone().into();
         am.status = Set(ArtifactStatus::Ready.as_str().into());
         am.storage_state = Set(ArtifactStatus::Ready.storage_state().into());
@@ -798,6 +804,7 @@ impl ArtifactService {
             )
             .await?;
         } else {
+            debug_assert!(status_of(&current).can_transition_to(ArtifactStatus::Failed));
             let mut am: meeting_artifacts::ActiveModel = current.clone().into();
             am.status = Set(ArtifactStatus::Failed.as_str().into());
             am.storage_state = Set(ArtifactStatus::Failed.storage_state().into());

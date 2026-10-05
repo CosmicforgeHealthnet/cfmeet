@@ -294,7 +294,14 @@ async fn m02_rollback_and_reapply() {
     let c = &db.conn;
     Migrator::up(c, None).await.unwrap();
     let spaces = count(c, "SELECT count(*) FROM meeting_spaces").await;
-    // Parts G–I down-migration alone first: Part F and the v2 core stay.
+    // Part M index down-migration alone first: only the index goes.
+    let main_cursor_index =
+        "SELECT count(*) FROM pg_indexes WHERE indexname = 'idx_messages_main_cursor'";
+    assert_eq!(count(c, main_cursor_index).await, 1);
+    Migrator::down(c, Some(1)).await.unwrap();
+    assert_eq!(count(c, main_cursor_index).await, 0);
+    assert_eq!(count(c, "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('transcription_jobs','webinar_registrations','conference_messages')").await, 3);
+    // Parts G–I down-migration alone next: Part F and the v2 core stay.
     Migrator::down(c, Some(1)).await.unwrap();
     assert_eq!(count(c, "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('transcription_jobs','transcript_segments','transcript_translations','webinar_registrations')").await, 0);
     assert_eq!(count(c, "SELECT count(*) FROM information_schema.columns WHERE table_name='meeting_artifacts' AND column_name IN ('status','storage_key','retention_at')").await, 0);
@@ -309,9 +316,10 @@ async fn m02_rollback_and_reapply() {
         spaces
     );
     Migrator::up(c, None).await.unwrap();
-    // All seven Phase 2 migrations (schema, backfill, organizations, recurrence
-    // exceptions, Part E rtc control plane, Part F collaboration, Parts G–I).
-    Migrator::down(c, Some(7)).await.unwrap();
+    assert_eq!(count(c, main_cursor_index).await, 1, "re-applied");
+    // All eight Phase 2 migrations (schema, backfill, organizations, recurrence
+    // exceptions, Part E rtc control plane, Part F collaboration, Parts G–I, Part M index).
+    Migrator::down(c, Some(8)).await.unwrap();
     assert_eq!(count(c, "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('meeting_spaces','conference_sessions','participant_sessions','outbox_events','organizations','meeting_recurrence_exceptions','rtc_webhook_events','rtc_drift_events','worker_leases','conference_messages','meeting_poll_ballots','transcription_jobs','webinar_registrations')").await, 0);
     assert_eq!(count(c, "SELECT count(*) FROM meetings").await, 5);
     assert_eq!(count(c, "SELECT count(*) FROM participants").await, 8);

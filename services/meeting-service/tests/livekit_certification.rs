@@ -1090,3 +1090,441 @@ async fn real_livekit_part_i_presence_and_mapping() {
         session_state(&app, g.session_id).await
     );
 }
+
+impl Probe {
+    /// First of `events` (already seen or upcoming).
+    async fn wait_any(&mut self, events: &[&str], within: Duration) -> Value {
+        if let Some(v) = self
+            .seen
+            .iter()
+            .find(|v| events.iter().any(|e| v["event"] == *e))
+        {
+            return v.clone();
+        }
+        let deadline = tokio::time::Instant::now() + within;
+        loop {
+            match tokio::time::timeout_at(deadline, self.rx.recv()).await {
+                Ok(Some(v)) => {
+                    self.seen.push(v.clone());
+                    if events.iter().any(|e| v["event"] == *e) {
+                        return v;
+                    }
+                }
+                _ => panic!("rtcprobe never reported {events:?}; saw {:?}", self.seen),
+            }
+        }
+    }
+
+    /// Drain everything currently buffered into `seen` (non-blocking).
+    fn pump(&mut self) {
+        while let Ok(v) = self.rx.try_recv() {
+            self.seen.push(v);
+        }
+    }
+
+    fn count(&self, event: &str) -> usize {
+        self.seen.iter().filter(|v| v["event"] == event).count()
+    }
+
+    fn last_stats(&self) -> Option<Value> {
+        self.seen
+            .iter()
+            .rev()
+            .find(|v| v["event"] == "stats")
+            .cloned()
+    }
+}
+
+/// Part M §7 additions against the real SFU: waiting room → admit → real connect,
+/// real SUBSCRIPTION of a remote participant's audio + video (RTP actually received),
+/// ban → real disconnect, and ban/reconnect protection with the old credential.
+#[tokio::test]
+#[ignore = "requires a real livekit-server (scripts/livekit-certification/run.sh)"]
+async fn real_livekit_m_waiting_subscription_ban() {
+    let r = real();
+    let app = app_for(&r).await;
+    let owner = app.user("owner").await;
+    let (_, cid) = app
+        .live_conference(&owner, json!({ "title": "cert-m", "accessPolicy": "PUBLIC", "waitingRoomPolicy": "GUESTS_ONLY" }))
+        .await;
+    let provider = app.state.meeting.core.rtc.clone();
+    let main = RtcRoomRef {
+        conference_id: cid,
+        room_name: room(cid),
+    };
+
+    // Host publishes audio + video.
+    let host = join_user(&app, cid, &owner).await;
+    let mut hp = Probe::spawn_with(&r.probe, &r.url, &host.credential, "mic,camera", 120);
+    hp.wait_for("connected", Duration::from_secs(20)).await;
+    hp.next_for(&["publish_ok"], "MICROPHONE", Duration::from_secs(20))
+        .await;
+    hp.next_for(&["publish_ok"], "CAMERA", Duration::from_secs(20))
+        .await;
+
+    // Guest waits (no credential), is admitted, then obtains a credential.
+    let (s, g) = app
+        .join(cid, Auth::None, json!({ "displayName": "waiting guest" }))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{g}");
+    assert_eq!(g["participant"]["admissionState"], "WAITING");
+    assert!(g["rtc"].is_null(), "no credential while waiting");
+    let gtoken = g["participantToken"].as_str().unwrap().to_string();
+    let gpid = uuid(&g["participant"]["id"]);
+    let (s, v) = app
+        .post(
+            format!("/api/v2/conferences/{cid}/waiting-room/admit"),
+            Auth::Bearer(&owner.token),
+            json!({ "participantIds": [gpid] }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, g2) = app.join(cid, Auth::Participant(&gtoken), json!({})).await;
+    assert_eq!(
+        (s, g2["rtcStatus"].as_str()),
+        (StatusCode::OK, Some("ISSUED")),
+        "{g2}"
+    );
+    let credential = g2["rtc"]["credential"].as_str().unwrap().to_string();
+    let session_id = uuid(&g2["participantSession"]["id"]);
+    let identity = format!("ps_{}", session_id.simple());
+    println!("CERT M waiting → admit → credential: PASS");
+
+    // Real subscription: the guest receives the host's audio and video RTP.
+    let mut gp = Probe::spawn_with(&r.probe, &r.url, &credential, "false", 120);
+    gp.wait_for("connected", Duration::from_secs(20)).await;
+    let mut kinds = vec![];
+    while kinds.len() < 2 {
+        let v = gp
+            .wait_any(&["track_subscribed"], Duration::from_secs(30))
+            .await;
+        gp.seen.retain(|x| x != &v);
+        assert_eq!(v["from"], json!(host.identity), "{v}");
+        kinds.push(v["kind"].as_str().unwrap().to_string());
+    }
+    kinds.sort();
+    assert_eq!(kinds, ["audio", "video"]);
+    eventually("guest CONNECTED", || async {
+        session_state(&app, session_id).await == "CONNECTED"
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    gp.pump();
+    let st = gp.last_stats().expect("stats");
+    assert!(st["rtpPackets"].as_i64().unwrap() > 0, "RTP received: {st}");
+    println!("CERT M real subscription (audio+video RTP received): PASS ({st})");
+
+    // Ban → real disconnect; the old credential cannot restore presence.
+    let (s, v) = app
+        .post(
+            format!("/api/v2/conferences/{cid}/participants/{gpid}/ban"),
+            Auth::Bearer(&owner.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    gp.wait_for("disconnected", Duration::from_secs(15)).await;
+    println!("CERT M ban → real disconnect: PASS");
+    let mut replay = Probe::spawn_with(&r.probe, &r.url, &credential, "mic", 60);
+    let outcome = replay
+        .wait_any(&["connect_failed", "disconnected"], Duration::from_secs(30))
+        .await;
+    println!(
+        "CERT M ban reconnect with old credential → {}",
+        outcome["event"]
+    );
+    eventually("banned identity absent at the provider", || async {
+        !provider
+            .list_participants(&main)
+            .await
+            .unwrap()
+            .iter()
+            .any(|p| p.media_identity == identity)
+    })
+    .await;
+    let (_, again) = app.join(cid, Auth::Participant(&gtoken), json!({})).await;
+    assert!(
+        again.get("rtc").map(|x| x.is_null()).unwrap_or(true),
+        "banned: no new credential: {again}"
+    );
+    assert_eq!(
+        app.scalar(&format!("SELECT count(*) FROM participant_sessions WHERE conference_participant_id='{gpid}' AND state IN ('PENDING','CONNECTED')")).await,
+        0,
+        "banned participant holds no active session"
+    );
+    println!("CERT M ban/reconnect protection: PASS");
+    drop(hp);
+}
+
+fn proc_cpu_ticks(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let rest = &stat[stat.rfind(')')? + 2..];
+    let f: Vec<&str> = rest.split_whitespace().collect();
+    Some(f.get(11)?.parse::<u64>().ok()? + f.get(12)?.parse::<u64>().ok()?)
+}
+
+fn proc_rss_kb(pid: u32) -> Option<u64> {
+    std::fs::read_to_string(format!("/proc/{pid}/status"))
+        .ok()?
+        .lines()
+        .find(|l| l.starts_with("VmRSS:"))?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()
+}
+
+fn livekit_pid() -> Option<u32> {
+    let out = std::process::Command::new("pgrep")
+        .args(["-f", "livekit-server --config"])
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .next()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// Part M §43 / §44 — self-hosted media load + large-audience strategy on the real SFU.
+/// A TOWN_HALL conference: `MEDIA_LOAD_PUBLISHERS` presenters on a capped stage publish
+/// audio + video; `MEDIA_LOAD_SUBSCRIBERS` VIEWER attendees subscribe only. Records
+/// join latency, join failures, unexpected disconnects, subscriptions, RTP packets and
+/// gaps, and livekit-server CPU / RSS. Sizes are environment-driven so the same test
+/// runs at the capacity of whatever host executes it; the report states the sizes run.
+#[tokio::test]
+#[ignore = "requires a real livekit-server (scripts/livekit-certification/run.sh)"]
+async fn real_livekit_m_media_load_and_large_audience() {
+    let r = real();
+    let env = |k: &str, d: usize| {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(d)
+    };
+    let publishers = env("MEDIA_LOAD_PUBLISHERS", 4);
+    let subscribers = env("MEDIA_LOAD_SUBSCRIBERS", 16);
+    let hold = env("MEDIA_LOAD_SECS", 30) as u64;
+    let app = app_for_ghi(&r, None).await;
+    let owner = app.user("owner").await;
+    let (sid, cid) = app
+        .live_conference(
+            &owner,
+            json!({ "title": "media load", "accessPolicy": "PUBLIC", "meetingType": "TOWN_HALL", "viewerCapacity": publishers + subscribers }),
+        )
+        .await;
+    let (s, v) = common::artifacts::set_profile(
+        &app,
+        &owner,
+        sid,
+        json!({ "stage": { "maxStageParticipants": publishers, "maxPresenters": publishers } }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let lk_pid = livekit_pid();
+    let cpu0 = lk_pid.and_then(proc_cpu_ticks);
+    let t0 = std::time::Instant::now();
+
+    // Everyone joins as a VIEWER attendee (subscribe-only by default).
+    let total = publishers + subscribers;
+    let mut joined = vec![];
+    let mut join_failures = 0usize;
+    let mut failure_reasons: Vec<String> = vec![];
+    for i in 0..total {
+        let (s, v) = app
+            .join(cid, Auth::None, json!({ "displayName": format!("a{i}") }))
+            .await;
+        if s != StatusCode::OK || v["rtcStatus"] != "ISSUED" {
+            join_failures += 1;
+            failure_reasons.push(format!("api {s} {}", code(&v)));
+            continue;
+        }
+        assert_eq!(
+            v["participant"]["role"], "VIEWER",
+            "audience defaults to VIEWER"
+        );
+        joined.push(v);
+    }
+    // The subscribe-only audience pool is bounded by its own capacity.
+    let (_, over) = app
+        .join(cid, Auth::None, json!({ "displayName": "over capacity" }))
+        .await;
+    assert_eq!(
+        code(&over),
+        "MEETING_CAPACITY_REACHED",
+        "viewer pool enforced: {over}"
+    );
+    let mut probes = vec![];
+    let mut connect_ms = vec![];
+    for v in &joined {
+        let started = std::time::Instant::now();
+        let mut p = Probe::spawn_with(
+            &r.probe,
+            &r.url,
+            v["rtc"]["credential"].as_str().unwrap(),
+            "false",
+            (hold + 120) as u32,
+        );
+        let first = p
+            .wait_any(&["connected", "connect_failed"], Duration::from_secs(60))
+            .await;
+        if first["event"] == "connected" {
+            connect_ms.push(started.elapsed().as_millis() as u64);
+        } else {
+            join_failures += 1;
+            failure_reasons.push(format!("media {}", first["error"]));
+        }
+        probes.push(p);
+    }
+    // Promote the stage, then the presenters publish audio + video on live connections.
+    for v in joined.iter().take(publishers) {
+        let (s, b) = change_role(
+            &app,
+            cid,
+            &owner,
+            uuid(&v["participant"]["id"]),
+            "PRESENTER",
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{b}");
+    }
+    // Stage capacity holds under load: one more promotion is refused.
+    if let Some(extra) = joined.get(publishers) {
+        let (_, b) = change_role(
+            &app,
+            cid,
+            &owner,
+            uuid(&extra["participant"]["id"]),
+            "PRESENTER",
+        )
+        .await;
+        assert_eq!(code(&b), "STAGE_CAPACITY_REACHED", "{b}");
+    }
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    for p in probes.iter_mut().take(publishers) {
+        p.publish("mic").await;
+        p.publish("camera").await;
+    }
+    for p in probes.iter_mut().take(publishers) {
+        p.next_for(&["publish_ok"], "MICROPHONE", Duration::from_secs(45))
+            .await;
+        p.next_for(&["publish_ok"], "CAMERA", Duration::from_secs(45))
+            .await;
+    }
+    // Audience stays subscribe-only: a modified attendee client is refused.
+    if let Some(p) = probes.get_mut(publishers) {
+        p.publish("camera").await;
+        p.next_for(&["publish_denied"], "CAMERA", Duration::from_secs(45))
+            .await;
+    }
+    let mut peak_rss = lk_pid.and_then(proc_rss_kb).unwrap_or(0);
+    let hold_until = std::time::Instant::now() + Duration::from_secs(hold);
+    while std::time::Instant::now() < hold_until {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        peak_rss = peak_rss.max(lk_pid.and_then(proc_rss_kb).unwrap_or(0));
+    }
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    let mut subs_expected_met = 0usize;
+    let (mut packets, mut lost, mut unexpected_disconnects, mut subscriptions) =
+        (0i64, 0i64, 0usize, 0usize);
+    let expected_tracks = publishers * 2;
+    for (i, p) in probes.iter_mut().enumerate() {
+        p.pump();
+        unexpected_disconnects += p.count("disconnected");
+        let subscribed = p.count("track_subscribed");
+        subscriptions += subscribed;
+        let own = if i < publishers { 2 } else { 0 };
+        if subscribed + own >= expected_tracks {
+            subs_expected_met += 1;
+        }
+        if let Some(st) = p.last_stats() {
+            packets += st["rtpPackets"].as_i64().unwrap_or(0);
+            lost += st["rtpLost"].as_i64().unwrap_or(0);
+        }
+    }
+    let cpu1 = lk_pid.and_then(proc_cpu_ticks);
+    let elapsed = t0.elapsed().as_secs_f64();
+    let cpu_pct = match (cpu0, cpu1) {
+        (Some(a), Some(b)) => Some(((b - a) as f64 / 100.0) / elapsed * 100.0),
+        _ => None,
+    };
+    connect_ms.sort();
+    let pct = |q: f64| {
+        connect_ms
+            .get(((connect_ms.len() as f64 - 1.0) * q).round() as usize)
+            .copied()
+    };
+    let loss_pct = if packets + lost > 0 {
+        lost as f64 * 100.0 / (packets + lost) as f64
+    } else {
+        0.0
+    };
+    let report = json!({
+        "publishers": publishers,
+        "subscribers": subscribers,
+        "holdSecs": hold,
+        "joinFailures": join_failures,
+        "joinFailureReasons": failure_reasons.iter().take(5).collect::<Vec<_>>(),
+        "connectMs": { "p50": pct(0.5), "p95": pct(0.95), "p99": pct(0.99), "max": connect_ms.last() },
+        "unexpectedDisconnects": unexpected_disconnects,
+        "trackSubscriptions": subscriptions,
+        "participantsWithAllStageTracks": subs_expected_met,
+        "rtpPackets": packets,
+        "rtpGaps": lost,
+        "rtpGapPct": loss_pct,
+        "livekitCpuPctAvg": cpu_pct,
+        "livekitPeakRssMb": peak_rss / 1024,
+        "hostCpus": std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0),
+        "livekitVersion": probes.first().and_then(|p| p.seen.iter().find(|v| v["event"] == "connected").map(|v| v["serverVersion"].clone())),
+    });
+    println!("MEDIA_LOAD {report}");
+    if let Ok(dir) = std::env::var("CFMEET_CERT_OUT") {
+        let _ = std::fs::write(
+            format!("{dir}/media-load-{publishers}x{subscribers}.json"),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        );
+    }
+    assert_eq!(join_failures, 0, "{report}");
+    assert_eq!(unexpected_disconnects, 0, "{report}");
+    assert_eq!(
+        subs_expected_met,
+        probes.len(),
+        "every participant receives every stage track: {report}"
+    );
+    assert!(packets > 0, "{report}");
+    let (_, list) = app
+        .get(
+            format!("/api/v2/conferences/{cid}/participants"),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    let presenters = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| p["role"] == "PRESENTER")
+        .count();
+    assert_eq!(presenters, publishers, "small controlled stage");
+    // Media delivery is reported, never silently passed: any RTP gap means the run hit
+    // an observed limit of the host it ran on. An operator-approved ceiling can be
+    // enforced with MEDIA_LOAD_MAX_GAP_PCT (no threshold is invented here).
+    let media = if lost == 0 {
+        "CLEAN (0 RTP gaps)".to_string()
+    } else {
+        format!("OBSERVED LIMIT ({loss_pct:.1}% RTP gaps)")
+    };
+    if let Some(max) = std::env::var("MEDIA_LOAD_MAX_GAP_PCT")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+    {
+        assert!(
+            loss_pct <= max,
+            "media delivery above approved ceiling {max}%: {report}"
+        );
+    }
+    println!("CERT M media load {publishers} publishers × {subscribers} subscribers: control plane PASS; media delivery {media}");
+    for p in probes.iter_mut() {
+        let _ = p.child.kill().await;
+    }
+}

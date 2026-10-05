@@ -21,3 +21,10 @@ This folder is the documentation home for the Phase 2 implementation programme.
 Future platform services such as calling, Privacy Relay, messaging, telephony and numbering are separate domain boundaries. They are not to be implemented inside the Meeting Service merely because they are part of the wider CF Meet roadmap.
 
 The full Phase 2 implementation specification should be added to this folder before implementation begins.
+
+## Backend certification and closure (Parts M–N)
+
+The Phase 2 backend closure evidence package (requirements matrix, migration, test,
+system E2E, load, real RTC provider, recording / storage, security, failure / recovery,
+staging, rollout, rollback, runbook and contract reports) lives in
+[`docs/phase2-certification/`](../../phase2-certification/01-summary.md).

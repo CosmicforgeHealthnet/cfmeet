@@ -235,7 +235,7 @@ DATABASE_URL=postgres://user:password@localhost:5432/cosmicforge?sslmode=require
 
 ## Phase 2 migrations and the legacy backfill
 
-Phase 2 migrations (`m20261003_000001` … `m20261005_000005`) are additive: legacy `meetings` /
+Phase 2 migrations (`m20261003_000001` … `m20261005_000006`) are additive: legacy `meetings` /
 `participants` tables and columns are never dropped. `m20261003_000002_phase2_legacy_backfill`
 runs `migration/src/phase2_backfill.rs`, which is also used by the compatibility resolver
 (single legacy meeting) and by `cargo run --bin phase2_backfill` (evidence + rerun).
@@ -246,7 +246,10 @@ runs `migration/src/phase2_backfill.rs`, which is also used by the compatibility
   without duplicates.
 - A rerun refreshes legacy-managed rows only: conference status, never-v2-edited space fields
   (`version = 1`), and (Parts J–L) legacy-managed participant admission state / role.
-- Parts J–L added **no** migration. Certification: fresh `up` → `down 7` → `up`
+- Parts J–L added **no** migration. Part M added one additive index,
+  `m20261005_000006_message_main_cursor_index` (main-room chat pagination; justified by the
+  query-plan certification, `docs/phase2-certification/06-load-concurrency-report.md`).
+  Certification: fresh `up` → index `down` → G–I `down` → F `down` → `up` → `down 8` → `up`
   (`tests/migration_backfill.rs::m02_rollback_and_reapply`) and the K-E2E backfill tests.
 
 ---

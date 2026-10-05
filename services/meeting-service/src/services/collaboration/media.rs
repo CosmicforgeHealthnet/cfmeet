@@ -944,6 +944,20 @@ impl MediaControlService {
                     "Session not found for this participant",
                 )
             })?;
+        // A session past its validity window (session TTL, guest TTL, healthcare
+        // appointment window) never yields a new credential, and a refreshed credential
+        // never outlives the session: the participant must re-join (re-authorization).
+        let now = chrono::Utc::now();
+        if !session.is_live_at(now) {
+            return Err(ApiError::domain(
+                ErrorCode::ParticipantStateConflict,
+                "Your session has expired; join the meeting again",
+            ));
+        }
+        let mut ttl = self.rtc.credential_ttl();
+        if let Some(remaining) = session.expires_at.and_then(|e| (e - now).to_std().ok()) {
+            ttl = ttl.min(remaining);
+        }
         let context = media_context(&self.core.db, &c.conference, &me).await?;
         super::breakouts::ensure_context_room(&self.core, &self.rtc, &c.conference, &context)
             .await?;
@@ -960,7 +974,7 @@ impl MediaControlService {
                 },
                 display_name: me.display_name.clone(),
                 permissions,
-                ttl: self.rtc.credential_ttl(),
+                ttl,
             })
             .await?;
         // Fail closed if authority changed while minting (lock, move, removal, end).
@@ -970,7 +984,7 @@ impl MediaControlService {
         let still_active = participant_sessions::Entity::find_by_id(session.id)
             .one(&self.core.db)
             .await?
-            .map(|s| s.state.is_active())
+            .map(|s| s.is_live_at(chrono::Utc::now()))
             .unwrap_or(false);
         let now_context = media_context(&self.core.db, &conference, &current).await?;
         let now_permissions = effective_media_for(&self.core.db, &conference, &current).await?;

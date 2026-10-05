@@ -13,6 +13,7 @@
 //! | provider participant without an active ParticipantSession | evict (repair) |
 //! | provider participant whose PENDING session is not yet CONNECTED (late webhook) | mark CONNECTED (repair) |
 //! | session CONNECTED but absent at the provider (beyond grace) | mark DISCONNECTED (repair) |
+//! | session past its `expires_at` still PENDING / CONNECTED | mark EXPIRED, evict identity (repair) |
 //! | provider grants ≠ permission engine grants | push authoritative grants (repair) |
 //!
 //! Safe, deterministic drift is repaired because PostgreSQL says exactly what must be
@@ -573,6 +574,33 @@ impl ConferenceReconciler {
         report: &mut ReconcileReport,
     ) -> ApiResult<()> {
         let room = RtcRoomRef::for_conference(c);
+        // Sessions past their validity window are ended before comparing with the
+        // provider, so their media identities are evicted below like any other stale
+        // session (business authority wins over a still-valid provider token).
+        let expired = self
+            .core
+            .db
+            .execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "UPDATE participant_sessions SET state = 'EXPIRED', end_reason = 'EXPIRED', \
+                        disconnected_at = coalesce(disconnected_at, now()), updated_at = now() \
+                  WHERE conference_id = $1 AND state IN ('PENDING','CONNECTED') \
+                    AND expires_at IS NOT NULL AND expires_at <= now()",
+                [c.id.into()],
+            ))
+            .await?
+            .rows_affected();
+        if expired > 0 {
+            self.record(
+                report,
+                Some(c.id),
+                Some(&room.room_name),
+                "SESSION_EXPIRED",
+                Action::Repaired,
+                json!({ "sessions": expired }),
+            )
+            .await;
+        }
         let snapshot = match self.core.rtc.reconcile(&room).await {
             Ok(s) => s,
             Err(e) => {

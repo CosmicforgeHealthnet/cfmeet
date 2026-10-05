@@ -475,3 +475,100 @@ pub struct ErrorBody {
 }
 
 pub type ApiResult<T> = Result<T, ApiError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+    use serde_json::Value;
+
+    async fn render(e: ApiError) -> (StatusCode, axum::http::HeaderMap, Value) {
+        let resp = e.into_response();
+        let status = resp.status();
+        let headers = resp.headers().clone();
+        let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        (status, headers, serde_json::from_slice(&body).unwrap())
+    }
+
+    #[tokio::test]
+    async fn domain_errors_serialize_to_the_standard_envelope() {
+        for code in [
+            ErrorCode::MeetingAccessDenied,
+            ErrorCode::ConferenceNotLive,
+            ErrorCode::RtcProviderUnavailable,
+            ErrorCode::EndpointNotFound,
+            ErrorCode::LegacyWriteDisabled,
+        ] {
+            let (status, _, v) = render(ApiError::domain(code, "safe message")).await;
+            assert_eq!(status, code.status());
+            assert_eq!(v["success"], false);
+            assert_eq!(v["error"]["code"], code.as_str());
+            assert_eq!(v["error"]["message"], "safe message");
+            assert!(v["error"].as_object().unwrap().contains_key("requestId"));
+            assert_eq!(v["error"].as_object().unwrap().len(), 3, "{v}");
+        }
+    }
+
+    #[tokio::test]
+    async fn rate_limit_carries_retry_semantics() {
+        let (status, headers, v) = render(ApiError::rate_limited("slow down", 0)).await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            headers[axum::http::header::RETRY_AFTER],
+            "1",
+            "retry-after floored at 1s"
+        );
+        assert_eq!(v["error"]["code"], "RATE_LIMITED");
+        assert_eq!(v["error"]["retryAfterSeconds"], 1);
+    }
+
+    #[tokio::test]
+    async fn internal_and_database_details_never_reach_the_client() {
+        let (status, _, v) = render(ApiError::InternalError(
+            "panicked at /home/build/src/secret.rs: postgres://user:pw@db".into(),
+        ))
+        .await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(v["error"]["code"], "INTERNAL_ERROR");
+        assert!(!v.to_string().contains("postgres://") && !v.to_string().contains("/home/"));
+
+        let (status, _, v) = render(ApiError::DatabaseError(sea_orm::DbErr::Custom(
+            "duplicate key value violates unique constraint \"uq_secret\"".into(),
+        )))
+        .await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(v["error"]["code"], "DATABASE_ERROR");
+        assert!(!v.to_string().contains("uq_secret"));
+
+        let (status, _, v) = render(ApiError::DatabaseError(sea_orm::DbErr::ConnectionAcquire(
+            sea_orm::ConnAcquireErr::Timeout,
+        )))
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(v["error"]["code"], "SERVICE_UNAVAILABLE");
+    }
+
+    #[test]
+    fn every_error_code_has_a_stable_string_and_client_or_server_status() {
+        let all = [
+            ErrorCode::MeetingNotFound,
+            ErrorCode::PermissionDenied,
+            ErrorCode::ValidationError,
+            ErrorCode::RateLimited,
+            ErrorCode::FeatureDisabled,
+            ErrorCode::ServiceUnavailable,
+            ErrorCode::DatabaseError,
+            ErrorCode::InternalError,
+            ErrorCode::MethodNotAllowed,
+        ];
+        for c in all {
+            let s = c.as_str();
+            assert!(
+                s.chars().all(|ch| ch.is_ascii_uppercase() || ch == '_'),
+                "{s}"
+            );
+            assert_eq!(serde_json::to_value(c).unwrap(), serde_json::json!(s));
+            assert!(c.status().is_client_error() || c.status().is_server_error());
+        }
+    }
+}

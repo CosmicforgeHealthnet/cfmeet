@@ -188,6 +188,12 @@ async fn set_indicator<C: ConnectionTrait>(
 
 /// Transition helper: updates status (+ legacy storage_state) and version.
 fn transition(a: &meeting_artifacts::Model, to: ArtifactStatus) -> meeting_artifacts::ActiveModel {
+    debug_assert!(
+        status_of(a).can_transition_to(to),
+        "illegal artefact transition {} → {}",
+        a.status,
+        to.as_str()
+    );
     let mut am: meeting_artifacts::ActiveModel = a.clone().into();
     am.status = Set(to.as_str().to_string());
     am.storage_state = Set(to.storage_state().to_string());

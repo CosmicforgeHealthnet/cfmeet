@@ -470,7 +470,7 @@ impl RtcWebhookService {
                 .one(txn)
                 .await?;
         let allowed = conference.status == ConferenceStatus::Live
-            && session.state.is_active()
+            && session.is_live_at(chrono::Utc::now())
             && participant
                 .as_ref()
                 .map(|p| p.admission_state == AdmissionState::Admitted)

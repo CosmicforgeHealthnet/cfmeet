@@ -347,6 +347,7 @@ async fn i07_migrations_idempotent() {
     let applied = Migrator::get_applied_migrations(&db.conn).await.unwrap();
     // 18 through Parts A–D + 1 additive Part E migration (rtc control plane)
     // + 1 additive Part F migration (collaboration)
-    // + 1 additive Parts G–I migration (artefacts, profiles, operations).
-    assert_eq!(applied.len(), 21);
+    // + 1 additive Parts G–I migration (artefacts, profiles, operations)
+    // + 1 additive Part M index (main-room message cursor).
+    assert_eq!(applied.len(), 22);
 }

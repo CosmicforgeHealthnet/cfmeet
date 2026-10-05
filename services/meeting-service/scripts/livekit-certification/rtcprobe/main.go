@@ -8,6 +8,8 @@
 //	{"event":"publish_ok","source":"MICROPHONE","trackSid":"…"} | {"event":"publish_denied","source":"…","error":"…"}
 //	{"event":"track_muted","source":"…"} / {"event":"track_unmuted","source":"…"}
 //	{"event":"track_unpublished","source":"…","trackSid":"…"}   (server-side unpublish)
+//	{"event":"track_subscribed","source":"…","from":"…","kind":"…"}   (remote track received)
+//	{"event":"stats","subscribed":n,"rtpPackets":n,"rtpLost":n,"bytes":n}   (every 5 s and at exit)
 //	{"event":"disconnected","reason":"…"}
 //	{"event":"timeout"}
 //
@@ -93,6 +95,34 @@ func main() {
 			}
 		}
 	}
+	// Receive side: count every subscribed remote track, RTP packets, sequence gaps
+	// (lost packets) and bytes, so media load runs can report subscriber delivery.
+	var subscribed, rtpPackets, rtpLost, rtpBytes atomic.Int64
+	cb.ParticipantCallback.OnTrackSubscribed = func(track *webrtc.TrackRemote, pub *lksdk.RemoteTrackPublication, rp *lksdk.RemoteParticipant) {
+		subscribed.Add(1)
+		emit(map[string]any{"event": "track_subscribed", "source": pub.Source().String(), "from": rp.Identity(), "kind": track.Kind().String()})
+		go func() {
+			var last uint16
+			first := true
+			for {
+				pkt, _, err := track.ReadRTP()
+				if err != nil {
+					return
+				}
+				rtpPackets.Add(1)
+				rtpBytes.Add(int64(len(pkt.Payload)))
+				if !first {
+					if gap := pkt.SequenceNumber - last - 1; gap > 0 && gap < 1000 {
+						rtpLost.Add(int64(gap))
+					}
+				}
+				first, last = false, pkt.SequenceNumber
+			}
+		}()
+	}
+	stats := func() {
+		emit(map[string]any{"event": "stats", "subscribed": subscribed.Load(), "rtpPackets": rtpPackets.Load(), "rtpLost": rtpLost.Load(), "bytes": rtpBytes.Load()})
+	}
 	room, err := lksdk.ConnectToRoomWithToken(url, token, cb, lksdk.WithAutoSubscribe(true))
 	if err != nil {
 		emit(map[string]any{"event": "connect_failed", "error": err.Error()})
@@ -163,14 +193,20 @@ func main() {
 	deadline := time.After(time.Duration(seconds) * time.Second)
 	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()
+	statsTick := time.NewTicker(5 * time.Second)
+	defer statsTick.Stop()
 	for {
 		select {
 		case <-done:
+			stats()
 			return
 		case <-deadline:
+			stats()
 			emit(map[string]any{"event": "timeout"})
 			room.Disconnect()
 			return
+		case <-statsTick.C:
+			stats()
 		case <-tick.C:
 			mu.Lock()
 			for _, p := range pubs {

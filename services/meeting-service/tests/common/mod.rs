@@ -11,7 +11,10 @@ pub mod artifacts;
 pub mod collab;
 pub mod contract;
 pub mod livekit_mock;
+pub mod proxy;
+pub mod route_coverage;
 pub mod rtc;
+pub mod ws;
 
 use std::{
     collections::HashMap,
@@ -158,6 +161,15 @@ pub struct TestDb {
 
 impl TestDb {
     pub async fn new() -> Option<Self> {
+        Self::with_pool(40, None).await
+    }
+
+    /// Migrated database with an explicit pool size / acquire timeout (load harness:
+    /// mirror the production pool instead of the generous test default).
+    pub async fn with_pool(
+        max_connections: u32,
+        acquire_timeout: Option<Duration>,
+    ) -> Option<Self> {
         let admin = admin_url()?;
         let tmpl = template(&admin).await;
         let name = format!("cfm_t_{}_{}", std::process::id(), Uuid::new_v4().simple());
@@ -171,7 +183,10 @@ impl TestDb {
         }
         let url = with_db(&admin, &name);
         let mut opts = sea_orm::ConnectOptions::new(url.clone());
-        opts.max_connections(40).sqlx_logging(false);
+        opts.max_connections(max_connections).sqlx_logging(false);
+        if let Some(t) = acquire_timeout {
+            opts.acquire_timeout(t);
+        }
         let conn = Database::connect(opts).await.unwrap();
         Some(Self {
             conn,
@@ -362,6 +377,8 @@ pub enum RedisMode {
     FromEnv,
     /// Always unreachable (proves Redis is not meeting authority / tests fail-closed paths).
     Unreachable,
+    /// Through a local [`proxy::ToggleProxy`] on this port (outage *and* recovery tests).
+    Via(u16),
 }
 
 /// Which RTC provider the app talks to.
@@ -398,6 +415,8 @@ pub struct TestOptions {
     pub telemetry: Option<Arc<dyn backend::services::quality::sink::QualityTelemetrySink>>,
     /// Part G/I tunables.
     pub config: Option<MeetingV2Config>,
+    /// Part N: keep the in-memory object store across an app restart (rollback drill).
+    pub reuse_storage: Option<Arc<backend::services::artifacts::storage::MemoryArtifactStorage>>,
 }
 
 impl Default for TestOptions {
@@ -418,6 +437,7 @@ impl Default for TestOptions {
             artifact_backends: None,
             telemetry: None,
             config: None,
+            reuse_storage: None,
         }
     }
 }
@@ -528,8 +548,43 @@ impl TestApp {
         }
     }
 
+    /// Part N rollback drill: "redeploy" with different flags / configuration on the
+    /// SAME database, provider (mock LiveKit) and object store.
+    pub fn reconfigure(self, opts: TestOptions) -> Self {
+        let TestApp {
+            db, lk, storage, ..
+        } = self;
+        let rtc = if lk.is_some() {
+            RtcMode::LiveKitMock
+        } else {
+            opts.rtc.clone()
+        };
+        let mut app = Self::on_with_lk(
+            db,
+            TestOptions {
+                rtc,
+                reuse_storage: Some(storage),
+                ..opts
+            },
+            lk.clone(),
+        );
+        app.lk = lk;
+        app
+    }
+
     pub fn on(db: TestDb, opts: TestOptions) -> Self {
         Self::on_with_lk(db, opts, None)
+    }
+
+    /// Like [`TestApp::on`], starting the mock LiveKit server when `opts.rtc` asks for it.
+    pub async fn on_with_provider(db: TestDb, opts: TestOptions) -> Self {
+        let lk = match opts.rtc {
+            RtcMode::LiveKitMock => Some(livekit_mock::start().await),
+            _ => None,
+        };
+        let mut app = Self::on_with_lk(db, opts, lk.clone());
+        app.lk = lk;
+        app
     }
 
     fn on_with_lk(
@@ -561,6 +616,7 @@ impl TestApp {
                 .filter(|v| !v.is_empty())
                 .unwrap_or(unreachable),
             RedisMode::Unreachable => unreachable,
+            RedisMode::Via(port) => format!("redis://127.0.0.1:{port}"),
         };
         let redis = RedisService::new_lazy(&RedisConfig {
             url: redis_url,
@@ -613,7 +669,9 @@ impl TestApp {
                 memberships: opts.organizations,
             })
         };
-        let storage = Arc::new(backend::services::artifacts::storage::MemoryArtifactStorage::new());
+        let storage = opts.reuse_storage.clone().unwrap_or_else(|| {
+            Arc::new(backend::services::artifacts::storage::MemoryArtifactStorage::new())
+        });
         let transcription = Arc::new(artifacts::TestTranscription::default());
         let translation = Arc::new(artifacts::TestTranslation::default());
         let intelligence = Arc::new(artifacts::TestIntelligence::default());
@@ -668,7 +726,8 @@ impl TestApp {
             &livekit,
             deps,
         );
-        let router = routes::create_routes(state.clone());
+        let router = routes::create_routes(state.clone())
+            .route_layer(axum::middleware::from_fn(route_coverage::record));
         Self {
             db,
             state,

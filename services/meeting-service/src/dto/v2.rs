@@ -935,3 +935,100 @@ pub struct EventReplayResponse {
 
 pub use super::v2_collab::*;
 pub use super::v2_ghi::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::de::DeserializeOwned;
+    use serde_json::{json, Value};
+
+    /// Every request DTO accepts its minimal valid body and rejects any unknown or
+    /// authority-bearing field (identity, role, ownership, provider, storage).
+    fn strict<T: DeserializeOwned>(name: &str, valid: Value) {
+        serde_json::from_value::<T>(valid.clone())
+            .unwrap_or_else(|e| panic!("{name}: valid body rejected: {e}"));
+        for injected in [
+            "userId",
+            "ownerUserId",
+            "participantId",
+            "admissionState",
+            "rtcRoomName",
+            "storageKey",
+            "providerRef",
+            "unexpected",
+        ] {
+            let mut body = valid.clone();
+            if body.get(injected).is_some() {
+                continue; // a legitimate field of this DTO (e.g. AddMember.userId)
+            }
+            body[injected] = json!("x");
+            assert!(
+                serde_json::from_value::<T>(body).is_err(),
+                "{name} accepts injected field `{injected}`"
+            );
+        }
+    }
+
+    #[test]
+    fn request_dtos_reject_unknown_and_authority_fields() {
+        let id = Uuid::new_v4();
+        strict::<CreateMeetingSpaceRequest>("CreateMeetingSpace", json!({ "title": "t" }));
+        strict::<UpdateMeetingSpaceRequest>("UpdateMeetingSpace", json!({ "version": 1 }));
+        strict::<OwnerTransferRequest>(
+            "OwnerTransfer",
+            json!({ "newOwnerUserId": id, "version": 1 }),
+        );
+        strict::<InstantMeetingRequest>("InstantMeeting", json!({}));
+        strict::<AddMemberRequest>("AddMember", json!({ "userId": id, "role": "PARTICIPANT" }));
+        strict::<UpdateMemberRequest>("UpdateMember", json!({ "role": "HOST", "version": 1 }));
+        strict::<CreateInvitationRequest>("CreateInvitation", json!({}));
+        strict::<CreateConferenceRequest>("CreateConference", json!({}));
+        strict::<RescheduleConferenceRequest>(
+            "Reschedule",
+            json!({ "scheduledStartAt": "2030-01-01T10:00:00Z" }),
+        );
+        strict::<SetRecurrenceRequest>(
+            "SetRecurrence",
+            json!({ "rrule": "FREQ=DAILY", "startLocal": "2030-01-01T10:00:00", "durationMinutes": 30 }),
+        );
+        strict::<JoinConferenceRequest>("Join", json!({}));
+        strict::<LeaveConferenceRequest>("Leave", json!({}));
+        strict::<AdmitRequest>("Admit", json!({ "participantIds": [id] }));
+        strict::<DenyRequest>("Deny", json!({ "participantIds": [id] }));
+        strict::<RoleChangeRequest>("RoleChange", json!({ "role": "PRESENTER" }));
+        strict::<RemoveParticipantRequest>("Remove", json!({}));
+        strict::<BanParticipantRequest>("Ban", json!({ "scope": "CONFERENCE" }));
+    }
+
+    #[test]
+    fn request_dtos_reject_invalid_enum_values_and_types() {
+        assert!(serde_json::from_value::<RoleChangeRequest>(json!({ "role": "Host" })).is_err());
+        assert!(
+            serde_json::from_value::<RoleChangeRequest>(json!({ "role": "SUPERUSER" })).is_err()
+        );
+        assert!(serde_json::from_value::<UpdateMemberRequest>(
+            json!({ "role": "HOST", "version": "1" })
+        )
+        .is_err());
+        assert!(
+            serde_json::from_value::<AdmitRequest>(json!({ "participantIds": ["nope"] })).is_err()
+        );
+        assert!(serde_json::from_value::<CreateMeetingSpaceRequest>(
+            json!({ "title": "t", "accessPolicy": "public" })
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn join_realtime_info_is_scoped_to_the_conference() {
+        let cid = Uuid::new_v4();
+        let on = JoinRealtimeInfo::for_conference(cid, true);
+        assert_eq!(on.conference_path, format!("/api/v2/conferences/{cid}"));
+        assert!(on.ticket_path.unwrap().ends_with("/realtime/ticket"));
+        let off = JoinRealtimeInfo::for_conference(cid, false);
+        assert!(
+            off.ticket_path.is_none() && off.stream_path.is_none() && off.events_path.is_none()
+        );
+        assert!(off.participant_path.ends_with("/participants/me"));
+    }
+}

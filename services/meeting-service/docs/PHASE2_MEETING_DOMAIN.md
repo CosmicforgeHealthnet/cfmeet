@@ -265,7 +265,8 @@ rooms are recorded and ignored.
 `workers/conference_reconciler.rs` — see the module docs for the drift table (PREPARING not ready,
 LIVE room missing, ENDING not finalized, orphan rooms, unmapped rooms (escalated, never deleted),
 provider participants without session (evicted), late webhooks (session marked CONNECTED), sessions
-absent at the provider beyond grace (DISCONNECTED), permission drift (re-pushed)). Singleton via
+absent at the provider beyond grace (DISCONNECTED), sessions past `expires_at` (EXPIRED + identity
+evicted; Part M), permission drift (re-pushed)). Singleton via
 `worker_leases` (crash-safe expiry), bounded batches, findings in `rtc_drift_events`.
 
 ### Outbox, realtime, recovery
@@ -778,3 +779,28 @@ web client must be on the v2 join before the flag is enabled. Default: off.
 `tests/legacy_retirement.rs` (K-E2E-10, flag matrix), `tests/architecture_boundaries.rs`
 (K-E2E-09), `tests/platform_security.rs` (L-S1..L-S20), `tests/platform_concurrency.rs`
 (L-C1..L-C12), `tests/platform_failure.rs` (L-F1..L-F12).
+
+## Parts M–N — certification and closure
+
+Evidence package: `docs/phase2-certification/` (repository root). Code changes made by the
+certification (each with a permanent regression test):
+
+- **SEC-M-01 (high, fixed)** — an active session past `expires_at` could refresh its media
+  credential. `ParticipantSession::is_live_at` now gates credential issuance (TTL capped at the
+  session's remaining lifetime), provider-join authority, and a reconciler sweep
+  (`SESSION_EXPIRED`). Tests: `tests/credential_replay.rs`.
+- **REL-M-01 (fixed)** — scheduler auto-end evaluated `autoEnd` / grace after `LIMIT`, so
+  ≥ 50 ineligible overrunning conferences starved due ones. Eligibility is now in SQL, ordered by
+  `scheduled_end_at` (`workers/conference_scheduler.rs`). Test:
+  `tests/failure_injection_m.rs::m_scheduler_auto_end_not_starved_by_ineligible_overruns`.
+- **Query plan** — `idx_messages_main_cursor` (migration `m20261005_000006`) for main-room chat
+  pagination, which previously seq-scanned. Test: `tests/query_plans.rs` (ignored; certification).
+- `ArtifactStatus::can_transition_to` (artefact lifecycle table, debug-asserted on transitions);
+  `meeting_access::policy_step` (pure access-policy decision, unit-tested).
+
+New suites: `api_operation_coverage`, `system_e2e` (M-E2E-01..11 + recovery), `idor_matrix`,
+`credential_replay`, `invariants_certification` (§91 + M-S4), `failure_injection_m`,
+`rollout_flags` (flag matrix + rollback drill), `migration_certification` (synthetic legacy
+dataset); ignored certification suites `load_certification`, `query_plans` and the Part M
+real-provider tests in `livekit_certification`. Every v2 operation's success and error path
+is measured at runtime (`tests/common/route_coverage.rs`, `scripts/certification/route_coverage.py`).

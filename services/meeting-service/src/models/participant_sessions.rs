@@ -49,3 +49,53 @@ impl Related<super::conference_participants::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl Model {
+    /// Usable for media right now: an active state AND not past its validity window.
+    /// `expires_at` caps every session (session TTL, guest TTL, healthcare appointment
+    /// window); an active-but-expired row is treated exactly like an ended session even
+    /// before a sweep marks it EXPIRED.
+    pub fn is_live_at(&self, now: chrono::DateTime<chrono::Utc>) -> bool {
+        self.state.is_active() && self.expires_at.map(|e| e > now).unwrap_or(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::SessionState;
+    use chrono::{Duration, Utc};
+
+    fn session(state: SessionState, expires_in: Option<i64>) -> Model {
+        let now = Utc::now();
+        Model {
+            id: uuid::Uuid::new_v4(),
+            conference_participant_id: uuid::Uuid::new_v4(),
+            conference_id: uuid::Uuid::new_v4(),
+            media_identity: "ps_x".into(),
+            state,
+            established_at: now,
+            connected_at: None,
+            disconnected_at: None,
+            expires_at: expires_in.map(|s| now + Duration::seconds(s)),
+            end_reason: None,
+            reconnect_of_session_id: None,
+            client_kind: None,
+            legacy_participant_id: None,
+            created_at: now,
+            updated_at: now,
+            screen_share_started_at: None,
+            screen_share_track_ref: None,
+        }
+    }
+
+    #[test]
+    fn expiry_overrides_an_active_state() {
+        let now = Utc::now();
+        assert!(session(SessionState::Connected, Some(60)).is_live_at(now));
+        assert!(session(SessionState::Pending, None).is_live_at(now));
+        assert!(!session(SessionState::Connected, Some(-1)).is_live_at(now));
+        assert!(!session(SessionState::Pending, Some(-60)).is_live_at(now));
+        assert!(!session(SessionState::Terminated, Some(60)).is_live_at(now));
+    }
+}
