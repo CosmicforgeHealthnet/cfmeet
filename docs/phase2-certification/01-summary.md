@@ -21,8 +21,8 @@ authority and `MeetingPermissionService` the permission authority.
 | Real LiveKit (1.8.4) | 7 / 8 real tests PASS in the final run, incl. new real subscription + ban / reconnect and media load (clean envelope on this host: 6 publishers × 50 subscribers) |
 | Real Egress + S3 | **PASS — re-certified in GitHub CI** (run 37384968304: 8 / 8 real-provider tests, real Egress recording → READY, real S3 / MinIO, artefact lifecycle) after the earlier local M / N environment failure (08) |
 | Flags / rollback | 12-combination flag matrix and 10-step rollback drill PASS (local) |
-| Staging | **STAGING DEPLOYMENT CERTIFICATION — PENDING ENVIRONMENT** |
-| Production | **PRODUCTION CANARY — NOT EXECUTED**; no production deployment; legacy-write cutover not enabled |
+| Staging | **PASS (2026-10-06)** — isolated staging deployment on a restored production copy: migration 14 → 22, backfill 12 / 12 and 37 / 37, functional validation 35 / 35, rollback compatibility 15 / 15 (16). Load, real media, recording and 24 h observation were not run there |
+| Production | **MIGRATED, PRE-CUTOVER PASS (2026-10-06)** — 22 migrations, backfill 12 / 12 and 37 / 37 with 0 failures, Phase 2 backend running on `127.0.0.1:18081`, pre-cutover certification 18 / 18 (16). Public `api.cfmeet.com` is still routed to the legacy backend until the frontend compatibility deployment is confirmed; legacy-write cutover not enabled |
 
 ## Defects found and fixed on `staging` (each with a permanent regression)
 
@@ -50,8 +50,10 @@ authority and `MeetingPermissionService` the permission authority.
 
 ## Genuine remaining backend gaps
 
-- Staging certification (11), production canary and legacy-write retirement (12) not
-  executed — they require an environment / explicit authorization.
+- None in the backend implementation. The public Nginx cutover waits for the frontend
+  compatibility deployment (16) — a deployment dependency. The staged canary and
+  legacy-write retirement of 12 and the staging load / media / observation items of 11
+  remain separate operational decisions.
 - The dedicated VIEWER audience pool (`viewerCapacity`) still counts the admitted audience
   (deliberately unchanged in the CAP-M-01 fix); whether it should also become current
   occupancy is a product decision.
@@ -73,6 +75,11 @@ authority and `MeetingPermissionService` the permission authority.
 in GitHub CI (run 37416638738, commit `3be8f81`): full suite 622 / 0 / 15 + 136 / 136 v2
 coverage, OpenAPI parity + migration up / reset / up, real LiveKit / WebRTC / Egress / S3
 (8 / 8) + media load, and the full control-plane load suite (burst, fanout, churn,
-scheduler, 600 s soak, migration, query plans) — 04, 06, 08. **NOT** "production rollout completed": staging certification is pending an
-environment, and the production canary, legacy-write retirement, frontend migration and any
-further phase require explicit instruction.
+scheduler, 600 s soak, migration, query plans) — 04, 06, 08.
+
+**Update 2026-10-06 — PHASE 2 BACKEND — COMPLETE.** The backend was deployed to an isolated
+staging environment, the production database was migrated (22 migrations) and the Phase 2
+backend passed the production pre-cutover certification (16). Public traffic is still served
+by the legacy backend until the frontend compatibility deployment is confirmed: a cutover
+dependency, not unfinished backend implementation. Legacy-write retirement, the frontend
+migration to `/api/v2` and any further phase still require explicit instruction.

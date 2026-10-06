@@ -2,6 +2,16 @@
 
 ## Classification
 
+**STAGING DEPLOYMENT — EXECUTED 2026-10-06, FUNCTIONAL VALIDATION PASS** (see
+[16](16-deployment-status.md)): an isolated staging environment now exists
+(`https://api.staging.cfmeet.com`), deployed from `staging`, migrated on a restored copy of
+production and validated functionally (35 / 35) with a rollback-compatibility run (15 / 15).
+Steps 3–4 and 6–7 of the procedure below (external load, real media / Egress / bucket
+certification, rollback drill, 24 h observation) were **not** run there: the host also runs
+production, staging shares the production LiveKit project, and no object storage is
+provisioned. The text below is the original pre-deployment record.
+
+*Original classification (before a staging environment existed):*
 **STAGING DEPLOYMENT CERTIFICATION — PENDING ENVIRONMENT**
 
 No staging deployment of `services/meeting-service` was accessible from the certification

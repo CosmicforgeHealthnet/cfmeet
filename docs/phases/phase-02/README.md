@@ -2,6 +2,15 @@
 
 This folder is the documentation home for the Phase 2 implementation programme.
 
+## Status
+
+**PHASE 2 BACKEND — COMPLETE.** Production-ready backend: Swagger 1.1.0, 187 operations
+(49 v1, 136 v2), 22 migrations, production pre-cutover certification PASS. Public
+`api.cfmeet.com` is temporarily still routed to the legacy backend until the frontend
+compatibility deployment is confirmed — a deployment / cutover dependency, not unfinished
+backend implementation. See
+[`docs/phase2-certification/16-deployment-status.md`](../../phase2-certification/16-deployment-status.md).
+
 ## Implementation ownership
 
 | Concern | Repository location |
