@@ -109,6 +109,13 @@ fails on any capacity refusal while measured occupancy is below capacity, or any
 | 60 s, fixed code | 1 416 | 705 | 17 | 0 | 0 | 0 | PASS |
 | 150 s, fixed code | 3 435 | 1 715 | 17 | 0 | 0 | 0 | PASS |
 | 150 s, **previous code** (control) | 3 666 | 1 000 | 17 | **1 653** | **1 653** | 0 | **FAIL** |
+| GitHub CI run 37416638738 (`3be8f81`, 2-vCPU runner, 60 s) | 1 102 | 546 | 19 | 0 | 0 | 0 | PASS |
+
+**Final CI load certification (run 37416638738, commit `3be8f81`) — all PASS in one run:**
+burst join 25–500 (0 errors; p99 9.0 s at 500 on the 2-vCPU runner), WebSocket fanout
+25–500 (0 of 10 000 deliveries lost at 500; p95 3.0 s), waiting-room churn (above), scheduler,
+600 s soak (717 cycles; RSS 60 → 69 MB, 0 active sessions / stuck recordings at the end),
+migration certification (3 000 meetings), query plans 22 / 22 INDEX. Not capacity claims.
 
 ## §41 Scheduler load
 

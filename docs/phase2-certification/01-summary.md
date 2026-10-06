@@ -69,7 +69,10 @@ authority and `MeetingPermissionService` the permission authority.
 
 ## Decision
 
-**IMPLEMENTATION / CERTIFICATION READY**: real LiveKit / WebRTC / Egress / S3 certified in
-GitHub CI; load certification re-run after CAP-M-01 / QP-M-02 (results: 04, 06). **NOT** "production rollout completed": staging certification is pending an
+**IMPLEMENTATION / CERTIFICATION READY**: the complete Phase 2 certification workflow is green
+in GitHub CI (run 37416638738, commit `3be8f81`): full suite 622 / 0 / 15 + 136 / 136 v2
+coverage, OpenAPI parity + migration up / reset / up, real LiveKit / WebRTC / Egress / S3
+(8 / 8) + media load, and the full control-plane load suite (burst, fanout, churn,
+scheduler, 600 s soak, migration, query plans) — 04, 06, 08. **NOT** "production rollout completed": staging certification is pending an
 environment, and the production canary, legacy-write retirement, frontend migration and any
 further phase require explicit instruction.
