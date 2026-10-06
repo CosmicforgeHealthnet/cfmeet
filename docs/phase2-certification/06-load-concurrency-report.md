@@ -84,6 +84,32 @@ admitted and denied, 0 denied participants with a live session, 0 live sessions 
 leave, no denied participant ever received a credential. **PASS** (no lock starvation:
 max latency 1.3 s under saturation of the 10-connection pool).
 
+**Finding CAP-M-01 (fixed) — interactive capacity counted lifetime admissions.** The CI
+certification run (GitHub runner, faster than this host: 2 201 cycles ≈ 1 100 distinct
+admissions in 60 s) failed this scenario with `admit 409 MEETING_CAPACITY_REACHED`:
+`ensure_capacity` counted every ADMITTED participant, and a participant stays ADMITTED
+after leaving (that is the rejoin authorization), so once 1 000 distinct guests had ever
+been admitted the room refused everyone while only a handful were present; the refused
+guests stayed WAITING (stale-waiting invariant). Fixed semantics — **interactive capacity
+= current logical interactive occupancy**: a participant occupies one seat while it is
+ADMITTED and has ≥ 1 live ParticipantSession (PENDING / CONNECTED, not past
+`expires_at`); multiple devices count once; the last live session ending (leave, expiry,
+reconnect replacement, removal, ban, conference end) releases the seat; admission
+authorization, admission / audit / attendance history and reconnect are unchanged. A
+departed participant reconnecting takes a free seat again (refused only if the room is
+genuinely full); every seat-taking path runs under the conference row lock. The dedicated
+VIEWER pool (`viewerCapacity`) is unchanged. Regression suite `tests/capacity_occupancy.rs`
+(A–K, incl. 1 000 distinct cycles through a 3-seat room and last-seat races).
+
+The scenario now also reports occupancy, admissions, capacity refusals and deadlocks, and
+fails on any capacity refusal while measured occupancy is below capacity, or any deadlock.
+
+| Run (this host, 20 workers) | Cycles | Admissions | Max simultaneous occupancy | Capacity refusals | Stale waiting | Deadlocks | Class |
+|---|---|---|---|---|---|---|---|
+| 60 s, fixed code | 1 416 | 705 | 17 | 0 | 0 | 0 | PASS |
+| 150 s, fixed code | 3 435 | 1 715 | 17 | 0 | 0 | 0 | PASS |
+| 150 s, **previous code** (control) | 3 666 | 1 000 | 17 | **1 653** | **1 653** | 0 | **FAIL** |
+
 ## §41 Scheduler load
 
 300 recurring series (3 000 occurrences) with materialization bookkeeping wiped (all due
@@ -139,6 +165,25 @@ conference with 2 000 participants), 60 000 memberships, 40 000 invitations, 10 
 justified additive partial index (`m20261005_000006_message_main_cursor_index`) fixes it
 (0.05 ms). No other index was added. Class: **PASS** (all 22 critical queries indexed;
 the test fails on any sequential scan of a large table).
+
+**Finding QP-M-02 (test defect, fixed) — unrepresentative Q&A seed.** The CI run failed
+on `Q&A lookup` (`SELECT * FROM meeting_questions WHERE conference_id = $hot AND status =
+'OPEN' ORDER BY created_at`). With the new per-query diagnostics the plan was `Seq Scan on
+meeting_questions` returning 471 of 471 rows (0 removed by filter): the seed put every
+question into the hot conference, so the predicate selected 100 % of a few-page table and
+a sequential scan was PostgreSQL's correct choice (index vs. heap cost near-tied — which is
+why it passed here earlier and failed on CI). The intended index
+`idx_questions_conference (conference_id, status, created_at)` already existed — **not an
+index defect; no index added**. The seed now carries Q&A history like polls / chat /
+artefacts (≈ 60 000 questions across ≈ 10 000 historical conferences); the plan becomes
+`Bitmap Index Scan using idx_questions_conference` (465 rows, 0.31 ms) and the
+no-sequential-scan gate is kept unchanged (22 / 22 INDEX).
+
+Diagnostics: every query now prints a `QUERY_PLAN` line (expected index, indexes used,
+seq-scanned tables with their row counts, rows returned, execution time); a failing query
+prints its SQL and the full rendered plan (`QUERY_PLAN_FAIL …`: node, relation / index,
+estimated vs. actual rows, filter / index condition); the console filter in
+`run-load.sh` no longer truncates these or the panic message.
 
 ## §43 Self-hosted LiveKit media load (real SFU) — separate from control-plane load
 

@@ -7,7 +7,10 @@
 //! `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` for the critical query shapes the code
 //! issues (filters / ordering / limits mirror the SeaORM queries in `src/services`).
 //! Fails if a critical query uses a sequential scan on a large table.
-//! Emits `QUERY_PLANS {json}` (and `$CFMEET_CERT_OUT/query-plans.json`).
+//! Emits one `QUERY_PLAN {json}` line per query (expected index, indexes used, seq-scanned
+//! tables with their row counts, rows returned), `QUERY_PLAN_FAIL <query> | …` lines with
+//! the SQL and the full rendered plan for every failing query, and the complete
+//! `QUERY_PLANS {json}` report (also `$CFMEET_CERT_OUT/query-plans.json`).
 
 mod common;
 
@@ -46,6 +49,71 @@ fn walk(node: &Value, out: &mut Vec<(String, Option<String>, Option<String>, f64
     if let Some(children) = node["Plans"].as_array() {
         for c in children {
             walk(c, out);
+        }
+    }
+}
+
+/// The index each critical query shape is designed to use (reported next to the plan the
+/// planner actually chose; the gate itself is "no sequential scan on a large table").
+fn expected_index(query: &str) -> &'static str {
+    match query {
+        "conference participant lookup (registered)" => "uq_participant_registered_user",
+        "conference participant lookup (scoped id)" => "uq_participant_scope",
+        "participant list (admitted)" => "idx_participants_conference_state",
+        "participant-session lookup (active by participant)" => "idx_sessions_participant_state",
+        "participant-session lookup (provider identity)" => "uq_session_media_identity",
+        "active sessions of a conference" => "idx_sessions_conference_active",
+        "membership lookup" => "uq_meeting_member_active",
+        "invitation lookup (token hash)" => "meeting_invitations_token_hash_key",
+        "waiting room lookup" => "idx_participants_waiting",
+        "conference event replay" | "conference current sequence" => "idx_outbox_conference_replay",
+        "message pagination (room, newest page)" | "message pagination (room, deep cursor)" => {
+            "idx_messages_main_cursor"
+        }
+        "poll lookup" => "idx_polls_conference",
+        "Q&A lookup" => "idx_questions_conference",
+        "artefact lookup" => "idx_artifact_conference_type",
+        "scheduler due auto-end" => "uq_conference_one_live_per_space",
+        "scheduler due auto-start (CREATED)" => "idx_conference_scheduler_start",
+        "recurrence due materialisation" => "idx_recurrence_materialization",
+        "outbox relay pending claim" => "idx_outbox_pending",
+        "space resolve by meeting code" => "meeting_spaces_meeting_code_key",
+        "space occurrences by schedule" => "idx_conference_space_start",
+        _ => "?",
+    }
+}
+
+/// Human-readable plan tree (EXPLAIN ANALYZE text equivalent) for failure diagnostics:
+/// node, relation / index, estimated vs actual rows, filter / index condition.
+fn render(node: &Value, depth: usize, out: &mut Vec<String>) {
+    let mut line = format!(
+        "{}{}",
+        "  ".repeat(depth),
+        node["Node Type"].as_str().unwrap_or("")
+    );
+    if let Some(r) = node["Relation Name"].as_str() {
+        line += &format!(" on {r}");
+    }
+    if let Some(i) = node["Index Name"].as_str() {
+        line += &format!(" using {i}");
+    }
+    line += &format!(
+        " (est rows={}, actual rows={}, loops={}",
+        node["Plan Rows"], node["Actual Rows"], node["Actual Loops"]
+    );
+    if let Some(r) = node["Rows Removed by Filter"].as_f64() {
+        line += &format!(", removed by filter={r}");
+    }
+    line += ")";
+    for k in ["Index Cond", "Recheck Cond", "Filter", "Sort Key"] {
+        if !node[k].is_null() {
+            line += &format!(" {k}: {}", node[k]);
+        }
+    }
+    out.push(line);
+    if let Some(children) = node["Plans"].as_array() {
+        for c in children {
+            render(c, depth + 1, out);
         }
     }
 }
@@ -168,6 +236,17 @@ async fn query_plans_at_representative_volume() {
         "INSERT INTO meeting_questions (id, conference_id, participant_id, body, status, created_at) \
          SELECT gen_random_uuid(), '{hot}', p.id, 'question', 'OPEN', now() FROM conference_participants p WHERE p.conference_id = '{hot}' AND abs(hashtext(p.id::text)) % 4 = 0"
     )).await;
+    // Background Q&A history (3 questions in every second historical conference), like
+    // the poll / chat / artefact history: without it the table holds only the hot
+    // conference's questions, the lookup returns 100 % of a few-page table and a
+    // sequential scan is the planner's correct choice — not a representative check.
+    exec(c,
+        "INSERT INTO meeting_questions (id, conference_id, participant_id, body, status, created_at) \
+         SELECT gen_random_uuid(), p.conference_id, p.id, 'history question', \
+                (ARRAY['ANSWERED','OPEN','DISMISSED'])[1 + abs(hashtext(p.id::text)) % 3], now() - interval '30 days' \
+           FROM conference_participants p JOIN conference_sessions cs ON cs.id = p.conference_id \
+          WHERE cs.status = 'ENDED' AND abs(hashtext(cs.id::text)) % 2 = 0 AND p.display_name IN ('p1', 'p2', 'p4')",
+    ).await;
     exec(c,
         "INSERT INTO meeting_artifacts (id, conference_id, meeting_space_id, artifact_type, status, created_at) \
          SELECT gen_random_uuid(), cs.id, cs.meeting_space_id, 'RECORDING', 'FAILED', now() FROM conference_sessions cs WHERE cs.status = 'ENDED' AND abs(hashtext(cs.id::text)) % 3 = 0",
@@ -245,8 +324,13 @@ async fn query_plans_at_representative_volume() {
         "meeting_questions",
         "meeting_recurrence_rules",
     ];
+    let mut table_rows = std::collections::BTreeMap::new();
+    for t in large {
+        table_rows.insert(t, one::<i64>(c, &format!("SELECT count(*) FROM {t}")).await);
+    }
     let mut results = vec![];
     let mut failures = vec![];
+    let mut failure_detail = vec![];
     for (name, sql) in &queries {
         let plan: Value = {
             let raw: String =
@@ -267,18 +351,37 @@ async fn query_plans_at_representative_volume() {
             .collect();
         let indexes: Vec<String> = nodes.iter().filter_map(|(_, _, i, _)| i.clone()).collect();
         let exec_ms = root["Execution Time"].as_f64().unwrap_or(0.0);
+        let rows_returned = root["Plan"]["Actual Rows"].as_f64().unwrap_or(0.0);
         let verdict = if seq_scans.is_empty() {
             "INDEX"
         } else {
             "SEQ SCAN"
         };
+        let seq_detail: Vec<Value> = seq_scans
+            .iter()
+            .map(|t| json!({ "table": t, "tableRows": table_rows.get(t.as_str()) }))
+            .collect();
+        let mut tree = vec![];
+        render(&root["Plan"], 0, &mut tree);
+        let summary = json!({ "query": name, "verdict": verdict, "expectedIndex": expected_index(name),
+                              "indexesUsed": indexes, "seqScans": seq_detail, "rowsReturned": rows_returned,
+                              "executionMs": exec_ms });
+        println!("QUERY_PLAN {summary}");
         if !seq_scans.is_empty() {
             failures.push(name.to_string());
+            println!("QUERY_PLAN_FAIL {name} | sql: {sql}");
+            for l in &tree {
+                println!("QUERY_PLAN_FAIL {name} | {l}");
+            }
+            failure_detail.push(summary.clone());
         }
-        results.push(json!({ "query": name, "verdict": verdict, "indexes": indexes, "seqScans": seq_scans, "executionMs": exec_ms,
+        results.push(json!({ "query": name, "verdict": verdict, "expectedIndex": expected_index(name),
+                             "indexes": indexes, "seqScans": seq_detail, "rowsReturned": rows_returned,
+                             "executionMs": exec_ms, "sql": sql, "plan": tree,
                              "nodes": nodes.iter().map(|(t, r, i, rows)| json!([t, r, i, rows])).collect::<Vec<_>>() }));
     }
-    let report = json!({ "seedSecs": seed_secs, "volumes": counts, "plans": results, "seqScanFailures": failures });
+    let report = json!({ "seedSecs": seed_secs, "volumes": counts, "tableRows": table_rows,
+                         "plans": results, "seqScanFailures": failures });
     println!("QUERY_PLANS {report}");
     if let Ok(dir) = std::env::var("CFMEET_CERT_OUT") {
         std::fs::write(
@@ -289,6 +392,7 @@ async fn query_plans_at_representative_volume() {
     }
     assert!(
         failures.is_empty(),
-        "unacceptable sequential scans: {failures:?}"
+        "unacceptable sequential scans: {}",
+        Value::from(failure_detail)
     );
 }

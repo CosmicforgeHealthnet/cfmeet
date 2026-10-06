@@ -68,6 +68,19 @@ made; the affected suites were re-run green (`--lib` 127, `idor_matrix` 1,
 Before Parts M–N the suite was 550 passed / 7 ignored (Part L report). Parts M–N add 64
 passing tests (20 unit + 44 integration) and 8 ignored certification tests.
 
+## Regression after the load-certification fix (CAP-M-01 / QP-M-02)
+
+Same command, CI disk-safe settings (`CARGO_PROFILE_DEV_DEBUG=0`, `CARGO_PROFILE_TEST_DEBUG=0`,
+`CARGO_INCREMENTAL=0`): **exit 0 — 622 passed, 0 failed, 15 ignored** (53 test binaries).
+The 8 new tests are the permanent capacity-occupancy suite:
+
+| Suite | Passed | Covers |
+|---|---|---|
+| **capacity_occupancy** (new) | 8 | A + H live session holds a seat / full room refuses (join and host admit); B–E multi-device counts once, one device leaving keeps the seat, last device releases it, ADMITTED persists; F reconnect follows occupancy (full room refuses, own-session reconnect never needs a second seat); G 1 000 distinct cycles through a 3-seat room; I last-seat races (new admissions and reconnects) never overbook; J removal / ban / session expiry release, end → ENDING refuses entrants, end with a room-controlling provider finalizes sessions (occupancy 0); K dedicated viewer pool unchanged |
+
+clippy: 18 warnings, all pre-existing (0 in changed files); rustfmt: 0 new drift; OpenAPI:
+identical (no contract change); v2 operation coverage 136 / 136.
+
 ## Static analysis, format, contract
 
 | Check | Command | Result |
@@ -92,6 +105,8 @@ passing tests (20 unit + 44 integration) and 8 ignored certification tests.
 
 | Id | Severity | Summary | Regression test |
 |---|---|---|---|
+| CAP-M-01 | Correctness (capacity) | Interactive capacity counted lifetime admissions; departed participants held seats | `capacity_occupancy::*` (8 tests); churn certification fails on the previous code (06) |
+| QP-M-02 | Test defect | Query-plan seed put all Q&A rows in one conference (seq scan was the correct plan) | `query_plans` with representative Q&A history + plan diagnostics |
 | SEC-M-01 | High (security) | Expired session could refresh / replay its media credential | `credential_replay::replay_expired_session`, `refreshed_credential_is_capped_by_session_expiry` |
 | REL-M-01 | Reliability | Scheduler auto-end starvation by ineligible overrunning conferences | `failure_injection_m::m_scheduler_auto_end_not_starved_by_ineligible_overruns` (fails 3 / 3 on the old code, passes 3 / 3 with the fix) |
 | PERF-M-01 | Performance | Main-room chat pagination sequential scan | `query_plans::query_plans_at_representative_volume` (+ migration `m20261005_000006`) |

@@ -322,7 +322,12 @@ jobs:
           LOAD_WS_LEVELS: ${{ inputs.ws_levels || '25,50,100,250,500' }}
           LOAD_SOAK_SECS: ${{ inputs.soak_secs || '600' }}
           CFMEET_CERT_OUT: ${{ github.workspace }}/services/meeting-service/target/certification
-        run: bash scripts/certification/run-load.sh
+        # The console output (per-query plans, churn summary, failure diagnostics) is kept
+        # with the JSON reports in the artifact.
+        run: |
+          set -o pipefail
+          mkdir -p "$CFMEET_CERT_OUT"
+          bash scripts/certification/run-load.sh | tee "$CFMEET_CERT_OUT/load-console.txt"
       - name: Disk usage (end of job)
         if: always()
         run: df -h / && (du -sh target 2>/dev/null || true)
@@ -330,4 +335,6 @@ jobs:
         if: always()
         with:
           name: certification-load
-          path: services/meeting-service/target/certification/*.json
+          path: |
+            services/meeting-service/target/certification/*.json
+            services/meeting-service/target/certification/load-console.txt

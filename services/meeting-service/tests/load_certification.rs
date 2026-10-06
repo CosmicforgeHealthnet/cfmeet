@@ -858,6 +858,16 @@ async fn load_ws_fanout() {
 
 // ------------------------------------------------------------------ §40 ----------
 
+async fn errors_snapshot_capacity(errors: &Mutex<BTreeMap<String, usize>>) -> usize {
+    errors
+        .lock()
+        .await
+        .iter()
+        .filter(|(k, _)| k.contains("MEETING_CAPACITY_REACHED"))
+        .map(|(_, n)| n)
+        .sum()
+}
+
 /// §40 — continuous join / wait / admit / deny / leave / rejoin churn with REST
 /// readers measuring responsiveness.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
@@ -874,16 +884,37 @@ async fn load_waiting_room_churn() {
     let lats: Arc<Mutex<HashMap<&'static str, Vec<f64>>>> = Arc::new(Mutex::new(HashMap::new()));
     let errors: Arc<Mutex<BTreeMap<String, usize>>> = Arc::new(Mutex::new(BTreeMap::new()));
     let cycles = Arc::new(AtomicU64::new(0));
+    let admissions = Arc::new(AtomicU64::new(0));
+    let deadlock_sql = "SELECT deadlocks FROM pg_stat_database WHERE datname = current_database()";
+    let deadlocks_before = ctx.n(deadlock_sql).await;
+    // Interactive occupancy (ADMITTED + ≥ 1 live session), sampled while churning.
+    let occupancy_sql = format!(
+        "SELECT count(*) FROM conference_participants p WHERE p.conference_id='{cid}' AND p.admission_state='ADMITTED' \
+         AND EXISTS (SELECT 1 FROM participant_sessions s WHERE s.conference_participant_id = p.id \
+         AND s.state IN ('PENDING','CONNECTED') AND (s.expires_at IS NULL OR s.expires_at > now()))"
+    );
     let deadline = Instant::now() + Duration::from_secs(secs);
+    let occupancy_sampler = {
+        let (ctx, sql) = (ctx.clone(), occupancy_sql.clone());
+        tokio::spawn(async move {
+            let mut max = 0i64;
+            while Instant::now() < deadline {
+                max = max.max(ctx.n(&sql).await);
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            max
+        })
+    };
     let sampler = Sampler::start(&ctx).await;
     let mut hs = vec![];
     for w in 0..workers {
-        let (ctx, lats, errors, cycles, host) = (
+        let (ctx, lats, errors, cycles, host, admissions) = (
             ctx.clone(),
             lats.clone(),
             errors.clone(),
             cycles.clone(),
             host.clone(),
+            admissions.clone(),
         );
         hs.push(tokio::spawn(async move {
             let hauth = A::Bearer(host);
@@ -925,6 +956,9 @@ async fn load_waiting_room_churn() {
                 if s != 200 {
                     err(format!("{path} {s} {}", code(&v)), errors.clone()).await;
                     continue;
+                }
+                if admit {
+                    admissions.fetch_add(1, Ordering::Relaxed);
                 }
                 let pauth = A::Participant(tok);
                 if admit {
@@ -1039,7 +1073,11 @@ async fn load_waiting_room_churn() {
         h.await.unwrap();
     }
     reader.await.unwrap();
+    let max_occupancy = occupancy_sampler.await.unwrap();
     let resources = sampler.finish().await;
+    let deadlocks = ctx.n(deadlock_sql).await - deadlocks_before;
+    let capacity = 1000i64;
+    let capacity_failures: usize = errors_snapshot_capacity(&errors).await;
     let stale_waiting = ctx.n(&format!("SELECT count(*) FROM conference_participants WHERE conference_id='{cid}' AND admission_state='WAITING'")).await;
     let dup_guest = ctx.n(&format!("SELECT count(*) - count(DISTINCT guest_identity) FROM conference_participants WHERE conference_id='{cid}' AND guest_identity IS NOT NULL")).await;
     let both = ctx.n(&format!("SELECT count(*) FROM conference_participants WHERE conference_id='{cid}' AND admitted_at IS NOT NULL AND denied_at IS NOT NULL")).await;
@@ -1050,11 +1088,20 @@ async fn load_waiting_room_churn() {
     let live_after_leave = ctx.n(&format!("SELECT count(*) FROM participant_sessions WHERE conference_id='{cid}' AND state IN ('PENDING','CONNECTED')")).await;
     let lats = lats.lock().await;
     let errors = errors.lock().await.clone();
+    // Capacity is current occupancy: refusing a seat while the room is below capacity
+    // is a correctness failure (departed participants must not hold seats).
+    let erroneous_capacity_refusals = if max_occupancy < capacity {
+        capacity_failures
+    } else {
+        0
+    };
     let invariants_ok = stale_waiting == 0
         && dup_guest == 0
         && both == 0
         && denied_live == 0
         && live_after_leave == 0
+        && erroneous_capacity_refusals == 0
+        && deadlocks == 0
         && !errors.contains_key("denied participant obtained a credential");
     let classification = if !invariants_ok {
         "FAIL"
@@ -1067,9 +1114,19 @@ async fn load_waiting_room_churn() {
         "environment": environment(&ctx), "workers": workers, "durationSecs": secs, "cycles": cycles.load(Ordering::Relaxed),
         "latencyMs": lats.iter().map(|(k, v)| (k.to_string(), lat(v))).collect::<BTreeMap<_, _>>(),
         "errors": errors,
-        "invariants": { "staleWaiting": stale_waiting, "duplicateGuestIdentity": dup_guest, "admittedAndDenied": both, "deniedWithLiveSession": denied_live, "liveSessionsAfterLeave": live_after_leave },
+        "invariants": { "staleWaiting": stale_waiting, "duplicateGuestIdentity": dup_guest, "admittedAndDenied": both, "deniedWithLiveSession": denied_live, "liveSessionsAfterLeave": live_after_leave,
+                        "erroneousCapacityRefusals": erroneous_capacity_refusals, "deadlocks": deadlocks },
+        "occupancy": { "interactiveCapacity": capacity, "maxSimultaneous": max_occupancy, "admissions": admissions.load(Ordering::Relaxed),
+                       "capacityFailures": capacity_failures },
         "resources": resources, "classification": classification,
     });
+    println!(
+        "LOAD churn-summary {}",
+        json!({ "classification": classification, "cycles": cycles.load(Ordering::Relaxed),
+                "admissions": admissions.load(Ordering::Relaxed), "maxSimultaneousOccupancy": max_occupancy,
+                "capacity": capacity, "capacityFailures": capacity_failures, "staleWaiting": stale_waiting,
+                "errors": errors.values().sum::<usize>(), "deadlocks": deadlocks })
+    );
     emit("waiting-room-churn", &r);
     assert!(invariants_ok, "{r}");
 }

@@ -12,7 +12,7 @@ use std::time::Duration as StdDuration;
 
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{
-    sea_query::{Expr, LockType},
+    sea_query::{Expr, LockType, Query},
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseTransaction, EntityTrait,
     PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
 };
@@ -327,6 +327,17 @@ impl AdmissionService {
 
     /// Seats: interactive roles count against `interactive_capacity`; VIEWERs against
     /// `viewer_capacity` (or the interactive pool when no viewer pool is configured).
+    ///
+    /// The interactive pool is CURRENT occupancy, not lifetime admissions: a logical
+    /// participant occupies one seat while it is ADMITTED and has at least one live
+    /// ParticipantSession (PENDING / CONNECTED, not past `expires_at`). Several devices
+    /// count once; the seat is released when the last live session ends (leave, expiry,
+    /// replacement, removal, ban, conference end). ADMITTED itself stays the persistent
+    /// admission authorization that lets a participant rejoin without waiting again.
+    /// The dedicated viewer pool keeps its admitted-audience count.
+    ///
+    /// Every seat-taking path runs under the conference row lock (`lock_conference`),
+    /// so two requests can never both take the last seat.
     async fn ensure_capacity<C: ConnectionTrait>(
         conn: &C,
         space: &meeting_spaces::Model,
@@ -344,6 +355,21 @@ impl AdmissionService {
             if space.viewer_capacity > 0 {
                 q = q.filter(conference_participants::Column::Role.ne(Role::Viewer));
             }
+            let live = Query::select()
+                .column(participant_sessions::Column::ConferenceParticipantId)
+                .from(participant_sessions::Entity)
+                .and_where(participant_sessions::Column::ConferenceId.eq(conference_id))
+                .and_where(
+                    participant_sessions::Column::State
+                        .is_in([SessionState::Pending, SessionState::Connected]),
+                )
+                .and_where(
+                    participant_sessions::Column::ExpiresAt
+                        .is_null()
+                        .or(participant_sessions::Column::ExpiresAt.gt(Utc::now())),
+                )
+                .to_owned();
+            q = q.filter(conference_participants::Column::Id.in_subquery(live));
             space.interactive_capacity
         };
         if q.count(conn).await? >= limit as u64 {
@@ -353,6 +379,29 @@ impl AdmissionService {
             ));
         }
         Ok(())
+    }
+
+    /// Seat check for an already-ADMITTED participant that is (re)connecting: one that
+    /// still holds a seat (another live device, or the session a reconnect replaces)
+    /// needs no new seat; one whose sessions have all ended takes a free seat again.
+    /// The dedicated viewer pool counts admitted viewers, so a rejoin needs no new seat.
+    async fn ensure_seat<C: ConnectionTrait>(
+        conn: &C,
+        space: &meeting_spaces::Model,
+        participant: &conference_participants::Model,
+    ) -> ApiResult<()> {
+        if participant.role == Role::Viewer && space.viewer_capacity > 0 {
+            return Ok(());
+        }
+        let now = Utc::now();
+        let holds_seat = Self::active_sessions(conn, participant.id)
+            .await?
+            .iter()
+            .any(|s| s.is_live_at(now));
+        if holds_seat {
+            return Ok(());
+        }
+        Self::ensure_capacity(conn, space, participant.conference_id, participant.role).await
     }
 
     fn is_internal(space: &meeting_spaces::Model, ctx: &ActorContext) -> bool {
@@ -1122,8 +1171,13 @@ impl AdmissionService {
             }
         }
 
-        // 13. Device session only for an ADMITTED participant.
+        // 13. Device session only for an ADMITTED participant. Admission persists after
+        // leaving; a rejoin without any live session takes a seat again (newly admitted
+        // participants were checked above).
         let session = if participant.admission_state == AdmissionState::Admitted {
+            if !newly_admitted && !exempt {
+                Self::ensure_seat(&txn, &space, &participant).await?;
+            }
             Some(
                 self.establish_session(
                     &txn,

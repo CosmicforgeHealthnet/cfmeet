@@ -19,7 +19,7 @@ authority and `MeetingPermissionService` the permission authority.
 | Failure injection | PostgreSQL, Redis, LiveKit (join, room creation, permission update, remove, screen-share stop, end), storage, recording provider, workers, WebSocket (drop, slow consumer, cursor too old): PASS; **1 reliability defect fixed (REL-M-01)** |
 | Load (local, single 4-vCPU host) | burst join 25–500 with 0 errors (one conference: ~70–77 joins/s, p99 7.0 s at 500 → observed limit); WebSocket fanout 25–500 clients, 0 lost of 10 000 deliveries (p95 ≈ 2.2 s, bounded by the 2 s relay poll); churn 1 408 cycles 0 errors; scheduler 4 instances 0 duplicates; 10-min soak no leaks; query plans all indexed after **1 justified index (PERF-M-01)** |
 | Real LiveKit (1.8.4) | 7 / 8 real tests PASS in the final run, incl. new real subscription + ban / reconnect and media load (clean envelope on this host: 6 publishers × 50 subscribers) |
-| Real Egress + S3 | S3: PASS (final run). Egress capture: PASS in the J–L run; **final M / N re-run failed for an environmental reason** (Egress headless Chrome could not load its template after a sandbox restart) — **not re-certified** (08) |
+| Real Egress + S3 | **PASS — re-certified in GitHub CI** (run 37384968304: 8 / 8 real-provider tests, real Egress recording → READY, real S3 / MinIO, artefact lifecycle) after the earlier local M / N environment failure (08) |
 | Flags / rollback | 12-combination flag matrix and 10-step rollback drill PASS (local) |
 | Staging | **STAGING DEPLOYMENT CERTIFICATION — PENDING ENVIRONMENT** |
 | Production | **PRODUCTION CANARY — NOT EXECUTED**; no production deployment; legacy-write cutover not enabled |
@@ -36,14 +36,25 @@ authority and `MeetingPermissionService` the permission authority.
    `conference_messages`; additive partial index `idx_messages_main_cursor`
    (migration `m20261005_000006`): 37.9 ms → 0.05 ms at 300 000 messages. (06)
 
+4. **CAP-M-01 (correctness, load certification)** — interactive capacity counted every
+   participant ever ADMITTED (ADMITTED persists after leaving as the rejoin authorization),
+   so a room that had admitted 1 000 distinct participants over its lifetime refused new
+   entrants while nearly empty (surfaced by the CI churn run). Interactive capacity is now
+   **current logical occupancy**: ADMITTED + ≥ 1 live session, multiple devices count once,
+   the last live session ending releases the seat; admission history / reconnect unchanged,
+   race-safe under the conference row lock. Regression suite `capacity_occupancy` (A–K). (06)
+5. **QP-M-02 (test defect)** — the query-plan seed put every Q&A row into one conference,
+   so the Q&A lookup selected 100 % of a tiny table and a sequential scan was the correct
+   plan; the seed now carries representative Q&A history and the existing
+   `idx_questions_conference` is used. No index added. Plan-failure diagnostics added. (06)
+
 ## Genuine remaining backend gaps
 
-- Real Egress capture not re-certified after the sandbox restart (08); must be re-run in the
-  manual CI workflow or staging.
 - Staging certification (11), production canary and legacy-write retirement (12) not
   executed — they require an environment / explicit authorization.
-- CI workflows were changed but have not yet executed on GitHub (they run on the next
-  push / manual dispatch).
+- The dedicated VIEWER audience pool (`viewerCapacity`) still counts the admitted audience
+  (deliberately unchanged in the CAP-M-01 fix); whether it should also become current
+  occupancy is a product decision.
 
 ## Non-blocking hardening backlog
 
@@ -58,7 +69,7 @@ authority and `MeetingPermissionService` the permission authority.
 
 ## Decision
 
-**IMPLEMENTATION / CERTIFICATION READY — LOCAL**, with the real-Egress re-certification
-outstanding. **NOT** "production rollout completed": staging certification is pending an
+**IMPLEMENTATION / CERTIFICATION READY**: real LiveKit / WebRTC / Egress / S3 certified in
+GitHub CI; load certification re-run after CAP-M-01 / QP-M-02 (results: 04, 06). **NOT** "production rollout completed": staging certification is pending an
 environment, and the production canary, legacy-write retirement, frontend migration and any
 further phase require explicit instruction.

@@ -16,9 +16,18 @@ cd "$(dirname "$0")/../.."
 export CFMEET_CERT_OUT="${CFMEET_CERT_OUT:-$PWD/target/certification}"
 mkdir -p "$CFMEET_CERT_OUT"
 selection="${LOAD_SELECTION:-burst fanout churn scheduler soak migration plans}"
+# Console filter: per-query plan lines and plan-failure diagnostics in full, report lines
+# capped at 400 chars (the complete JSON is in $CFMEET_CERT_OUT), and every failing test's
+# panic message (up to 3 lines) so the failure reason is never cut off.
+show() {
+  awk '/^QUERY_PLAN( |_FAIL )/ { print; next }
+       /^(LOAD|SOAK|MIGRATION|QUERY_PLANS|test result)/ { print substr($0, 1, 400); next }
+       /panicked at/ { n = 4 }
+       n > 0 { print substr($0, 1, 4000); n-- }'
+}
 run() { # name, test binary, test name
   echo "=== $1"
-  cargo test --test "$2" -- --ignored --nocapture --test-threads=1 --exact "$3" 2>&1 | tee "$CFMEET_CERT_OUT/$1.log" | grep -E '^(LOAD|SOAK|MIGRATION|QUERY_PLANS|test result)' | cut -c1-400
+  cargo test --test "$2" -- --ignored --nocapture --test-threads=1 --exact "$3" 2>&1 | tee "$CFMEET_CERT_OUT/$1.log" | show
 }
 for s in $selection; do
   case "$s" in
@@ -29,7 +38,7 @@ for s in $selection; do
     soak) run leak-soak load_certification load_resource_leak_soak ;;
     migration)
       echo "=== migration"
-      cargo test --test migration_certification -- --nocapture 2>&1 | tee "$CFMEET_CERT_OUT/migration.log" | grep -E '^(MIGRATION input|test result)' | cut -c1-400 ;;
+      cargo test --test migration_certification -- --nocapture 2>&1 | tee "$CFMEET_CERT_OUT/migration.log" | show ;;
     plans) run query-plans query_plans query_plans_at_representative_volume ;;
     *) echo "unknown selection: $s" >&2; exit 2 ;;
   esac
