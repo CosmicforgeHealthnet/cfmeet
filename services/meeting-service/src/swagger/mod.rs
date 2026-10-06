@@ -636,7 +636,7 @@ pub fn swagger_router(server_addr: &str) -> Router {
     let mut current_server = utoipa::openapi::Server::new(format!("http://{}", server_addr));
     current_server.description = Some("Current server".to_string());
 
-    let mut prod_server = utoipa::openapi::Server::new("https://api.cosmicforge.com");
+    let mut prod_server = utoipa::openapi::Server::new("https://api.cfmeet.com");
     prod_server.description = Some("Production server".to_string());
 
     openapi.servers = Some(vec![current_server, prod_server]);
