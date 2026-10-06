@@ -628,6 +628,18 @@ pub fn openapi_json() -> String {
         .expect("OpenAPI document serializes")
 }
 
+const DEFAULT_PUBLIC_SERVER_URL: &str = "https://api.cfmeet.com";
+
+/// Public server URL advertised by Swagger: the configured value (trimmed, no trailing
+/// slash) or the production default when unset / blank.
+fn public_server_url(configured: Option<&str>) -> String {
+    configured
+        .map(|v| v.trim().trim_end_matches('/'))
+        .filter(|v| !v.is_empty())
+        .unwrap_or(DEFAULT_PUBLIC_SERVER_URL)
+        .to_string()
+}
+
 /// Creates the Swagger UI router with dynamic server URL from environment
 pub fn swagger_router(server_addr: &str) -> Router {
     let mut openapi = ApiDoc::openapi();
@@ -636,12 +648,41 @@ pub fn swagger_router(server_addr: &str) -> Router {
     let mut current_server = utoipa::openapi::Server::new(format!("http://{}", server_addr));
     current_server.description = Some("Current server".to_string());
 
-    let mut prod_server = utoipa::openapi::Server::new("https://api.cfmeet.com");
-    prod_server.description = Some("Production server".to_string());
+    // Externally advertised server: `SWAGGER_SERVER_URL` per environment (e.g. staging),
+    // otherwise production.
+    let configured = std::env::var("SWAGGER_SERVER_URL").ok();
+    let mut public_server = utoipa::openapi::Server::new(public_server_url(configured.as_deref()));
+    public_server.description = Some(
+        if configured.as_deref().is_some_and(|v| !v.trim().is_empty()) {
+            "Public server"
+        } else {
+            "Production server"
+        }
+        .to_string(),
+    );
 
-    openapi.servers = Some(vec![current_server, prod_server]);
+    openapi.servers = Some(vec![current_server, public_server]);
 
     SwaggerUi::new("/swagger-ui")
         .url("/api-docs/openapi.json", openapi)
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_server_url_defaults_to_production() {
+        assert_eq!(public_server_url(None), DEFAULT_PUBLIC_SERVER_URL);
+        assert_eq!(public_server_url(Some("  ")), DEFAULT_PUBLIC_SERVER_URL);
+    }
+
+    #[test]
+    fn public_server_url_uses_configured_value() {
+        assert_eq!(
+            public_server_url(Some(" https://api.staging.cfmeet.com/ ")),
+            "https://api.staging.cfmeet.com"
+        );
+    }
 }
