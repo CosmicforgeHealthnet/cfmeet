@@ -26,7 +26,10 @@ use crate::{
         participants::{self, Entity as Participants, ParticipantRole, ParticipantStatus},
         session_logs::{self, EventType},
     },
-    services::auth::Claims,
+    services::{
+        actor::{ActorContext, ActorKind},
+        auth::Claims,
+    },
     state::AppState,
     utils::{format_duration, format_role, format_status, format_utc, format_utc_opt, generate_meeting_identifier, local_to_utc, now_utc},
 };
@@ -144,7 +147,7 @@ pub async fn create_instant_meeting(
     join_log.insert(&state.db).await?;
 
     // Generate LiveKit join token
-    let join_token = state.livekit_service.generate_join_token(
+    let join_token = state.legacy_rtc.issue_legacy_join_credential(
         &meeting_identifier,
         &participant_id.to_string(),
         &user.username,
@@ -164,7 +167,7 @@ pub async fn create_instant_meeting(
         created_at: format_utc(meeting.created_at),
         participant_id,
         join_token,
-        livekit_url: state.livekit_service.get_url().to_string(),
+        livekit_url: state.legacy_rtc.media_url().to_string(),
         room_name: meeting.meeting_identifier,
     };
 
@@ -413,6 +416,13 @@ pub async fn get_meeting(
         .one(&state.db)
         .await?
         .ok_or_else(|| ApiError::NotFound("Meeting not found".to_string()))?;
+
+    // Phase 2 dual-read shadow comparison: logs legacy/v2 drift, never alters this response.
+    if state.meeting.core.flags.meeting_v2_shadow_read {
+        let meeting_domain = state.meeting.clone();
+        let legacy_id = meeting.id;
+        tokio::spawn(async move { meeting_domain.compat.shadow_log(legacy_id).await });
+    }
 
     let response = MeetingResponse {
         id: meeting.id,
@@ -663,19 +673,22 @@ pub async fn delete_meeting(
     responses(
         (status = 200, description = "Successfully joined meeting", body = JoinMeetingApiResponse),
         (status = 400, description = "Validation error - Invalid user_id or display_name"),
-        (status = 403, description = "Private meeting - guests not allowed"),
+        (status = 401, description = "user_id supplied without a valid access token (identity comes only from the Authorization header)"),
+        (status = 403, description = "Private meeting - guests not allowed, or user_id does not match the authenticated user"),
         (status = 404, description = "Meeting not found"),
         (status = 409, description = "Meeting has ended, cancelled, hasn't started yet, or past scheduled end time")
     )
 )]
 pub async fn join_meeting(
     State(state): State<AppState>,
+    actor: ActorContext,
     Path(id): Path<Uuid>,
     Json(payload): Json<JoinMeetingRequest>,
 ) -> ApiResult<Json<ApiResponse<JoinMeetingResponse>>> {
     payload
         .validate()
         .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    let identity = LegacyJoinIdentity::resolve(&actor, payload.user_id)?;
 
     // Find meeting
     let meeting = Meetings::find_by_id(id)
@@ -684,7 +697,48 @@ pub async fn join_meeting(
         .ok_or_else(|| ApiError::NotFound("Meeting not found".to_string()))?;
 
     // Use shared join logic
-    join_meeting_internal(state, meeting, payload).await
+    join_meeting_internal(state, meeting, payload.display_name, identity).await
+}
+
+/// Server-resolved identity for the legacy v1 join.
+///
+/// The request body's `user_id` is a *claim* kept for wire compatibility; it can
+/// never select a registered actor. Registered identity comes only from a verified
+/// bearer token (or the API-key owner); guest continuity only from the server-signed
+/// legacy guest token. Display names are never identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacyJoinIdentity {
+    Registered(Uuid),
+    Guest { legacy_participant_id: Option<Uuid> },
+}
+
+impl LegacyJoinIdentity {
+    pub fn resolve(actor: &ActorContext, claimed_user_id: Option<Uuid>) -> ApiResult<Self> {
+        match (&actor.kind, claimed_user_id) {
+            (ActorKind::RegisteredUser(r), Some(claimed)) if claimed != r.user_id => Err(
+                ApiError::Forbidden("user_id does not match the authenticated user".to_string()),
+            ),
+            (ActorKind::RegisteredUser(r), _) => Ok(Self::Registered(r.user_id)),
+            (_, Some(_)) => Err(ApiError::Unauthorized(
+                "Authentication required to join as a registered user. Send your access token \
+                 in the Authorization header."
+                    .to_string(),
+            )),
+            (ActorKind::LegacyGuest(p), None) => Ok(Self::Guest {
+                legacy_participant_id: Some(*p),
+            }),
+            (_, None) => Ok(Self::Guest {
+                legacy_participant_id: None,
+            }),
+        }
+    }
+
+    fn user_id(&self) -> Option<Uuid> {
+        match self {
+            Self::Registered(u) => Some(*u),
+            Self::Guest { .. } => None,
+        }
+    }
 }
 
 /// Internal helper function containing the core join logic
@@ -692,8 +746,10 @@ pub async fn join_meeting(
 async fn join_meeting_internal(
     state: AppState,
     meeting: meetings::Model,
-    payload: JoinMeetingRequest,
+    display_name: String,
+    identity: LegacyJoinIdentity,
 ) -> ApiResult<Json<ApiResponse<JoinMeetingResponse>>> {
+    let user_id = identity.user_id();
     // Check if meeting is ended - no joins allowed after ended
     if meeting.status == MeetingStatus::Ended {
         return Err(ApiError::Conflict("Meeting has ended".to_string()));
@@ -729,14 +785,14 @@ async fn join_meeting_internal(
     }
 
     // Check if meeting is private (would require invitation check in real impl)
-    if meeting.is_private && payload.user_id.is_none() {
+    if meeting.is_private && user_id.is_none() {
         return Err(ApiError::Forbidden(
             "This is a private meeting. Guests cannot join.".to_string(),
         ));
     }
 
-    // Validate user exists if user_id is provided
-    if let Some(user_id) = payload.user_id {
+    // The authenticated user must still exist (identity was resolved server-side)
+    if let Some(user_id) = user_id {
         use crate::models::users::Entity as Users;
 
         let user_exists = Users::find_by_id(user_id).one(&state.db).await?.is_some();
@@ -749,10 +805,8 @@ async fn join_meeting_internal(
     }
 
     // Determine participant type and role
-    let is_host = payload
-        .user_id
-        .map(|uid| uid == meeting.host_id)
-        .unwrap_or(false);
+    // Host role only for the authenticated host account.
+    let is_host = user_id.map(|uid| uid == meeting.host_id).unwrap_or(false);
     let role = if is_host {
         ParticipantRole::Host
     } else {
@@ -761,24 +815,30 @@ async fn join_meeting_internal(
 
     let now = now_utc();
 
-    // Check if participant already exists for this meeting (by user_id or display_name for guests)
-    let existing_participant = if let Some(user_id) = payload.user_id {
-        // For authenticated users, check by user_id
-        Participants::find()
-            .filter(participants::Column::MeetingId.eq(meeting.id))
-            .filter(participants::Column::UserId.eq(user_id))
-            .filter(participants::Column::LeaveTime.is_null())
-            .one(&state.db)
-            .await?
-    } else {
-        // For guests, check by display_name (not ideal but necessary)
-        Participants::find()
-            .filter(participants::Column::MeetingId.eq(meeting.id))
-            .filter(participants::Column::UserId.is_null())
-            .filter(participants::Column::DisplayName.eq(&payload.display_name))
-            .filter(participants::Column::LeaveTime.is_null())
-            .one(&state.db)
-            .await?
+    // Existing participant: registered users by their authenticated id; guests ONLY via
+    // their server-signed guest token (scoped to this meeting). Never by display name.
+    let existing_participant = match identity {
+        LegacyJoinIdentity::Registered(user_id) => {
+            Participants::find()
+                .filter(participants::Column::MeetingId.eq(meeting.id))
+                .filter(participants::Column::UserId.eq(user_id))
+                .filter(participants::Column::LeaveTime.is_null())
+                .one(&state.db)
+                .await?
+        }
+        LegacyJoinIdentity::Guest {
+            legacy_participant_id: Some(participant_id),
+        } => {
+            Participants::find_by_id(participant_id)
+                .filter(participants::Column::MeetingId.eq(meeting.id))
+                .filter(participants::Column::UserId.is_null())
+                .filter(participants::Column::LeaveTime.is_null())
+                .one(&state.db)
+                .await?
+        }
+        LegacyJoinIdentity::Guest {
+            legacy_participant_id: None,
+        } => None,
     };
 
     // If participant exists, handle based on their status
@@ -803,7 +863,7 @@ async fn join_meeting_internal(
             ParticipantStatus::Joined => {
                 // Already admitted - generate token and return
                 let room_name = &meeting.meeting_identifier;
-                let join_token = state.livekit_service.generate_join_token(
+                let join_token = state.legacy_rtc.issue_legacy_join_credential(
                     room_name,
                     &existing.id.to_string(),
                     &existing.display_name,
@@ -826,7 +886,7 @@ async fn join_meeting_internal(
                         participant_id: existing.id,
                         role: format_role(&existing.role),
                         join_token,
-                        livekit_url: state.livekit_service.get_url().to_string(),
+                        livekit_url: state.legacy_rtc.media_url().to_string(),
                         room_name: room_name.clone(),
                         access_token,
                         refresh_token,
@@ -854,7 +914,7 @@ async fn join_meeting_internal(
     let participant = participants::ActiveModel {
         id: Set(participant_id),
         meeting_id: Set(meeting.id),
-        user_id: Set(payload.user_id), // NULL for guests
+        user_id: Set(user_id), // NULL for guests
         role: Set(role.clone()),
         join_time: Set(now),
         leave_time: Set(None),
@@ -862,7 +922,7 @@ async fn join_meeting_internal(
         is_muted: Set(false),
         is_video_on: Set(true),
         is_screen_sharing: Set(false),
-        display_name: Set(payload.display_name.clone()),
+        display_name: Set(display_name.clone()),
     };
 
     let _participant = participant.insert(&state.db).await?;
@@ -877,7 +937,7 @@ async fn join_meeting_internal(
         // If they are in `Participants` table, they are valid.
         
         // Let's issue tokens for guests in waiting room too, so they can poll cleanly.
-        let (access_token, refresh_token) = if payload.user_id.is_none() {
+        let (access_token, refresh_token) = if user_id.is_none() {
             let acc = state.jwt_service.generate_access_token(participant_id, "guest")?;
             let reference = state.jwt_service.generate_refresh_token(participant_id, "guest")?;
             (Some(acc), Some(reference))
@@ -916,7 +976,7 @@ async fn join_meeting_internal(
             event_time: Set(now),
             metadata: Set(Some(serde_json::json!({
                 "started_by": participant_id.to_string(),
-                "display_name": payload.display_name
+                "display_name": display_name
             }))),
         };
         session_log.insert(&state.db).await?;
@@ -930,9 +990,9 @@ async fn join_meeting_internal(
         event_type: Set(EventType::ParticipantJoin),
         event_time: Set(now),
         metadata: Set(Some(serde_json::json!({
-            "display_name": payload.display_name,
+            "display_name": display_name,
             "role": format_role(&role),
-            "is_guest": payload.user_id.is_none()
+            "is_guest": user_id.is_none()
         }))),
     };
     session_log.insert(&state.db).await?;
@@ -940,15 +1000,15 @@ async fn join_meeting_internal(
     // Generate LiveKit join token
     // Room name is the meeting identifier (human-friendly code)
     let room_name = &meeting.meeting_identifier;
-    let join_token = state.livekit_service.generate_join_token(
+    let join_token = state.legacy_rtc.issue_legacy_join_credential(
         room_name,
         &participant_id.to_string(),
-        &payload.display_name,
+        &display_name,
         is_host,
     )?;
 
     // Generate guest tokens if needed
-    let (access_token, refresh_token) = if payload.user_id.is_none() {
+    let (access_token, refresh_token) = if user_id.is_none() {
         let acc = state.jwt_service.generate_access_token(participant_id, "guest")?;
         let reference = state.jwt_service.generate_refresh_token(participant_id, "guest")?;
         (Some(acc), Some(reference))
@@ -961,7 +1021,7 @@ async fn join_meeting_internal(
         participant_id,
         role: format_role(&role),
         join_token,
-        livekit_url: state.livekit_service.get_url().to_string(),
+        livekit_url: state.legacy_rtc.media_url().to_string(),
         room_name: room_name.clone(),
         access_token,
         refresh_token,
@@ -1085,19 +1145,22 @@ pub async fn end_meeting(
     responses(
         (status = 200, description = "Successfully joined meeting", body = JoinMeetingApiResponse),
         (status = 400, description = "Validation error - Invalid user_id or display_name"),
-        (status = 403, description = "Private meeting - guests not allowed"),
+        (status = 401, description = "user_id supplied without a valid access token (identity comes only from the Authorization header)"),
+        (status = 403, description = "Private meeting - guests not allowed, or user_id does not match the authenticated user"),
         (status = 404, description = "Meeting not found"),
         (status = 409, description = "Meeting has ended, cancelled, hasn't started yet, or past scheduled end time")
     )
 )]
 pub async fn join_meeting_by_identifier(
     State(state): State<AppState>,
+    actor: ActorContext,
     Path(meeting_identifier): Path<String>,
     Json(payload): Json<JoinMeetingRequest>,
 ) -> ApiResult<Json<ApiResponse<JoinMeetingResponse>>> {
     payload
         .validate()
         .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    let identity = LegacyJoinIdentity::resolve(&actor, payload.user_id)?;
 
     // Find meeting by identifier
     let meeting = Meetings::find()
@@ -1112,7 +1175,7 @@ pub async fn join_meeting_by_identifier(
         })?;
 
     // Use shared join logic
-    join_meeting_internal(state, meeting, payload).await
+    join_meeting_internal(state, meeting, payload.display_name, identity).await
 }
 
 // ============================================================================
@@ -1369,11 +1432,12 @@ pub async fn api_join_meeting(
         .await?
         .ok_or_else(|| ApiError::NotFound("Meeting not found".to_string()))?;
 
-    // Use shared join logic with API key user
-    let join_request = JoinMeetingRequest {
-        user_id: Some(api_claims.user_id),
-        display_name: payload.display_name,
-    };
-
-    join_meeting_internal(state, meeting, join_request).await
+    // The API-key owner is the trusted, server-resolved identity.
+    join_meeting_internal(
+        state,
+        meeting,
+        payload.display_name,
+        LegacyJoinIdentity::Registered(api_claims.user_id),
+    )
+    .await
 }

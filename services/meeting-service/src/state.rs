@@ -2,9 +2,13 @@ use sea_orm::DatabaseConnection;
 use std::sync::Arc;
 
 use crate::config::{AppConfig, EmailConfig, LiveKitConfig};
+use crate::services::actor::SharedOrganizationDirectory;
 use crate::services::auth::JwtService;
 use crate::services::email::EmailService;
 use crate::services::livekit::LiveKitService;
+use crate::services::meeting_domain::{MeetingDomain, MeetingDomainDeps};
+use crate::services::realtime::RealtimeService;
+use crate::services::rtc_provider::LegacyRtcCredentials;
 use crate::services::{OtpService, RateLimiterService, RedisService, TokenBlacklistService};
 
 #[derive(Clone)]
@@ -12,7 +16,8 @@ pub struct AppState {
     pub db: DatabaseConnection,
     pub jwt_service: Arc<JwtService>,
     pub email_service: Arc<EmailService>,
-    pub livekit_service: Arc<LiveKitService>,
+    /// Legacy `/api/v1` media credentials (provider-neutral compatibility boundary).
+    pub legacy_rtc: Arc<dyn LegacyRtcCredentials>,
     pub redis: Arc<RedisService>,
     pub otp_service: Arc<OtpService>,
     pub token_blacklist: Arc<TokenBlacklistService>,
@@ -27,6 +32,12 @@ pub struct AppState {
     pub google_redirect_url: String,
     /// Require email verification before login
     pub require_email_verification: bool,
+    /// Phase 2 meeting domain services (MeetingSpace / Conference / Admission …)
+    pub meeting: Arc<MeetingDomain>,
+    /// Verified organization membership source (shared with the meeting domain)
+    pub organization_directory: SharedOrganizationDirectory,
+    /// Part E conference realtime (subscription authorization, tickets, replay)
+    pub realtime: Arc<RealtimeService>,
 }
 
 impl AppState {
@@ -37,7 +48,29 @@ impl AppState {
         email_config: &EmailConfig,
         livekit_config: &LiveKitConfig,
     ) -> Self {
+        let deps = MeetingDomainDeps::from_env(&db, livekit_config);
+        Self::with_meeting_deps(db, redis, app_config, email_config, livekit_config, deps)
+    }
+
+    /// Construct with explicit meeting-domain dependencies (feature flags, RTC provider,
+    /// organization directory, access adapters).
+    pub fn with_meeting_deps(
+        db: DatabaseConnection,
+        redis: RedisService,
+        app_config: &AppConfig,
+        email_config: &EmailConfig,
+        livekit_config: &LiveKitConfig,
+        deps: MeetingDomainDeps,
+    ) -> Self {
         let redis = Arc::new(redis);
+        let organization_directory = deps.organizations.clone();
+        let meeting = Arc::new(MeetingDomain::new(db.clone(), Some(redis.clone()), deps));
+        let realtime = Arc::new(RealtimeService::new(
+            meeting.core.clone(),
+            Some(redis.clone()),
+            &app_config.jwt_secret,
+            app_config.require_email_verification,
+        ));
         let otp_service = Arc::new(OtpService::new(redis.clone()));
         let token_blacklist = Arc::new(TokenBlacklistService::new(redis.clone()));
         let rate_limiter = Arc::new(RateLimiterService::new(redis.clone()));
@@ -46,7 +79,7 @@ impl AppState {
             db,
             jwt_service: Arc::new(JwtService::new(app_config.jwt_secret.clone())),
             email_service: Arc::new(EmailService::new(redis.clone(), email_config)),
-            livekit_service: Arc::new(LiveKitService::new(livekit_config)),
+            legacy_rtc: Arc::new(LiveKitService::new(livekit_config)),
             redis,
             otp_service,
             token_blacklist,
@@ -56,6 +89,9 @@ impl AppState {
             google_client_secret: app_config.google_client_secret.clone(),
             google_redirect_url: app_config.google_redirect_url.clone(),
             require_email_verification: app_config.require_email_verification,
+            meeting,
+            organization_directory,
+            realtime,
         }
     }
 

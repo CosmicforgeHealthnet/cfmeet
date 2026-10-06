@@ -21,6 +21,8 @@ return value
 #[derive(Clone)]
 pub struct RedisService {
     pool: Pool,
+    url: String,
+    timeout: std::time::Duration,
 }
 
 impl RedisService {
@@ -47,7 +49,63 @@ impl RedisService {
             .await
             .map_err(|e| ApiError::InternalError(format!("Redis PING failed: {}", e)))?;
 
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            url: config.url.clone(),
+            timeout: std::time::Duration::from_secs(config.timeout_secs.max(1)),
+        })
+    }
+
+    /// Create a pool without an initial PING. Connections are established on first use
+    /// and fail fast (bounded timeouts), so Redis loss degrades instead of blocking.
+    pub fn new_lazy(config: &RedisConfig) -> ApiResult<Self> {
+        let timeout = Some(std::time::Duration::from_secs(config.timeout_secs.max(1)));
+        let pool = Config::from_url(&config.url)
+            .builder()
+            .map_err(|e| ApiError::InternalError(format!("Redis pool builder error: {}", e)))?
+            .max_size(config.pool_size)
+            .runtime(Runtime::Tokio1)
+            .wait_timeout(timeout)
+            .create_timeout(timeout)
+            .recycle_timeout(timeout)
+            .build()
+            .map_err(|e| ApiError::InternalError(format!("Redis pool creation error: {}", e)))?;
+        Ok(Self {
+            pool,
+            url: config.url.clone(),
+            timeout: std::time::Duration::from_secs(config.timeout_secs.max(1)),
+        })
+    }
+
+    /// PUBLISH (ephemeral realtime fanout; Redis is never meeting authority).
+    pub async fn publish(&self, channel: &str, payload: &str) -> ApiResult<i64> {
+        let mut conn = self.get_conn().await?;
+        let receivers: i64 = tokio::time::timeout(
+            self.timeout,
+            redis::cmd("PUBLISH")
+                .arg(channel)
+                .arg(payload)
+                .query_async(&mut conn),
+        )
+        .await
+        .map_err(|_| ApiError::InternalError("Redis PUBLISH timed out".into()))?
+        .map_err(|e| ApiError::InternalError(format!("Redis PUBLISH error: {}", e)))?;
+        Ok(receivers)
+    }
+
+    /// Dedicated pub/sub connection subscribed to `channel` (bounded connect time).
+    pub async fn subscribe(&self, channel: &str) -> ApiResult<redis::aio::PubSub> {
+        let client = redis::Client::open(self.url.as_str())
+            .map_err(|e| ApiError::InternalError(format!("Redis client error: {}", e)))?;
+        let mut pubsub = tokio::time::timeout(self.timeout, client.get_async_pubsub())
+            .await
+            .map_err(|_| ApiError::InternalError("Redis subscribe timed out".into()))?
+            .map_err(|e| ApiError::InternalError(format!("Redis subscribe error: {}", e)))?;
+        tokio::time::timeout(self.timeout, pubsub.subscribe(channel))
+            .await
+            .map_err(|_| ApiError::InternalError("Redis subscribe timed out".into()))?
+            .map_err(|e| ApiError::InternalError(format!("Redis subscribe error: {}", e)))?;
+        Ok(pubsub)
     }
 
     /// Get a connection from the pool

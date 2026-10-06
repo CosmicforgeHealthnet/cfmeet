@@ -20,5 +20,5 @@ path = "test_connection.rs"
 [dependencies]
 async-std = { version = "1.12", features = ["attributes", "tokio1"] }
 async-trait = "0.1"
-sea-orm-migration = { version = "1.1.0", features = ["sqlx-postgres", "runtime-async-std-rustls"] }
+sea-orm-migration = { version = "1.1.0", features = ["sqlx-postgres", "runtime-async-std-rustls", "with-uuid", "with-chrono", "with-json"] }
 dotenvy = "0.15"

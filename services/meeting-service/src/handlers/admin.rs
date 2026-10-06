@@ -284,6 +284,7 @@ pub async fn update_user(
 #[utoipa::path(
     get,
     path = "/api/v1/admin/meetings",
+    operation_id = "admin_list_meetings",
     tag = "Admin",
     params(
         ("page" = Option<u64>, Query, description = "Page number (default: 1)"),

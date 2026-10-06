@@ -17,8 +17,9 @@
 //! - Does NOT affect meetings without an end_time (they can run indefinitely)
 
 use sea_orm::{
+    sea_query::{Alias, Expr},
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set,
+    QuerySelect, Set, TransactionTrait,
 };
 use tokio::sync::watch;
 use tokio::time::{sleep, Duration};
@@ -90,8 +91,9 @@ impl MeetingAutoEndWorker {
         }
     }
 
-    /// Process a batch of meetings that should be auto-ended
-    async fn process_batch(&self) -> Result<(), String> {
+    /// Process a batch of meetings that should be auto-ended.
+    /// Multi-instance safe: returns how many meetings THIS call ended.
+    pub async fn process_batch(&self) -> Result<u64, String> {
         let now = now_utc();
 
         // Find ongoing meetings that have passed their scheduled end time
@@ -107,43 +109,60 @@ impl MeetingAutoEndWorker {
 
         if meetings.is_empty() {
             tracing::debug!("No meetings to auto-end");
-            return Ok(());
+            return Ok(0);
         }
 
-        tracing::info!("Auto-ending {} meeting(s)", meetings.len());
-
+        let mut ended = 0;
         for meeting in meetings {
             let meeting_id = meeting.id;
-            if let Err(e) = self.end_meeting(meeting).await {
-                tracing::error!("Failed to auto-end meeting {}: {}", meeting_id, e);
+            match self.end_meeting(meeting).await {
+                Ok(true) => ended += 1,
+                Ok(false) => {}
+                Err(e) => tracing::error!("Failed to auto-end meeting {}: {}", meeting_id, e),
             }
         }
-
-        Ok(())
+        if ended > 0 {
+            tracing::info!("Auto-ended {} meeting(s)", ended);
+        }
+        Ok(ended)
     }
 
-    /// End a single meeting
-    async fn end_meeting(&self, meeting: meetings::Model) -> Result<(), String> {
+    /// End a single meeting. The `status = 'ongoing'` conditional update and every
+    /// follow-up write share one transaction, so concurrent worker instances end a
+    /// meeting — and log it — exactly once.
+    async fn end_meeting(&self, meeting: meetings::Model) -> Result<bool, String> {
         let meeting_id = meeting.id;
         let meeting_identifier = meeting.meeting_identifier.clone();
         let now = now_utc();
-
-        // Update meeting status to ended
-        let mut meeting_update: meetings::ActiveModel = meeting.into();
-        meeting_update.status = Set(MeetingStatus::Ended);
-        meeting_update.updated_at = Set(now);
-        // Keep the original scheduled end_time, don't override with current time
-
-        meeting_update
-            .update(&self.db)
+        let txn = self
+            .db
+            .begin()
             .await
-            .map_err(|e| format!("Failed to update meeting status: {}", e))?;
+            .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+
+        // Keep the original scheduled end_time, don't override with current time
+        let claimed = Meetings::update_many()
+            .col_expr(
+                meetings::Column::Status,
+                Expr::val("ended").as_enum(Alias::new("meeting_status")),
+            )
+            .col_expr(meetings::Column::UpdatedAt, Expr::value(now))
+            .filter(meetings::Column::Id.eq(meeting_id))
+            .filter(meetings::Column::Status.eq(MeetingStatus::Ongoing))
+            .exec(&txn)
+            .await
+            .map_err(|e| format!("Failed to update meeting status: {}", e))?
+            .rows_affected;
+        if claimed == 0 {
+            // Another instance (or the host) already ended it.
+            return Ok(false);
+        }
 
         // Update all active participants to mark leave time
         let active_participants = Participants::find()
             .filter(participants::Column::MeetingId.eq(meeting_id))
             .filter(participants::Column::LeaveTime.is_null())
-            .all(&self.db)
+            .all(&txn)
             .await
             .map_err(|e| format!("Failed to fetch participants: {}", e))?;
 
@@ -151,7 +170,7 @@ impl MeetingAutoEndWorker {
             let mut participant: participants::ActiveModel = p.into();
             participant.leave_time = Set(Some(now));
             participant
-                .update(&self.db)
+                .update(&txn)
                 .await
                 .map_err(|e| format!("Failed to update participant: {}", e))?;
         }
@@ -159,7 +178,7 @@ impl MeetingAutoEndWorker {
         // Clear chat messages (volatile per session)
         ChatMessages::delete_many()
             .filter(chat_messages::Column::MeetingId.eq(meeting_id))
-            .exec(&self.db)
+            .exec(&txn)
             .await
             .map_err(|e| format!("Failed to clear chat messages: {}", e))?;
 
@@ -178,9 +197,12 @@ impl MeetingAutoEndWorker {
         };
 
         session_log
-            .insert(&self.db)
+            .insert(&txn)
             .await
             .map_err(|e| format!("Failed to log auto-end event: {}", e))?;
+        txn.commit()
+            .await
+            .map_err(|e| format!("Failed to commit auto-end: {}", e))?;
 
         tracing::info!(
             "Auto-ended meeting {} ({}) at scheduled end time",
@@ -188,7 +210,7 @@ impl MeetingAutoEndWorker {
             meeting_identifier
         );
 
-        Ok(())
+        Ok(true)
     }
 }
 

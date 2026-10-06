@@ -2,21 +2,28 @@ name: Meeting service
 
 # services/meeting-service — the Rust/Axum Meeting & Conference Platform service.
 # This remains one deployable modular monolith during Phase 2.
+#
+# Disk safety (GitHub-hosted runners have ~14 GB free): the gates are split across
+# jobs so each gets a fresh runner disk, and CI builds carry no debug info
+# (`CARGO_PROFILE_DEV_DEBUG=0` / `CARGO_PROFILE_TEST_DEBUG=0`) and no incremental
+# state. `debug-assertions` and overflow checks stay on (separate profile settings), so
+# test behaviour is unchanged; only debug symbols are dropped. The ~50 test binaries
+# each link the whole service: with full debug info (plus split `.dwp` packages) they
+# exhausted the runner disk ("No space left on device", os error 28).
 
 on:
   push:
-    branches: [main]
+    # `staging` carries Phase 2 backend work before release; it gets the same fast gate.
+    branches: [main, staging]
     paths:
       - "services/meeting-service/**"
+      - "packages/contracts/openapi/**"
       - ".github/workflows/backend.yml"
-      # Once meeting-service generates or consumes packages/contracts, add:
-      # - "packages/contracts/**"
   pull_request:
     paths:
       - "services/meeting-service/**"
+      - "packages/contracts/openapi/**"
       - ".github/workflows/backend.yml"
-      # Once meeting-service generates or consumes packages/contracts, add:
-      # - "packages/contracts/**"
   workflow_dispatch:
 
 concurrency:
@@ -29,10 +36,13 @@ defaults:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
 
 jobs:
-  check:
-    name: fmt / clippy / test / build
+  lint:
+    name: fmt / check / clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,21 +54,127 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: services/meeting-service -> target
+          key: lint
 
-      # Pre-existing formatting drift was imported from rtc_backend unchanged.
-      # Reported but non-blocking until a dedicated `cargo fmt` commit lands.
-      - name: cargo fmt --check
-        continue-on-error: true
-        run: cargo fmt --all -- --check
+      - name: Disk usage (after cache restore)
+        run: df -h / && (du -sh target 2>/dev/null || true)
+
+      # Pre-existing formatting drift (imported from rtc_backend unchanged) is listed in
+      # scripts/certification/fmt-baseline.txt. Any NEW drift fails the build.
+      - name: rustfmt (no new drift beyond the documented baseline)
+        run: bash scripts/certification/check-fmt.sh
+
+      - name: cargo check
+        run: cargo check --workspace
 
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets
 
+      - name: Disk usage (end of job)
+        if: always()
+        run: df -h / && (du -sh target 2>/dev/null || true)
+
+  test:
+    name: test / v2 operation coverage
+    runs-on: ubuntu-latest
+    # Database-backed integration, security, concurrency and migration tests run
+    # against real PostgreSQL/Redis. Locally these are a normal PostgreSQL/Redis
+    # install (no Docker Compose required); see services/meeting-service/README.md.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      TEST_REDIS_URL: redis://127.0.0.1:6379
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free unused runner toolchains (Android, .NET, GHC, CodeQL)
+        working-directory: .
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/meeting-service -> target
+          key: test
+
+      - name: Disk usage (before cargo test)
+        run: df -h / && (du -sh target 2>/dev/null || true)
+
+      # Includes the security, IDOR, credential-replay, concurrency, failure-injection,
+      # system E2E, flag/rollback and migration-certification suites.
       - name: cargo test
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
+
+      - name: Disk usage (after cargo test)
+        if: always()
+        run: df -h / && (du -sh target 2>/dev/null || true)
+
+      # Every v2 operation must have a success-path and an authorization/error-path test
+      # (recorded at runtime by tests/common/route_coverage.rs during `cargo test`).
+      - name: v2 operation coverage (success + error path per operation)
+        run: python3 scripts/certification/route_coverage.py --openapi ../../packages/contracts/openapi/meeting-service.json --strict
+
+  build:
+    name: build / migration smoke / OpenAPI
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/meeting-service -> target
+          key: build
 
       - name: cargo build
         run: cargo build --workspace
+
+      - name: Migration smoke (up / reset / up)
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE cfmeet_migration_smoke"
+          export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/cfmeet_migration_smoke
+          cargo run -q -p migration -- up
+          cargo run -q -p migration -- reset
+          cargo run -q -p migration -- up
+
+      - name: OpenAPI contract export is current
+        run: |
+          cargo run -q --bin export_openapi > /tmp/meeting-service.json
+          diff -u ../../packages/contracts/openapi/meeting-service.json /tmp/meeting-service.json
+
+      - name: Disk usage (end of job)
+        if: always()
+        run: df -h / && (du -sh target 2>/dev/null || true)
 
   docker:
     name: Docker image (services/meeting-service/ context)
@@ -67,3 +183,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: docker build
         run: docker build -t cfmeet-meeting-service:ci .
+      - name: Disk usage
+        if: always()
+        run: df -h / && (docker system df || true)

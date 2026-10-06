@@ -11,7 +11,11 @@ use backend::{
     services::RedisService,
     state::AppState,
     swagger,
-    workers::{spawn_email_worker, spawn_meeting_auto_end_worker, spawn_meeting_auto_start_worker},
+    workers::{
+        outbox_relay::{spawn_outbox_relay, OutboxRelay},
+        spawn_conference_scheduler, spawn_email_worker, spawn_meeting_auto_end_worker,
+        spawn_meeting_auto_start_worker,
+    },
 };
 
 #[tokio::main]
@@ -96,6 +100,73 @@ async fn main() -> anyhow::Result<()> {
     let _meeting_auto_start_worker = spawn_meeting_auto_start_worker(db.clone());
     tracing::info!("✅ Meeting auto-start worker started");
 
+    // Phase 2 meeting domain workers (v2 conferences only; legacy workers above keep
+    // serving legacy meetings).
+    let flags = state.meeting.core.flags.clone();
+    tracing::info!(
+        "Meeting v2: enabled={} waiting_room_v2={} rtc_provider_control_v2={} legacy_write_disabled={}",
+        flags.meeting_v2_enabled,
+        flags.waiting_room_v2_enabled,
+        flags.rtc_provider_control_v2,
+        flags.legacy_meeting_write_disabled
+    );
+    let _conference_scheduler = flags
+        .meeting_v2_enabled
+        .then(|| spawn_conference_scheduler(state.meeting.clone()));
+    // Part E: the outbox relay delivers client realtime events to Redis fanout (when
+    // `conference_realtime_enabled`) and executes provider commands through the RTC
+    // control plane (when `rtc_provider_control_v2`). Without a consumer, rows stay
+    // durably PENDING in PostgreSQL.
+    let _outbox_relay =
+        (flags.conference_realtime_enabled || flags.rtc_provider_control_v2).then(|| {
+            let publisher: Option<
+                std::sync::Arc<dyn backend::workers::outbox_relay::EventPublisher>,
+            > = flags.conference_realtime_enabled.then(|| {
+                std::sync::Arc::new(backend::services::realtime::RedisPublisher::new(
+                    state.redis.clone(),
+                ))
+                    as std::sync::Arc<dyn backend::workers::outbox_relay::EventPublisher>
+            });
+            let control = flags.rtc_provider_control_v2.then(|| {
+                std::sync::Arc::new(backend::services::rtc_control::RtcControl::new(
+                    state.meeting.core.clone(),
+                ))
+            });
+            spawn_outbox_relay(OutboxRelay::with_control(db.clone(), publisher, control), 2)
+        });
+    // Part F: restart-safe breakout countdown completion.
+    let _breakout_closer = flags.collaboration_v2_enabled.then(|| {
+        backend::workers::spawn_breakout_closer(
+            backend::workers::BreakoutCloser::new(state.meeting.core.clone()),
+            2,
+        )
+    });
+    // Part G: artefact finalization retries + retention deletion (row-leased).
+    let _artifact_worker =
+        (flags.recording_v2_enabled || flags.transcription_v2_enabled).then(|| {
+            let poll = state.meeting.core.config.artifacts.retention_poll_secs;
+            backend::services::artifacts::retention::spawn_artifact_worker(
+                backend::services::artifacts::retention::ArtifactRetentionWorker::new(
+                    state.meeting.core.clone(),
+                ),
+                poll,
+            )
+        });
+    let _conference_reconciler = flags.rtc_provider_control_v2.then(|| {
+        let poll = state.meeting.core.config.reconciler_poll_secs;
+        backend::workers::spawn_conference_reconciler(
+            backend::workers::ConferenceReconciler::new(state.meeting.core.clone()),
+            poll,
+        )
+    });
+    tracing::info!(
+        "Part E: realtime={} provider_control={} provider={} capabilities={:?}",
+        flags.conference_realtime_enabled,
+        flags.rtc_provider_control_v2,
+        state.meeting.core.rtc.name(),
+        state.meeting.core.rtc.capabilities()
+    );
+
     // Configure CORS - allow frontend(s) to access API
     let allowed_origins: Vec<axum::http::HeaderValue> = app_config
         .frontend_urls
@@ -124,7 +195,11 @@ async fn main() -> anyhow::Result<()> {
             header::CONTENT_TYPE,
             header::ACCEPT,
             header::ORIGIN,
+            header::HeaderName::from_static("x-participant-token"),
+            header::HeaderName::from_static("x-request-id"),
+            header::HeaderName::from_static("x-client-kind"),
         ])
+        .expose_headers([header::HeaderName::from_static("x-request-id")])
         .allow_credentials(true);
 
     // Start server

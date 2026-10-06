@@ -35,6 +35,39 @@ curl http://localhost:8080/health
 Phase 2 — Meeting & Conference Platform — backend work is implemented here.
 The corresponding web experience lives in `apps/web/`, shared contracts in `packages/contracts/`, LiveKit infrastructure in `infra/livekit/`, and the implementation specification/acceptance evidence in `docs/phases/phase-02/`.
 
+Parts A–D (meeting core, admission, roles, participants) live under `/api/v2` behind
+`FEATURE_MEETING_V2_ENABLED`. The legacy `/api/v1` meeting API is unchanged and keeps working.
+See [`docs/PHASE2_MEETING_DOMAIN.md`](docs/PHASE2_MEETING_DOMAIN.md).
+
+### Local development and tests (no Docker required)
+
+Use a normal local PostgreSQL (and optionally Redis) install:
+
+```bash
+cargo run -p migration -- up                    # legacy + Phase 2 additive schema + idempotent backfill
+cargo run --bin phase2_backfill -- --dry        # migration evidence (counts / exceptions)
+
+# Unit tests only
+cargo test --lib
+
+# Full suite: unit + DB integration + API + security + concurrency + migration tests.
+# Each test gets its own database cloned from a migrated template.
+TEST_DATABASE_URL=postgres://postgres@127.0.0.1:5432/postgres \
+TEST_REDIS_URL=redis://127.0.0.1:6379 \
+cargo test --workspace
+```
+
+Without `TEST_DATABASE_URL` the database-backed suites **fail** (they are never silently
+skipped). `CFMEET_SKIP_DB_TESTS=1` skips them explicitly with a printed `SKIPPED` line.
+`TEST_REDIS_URL` is only needed by the legacy v1 regression test (legacy auth uses Redis);
+the v2 suites deliberately run with Redis unreachable.
+
+OpenAPI contract export (checked in CI):
+
+```bash
+cargo run --bin export_openapi > ../../packages/contracts/openapi/meeting-service.json
+```
+
 ## Documentation
 
 See [`docs/`](docs/) for detailed guides:
