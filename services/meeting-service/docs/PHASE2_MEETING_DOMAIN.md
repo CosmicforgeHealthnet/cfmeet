@@ -3,6 +3,32 @@
 Spec: *CF Meet Phase 2 Backend Implementation Specification v1.1*. Current→target map:
 [`docs/phases/phase-02/parts-a-d-implementation-map.md`](../../../docs/phases/phase-02/parts-a-d-implementation-map.md).
 
+## Backend status
+
+**PHASE 2 BACKEND — COMPLETE**
+
+Production-ready backend (`main`, backend code commit `fd757bc`):
+
+- Swagger 1.1.0
+- 187 operations
+- 49 v1
+- 136 v2
+- 22 migrations
+- production pre-cutover certification PASS
+
+Public `api.cfmeet.com` is temporarily still routed to the legacy backend until the frontend
+compatibility deployment is confirmed (the deployed web client must send the bearer token on
+`POST /api/v1/meetings/join/{code}` — see *Legacy v1 join identity* below). This is a
+deployment / cutover dependency, NOT unfinished backend implementation.
+
+The Phase 2 backend is migrated and running in production as `cfmeet-production-backend` on
+`127.0.0.1:18081`, next to the legacy backend. Until the Nginx cutover the authoritative
+Phase 2 Swagger is that backend, staging (`https://api.staging.cfmeet.com/swagger-ui/`) and the
+checked-in contract `packages/contracts/openapi/meeting-service.json`; the public Swagger at
+`api.cfmeet.com` shows the legacy 1.0.0 document and becomes 1.1.0 at the cutover. Evidence
+and the cutover procedure:
+[`docs/phase2-certification/16-deployment-status.md`](../../../docs/phase2-certification/16-deployment-status.md).
+
 ## Domain
 
 ```

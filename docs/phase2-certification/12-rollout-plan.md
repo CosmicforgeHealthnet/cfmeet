@@ -4,6 +4,11 @@ Status vocabulary: **DONE** = actually performed with evidence in this package;
 **NOT EXECUTED** = prepared only. Nothing beyond step 1 of the rollout sequence has been
 performed.
 
+**Update 2026-10-06:** stage 3 was executed as a functional staging deployment, and the
+production database was migrated with the Phase 2 backend running next to the legacy backend
+(blue / green, pre-cutover certification PASS). Public traffic has not been switched; stages
+4–8 as written here were not executed. Current state and cutover procedure: 16.
+
 ## 1. Feature flag audit (§52)
 
 All flags are read once at startup by `FeatureFlags::from_env()`
@@ -59,7 +64,7 @@ no admission without the waiting-room API, no legacy authority on v2 routes).
 |---|---|---|---|
 | 1 | Local / CI certification | all A–I in tests | **DONE** (this package; local container — see 11-staging-certification.md) |
 | 2 | Shared development environment | all A–I, allowlist = engineering | NOT EXECUTED |
-| 3 | Staging with migrated production-like data + real LiveKit / Egress / S3 | all A–I; `SHADOW_READ` on; legacy writes enabled | NOT EXECUTED — **PENDING ENVIRONMENT** |
+| 3 | Staging with migrated production-like data + real LiveKit / Egress / S3 | all A–I; `SHADOW_READ` on; legacy writes enabled | DONE 2026-10-06 (functional; recording / transcription / intelligence / healthcare off; no Egress / S3, no load) — 16 |
 | 4 | Internal CosmicForge meetings | `MEETING_V2` + `RTC_PROVIDER_CONTROL_V2` + `REALTIME` + `WAITING_ROOM`; allowlist = internal staff | NOT EXECUTED |
 | 5 | Small allowlisted production cohort (canary) | as 4 + collaboration; allowlist = cohort | NOT EXECUTED — **PRODUCTION CANARY — NOT EXECUTED** |
 | 6 | Gradual tenant / percentage rollout | widen allowlist; enable recording / webinar / healthcare per tenant readiness | NOT EXECUTED |

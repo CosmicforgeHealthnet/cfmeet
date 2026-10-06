@@ -2,8 +2,11 @@
 
 Service: `services/meeting-service`. Branch: `staging`. All evidence is **local** (a single
 4-vCPU cloud container with real PostgreSQL, Redis, self-hosted LiveKit, Egress and an
-S3-compatible store) unless stated otherwise. Staging and production steps are prepared
-but **NOT EXECUTED**.
+S3-compatible store) unless stated otherwise. Documents 01–15 were written before any
+deployment; the staging deployment, production migration and production pre-cutover
+certification executed afterwards (2026-10-06) are recorded in
+[16](16-deployment-status.md), which is the current status: **PHASE 2 BACKEND — COMPLETE**,
+public cutover pending frontend compatibility only.
 
 | # | Document | Content |
 |---|---|---|
@@ -18,11 +21,12 @@ but **NOT EXECUTED**.
 | 08 | [Recording / storage certification](08-recording-storage-certification.md) | Real Egress + S3-compatible storage |
 | 09 | [Security review](09-security-review.md) | M-S1..15, IDOR, replay, findings |
 | 10 | [Failure / recovery](10-failure-recovery-report.md) | §29–§35, reconciliation evidence |
-| 11 | [Staging certification](11-staging-certification.md) | PENDING ENVIRONMENT |
+| 11 | [Staging certification](11-staging-certification.md) | Procedure; functional staging deployment executed — see 16 |
 | 12 | [Rollout plan](12-rollout-plan.md) | Flag audit, combinations, stages, gates, canary, legacy-write retirement |
 | 13 | [Rollback plan](13-rollback-plan.md) | Levers, certification, drill |
 | 14 | [Operational runbook](14-operational-runbook.md) | Runbooks, dashboards, alerts |
 | 15 | [OpenAPI / realtime compatibility](15-openapi-realtime-compatibility.md) | Contract parity, realtime protocol, consumers |
+| 16 | [Deployment status](16-deployment-status.md) | Staging deployment, production migration, pre-cutover certification, port hardening, rollback, cutover |
 
 Reproduce:
 

@@ -60,7 +60,7 @@ First, authenticate with your CosmicForge account and create an API key:
 
 ```bash
 # Login to get JWT token
-curl -X POST https://api.cosmicforge.com/api/v1/auth/login \
+curl -X POST https://api.cfmeet.com/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "your@email.com",
@@ -72,7 +72,7 @@ curl -X POST https://api.cosmicforge.com/api/v1/auth/login \
 
 ```bash
 # Create API key using the JWT token
-curl -X POST https://api.cosmicforge.com/api/v1/api-keys \
+curl -X POST https://api.cfmeet.com/api/v1/api-keys \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -107,7 +107,7 @@ Store the API key in your server's environment variables:
 ```bash
 # .env file (NEVER commit this to git)
 COSMICFORGE_API_KEY=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789AB
-COSMICFORGE_API_URL=https://api.cosmicforge.com
+COSMICFORGE_API_URL=https://api.cfmeet.com
 ```
 
 ---
@@ -125,7 +125,7 @@ Api-Key: your-64-character-api-key
 ### Example Request
 
 ```bash
-curl -X POST https://api.cosmicforge.com/api/v1/api/meetings \
+curl -X POST https://api.cfmeet.com/api/v1/api/meetings \
   -H "Api-Key: ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789AB" \
   -H "Content-Type: application/json" \
   -d '{
@@ -384,7 +384,7 @@ GET /api/v1/meetings/public/{meeting_identifier}
 ### List Your API Keys
 
 ```bash
-curl -X GET https://api.cosmicforge.com/api/v1/api-keys \
+curl -X GET https://api.cfmeet.com/api/v1/api-keys \
   -H "Authorization: Bearer {jwt-token}"
 ```
 
@@ -411,7 +411,7 @@ curl -X GET https://api.cosmicforge.com/api/v1/api-keys \
 ### Revoke an API Key
 
 ```bash
-curl -X DELETE https://api.cosmicforge.com/api/v1/api-keys/{id} \
+curl -X DELETE https://api.cfmeet.com/api/v1/api-keys/{id} \
   -H "Authorization: Bearer {jwt-token}"
 ```
 
@@ -539,7 +539,7 @@ const app = express();
 
 const COSMICFORGE_API_KEY = process.env.COSMICFORGE_API_KEY;
 const COSMICFORGE_API_URL =
-  process.env.COSMICFORGE_API_URL || "https://api.cosmicforge.com";
+  process.env.COSMICFORGE_API_URL || "https://api.cfmeet.com";
 
 app.use(express.json());
 
@@ -597,7 +597,7 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 COSMICFORGE_API_KEY = os.environ.get('COSMICFORGE_API_KEY')
-COSMICFORGE_API_URL = os.environ.get('COSMICFORGE_API_URL', 'https://api.cosmicforge.com')
+COSMICFORGE_API_URL = os.environ.get('COSMICFORGE_API_URL', 'https://api.cfmeet.com')
 
 @app.route('/api/meetings', methods=['POST'])
 def create_meeting():
@@ -643,7 +643,7 @@ if __name__ == '__main__':
 **Create a meeting:**
 
 ```bash
-curl -X POST https://api.cosmicforge.com/api/v1/api/meetings \
+curl -X POST https://api.cfmeet.com/api/v1/api/meetings \
   -H "Api-Key: YOUR_API_KEY_HERE" \
   -H "Content-Type: application/json" \
   -d '{
@@ -655,7 +655,7 @@ curl -X POST https://api.cosmicforge.com/api/v1/api/meetings \
 **Get public meeting info:**
 
 ```bash
-curl -X GET https://api.cosmicforge.com/api/v1/meetings/public/ABCD1234
+curl -X GET https://api.cfmeet.com/api/v1/meetings/public/ABCD1234
 ```
 
 ---

@@ -87,7 +87,7 @@ EXECUTED as stated in 11).
 | Recording / artefacts | recording, consent, artefact lifecycle, attendance | `recording_g`, real Part G, `m_e2e_09` | PASS |
 | Special modes | webinar, town hall, healthcare | `profiles_h`, real Part H, `m_e2e_10/11` | PASS |
 | Quality / operations | telemetry, reconciliation, operations visibility | `operations_i`, real Part I | PASS |
-| Migration / certification | backfill, compatibility, load, security, failure, rollout controls | 03, 06, 09, 10, `rollout_flags` | PASS (local); staging NOT EXECUTED |
+| Migration / certification | backfill, compatibility, load, security, failure, rollout controls | 03, 06, 09, 10, `rollout_flags` | PASS (local); staging and production migration / backfill executed 2026-10-06 (16) |
 
 ## 3. Definition of Done (§57–§74)
 
@@ -171,4 +171,4 @@ No question is answered NO.
 | runbooks | ✔ (14) |
 | alerts / dashboard specification | ✔ (14) |
 | rollback plan | ✔ (13) |
-| staging certification readiness | ✔ prepared — execution PENDING ENVIRONMENT (11) |
+| staging certification readiness | ✔ prepared — functional staging deployment executed 2026-10-06 (16); load / media / observation steps of 11 not run |
