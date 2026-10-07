@@ -1,0 +1,49 @@
+[workspace]
+members = [".", "migration"]
+
+[package]
+name = "calling"
+version = "0.1.0"
+edition = "2021"
+publish = false
+default-run = "calling"
+description = "CF Meet Calling service: platform consumer, credential and principal trust foundation"
+
+[lib]
+name = "calling"
+path = "src/lib.rs"
+
+[[bin]]
+name = "calling"
+path = "src/main.rs"
+
+[[bin]]
+name = "platform_admin"
+path = "src/bin/platform_admin.rs"
+
+[dependencies]
+calling-migration = { path = "migration" }
+tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync"] }
+sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono", "with-json", "postgres-array"] }
+axum = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio", "query"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+thiserror = "2.0"
+anyhow = "1.0"
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+# Credential security: CSPRNG secrets, keyed HMAC-SHA-256 verifier, redacted/zeroized secret containers.
+rand = "0.8"
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+secrecy = "0.10"
+zeroize = "1.8"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

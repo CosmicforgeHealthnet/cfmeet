@@ -1,0 +1,20 @@
+[package]
+name = "calling-migration"
+version = "0.1.0"
+edition = "2021"
+publish = false
+default-run = "calling-migration"
+
+[lib]
+name = "calling_migration"
+path = "src/lib.rs"
+
+[[bin]]
+name = "calling-migration"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1.42", features = ["macros", "rt-multi-thread"] }
+dotenvy = "0.15"
+sea-orm-migration = { version = "1.1", default-features = false, features = ["cli", "sqlx-postgres", "runtime-tokio-rustls"] }
+async-trait = "0.1"
