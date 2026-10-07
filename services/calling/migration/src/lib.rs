@@ -11,6 +11,11 @@ mod m20261007_000001_platform_consumers;
 mod m20261007_000002_platform_credentials;
 mod m20261007_000003_platform_principals;
 mod m20261007_000004_platform_limits;
+mod m20261007_000005_call_core;
+mod m20261007_000006_call_participants_sessions;
+mod m20261007_000007_call_routes_legs_attempts;
+mod m20261007_000008_call_evidence_quality_usage;
+mod m20261007_000009_call_outbox;
 
 /// Name of the table recording which Calling migrations have been applied.
 pub const MIGRATION_TABLE: &str = "calling_seaql_migrations";
@@ -25,6 +30,11 @@ impl MigratorTrait for Migrator {
             Box::new(m20261007_000002_platform_credentials::Migration),
             Box::new(m20261007_000003_platform_principals::Migration),
             Box::new(m20261007_000004_platform_limits::Migration),
+            Box::new(m20261007_000005_call_core::Migration),
+            Box::new(m20261007_000006_call_participants_sessions::Migration),
+            Box::new(m20261007_000007_call_routes_legs_attempts::Migration),
+            Box::new(m20261007_000008_call_evidence_quality_usage::Migration),
+            Box::new(m20261007_000009_call_outbox::Migration),
         ]
     }
 
