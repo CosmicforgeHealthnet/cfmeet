@@ -12,7 +12,7 @@ use crate::{
     domain::SharedClock,
     endpoints::{EndpointService, PresenceWindow},
     internal_auth::ServiceAuthRuntime,
-    media::{CallMediaProvider, MediaCredentialPolicy},
+    media::{gateway::MediaConnectionGateway, CallMediaProvider, MediaCredentialPolicy},
     platform::{
         authentication::CredentialAuthenticator,
         limits::{LimitDefaults, LimitPolicyResolver, RequestRateLimiter},
@@ -30,6 +30,8 @@ use crate::{
 pub struct CallingRuntime {
     pub signaling_keys: Arc<SignalingKeys>,
     pub media: Option<Arc<dyn CallMediaProvider>>,
+    /// The provider's media connection gateway (admission before every connection).
+    pub media_gateway: Option<Arc<dyn MediaConnectionGateway>>,
     pub credential_policy: MediaCredentialPolicy,
     pub bus: Arc<dyn RealtimeSignalBus>,
     pub push: Arc<dyn PushDispatcher>,
@@ -53,6 +55,8 @@ pub struct AppState {
     pub signaling: SignalingAuthority,
     /// Application calling orchestration (§20–§25).
     pub app: Arc<AppCallService>,
+    /// Media connection gateway (none when application media is disabled).
+    pub media_gateway: Option<Arc<dyn MediaConnectionGateway>>,
     /// Internal service authentication (separate from customer credentials).
     pub service_auth: ServiceAuthRuntime,
 }
@@ -80,6 +84,7 @@ impl AppState {
             clock.clone(),
             PresenceWindow::default(),
         ));
+        let media_gateway = runtime.media_gateway.clone();
         let app = Arc::new(
             AppCallService::new(
                 calls.clone(),
@@ -110,6 +115,7 @@ impl AppState {
             endpoints,
             signaling: SignalingAuthority::new(runtime.signaling_keys, db.clone(), clock.clone()),
             app,
+            media_gateway,
             service_auth,
             clock,
             db,

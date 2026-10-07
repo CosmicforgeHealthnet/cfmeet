@@ -9,15 +9,22 @@
 //! redacted container: it is never logged, serialized, persisted or returned, and the
 //! configuration type has no derived `Debug`.
 //!
-//! Credentials (§42–§44):
+//! Credentials (§42–§44; ADR 0007):
 //!
-//! * join tokens grant `roomJoin` for exactly the Call's canonical room and the session's
-//!   media identity, and NOTHING else — no publish, no subscribe, no data, no metadata
-//!   updates, no admin / create / list / record / ingress / agent grant. The session's
-//!   media generation is carried as the participant attribute `cfm.gen`; a client cannot
-//!   change attributes (no `canUpdateOwnMetadata`);
+//! * clients never hold a token LiveKit accepts. Their media credential is a LiveKit-shaped
+//!   JWT sealed with Calling's separate media-edge key (`CALLING_MEDIA_EDGE_SIGNING_KEY`,
+//!   issuer [`EDGE_ISSUER`], unknown to LiveKit), usable only through Calling's media
+//!   connection gateway (`livekit_gateway`), which admits every connection against the
+//!   database first;
+//! * the gateway opens each admitted upstream connection with a token minted for that one
+//!   connection: `roomJoin` for exactly the Call's canonical room and the session's media
+//!   identity, and NOTHING else — no publish, no subscribe, no data, no metadata updates,
+//!   no admin / create / list / record / ingress / agent grant. The session's media
+//!   generation is carried as the participant attribute `cfm.gen`;
 //! * the server grants the effective media permissions with `UpdateParticipant` only after
-//!   it verified the connection (webhook / listing) against the database;
+//!   it verified the connection against the database. The privileged tokens LiveKit then
+//!   refreshes are re-sealed with the edge key on their way to the client, so a saved
+//!   refreshed token is again only usable through the gateway;
 //! * server API calls use separate short-lived tokens with the minimal grant per call.
 
 use std::{collections::BTreeMap, fmt, time::Duration as StdDuration};
@@ -32,6 +39,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use super::{
+    gateway::{ConnectionClaims, ConnectionDenied},
     permissions::MediaPermissions,
     provider::{
         CallMediaProvider, EnsuredMediaSession, EventVerificationError, IssuedMediaCredential,
@@ -46,6 +54,12 @@ use crate::{calls::kinds::MediaEventKind, config::ConfigError};
 pub const ADAPTER_NAME: &str = "livekit";
 /// Participant attribute carrying the session media generation.
 pub const GENERATION_ATTRIBUTE: &str = "cfm.gen";
+/// Issuer of client media credentials (Calling's media edge). Never a LiveKit API key.
+pub const EDGE_ISSUER: &str = "cfmeet-media-edge";
+/// Lifetime of the per-connection upstream token (used once, by the gateway, to connect).
+const UPSTREAM_TOKEN_TTL_SECONDS: i64 = 30;
+/// Longest lifetime a re-sealed refreshed credential may carry.
+const MAX_RESEALED_TTL_SECONDS: i64 = 900;
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 const MAX_TIMEOUT_MS: u64 = 60_000;
@@ -55,24 +69,31 @@ const ADMIN_TOKEN_TTL_SECONDS: i64 = 60;
 /// Accepted clock skew for webhook tokens.
 const WEBHOOK_LEEWAY_SECONDS: u64 = 30;
 
-/// Calling's LiveKit configuration. No `Debug` derive: the secret is redacted by hand.
+/// Calling's LiveKit configuration. No `Debug` derive: the secrets are redacted by hand.
 pub struct LiveKitSettings {
-    /// URL clients connect to (`wss://…`, `ws://` only for loopback development).
-    client_url: String,
+    /// LiveKit's signaling URL the gateway relays to (`wss://…`, `ws://` only for loopback).
+    /// Never handed to clients.
+    signal_url: String,
+    /// Public URL of Calling's media connection gateway, handed to clients.
+    gateway_url: String,
     /// Server API base URL (`https://…`, `http://` only for loopback development).
     api_url: String,
     api_key: String,
     api_secret: SecretString,
+    /// Calling's media-edge key sealing client credentials (unknown to LiveKit).
+    edge_key: SecretString,
     api_timeout: StdDuration,
 }
 
 impl fmt::Debug for LiveKitSettings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LiveKitSettings")
-            .field("client_url", &self.client_url)
+            .field("signal_url", &self.signal_url)
+            .field("gateway_url", &self.gateway_url)
             .field("api_url", &self.api_url)
             .field("api_key", &"[REDACTED]")
             .field("api_secret", &"[REDACTED]")
+            .field("edge_key", &"[REDACTED]")
             .field("api_timeout", &self.api_timeout)
             .finish()
     }
@@ -82,18 +103,21 @@ impl LiveKitSettings {
     /// A copy for building an adapter (the secret stays in a redacted container).
     pub(crate) fn clone_settings(&self) -> Self {
         Self {
-            client_url: self.client_url.clone(),
+            signal_url: self.signal_url.clone(),
+            gateway_url: self.gateway_url.clone(),
             api_url: self.api_url.clone(),
             api_key: self.api_key.clone(),
             api_secret: self.api_secret.clone(),
+            edge_key: self.edge_key.clone(),
             api_timeout: self.api_timeout,
         }
     }
 
-    /// Reads `CALLING_LIVEKIT_URL`, `CALLING_LIVEKIT_API_URL`, `CALLING_LIVEKIT_API_KEY`,
-    /// `CALLING_LIVEKIT_API_SECRET` and `CALLING_LIVEKIT_API_TIMEOUT_MS`. Every value is
-    /// required (no fallback credential exists); invalid values are refused without echoing
-    /// them.
+    /// Reads `CALLING_LIVEKIT_URL` (LiveKit signaling, gateway upstream),
+    /// `CALLING_LIVEKIT_API_URL`, `CALLING_LIVEKIT_API_KEY`, `CALLING_LIVEKIT_API_SECRET`,
+    /// `CALLING_MEDIA_GATEWAY_URL` (public gateway URL), `CALLING_MEDIA_EDGE_SIGNING_KEY`
+    /// and `CALLING_LIVEKIT_API_TIMEOUT_MS`. Every value is required (no fallback
+    /// credential exists); invalid values are refused without echoing them.
     pub fn from_lookup(get: &impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
         let required = |var: &'static str| {
             get(var)
@@ -101,8 +125,19 @@ impl LiveKitSettings {
                 .filter(|v| !v.is_empty())
                 .ok_or(ConfigError::Missing { var })
         };
-        let client_url = required("CALLING_LIVEKIT_URL")?;
-        check_url("CALLING_LIVEKIT_URL", &client_url, &["wss://"], &["ws://"])?;
+        let signal_url = required("CALLING_LIVEKIT_URL")?
+            .trim_end_matches('/')
+            .to_string();
+        check_url("CALLING_LIVEKIT_URL", &signal_url, &["wss://"], &["ws://"])?;
+        let gateway_url = required("CALLING_MEDIA_GATEWAY_URL")?
+            .trim_end_matches('/')
+            .to_string();
+        check_url(
+            "CALLING_MEDIA_GATEWAY_URL",
+            &gateway_url,
+            &["wss://"],
+            &["ws://"],
+        )?;
         let api_url = required("CALLING_LIVEKIT_API_URL")?
             .trim_end_matches('/')
             .to_string();
@@ -114,6 +149,7 @@ impl LiveKitSettings {
         )?;
         let api_key = required("CALLING_LIVEKIT_API_KEY")?;
         if api_key.len() > 64
+            || api_key == EDGE_ISSUER
             || !api_key
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
@@ -135,6 +171,15 @@ impl LiveKitSettings {
                 format!("must be a generated secret of at least {MIN_SECRET_LEN} characters"),
             ));
         }
+        let edge_key = required("CALLING_MEDIA_EDGE_SIGNING_KEY")?;
+        if edge_key.len() < MIN_SECRET_LEN || edge_key == api_secret {
+            return Err(ConfigError::invalid(
+                "CALLING_MEDIA_EDGE_SIGNING_KEY",
+                format!(
+                    "must be a generated secret of at least {MIN_SECRET_LEN} characters, distinct from the LiveKit API secret"
+                ),
+            ));
+        }
         let api_timeout = match get("CALLING_LIVEKIT_API_TIMEOUT_MS") {
             None => DEFAULT_TIMEOUT_MS,
             Some(v) => v
@@ -150,10 +195,12 @@ impl LiveKitSettings {
                 })?,
         };
         Ok(Self {
-            client_url,
+            signal_url,
+            gateway_url,
             api_url,
             api_key,
             api_secret: SecretString::from(api_secret),
+            edge_key: SecretString::from(edge_key),
             api_timeout: StdDuration::from_millis(api_timeout),
         })
     }
@@ -226,6 +273,15 @@ struct AccessClaims<'a> {
     attributes: BTreeMap<&'a str, String>,
 }
 
+/// Which key signs a token.
+#[derive(Debug, Clone, Copy)]
+enum Signer {
+    /// LiveKit's API key: server API calls and per-connection upstream tokens.
+    LiveKit,
+    /// Calling's media edge: client credentials (LiveKit does not know this key).
+    Edge,
+}
+
 #[derive(Deserialize)]
 struct WebhookClaims {
     #[serde(default)]
@@ -248,8 +304,16 @@ impl LiveKitAdapter {
         Ok(Self { settings, http })
     }
 
+    fn key(&self, signer: Signer) -> (&str, &SecretString) {
+        match signer {
+            Signer::LiveKit => (self.settings.api_key.as_str(), &self.settings.api_secret),
+            Signer::Edge => (EDGE_ISSUER, &self.settings.edge_key),
+        }
+    }
+
     fn sign(
         &self,
+        signer: Signer,
         identity: Option<&str>,
         ttl: Duration,
         video: Value,
@@ -257,8 +321,9 @@ impl LiveKitAdapter {
     ) -> Result<(String, DateTime<Utc>), MediaProviderError> {
         let now = Utc::now();
         let expires_at = now + ttl;
+        let (issuer, secret) = self.key(signer);
         let claims = AccessClaims {
-            iss: &self.settings.api_key,
+            iss: issuer,
             sub: identity,
             // LiveKit validates nbf strictly; allow for small clock skew between hosts.
             nbf: now.timestamp() - 5,
@@ -269,15 +334,168 @@ impl LiveKitAdapter {
         let token = jsonwebtoken::encode(
             &Header::new(Algorithm::HS256),
             &claims,
-            &EncodingKey::from_secret(self.settings.api_secret.expose_secret().as_bytes()),
+            &EncodingKey::from_secret(secret.expose_secret().as_bytes()),
         )
         .map_err(|_| MediaProviderError::Rejected)?;
         Ok((token, expires_at))
     }
 
+    /// The join-only grant: every capability explicitly false (LiveKit treats an absent
+    /// publish / subscribe / data grant as TRUE).
+    fn join_only(room: &str) -> Value {
+        json!({
+            "room": room,
+            "roomJoin": true,
+            "roomCreate": false,
+            "roomList": false,
+            "roomRecord": false,
+            "roomAdmin": false,
+            "ingressAdmin": false,
+            "canPublish": false,
+            "canSubscribe": false,
+            "canPublishData": false,
+            "canPublishSources": [],
+            "canUpdateOwnMetadata": false,
+            "canSubscribeMetrics": false,
+            "hidden": false,
+            "recorder": false,
+            "agent": false,
+        })
+    }
+
+    fn generation_attributes(generation: Option<i32>) -> BTreeMap<&'static str, String> {
+        let mut attributes = BTreeMap::new();
+        if let Some(generation) = generation {
+            attributes.insert(GENERATION_ATTRIBUTE, generation.to_string());
+        }
+        attributes
+    }
+
+    /// LiveKit's signaling base URL (gateway upstream only; never handed to clients).
+    pub fn signal_url(&self) -> &str {
+        &self.settings.signal_url
+    }
+
+    /// A token for ONE admitted upstream connection: join-only, the claimed room, identity
+    /// and generation, 30 s. Minted by the gateway after admission; never leaves it.
+    pub fn upstream_token(&self, claims: &ConnectionClaims) -> Result<String, MediaProviderError> {
+        self.sign(
+            Signer::LiveKit,
+            Some(&claims.identity),
+            Duration::seconds(UPSTREAM_TOKEN_TTL_SECONDS),
+            Self::join_only(&claims.resource_name),
+            Self::generation_attributes(claims.generation),
+        )
+        .map(|(t, _)| t)
+    }
+
+    fn decode_claims(
+        token: &str,
+        issuer: &str,
+        secret: &SecretString,
+        now: DateTime<Utc>,
+    ) -> Option<Value> {
+        let header = jsonwebtoken::decode_header(token).ok()?;
+        if header.alg != Algorithm::HS256 {
+            return None;
+        }
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.set_issuer(&[issuer]);
+        validation.set_required_spec_claims(&["exp", "iss", "sub"]);
+        // Time is checked below, explicitly, against the caller's clock.
+        validation.validate_exp = false;
+        validation.validate_nbf = false;
+        let claims = jsonwebtoken::decode::<Value>(
+            token,
+            &DecodingKey::from_secret(secret.expose_secret().as_bytes()),
+            &validation,
+        )
+        .ok()?
+        .claims;
+        let exp = claims.get("exp").and_then(Value::as_i64)?;
+        let nbf = claims
+            .get("nbf")
+            .and_then(Value::as_i64)
+            .unwrap_or(i64::MIN);
+        let now = now.timestamp();
+        (exp > now && nbf <= now + 5).then_some(claims)
+    }
+
+    fn connection_claims(claims: &Value) -> Option<ConnectionClaims> {
+        let identity = claims.get("sub").and_then(Value::as_str)?;
+        let video = claims.get("video")?;
+        if video.get("roomJoin").and_then(Value::as_bool) != Some(true) {
+            return None;
+        }
+        let room = video.get("room").and_then(Value::as_str)?;
+        if identity.is_empty() || identity.len() > 128 || room.is_empty() || room.len() > 128 {
+            return None;
+        }
+        let generation = match claims
+            .get("attributes")
+            .and_then(|a| a.get(GENERATION_ATTRIBUTE))
+        {
+            None => None,
+            Some(v) => Some(v.as_str()?.parse::<i32>().ok().filter(|g| *g >= 1)?),
+        };
+        Some(ConnectionClaims {
+            resource_name: room.to_string(),
+            identity: identity.to_string(),
+            generation,
+        })
+    }
+
+    /// Authenticates a client media credential: edge signature (a LiveKit-signed token is
+    /// refused), unexpired, join grant for one room, identity, generation.
+    pub fn verify_edge_credential(
+        &self,
+        token: &str,
+        now: DateTime<Utc>,
+    ) -> Result<ConnectionClaims, ConnectionDenied> {
+        if token.len() > 4096 {
+            return Err(ConnectionDenied::InvalidCredential);
+        }
+        Self::decode_claims(token, EDGE_ISSUER, &self.settings.edge_key, now)
+            .as_ref()
+            .and_then(Self::connection_claims)
+            .ok_or(ConnectionDenied::InvalidCredential)
+    }
+
+    /// Re-seals a token LiveKit refreshed for `connection`: verified as LiveKit's, bound to
+    /// the same room / identity / generation, then signed with the edge key (LiveKit will
+    /// not accept it; only the gateway will, after admission). `None`: refuse it.
+    pub fn reseal_refreshed(
+        &self,
+        token: &str,
+        connection: &ConnectionClaims,
+        now: DateTime<Utc>,
+    ) -> Option<String> {
+        let mut claims = Self::decode_claims(
+            token,
+            &self.settings.api_key,
+            &self.settings.api_secret,
+            now,
+        )?;
+        if Self::connection_claims(&claims).as_ref() != Some(connection) {
+            return None;
+        }
+        let object = claims.as_object_mut()?;
+        object.insert("iss".into(), Value::String(EDGE_ISSUER.into()));
+        let cap = now.timestamp() + MAX_RESEALED_TTL_SECONDS;
+        let exp = object.get("exp").and_then(Value::as_i64)?.min(cap);
+        object.insert("exp".into(), Value::from(exp));
+        jsonwebtoken::encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(self.settings.edge_key.expose_secret().as_bytes()),
+        )
+        .ok()
+    }
+
     /// Server API token with exactly one administrative grant.
     fn admin_token(&self, video: Value) -> Result<String, MediaProviderError> {
         self.sign(
+            Signer::LiveKit,
             None,
             Duration::seconds(ADMIN_TOKEN_TTL_SECONDS),
             video,
@@ -508,32 +726,16 @@ impl CallMediaProvider for LiveKitAdapter {
         &self,
         request: &MediaCredentialRequest,
     ) -> Result<IssuedMediaCredential, MediaProviderError> {
-        // Join-only: every capability is explicitly false (LiveKit treats an absent
-        // publish / subscribe / data grant as TRUE).
-        let video = json!({
-            "room": request.session.name.as_str(),
-            "roomJoin": true,
-            "roomCreate": false,
-            "roomList": false,
-            "roomRecord": false,
-            "roomAdmin": false,
-            "ingressAdmin": false,
-            "canPublish": false,
-            "canSubscribe": false,
-            "canPublishData": false,
-            "canPublishSources": [],
-            "canUpdateOwnMetadata": false,
-            "canSubscribeMetrics": false,
-            "hidden": false,
-            "recorder": false,
-            "agent": false,
-        });
-        let mut attributes = BTreeMap::new();
-        attributes.insert(GENERATION_ATTRIBUTE, request.generation.to_string());
-        let (token, expires_at) =
-            self.sign(Some(&request.identity), request.ttl, video, attributes)?;
+        // Join-only and sealed with the edge key: usable only through the gateway.
+        let (token, expires_at) = self.sign(
+            Signer::Edge,
+            Some(&request.identity),
+            request.ttl,
+            Self::join_only(request.session.name.as_str()),
+            Self::generation_attributes(Some(request.generation)),
+        )?;
         Ok(IssuedMediaCredential {
-            url: self.settings.client_url.clone(),
+            url: self.settings.gateway_url.clone(),
             token: MediaToken::new(token),
             expires_at,
         })
@@ -743,6 +945,7 @@ mod tests {
     }
 
     const SECRET: &str = "test-livekit-api-secret-0123456789abcdef";
+    const EDGE: &str = "test-media-edge-signing-key-0123456789abcdef";
 
     fn adapter() -> LiveKitAdapter {
         LiveKitAdapter::new(
@@ -751,22 +954,39 @@ mod tests {
                 ("CALLING_LIVEKIT_API_URL", "http://127.0.0.1:7880"),
                 ("CALLING_LIVEKIT_API_KEY", "callingkey"),
                 ("CALLING_LIVEKIT_API_SECRET", SECRET),
+                (
+                    "CALLING_MEDIA_GATEWAY_URL",
+                    "ws://127.0.0.1:8090/v1/calling/media",
+                ),
+                ("CALLING_MEDIA_EDGE_SIGNING_KEY", EDGE),
             ]))
             .unwrap(),
         )
         .unwrap()
     }
 
-    fn decode(token: &str) -> Value {
+    fn decode_with(token: &str, secret: &str) -> Value {
         let mut validation = Validation::new(Algorithm::HS256);
         validation.set_required_spec_claims(&["exp"]);
         jsonwebtoken::decode::<Value>(
             token,
-            &DecodingKey::from_secret(SECRET.as_bytes()),
+            &DecodingKey::from_secret(secret.as_bytes()),
             &validation,
         )
         .unwrap()
         .claims
+    }
+
+    fn decode(token: &str) -> Value {
+        decode_with(token, EDGE)
+    }
+
+    fn claims(room: &str, gen: Option<i32>) -> ConnectionClaims {
+        ConnectionClaims {
+            resource_name: room.into(),
+            identity: "cfmid_00".into(),
+            generation: gen,
+        }
     }
 
     #[test]
@@ -776,10 +996,15 @@ mod tests {
             ("CALLING_LIVEKIT_API_URL", "https://media.example.org"),
             ("CALLING_LIVEKIT_API_KEY", "callingkey"),
             ("CALLING_LIVEKIT_API_SECRET", SECRET),
+            (
+                "CALLING_MEDIA_GATEWAY_URL",
+                "wss://calling.example.org/v1/calling/media",
+            ),
+            ("CALLING_MEDIA_EDGE_SIGNING_KEY", EDGE),
         ];
         let settings = LiveKitSettings::from_lookup(&lookup(&base)).unwrap();
         let debug = format!("{settings:?}");
-        assert!(!debug.contains(SECRET) && !debug.contains("callingkey"));
+        assert!(!debug.contains(SECRET) && !debug.contains("callingkey") && !debug.contains(EDGE));
         for missing in base.iter().map(|(k, _)| *k) {
             let pairs: Vec<_> = base
                 .iter()
@@ -801,6 +1026,13 @@ mod tests {
             ("CALLING_LIVEKIT_API_URL", "http://media.example.org"),
             ("CALLING_LIVEKIT_API_URL", "ftp://media.example.org"),
             ("CALLING_LIVEKIT_API_KEY", "bad key"),
+            ("CALLING_LIVEKIT_API_KEY", EDGE_ISSUER),
+            (
+                "CALLING_MEDIA_GATEWAY_URL",
+                "ws://calling.example.org/v1/calling/media",
+            ),
+            ("CALLING_MEDIA_EDGE_SIGNING_KEY", "tooshort-x"),
+            ("CALLING_MEDIA_EDGE_SIGNING_KEY", SECRET),
         ] {
             let pairs: Vec<_> = base
                 .iter()
@@ -830,7 +1062,19 @@ mod tests {
             })
             .await
             .unwrap();
+        // The client credential is sealed with the edge key: LiveKit's key does not verify
+        // it, and it points at the gateway, never at LiveKit.
+        assert_eq!(credential.url, "ws://127.0.0.1:8090/v1/calling/media");
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.set_required_spec_claims(&["exp"]);
+        assert!(jsonwebtoken::decode::<Value>(
+            credential.token.expose(),
+            &DecodingKey::from_secret(SECRET.as_bytes()),
+            &validation
+        )
+        .is_err());
         let claims = decode(credential.token.expose());
+        assert_eq!(claims["iss"], EDGE_ISSUER);
         let video = &claims["video"];
         assert_eq!(video["roomJoin"], true);
         assert_eq!(video["room"], "cfc-00000000000000000000000000000000");
@@ -860,6 +1104,160 @@ mod tests {
         )
         .unwrap();
         assert!(!payload.contains(SECRET));
+    }
+
+    #[tokio::test]
+    async fn edge_credentials_are_verified_and_upstream_tokens_stay_join_only() {
+        let adapter = adapter();
+        let room = "cfc-00000000000000000000000000000000";
+        let issued = adapter
+            .issue_credentials(&MediaCredentialRequest {
+                session: MediaSessionRef {
+                    name: super::super::provider::MediaResourceName::for_call(
+                        crate::calls::ids::CallId::from_uuid(uuid::Uuid::nil()),
+                    ),
+                },
+                identity: "cfmid_00".into(),
+                generation: 4,
+                ttl: Duration::minutes(5),
+            })
+            .await
+            .unwrap();
+        let now = Utc::now();
+        assert_eq!(
+            adapter.verify_edge_credential(issued.token.expose(), now),
+            Ok(claims(room, Some(4)))
+        );
+        assert_eq!(
+            adapter.verify_edge_credential(issued.token.expose(), now + Duration::minutes(6)),
+            Err(ConnectionDenied::InvalidCredential),
+            "expired"
+        );
+        // A token LiveKit would accept (LiveKit key) is NOT a client credential.
+        let upstream = adapter.upstream_token(&claims(room, Some(4))).unwrap();
+        assert_eq!(
+            adapter.verify_edge_credential(&upstream, now),
+            Err(ConnectionDenied::InvalidCredential)
+        );
+        let up = decode_with(&upstream, SECRET);
+        assert_eq!(up["iss"], "callingkey");
+        assert_eq!(up["video"]["canPublish"], false);
+        assert_eq!(up["video"]["canSubscribe"], false);
+        assert_eq!(up["attributes"][GENERATION_ATTRIBUTE], "4");
+        assert!(up["exp"].as_i64().unwrap() - now.timestamp() <= UPSTREAM_TOKEN_TTL_SECONDS);
+        // Malformed generations and grants are refused.
+        let forged = |video: Value, attributes: Value, key: &str, iss: &str| {
+            jsonwebtoken::encode(
+                &Header::new(Algorithm::HS256),
+                &json!({ "iss": iss, "sub": "cfmid_00", "nbf": now.timestamp() - 1, "exp": now.timestamp() + 60, "video": video, "attributes": attributes }),
+                &EncodingKey::from_secret(key.as_bytes()),
+            )
+            .unwrap()
+        };
+        let join = json!({ "roomJoin": true, "room": room });
+        for (token, what) in [
+            (
+                forged(
+                    join.clone(),
+                    json!({ GENERATION_ATTRIBUTE: "zero" }),
+                    EDGE,
+                    EDGE_ISSUER,
+                ),
+                "bad generation",
+            ),
+            (
+                forged(
+                    join.clone(),
+                    json!({ GENERATION_ATTRIBUTE: "0" }),
+                    EDGE,
+                    EDGE_ISSUER,
+                ),
+                "generation 0",
+            ),
+            (
+                forged(
+                    json!({ "roomJoin": false, "room": room }),
+                    json!({}),
+                    EDGE,
+                    EDGE_ISSUER,
+                ),
+                "no join grant",
+            ),
+            (
+                forged(join.clone(), json!({}), SECRET, "callingkey"),
+                "LiveKit key",
+            ),
+            (
+                forged(join.clone(), json!({}), EDGE, "callingkey"),
+                "wrong issuer",
+            ),
+            ("not-a-token".to_string(), "garbage"),
+        ] {
+            assert_eq!(
+                adapter.verify_edge_credential(&token, now),
+                Err(ConnectionDenied::InvalidCredential),
+                "{what}"
+            );
+        }
+        assert_eq!(
+            adapter.verify_edge_credential(&forged(join, json!({}), EDGE, EDGE_ISSUER), now),
+            Ok(claims(room, None)),
+            "no generation: authenticated, refused later by admission"
+        );
+    }
+
+    #[test]
+    fn refreshed_livekit_tokens_are_resealed_for_the_same_connection_only() {
+        let adapter = adapter();
+        let room = "cfc-00000000000000000000000000000000";
+        let now = Utc::now();
+        let refreshed = |sub: &str, room: &str, gen: &str, key: &str| {
+            jsonwebtoken::encode(
+                &Header::new(Algorithm::HS256),
+                &json!({ "iss": "callingkey", "sub": sub, "nbf": now.timestamp(), "exp": now.timestamp() + 600,
+                         "video": { "roomJoin": true, "room": room, "canPublish": true, "canSubscribe": true },
+                         "attributes": { GENERATION_ATTRIBUTE: gen } }),
+                &EncodingKey::from_secret(key.as_bytes()),
+            )
+            .unwrap()
+        };
+        let connection = claims(room, Some(2));
+        let sealed = adapter
+            .reseal_refreshed(&refreshed("cfmid_00", room, "2", SECRET), &connection, now)
+            .unwrap();
+        let c = decode(&sealed);
+        assert_eq!(c["iss"], EDGE_ISSUER);
+        assert_eq!(
+            c["video"]["canPublish"], true,
+            "the server's grant is preserved"
+        );
+        assert_eq!(
+            adapter.verify_edge_credential(&sealed, now),
+            Ok(connection.clone())
+        );
+        // LiveKit's key no longer verifies it.
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.set_required_spec_claims(&["exp"]);
+        assert!(jsonwebtoken::decode::<Value>(
+            &sealed,
+            &DecodingKey::from_secret(SECRET.as_bytes()),
+            &validation
+        )
+        .is_err());
+        // Another identity / room / generation, or a token not signed by LiveKit: refused.
+        for token in [
+            refreshed("cfmid_01", room, "2", SECRET),
+            refreshed(
+                "cfmid_00",
+                "cfc-11111111111111111111111111111111",
+                "2",
+                SECRET,
+            ),
+            refreshed("cfmid_00", room, "3", SECRET),
+            refreshed("cfmid_00", room, "2", EDGE),
+        ] {
+            assert!(adapter.reseal_refreshed(&token, &connection, now).is_none());
+        }
     }
 
     fn signed(body: &str, secret: &str) -> String {

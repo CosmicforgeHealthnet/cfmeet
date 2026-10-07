@@ -99,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(2);
         }
     };
-    let media = match media_settings.build_provider() {
+    let media = match media_settings.build() {
         Ok(media) => media,
         Err(err) => {
             tracing::error!(error = %err, "media provider configuration error");
@@ -114,7 +114,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
     tracing::info!(
-        application_media = media.is_some(),
+        application_media = media.provider.is_some(),
         "application calling configured"
     );
     // Cross-instance realtime fanout over PostgreSQL LISTEN / NOTIFY.
@@ -134,7 +134,8 @@ async fn main() -> anyhow::Result<()> {
         service_auth,
         CallingRuntime {
             signaling_keys,
-            media,
+            media: media.provider,
+            media_gateway: media.gateway,
             credential_policy: media_settings.credential_policy,
             bus,
             push: Arc::new(NoPushTransport),

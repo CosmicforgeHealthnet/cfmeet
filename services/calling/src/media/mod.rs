@@ -7,14 +7,19 @@
 //! * [`events`] — admission decisions for provider callbacks (evidence only);
 //! * [`reconciliation`] — the pure diff between Calling's authoritative sessions and what
 //!   the provider reports, with the safe repairs it allows;
-//! * [`livekit`] — the self-hosted LiveKit adapter, the only provider-specific code.
+//! * [`gateway`] — CF Meet's admission authority over every media signaling connection
+//!   (provider-neutral; fail closed);
+//! * [`livekit`] / [`livekit_gateway`] — the self-hosted LiveKit adapter and its
+//!   connection gateway, the only provider-specific code.
 //!
 //! This module is independent of the Meeting Service: it shares no source, type, HTTP API
 //! or database with it.
 
 pub mod credentials;
 pub mod events;
+pub mod gateway;
 pub mod livekit;
+pub mod livekit_gateway;
 pub mod permissions;
 pub mod provider;
 pub mod reconciliation;
@@ -71,13 +76,27 @@ impl MediaSettings {
         })
     }
 
-    /// Builds the configured provider (`None` when media is disabled).
-    pub fn build_provider(&self) -> Result<Option<Arc<dyn CallMediaProvider>>, ConfigError> {
+    /// Builds the configured provider and its connection gateway (`None` when media is
+    /// disabled).
+    pub fn build(&self) -> Result<MediaRuntime, ConfigError> {
         Ok(match &self.selection {
-            MediaProviderSelection::Disabled => None,
-            MediaProviderSelection::LiveKit(settings) => Some(Arc::new(
-                livekit::LiveKitAdapter::new(settings.clone_settings())?,
-            )),
+            MediaProviderSelection::Disabled => MediaRuntime {
+                provider: None,
+                gateway: None,
+            },
+            MediaProviderSelection::LiveKit(settings) => {
+                let adapter = Arc::new(livekit::LiveKitAdapter::new(settings.clone_settings())?);
+                MediaRuntime {
+                    provider: Some(adapter.clone()),
+                    gateway: Some(Arc::new(livekit_gateway::LiveKitGateway::new(adapter))),
+                }
+            }
         })
     }
+}
+
+/// A configured media provider and the gateway every media connection passes through.
+pub struct MediaRuntime {
+    pub provider: Option<Arc<dyn CallMediaProvider>>,
+    pub gateway: Option<Arc<dyn gateway::MediaConnectionGateway>>,
 }

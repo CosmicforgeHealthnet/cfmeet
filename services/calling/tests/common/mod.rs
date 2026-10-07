@@ -431,6 +431,7 @@ pub fn test_runtime(
     CallingRuntime {
         signaling_keys: test_signaling_keys(),
         media,
+        media_gateway: None,
         credential_policy: MediaCredentialPolicy::default(),
         bus,
         push: Arc::new(NoPushTransport),

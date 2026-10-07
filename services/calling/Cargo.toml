@@ -52,6 +52,10 @@ jsonwebtoken = { version = "11", default-features = false, features = ["rust_cry
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 base64 = "0.22"
 async-trait = "0.1"
+# Media connection gateway (provider edge): admitted signaling connections are relayed to
+# the media server over a WebSocket client (rustls, webpki roots; wss outside loopback).
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 [dev-dependencies]
 jsonschema = { version = "0.58", default-features = false }
@@ -59,6 +63,5 @@ tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 # RTC certification drives real WebRTC client processes.
 tokio = { version = "1.42", features = ["process", "io-util", "net"] }
-# WebSocket client for the signaling integration tests.
+# WebSocket client for the signaling integration tests (default features: plain ws).
 tokio-tungstenite = "0.24"
-futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }

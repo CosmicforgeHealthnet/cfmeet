@@ -331,7 +331,11 @@ const FOREIGN_DOMAIN_TABLES: &[&str] = &[
 /// The media provider adapter (Part C §24): the only files that may name the current
 /// provider. Everything else — the Call aggregate, orchestration, the provider trait,
 /// models, migrations, HTTP — stays provider-independent.
-const MEDIA_ADAPTER_FILES: &[&str] = &["src/media/livekit.rs", "src/media/mod.rs"];
+const MEDIA_ADAPTER_FILES: &[&str] = &[
+    "src/media/livekit.rs",
+    "src/media/livekit_gateway.rs",
+    "src/media/mod.rs",
+];
 
 /// Whether `haystack` contains `word` as a whole identifier (not inside a longer name).
 fn contains_word(haystack: &str, word: &str) -> bool {

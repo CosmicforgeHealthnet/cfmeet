@@ -9,6 +9,9 @@
 //!   credential and never accept a platform API credential.
 //! * The media provider callback (`POST /internal/provider/media/events`) is
 //!   authenticated by the provider's signature only and accepts nothing else.
+//! * The media connection gateway (`GET /v1/calling/media/rtc…`) is authenticated by the
+//!   edge-sealed media credential and admits every connection against the database
+//!   before the media server is contacted.
 //! * Internal routes are passed as `internal`, are nested under `/internal/v1` and run
 //!   behind internal service authentication BY CONSTRUCTION — including unknown internal
 //!   paths, so internal routes cannot be enumerated without a valid service token.
@@ -59,6 +62,7 @@ pub fn app(state: AppState, protected: Router<AppState>, internal: Router<AppSta
         .merge(protected)
         .merge(crate::signaling::http::routes())
         .merge(crate::calls::app::http::callback_routes())
+        .merge(crate::media::gateway::routes())
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
         .with_state(state.clone())

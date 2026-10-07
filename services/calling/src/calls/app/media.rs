@@ -40,6 +40,7 @@ use crate::{
     },
     media::{
         events::{admission, Admission, EvictionReason, SessionMediaFacts},
+        gateway::{ConnectionAdmission, ConnectionClaims, ConnectionDenied},
         permissions::media_state,
         provider::{
             EventVerificationError, MediaCredentialRequest, MediaParticipantRef, MediaResourceName,
@@ -48,7 +49,7 @@ use crate::{
         reconciliation::{plan, ExpectedSession, RepairAction},
         MediaCredentialView, MediaPermissions,
     },
-    models::{call_media_provider_events, call_sessions, calls},
+    models::{call_media_provider_events, call_participants, call_sessions, calls},
     signaling::{signals::SignalType, SignalingIdentity},
 };
 
@@ -458,8 +459,14 @@ impl AppCallService {
         call: &calls::Model,
         session: &call_sessions::Model,
     ) -> CallResult<SessionMediaFacts> {
+        let participant_active = call_participants::Entity::find_by_id(session.participant_id)
+            .one(txn)
+            .await?
+            .is_some_and(|p| p.ended_at.is_none());
         let authorized = session.media_access == MediaAccess::Authorized
             && session.state != SessionState::Ended
+            && session.removed_at.is_none()
+            && participant_active
             && media_state(call.current_state);
         Ok(SessionMediaFacts {
             authorized,
@@ -894,5 +901,123 @@ impl AppCallService {
         self.try_confirm_connected(call.id).await?;
         self.complete_transfer_if_joined(call.id).await?;
         Ok(repairs)
+    }
+}
+
+/// The media connection gateway's authority (ADR 0007): every fresh signaling connection
+/// and reconnection is decided here, from the database, before the media server is
+/// contacted. No cache: a revocation committed before the check is always seen. Any error
+/// reading the state is a refusal (fail closed).
+#[async_trait::async_trait]
+impl ConnectionAdmission for AppCallService {
+    async fn admit_connection(&self, claims: &ConnectionClaims) -> Result<(), ConnectionDenied> {
+        let decision = self.connection_decision(claims).await;
+        let decision = match decision {
+            Ok(decision) => decision,
+            Err(error) => {
+                tracing::warn!(%error, "media connection refused: authoritative state unavailable");
+                Err(ConnectionDenied::Unavailable)
+            }
+        };
+        if let Err(denied) = decision {
+            tracing::info!(
+                reason = denied.as_str(),
+                resource = %claims.resource_name,
+                "media connection refused before admission to the media server"
+            );
+        }
+        decision
+    }
+
+    async fn connection_established(&self, claims: &ConnectionClaims) {
+        let Some(call_id) = MediaResourceName::call_id(&claims.resource_name) else {
+            return;
+        };
+        let result: CallResult<()> = async {
+            let Some(call) = calls::Entity::find_by_id(call_id.as_uuid())
+                .one(self.db())
+                .await?
+            else {
+                return Ok(());
+            };
+            let provider = self.provider()?.clone();
+            let participant = provider
+                .list_participants(&resource(call.id))
+                .await
+                .map_err(|_| CallError::MediaUnavailable)?
+                .into_iter()
+                .find(|p| p.identity == claims.identity);
+            if let Some(participant) = participant {
+                self.admit(&call, &participant).await?;
+            }
+            Ok(())
+        }
+        .await;
+        if let Err(error) = result {
+            tracing::warn!(%error, "post-connection admission deferred to callbacks / reconciliation");
+        }
+    }
+}
+
+impl AppCallService {
+    /// The admission decision for one claimed session generation (see
+    /// [`ConnectionAdmission`]). `Err(CallError)`: state unreadable (the caller refuses).
+    async fn connection_decision(
+        &self,
+        claims: &ConnectionClaims,
+    ) -> CallResult<Result<(), ConnectionDenied>> {
+        let Some(call_id) = MediaResourceName::call_id(&claims.resource_name) else {
+            return Ok(Err(ConnectionDenied::ForeignResource));
+        };
+        let txn = self.db().begin().await?;
+        let Some(session) = call_sessions::Entity::find()
+            .filter(call_sessions::Column::MediaIdentity.eq(claims.identity.as_str()))
+            .one(&txn)
+            .await?
+        else {
+            txn.commit().await?;
+            return Ok(Err(ConnectionDenied::UnknownIdentity));
+        };
+        if session.call_id != call_id.as_uuid() {
+            txn.commit().await?;
+            return Ok(Err(ConnectionDenied::ForeignResource));
+        }
+        let call = calls::Entity::find_by_id(session.call_id)
+            .one(&txn)
+            .await?
+            .ok_or(CallError::NotFound)?;
+        // Ownership is consistent by construction (composite keys); checked anyway.
+        if scope_of(&call)
+            != CallScope::from_parts(
+                crate::domain::TenantId::from_uuid(session.tenant_id),
+                crate::domain::ApplicationId::from_uuid(session.application_id),
+                crate::domain::EnvironmentId::from_uuid(session.environment_id),
+            )
+        {
+            txn.commit().await?;
+            return Ok(Err(ConnectionDenied::ForeignResource));
+        }
+        let binding_active = self
+            .calls
+            .media_binding_in(&txn, call.id)
+            .await?
+            .is_some_and(|b| b.status == MediaSessionStatus::Active);
+        let facts = self.facts(&txn, &call, &session).await?;
+        txn.commit().await?;
+        if !binding_active {
+            return Ok(Err(ConnectionDenied::SessionRevoked));
+        }
+        Ok(match admission(Some(facts), claims.generation) {
+            Admission::Admit(_) => Ok(()),
+            Admission::Evict(EvictionReason::StaleGeneration) => {
+                Err(ConnectionDenied::StaleGeneration)
+            }
+            Admission::Evict(EvictionReason::UnknownIdentity) => {
+                Err(ConnectionDenied::UnknownIdentity)
+            }
+            Admission::Evict(EvictionReason::SessionRevoked) => {
+                Err(ConnectionDenied::SessionRevoked)
+            }
+        })
     }
 }
