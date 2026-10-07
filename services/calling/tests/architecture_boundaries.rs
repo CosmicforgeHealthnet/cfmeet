@@ -6,6 +6,10 @@
 //!   branching.
 //! * No Part C (calls / call legs / routes …) schema exists yet.
 //! * Raw credential exposure is confined to the single CLI display site.
+//! * Section 13: Calling's only path dependencies are its own migration crate and shared
+//!   `packages/`; it reads no other service's database URL.
+//! * Section 11: internal service authentication never touches customer credentials, and
+//!   the four identity/context types never convert into one another implicitly.
 //!
 //! Comments are stripped before matching so documentation can still discuss these
 //! topics; string literals are kept, so `if app == "<product>"` is caught.
@@ -289,4 +293,126 @@ fn identity_types_stay_separate() {
         !context.contains("pub fn new"),
         "PlatformAuthContext must not be publicly constructible"
     );
+}
+
+#[test]
+fn path_dependencies_are_own_crates_or_shared_packages_only() {
+    let root = manifest_dir();
+    let packages = root.join("../../packages").canonicalize().unwrap();
+    for manifest in ["Cargo.toml", "migration/Cargo.toml"] {
+        let manifest_path = root.join(manifest);
+        let base = manifest_path.parent().unwrap();
+        let text = std::fs::read_to_string(&manifest_path).unwrap();
+        for line in text.lines().map(str::trim).filter(|l| l.contains('{')) {
+            let Some(at) = line.find("path = \"") else {
+                continue;
+            };
+            let rel = &line[at + 8..];
+            let rel = &rel[..rel.find('"').unwrap()];
+            let target = base.join(rel).canonicalize().unwrap();
+            assert!(
+                target.starts_with(&root) || target.starts_with(&packages),
+                "{manifest}: path dependency `{rel}` leaves this service and is not a shared package"
+            );
+        }
+    }
+}
+
+#[test]
+fn calling_reads_no_other_service_database_url() {
+    for (file, code) in production_sources() {
+        for (i, _) in code.match_indices("_DATABASE_URL") {
+            let name: String = code[..i]
+                .chars()
+                .rev()
+                .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '_')
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            assert!(
+                name == "TEST" || name.is_empty(),
+                "{file} reads another service's database URL `{name}_DATABASE_URL`"
+            );
+        }
+        let lower = code.to_lowercase();
+        for helper in [
+            "meeting_db",
+            "meeting_database",
+            "telephony_db",
+            "privacy_relay_db",
+        ] {
+            assert!(
+                !lower.contains(helper),
+                "{file} contains cross-service helper `{helper}`"
+            );
+        }
+    }
+}
+
+#[test]
+fn internal_service_authentication_never_uses_customer_credentials() {
+    let mut files = Vec::new();
+    rust_files(&manifest_dir().join("src/internal_auth"), &mut files);
+    assert!(files.len() >= 4, "internal_auth module not found");
+    for file in files {
+        let code = production_code_of(&file);
+        for forbidden in [
+            "platform::credentials",
+            "platform::authentication",
+            "VerifierKeyring",
+            "API_CREDENTIAL_PEPPER",
+            "platform_api_credentials",
+            "cfmk_",
+            "keyring",
+        ] {
+            assert!(
+                !code.contains(forbidden),
+                "{}: internal service auth references customer credential machinery `{forbidden}`",
+                file.display()
+            );
+        }
+    }
+}
+
+#[test]
+fn calling_never_requests_plaintext_contact_resolution() {
+    for (file, code) in production_sources() {
+        for forbidden in [
+            "ProtectedContactResolveForExecution",
+            "protected-contact.resolve",
+        ] {
+            assert!(!code.contains(forbidden), "{file} references `{forbidden}`");
+        }
+    }
+}
+
+#[test]
+fn context_types_have_no_implicit_conversions() {
+    const TYPES: [&str; 5] = [
+        "PlatformAuthContext",
+        "ResolvedPrincipal",
+        "InternalServiceContext",
+        "DelegatedPlatformContext",
+        "InternalCaller",
+    ];
+    for (file, code) in production_sources() {
+        for from in TYPES {
+            for to in TYPES.iter().filter(|t| **t != from) {
+                for conversion in ["From", "TryFrom"] {
+                    for form in [
+                        format!("impl {conversion}<{from}> for {to}"),
+                        format!("impl {conversion}<&{from}> for {to}"),
+                        format!("impl<'a> {conversion}<&'a {from}> for {to}"),
+                    ] {
+                        assert!(!code.contains(&form), "{file}: `{form}`");
+                    }
+                }
+            }
+        }
+        // Customer and internal contexts are never deserialized from requests.
+        if file == "src/internal_auth/middleware.rs" {
+            assert!(!code.contains("Deserialize"));
+        }
+    }
 }
