@@ -9,19 +9,47 @@ rules are enforced by
 service's own architecture tests. Decision record:
 [ADR 0005](../decisions/0005-contract-authority-and-runtime-boundaries.md).
 
-## Owners
+## Owners (Part III §13)
 
-| Service | Database (configured by) | Owns | Must never |
+This is the authoritative five-domain ownership model. Each domain is owned by exactly
+one service; *planned* and *future* services are boundaries only — no directory, code,
+schema or contract exists for them until their implementation phase begins.
+
+| Service | Status | Owns | Must not |
 |---|---|---|---|
-| `meeting-service` | its own PostgreSQL (`DATABASE_URL` of that deployment) | meeting accounts / users and their sessions, organizations and memberships, meeting spaces, conference sessions and participants, scheduling and recurrence, chat, polls, Q&A, breakouts, transcripts, artifacts, webinar registrations, meeting webhooks and `api_keys`, its outbox | act as identity provider or data source for Calling or any later service |
-| `calling` | its own PostgreSQL (`DATABASE_URL` of that deployment), tables `platform_*` | platform consumers: tenants, applications, application environments, service accounts, API credentials and their scopes, limit policy, request-rate windows, communication principals. Later (Part C): calls and call participants | read Meeting Service users / organizations / tables; receive plaintext protected contacts |
-| `privacy-relay` *(planned — not created)* | its own | protected contact references, communication authorizations, masking decisions | expose plaintext contacts except `protected-contact.resolve-for-execution` to Telephony |
-| `telephony` *(planned — not created)* | its own | call-leg execution state, provider / carrier interaction | own customer identity or contact policy |
+| **Calling** (`services/calling`) | **Active.** Platform-consumer foundation implemented; call domain planned (Part C) | • Calls<br>• Participants<br>• Sessions<br>• Routes<br>• Authorizations<br>• Call records<br>• Call quality<br>• Call-level usage<br>• Platform-consumer foundation *(implemented)*: tenants, applications, application environments, service accounts, API credentials and their scopes, limit policy, request-rate windows, communication principals | • read/write Privacy Relay private tables directly<br>• read/write Telephony private tables directly<br>• read Meeting Service tables<br>• receive ordinary plaintext protected contacts |
+| **Privacy Relay** (`services/privacy-relay`) | **Planned — not yet created** | • Communication Contexts<br>• Relay sessions<br>• Protected contact references<br>• Contact Vault metadata<br>• Relay authorization | • expose plaintext contacts to ordinary consumers<br>• become a general product/order database |
+| **Telephony** (`services/telephony`) | **Planned — not yet created** | • Call legs<br>• Provider bindings<br>• Carrier events<br>• Telephony routes<br>• SIP/provider operational state | • independently decide whether a business user is authorized to call<br>• bypass Calling / Privacy Relay policy |
+| **Meeting Service** (`services/meeting-service`) | **Current** | • Meeting Spaces<br>• Conference Sessions<br>• Meeting participants<br>• Meeting-specific media control | • act as the universal backend for calls or telephony |
+| **Numbering** (future `services/numbering`) | **Future — not yet created; no code** | • Permanent public-number inventory<br>• Public-number assignment<br>• Public-number lifecycle | • be prematurely implemented as Part III relay-number logic |
 
-Table ownership is **derived from migrations**, so it cannot drift: the guard collects
-every `CREATE TABLE` and SeaORM `X::Table` in `services/<name>/**/migration/**`. Two
-services may each own a table with the same name in their own databases (for example an
-outbox); that is not shared data.
+Notes on the model:
+
+* **Each service has its own database.** Calling's is configured by its own
+  `DATABASE_URL`, and every Calling table is `platform_*` today; the call-domain tables
+  arrive with Part C. The Meeting Service's database additionally holds the private
+  records that support its domains (accounts, organizations and memberships,
+  scheduling and recurrence, chat, polls, Q&A, breakouts, transcripts, artifacts,
+  webinar registrations, meeting webhooks, `api_keys`, its outbox); no other service
+  reads them.
+* **Authorizations and relay authorization are separate records.** Calling owns
+  Authorizations; Privacy Relay owns Relay authorization. Each service keeps its own
+  records in its own database; Calling obtains a relay decision through Privacy Relay's
+  authenticated API (`communication.authorize`, received by Privacy Relay) — never by
+  reading its tables.
+* **Routes and telephony routes are separate records.** Calling owns Routes; Telephony
+  owns Telephony routes. Neither service reads the other's.
+* **Plaintext contacts.** The only path to a plaintext contact is Privacy Relay's
+  `protected-contact.resolve-for-execution`, which the permission registry in
+  `packages/service-auth` allows to be granted to Telephony only, for executing a
+  specific authorized call leg. Calling and every other consumer receive protected
+  contact references, never plaintext.
+* **Telephony executes, it does not authorize.** Telephony acts on call legs Calling
+  asks it to execute (`call-leg.execute` is grantable to Calling only), within the policy
+  Calling and Privacy Relay have already applied.
+* **Numbering is future work.** Part III relay-number logic must not be built as, or
+  grow into, the Numbering service; permanent public-number inventory, assignment and
+  lifecycle are designed with Numbering itself.
 
 Identity is also owned:
 
@@ -29,7 +57,17 @@ Identity is also owned:
   credential) is Calling's (ADR 0003);
 * communication principals are resolved by Calling within that scope (ADR 0003);
 * service identity is a signed service token verified against the receiver's trust
-  bundle (ADR 0004) — never a database lookup in another service.
+  bundle (ADR 0004) — never a database lookup in another service;
+* the Meeting Service is not an identity provider for Calling or any other service
+  (ADR 0005).
+
+Table ownership is **derived from migrations**, so it cannot drift: the guard collects
+every `CREATE TABLE` and SeaORM `X::Table` in `services/<name>/**/migration/**`. Two
+services may each own a table with the same name in their own databases (for example an
+outbox); that is not shared data. Planned services are already known to the guard
+through the service identities registered in `packages/service-auth` (`privacy-relay`,
+`telephony`), so Calling cannot read their database locations even before they exist;
+Numbering becomes known when it is registered or created.
 
 ## How to use another service's data
 
