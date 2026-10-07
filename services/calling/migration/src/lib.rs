@@ -16,6 +16,11 @@ mod m20261007_000006_call_participants_sessions;
 mod m20261007_000007_call_routes_legs_attempts;
 mod m20261007_000008_call_evidence_quality_usage;
 mod m20261007_000009_call_outbox;
+mod m20261007_000010_call_endpoints_and_invitations;
+mod m20261007_000011_call_answer_arbitration;
+mod m20261007_000012_call_media_permissions_and_bindings;
+mod m20261007_000013_call_control_idempotency_and_transfers;
+mod m20261007_000014_call_media_provider_events;
 
 /// Name of the table recording which Calling migrations have been applied.
 pub const MIGRATION_TABLE: &str = "calling_seaql_migrations";
@@ -35,6 +40,11 @@ impl MigratorTrait for Migrator {
             Box::new(m20261007_000007_call_routes_legs_attempts::Migration),
             Box::new(m20261007_000008_call_evidence_quality_usage::Migration),
             Box::new(m20261007_000009_call_outbox::Migration),
+            Box::new(m20261007_000010_call_endpoints_and_invitations::Migration),
+            Box::new(m20261007_000011_call_answer_arbitration::Migration),
+            Box::new(m20261007_000012_call_media_permissions_and_bindings::Migration),
+            Box::new(m20261007_000013_call_control_idempotency_and_transfers::Migration),
+            Box::new(m20261007_000014_call_media_provider_events::Migration),
         ]
     }
 
