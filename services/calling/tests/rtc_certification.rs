@@ -24,7 +24,9 @@ use axum::http::{Method, StatusCode};
 use calling::{
     calls::{ids::CallId, CallState},
     media::{
-        livekit::{LiveKitAdapter, LiveKitSettings},
+        gateway::ConnectionClaims,
+        livekit::{LiveKitAdapter, LiveKitSettings, EDGE_ISSUER},
+        livekit_gateway::LiveKitGateway,
         provider::{
             CallMediaProvider, MediaCredentialRequest, MediaParticipantRef, MediaResourceName,
             MediaSessionRef, MediaSessionSpec,
@@ -53,6 +55,15 @@ struct CertConfig {
     secret: String,
     python: String,
     port: u16,
+    /// Per-run media-edge key (never known to LiveKit).
+    edge_key: String,
+}
+
+impl CertConfig {
+    /// Calling's media connection gateway on the certification listener.
+    fn gateway_url(&self) -> String {
+        format!("ws://127.0.0.1:{}/v1/calling/media", self.port)
+    }
 }
 
 fn config() -> Option<CertConfig> {
@@ -74,6 +85,7 @@ fn config() -> Option<CertConfig> {
             port: get("CALLING_RTC_CERT_WEBHOOK_PORT")
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(18089),
+            edge_key: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
         }),
         _ => {
             assert!(
@@ -92,6 +104,8 @@ fn adapter(cfg: &CertConfig) -> LiveKitAdapter {
         ("CALLING_LIVEKIT_API_URL", cfg.api_url.clone()),
         ("CALLING_LIVEKIT_API_KEY", cfg.key.clone()),
         ("CALLING_LIVEKIT_API_SECRET", cfg.secret.clone()),
+        ("CALLING_MEDIA_GATEWAY_URL", cfg.gateway_url()),
+        ("CALLING_MEDIA_EDGE_SIGNING_KEY", cfg.edge_key.clone()),
     ];
     let settings = LiveKitSettings::from_lookup(&|k: &str| {
         pairs
@@ -101,6 +115,19 @@ fn adapter(cfg: &CertConfig) -> LiveKitAdapter {
     })
     .expect("certification LiveKit settings");
     LiveKitAdapter::new(settings).unwrap()
+}
+
+/// Each client's stderr (SDK warnings / errors) goes to its own log file under
+/// `target/tmp/rtc-clients/` for diagnosis (printed by CI when the suite fails).
+fn client_log() -> std::process::Stdio {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("rtc-clients");
+    let _ = std::fs::create_dir_all(&dir);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    match std::fs::File::create(dir.join(format!("client-{}-{n:03}.log", std::process::id()))) {
+        Ok(file) => file.into(),
+        Err(_) => std::process::Stdio::null(),
+    }
 }
 
 /// A real WebRTC client process.
@@ -119,7 +146,7 @@ impl RtcClient {
             .arg(script)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
+            .stderr(client_log())
             .kill_on_drop(true)
             .spawn()
             .expect("python RTC client");
@@ -191,13 +218,16 @@ impl Cert {
         let db = Arc::new(TestDb::new().await?);
         let lk = Arc::new(adapter(&cfg));
         let bus = Arc::new(InMemorySignalBus::new());
+        let mut runtime = test_runtime(Some(lk.clone()), bus.clone());
+        // Every client media connection passes Calling's admission gateway.
+        runtime.media_gateway = Some(Arc::new(LiveKitGateway::new(lk.clone())));
         let h = Harness::with_runtime(
             db,
             TEST_PEPPER,
             calling::domain::ManualClock::new(chrono::Utc::now()),
             Arc::new(FakeMediaProvider::default()),
             bus.clone(),
-            test_runtime(Some(lk.clone()), bus),
+            runtime,
         );
         // Real listener: LiveKit delivers its signed webhooks here.
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", cfg.port))
@@ -300,7 +330,11 @@ async fn real_livekit_certification() {
     forged_and_duplicate_callbacks(&cert).await;
     voice_call(&cert).await;
     video_call_and_removal(&cert).await;
-    stale_reentry(&cert).await;
+    for round in 0..3 {
+        refreshed_privileged_token_cannot_reenter(&cert, round).await;
+    }
+    superseded_generation_and_terminal_call_tokens_are_refused(&cert).await;
+    legitimate_reconnect_with_the_current_generation(&cert).await;
     group_call(&cert).await;
     reconciliation(&cert).await;
     unknown_participant_quarantine(&cert).await;
@@ -345,10 +379,30 @@ async fn adapter_contract(cert: &Cert) {
         })
         .await
         .unwrap();
-    let mut client = RtcClient::spawn(&cert.cfg).await;
-    let joined = client
+    // The client credential points at Calling's gateway and is sealed with the edge key:
+    // LiveKit itself refuses it.
+    assert_eq!(credential.url, cert.cfg.gateway_url());
+    let mut refused = RtcClient::spawn(&cert.cfg).await;
+    let direct = refused
         .connect(&cert.cfg.url, credential.token.expose())
         .await;
+    assert_eq!(
+        direct["ok"], false,
+        "LiveKit must not accept a client credential: {direct}"
+    );
+    refused.quit().await;
+    // The adapter itself is exercised with the gateway's per-connection upstream token.
+    let upstream = |generation| {
+        cert.lk
+            .upstream_token(&ConnectionClaims {
+                resource_name: session.name.as_str().to_string(),
+                identity: identity.clone(),
+                generation: Some(generation),
+            })
+            .unwrap()
+    };
+    let mut client = RtcClient::spawn(&cert.cfg).await;
+    let joined = client.connect(&cert.cfg.url, &upstream(1)).await;
     assert_eq!(joined["ok"], true, "{joined}");
     let status = client.status().await;
     assert_eq!(status["can_publish"], false);
@@ -412,9 +466,7 @@ async fn adapter_contract(cert: &Cert) {
     // terminated resource (rooms are created by Calling only).
     cert.lk.terminate_session(&session).await.unwrap();
     let mut again = RtcClient::spawn(&cert.cfg).await;
-    let rejoin = again
-        .connect(&cert.cfg.url, credential.token.expose())
-        .await;
+    let rejoin = again.connect(&cert.cfg.url, &upstream(1)).await;
     assert_eq!(
         rejoin["ok"], false,
         "a terminated resource is not recreated by a join: {rejoin}"
@@ -631,30 +683,133 @@ async fn video_call_and_removal(cert: &Cert) {
 }
 
 /// The removed session's still-valid credential must not regain media (§44, §109).
-async fn stale_reentry(cert: &Cert) {
-    let (call, _caller, _callee, s1, s2) = cert.answered("VOICE", "stale").await;
+/// The (unverified) payload of a JWT, for inspecting what the SDK holds.
+fn jwt_payload(token: &str) -> Value {
+    use base64::Engine;
+    let payload = token.split('.').nth(1).expect("a JWT");
+    serde_json::from_slice(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(payload.trim_end_matches('='))
+            .expect("base64url payload"),
+    )
+    .expect("JSON payload")
+}
+
+async fn session_media(cert: &Cert, session: Uuid) -> (String, i32, String) {
+    use sea_orm::ConnectionTrait;
+    let row = cert
+        .a
+        .h()
+        .conn()
+        .query_one(sea_orm::Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            format!(
+                "SELECT media_identity, media_generation, media_access FROM call_sessions WHERE id = '{session}'"
+            ),
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    (
+        row.try_get_by_index(0).unwrap(),
+        row.try_get_by_index(1).unwrap(),
+        row.try_get_by_index(2).unwrap(),
+    )
+}
+
+async fn joined_callbacks(cert: &Cert, session: Uuid) -> i64 {
+    common::scalar_i64(
+        cert.a.h().conn(),
+        &format!(
+            "SELECT count(*) FROM call_media_provider_events WHERE session_id = '{session}' AND event_kind = 'PARTICIPANT_JOINED'"
+        ),
+    )
+    .await
+}
+
+/// Part C security closure: a REAL server-refreshed PRIVILEGED token, captured from the
+/// real client SDK, cannot bring a removed session back — neither through the gateway
+/// nor around it — and the refusal happens before any media participation.
+async fn refreshed_privileged_token_cannot_reenter(cert: &Cert, round: u32) {
+    // 1-2. An answered app Call; join-only credentials for both sessions.
+    let (call, _caller, _callee, s1, s2) =
+        cert.answered("VOICE", &format!("refresh-{round}")).await;
     let c1 = cert.credential(call, s1).await;
     let c2 = cert.credential(call, s2).await;
+    let issued = c2["token"].as_str().unwrap().to_string();
+    assert_eq!(c2["url"], cert.cfg.gateway_url());
+    let issued_claims = jwt_payload(&issued);
+    assert_eq!(issued_claims["iss"], EDGE_ISSUER);
+    assert_eq!(issued_claims["video"]["canPublish"], false);
+    assert_eq!(issued_claims["video"]["canSubscribe"], false);
+    // 3. Both clients join (through the gateway).
     let mut a = RtcClient::spawn(&cert.cfg).await;
     let mut b = RtcClient::spawn(&cert.cfg).await;
-    a.connect(c1["url"].as_str().unwrap(), c1["token"].as_str().unwrap())
-        .await;
-    b.connect(c2["url"].as_str().unwrap(), c2["token"].as_str().unwrap())
-        .await;
-    eventually(15, "stale scenario CONNECTED", || async {
-        cert.state(call).await == CallState::Connected
-    })
-    .await;
     assert_eq!(
-        a.cmd(json!({ "cmd": "wait_permission", "publish": true, "timeout": 10 }))
+        a.connect(c1["url"].as_str().unwrap(), c1["token"].as_str().unwrap())
             .await["ok"],
         true
     );
     assert_eq!(
-        a.cmd(json!({ "cmd": "publish", "kind": "audio" })).await["ok"],
+        b.connect(c2["url"].as_str().unwrap(), &issued).await["ok"],
         true
     );
-    // 1-5. accepted, credential issued, joined, removed, provider disconnect confirmed.
+    // 4-5. Calling admits them; the provider applies audio publish + subscription.
+    eventually(20, "refresh scenario CONNECTED", || async {
+        cert.state(call).await == CallState::Connected
+    })
+    .await;
+    assert_eq!(
+        b.cmd(json!({ "cmd": "wait_permission", "publish": true, "timeout": 15 }))
+            .await["ok"],
+        true
+    );
+    // 6-7. LiveKit refreshes the token after the permission update; the real SDK holds it.
+    let captured = b
+        .cmd(json!({ "cmd": "wait_refreshed", "publish": true, "timeout": 30 }))
+        .await;
+    assert_eq!(
+        captured["ok"], true,
+        "no privileged refreshed token was captured: {captured}"
+    );
+    let refreshed = captured["token"].as_str().unwrap().to_string();
+    let latest = b.cmd(json!({ "cmd": "token" })).await;
+    assert!(latest["refreshes"].as_u64().unwrap() >= 1);
+    // 8. It is the admitted session's privileged token (refreshed by the server, then
+    // sealed by the edge on its way to the client).
+    let (identity, generation, access) = session_media(cert, s2).await;
+    assert_eq!(access, "AUTHORIZED");
+    assert_ne!(refreshed, issued);
+    let p = jwt_payload(&refreshed);
+    assert_eq!(p["sub"], identity);
+    assert_eq!(p["video"]["room"], room(call).name.as_str());
+    assert_eq!(p["video"]["canPublish"], true, "{p}");
+    assert_eq!(p["video"]["canSubscribe"], true, "{p}");
+    assert_eq!(p["attributes"]["cfm.gen"], generation.to_string());
+    assert_eq!(
+        p["iss"], EDGE_ISSUER,
+        "the client never holds a LiveKit-signed token"
+    );
+    assert_eq!(
+        cert.lk
+            .verify_edge_credential(&refreshed, chrono::Utc::now()),
+        Ok(ConnectionClaims {
+            resource_name: room(call).name.as_str().to_string(),
+            identity: identity.clone(),
+            generation: Some(generation),
+        })
+    );
+    // Media flows: b publishes, a receives it.
+    assert_eq!(
+        b.cmd(json!({ "cmd": "publish", "kind": "audio" })).await["ok"],
+        true
+    );
+    assert_eq!(
+        a.cmd(json!({ "cmd": "wait_subscribed", "count": 1, "timeout": 15 }))
+            .await["ok"],
+        true
+    );
+    // 9. Remove the session.
     let (_, version) = cert.a.state(call).await;
     let r = cert
         .a
@@ -664,72 +819,213 @@ async fn stale_reentry(cert: &Cert) {
         )
         .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    // 10. Authoritative state: REVOKED.
+    assert_eq!(session_media(cert, s2).await.2, "REVOKED");
+    // 11. The provider disconnected it.
     assert_eq!(
-        b.cmd(json!({ "cmd": "wait_disconnected", "timeout": 10 }))
+        b.cmd(json!({ "cmd": "wait_disconnected", "timeout": 15 }))
             .await["ok"],
         true
     );
-    // A new credential for the removed session is refused.
-    let r = cert.a.media_credential(call, s2).await;
-    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
-    // 6. Re-entry with the STILL VALID original credential.
-    let mut stale = RtcClient::spawn(&cert.cfg).await;
-    let rejoin = stale
-        .connect(c2["url"].as_str().unwrap(), c2["token"].as_str().unwrap())
-        .await;
-    eprintln!("stale re-entry: provider join result {rejoin}");
-    if rejoin["ok"] == true {
-        // The provider let the connection in (the token is cryptographically valid): it
-        // holds no media right, is never admitted, and is evicted.
-        let status = stale.status().await;
-        assert_eq!(
-            status["can_publish"], false,
-            "stale connection must not publish: {status}"
-        );
-        assert_eq!(
-            status["can_subscribe"], false,
-            "stale connection must not subscribe: {status}"
-        );
-        let publish = stale
-            .cmd(json!({ "cmd": "publish", "kind": "audio" }))
-            .await;
-        assert_eq!(
-            publish["ok"], false,
-            "stale connection published: {publish}"
-        );
-        let evicted = stale
-            .cmd(json!({ "cmd": "wait_disconnected", "timeout": 15 }))
-            .await;
-        eprintln!("stale re-entry: eviction {evicted}");
-        assert_eq!(
-            evicted["ok"], true,
-            "stale connection must be evicted: {evicted}"
-        );
-        let status = stale.status().await;
-        assert!(
-            status["subscribed"].as_array().unwrap().is_empty(),
-            "stale connection received media: {status}"
-        );
-    }
-    eventually(10, "stale identity absent", || async {
-        cert.provider_identities(call).await.len() == 1
+    eventually(10, "removed identity gone from the provider", || async {
+        !cert
+            .provider_identities(call)
+            .await
+            .iter()
+            .any(|(i, _, _)| *i == identity)
     })
     .await;
-    // The database never re-admitted the removed session.
-    let view = cert.a.call_view(call).await;
-    let removed = view["sessions"]
-        .as_array()
-        .unwrap()
+    let joins_before = joined_callbacks(cert, s2).await;
+    let received_before = a.status().await["subscribed"].as_array().unwrap().len();
+    // 12-13. A NEW client presents the SAVED REFRESHED PRIVILEGED token through the
+    // gateway, and immediately tries to publish and to receive media.
+    let mut stale = RtcClient::spawn(&cert.cfg).await;
+    let attempt = stale.connect(&cert.cfg.gateway_url(), &refreshed).await;
+    assert_eq!(
+        attempt["ok"], false,
+        "the saved refreshed token re-entered: {attempt}"
+    );
+    assert!(
+        attempt["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("401"),
+        "refused at admission (401), before the media server: {attempt}"
+    );
+    let publish = stale
+        .cmd(json!({ "cmd": "publish", "kind": "audio" }))
+        .await;
+    assert_eq!(publish["ok"], false, "{publish}");
+    let status = stale.status().await;
+    assert_eq!(status["connected"], false, "{status}");
+    assert!(status["subscribed"].as_array().unwrap().is_empty());
+    // …and directly at LiveKit, around the gateway: LiveKit does not know the edge key.
+    let mut around = RtcClient::spawn(&cert.cfg).await;
+    let direct = around.connect(&cert.cfg.url, &refreshed).await;
+    assert_eq!(
+        direct["ok"], false,
+        "LiveKit accepted a client token: {direct}"
+    );
+    assert_eq!(
+        around
+            .cmd(json!({ "cmd": "publish", "kind": "audio" }))
+            .await["ok"],
+        false
+    );
+    // The original join-only credential is refused the same way.
+    let mut original = RtcClient::spawn(&cert.cfg).await;
+    let original_attempt = original.connect(&cert.cfg.gateway_url(), &issued).await;
+    assert_eq!(original_attempt["ok"], false, "{original_attempt}");
+    // No media window at all: LiveKit never saw the identity again, no join callback
+    // arrived for the session, and the remaining party received nothing new.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(!cert
+        .provider_identities(call)
+        .await
         .iter()
-        .find(|s| s["sessionId"] == s2.to_string())
-        .unwrap();
-    assert_eq!(removed["mediaAccess"], "REVOKED");
-    assert_eq!(removed["state"], "ENDED");
+        .any(|(i, _, _)| *i == identity));
+    assert_eq!(joined_callbacks(cert, s2).await, joins_before);
+    assert_eq!(
+        a.status().await["subscribed"].as_array().unwrap().len(),
+        received_before
+    );
+    eprintln!(
+        "refreshed-token re-entry (round {round}): gateway={} direct={} original={}",
+        attempt["error"], direct["error"], original_attempt["error"]
+    );
+    for client in [stale, around, original, a, b] {
+        client.quit().await;
+    }
+    let (_, version) = cert.a.state(call).await;
+    cert.a.command(call, "end", version).await;
+}
+
+/// A superseded generation is refused while the current one is admitted; nothing is
+/// admitted once the Call is terminal.
+async fn superseded_generation_and_terminal_call_tokens_are_refused(cert: &Cert) {
+    let (call, _caller, _callee, s1, s2) = cert.answered("VOICE", "generation").await;
+    let c1 = cert.credential(call, s1).await;
+    let old = cert.credential(call, s2).await;
+    let current = cert.credential(call, s2).await;
+    assert_ne!(old["token"], current["token"]);
+    let mut stale = RtcClient::spawn(&cert.cfg).await;
+    let refused = stale
+        .connect(old["url"].as_str().unwrap(), old["token"].as_str().unwrap())
+        .await;
+    assert_eq!(
+        refused["ok"], false,
+        "generation N after N+1 must be refused: {refused}"
+    );
+    let mut a = RtcClient::spawn(&cert.cfg).await;
+    let mut b = RtcClient::spawn(&cert.cfg).await;
+    assert_eq!(
+        a.connect(c1["url"].as_str().unwrap(), c1["token"].as_str().unwrap())
+            .await["ok"],
+        true
+    );
+    assert_eq!(
+        b.connect(
+            current["url"].as_str().unwrap(),
+            current["token"].as_str().unwrap()
+        )
+        .await["ok"],
+        true
+    );
+    eventually(20, "generation scenario CONNECTED", || async {
+        cert.state(call).await == CallState::Connected
+    })
+    .await;
+    // The Call ends: the current generation is refused afterwards.
+    let (_, version) = cert.a.state(call).await;
+    assert_eq!(
+        cert.a.command(call, "end", version).await.status,
+        StatusCode::OK
+    );
+    eventually(20, "ENDED", || async {
+        cert.state(call).await == CallState::Ended
+    })
+    .await;
+    let mut late = RtcClient::spawn(&cert.cfg).await;
+    let after = late
+        .connect(
+            current["url"].as_str().unwrap(),
+            current["token"].as_str().unwrap(),
+        )
+        .await;
+    assert_eq!(
+        after["ok"], false,
+        "a terminal Call admitted a connection: {after}"
+    );
+    for client in [stale, a, b, late] {
+        client.quit().await;
+    }
+}
+
+/// A legitimate session that loses its connection comes back with its current
+/// (server-refreshed, edge-sealed) token and regains its media.
+async fn legitimate_reconnect_with_the_current_generation(cert: &Cert) {
+    let (call, _caller, _callee, s1, s2) = cert.answered("VOICE", "reconnect").await;
+    let c1 = cert.credential(call, s1).await;
+    let c2 = cert.credential(call, s2).await;
+    let mut a = RtcClient::spawn(&cert.cfg).await;
+    let mut b = RtcClient::spawn(&cert.cfg).await;
+    assert_eq!(
+        a.connect(c1["url"].as_str().unwrap(), c1["token"].as_str().unwrap())
+            .await["ok"],
+        true
+    );
+    assert_eq!(
+        b.connect(c2["url"].as_str().unwrap(), c2["token"].as_str().unwrap())
+            .await["ok"],
+        true
+    );
+    eventually(20, "reconnect scenario CONNECTED", || async {
+        cert.state(call).await == CallState::Connected
+    })
+    .await;
+    let captured = b
+        .cmd(json!({ "cmd": "wait_refreshed", "publish": true, "timeout": 30 }))
+        .await;
+    assert_eq!(captured["ok"], true, "{captured}");
+    let token = captured["token"].as_str().unwrap().to_string();
+    // The network drops: the client is gone at the provider.
+    b.cmd(json!({ "cmd": "disconnect" })).await;
+    b.quit().await;
+    let (identity, _, _) = session_media(cert, s2).await;
+    eventually(15, "connection gone at the provider", || async {
+        !cert
+            .provider_identities(call)
+            .await
+            .iter()
+            .any(|(i, _, _)| *i == identity)
+    })
+    .await;
+    // Reconnect with the token the SDK holds: admitted, media restored.
+    let mut back = RtcClient::spawn(&cert.cfg).await;
+    let rejoined = back.connect(&cert.cfg.gateway_url(), &token).await;
+    assert_eq!(
+        rejoined["ok"], true,
+        "legitimate reconnect refused: {rejoined}"
+    );
+    assert_eq!(
+        back.cmd(json!({ "cmd": "wait_permission", "publish": true, "timeout": 15 }))
+            .await["ok"],
+        true,
+        "re-admitted server-side"
+    );
+    assert_eq!(
+        back.cmd(json!({ "cmd": "publish", "kind": "audio" })).await["ok"],
+        true
+    );
+    assert_eq!(
+        a.cmd(json!({ "cmd": "wait_subscribed", "count": 1, "timeout": 15 }))
+            .await["ok"],
+        true
+    );
     let (_, version) = cert.a.state(call).await;
     cert.a.command(call, "end", version).await;
     a.quit().await;
-    b.quit().await;
-    stale.quit().await;
+    back.quit().await;
 }
 
 async fn group_call(cert: &Cert) {
@@ -900,8 +1196,26 @@ async fn unknown_participant_quarantine(cert: &Cert) {
         })
         .await
         .unwrap();
+    // Through the gateway: refused before LiveKit is contacted.
+    let mut gated = RtcClient::spawn(&cert.cfg).await;
+    let refused = gated.connect(&rogue.url, rogue.token.expose()).await;
+    assert_eq!(
+        refused["ok"], false,
+        "unknown identity admitted by the gateway: {refused}"
+    );
+    gated.quit().await;
+    // Defense in depth: a LiveKit-signed token for an unknown identity (as if one leaked
+    // around the gateway) is quarantined and evicted by Calling.
+    let leaked = cert
+        .lk
+        .upstream_token(&ConnectionClaims {
+            resource_name: room(call).name.as_str().to_string(),
+            identity: format!("cfmid_{}", "f".repeat(64)),
+            generation: Some(1),
+        })
+        .unwrap();
     let mut client = RtcClient::spawn(&cert.cfg).await;
-    let joined = client.connect(&cert.cfg.url, rogue.token.expose()).await;
+    let joined = client.connect(&cert.cfg.url, &leaked).await;
     if joined["ok"] == true {
         let evicted = client
             .cmd(json!({ "cmd": "wait_disconnected", "timeout": 15 }))

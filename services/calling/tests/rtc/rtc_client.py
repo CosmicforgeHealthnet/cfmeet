@@ -13,15 +13,55 @@ Commands:
   {"cmd": "wait_subscribed", "count": n, "timeout": s} -> {"ok": bool, "subscribed": [...]}
   {"cmd": "wait_disconnected", "timeout": s}           -> {"ok": bool, "reason": ...}
   {"cmd": "wait_permission", "publish": bool, "timeout": s} -> {"ok": bool}
+  {"cmd": "token"}                                     -> {"token": <latest token the SDK holds>,
+                                                           "refreshes": n}
+  {"cmd": "wait_refreshed", "publish": bool, "timeout": s}
+                                                       -> {"ok": bool, "token": <first refreshed
+                                                           token whose grant has canPublish == publish>}
   {"cmd": "disconnect"}                                -> {"ok": true}
   {"cmd": "quit"}
 """
 
 import asyncio
+import base64
 import json
+import logging
 import sys
 
 from livekit import rtc
+from livekit.rtc._ffi_client import FfiClient
+from livekit.rtc._proto import ffi_pb2 as proto_ffi
+
+
+async def publish_track_acked(local, track, options):
+    """LocalParticipant.publish_track of the pinned SDK (livekit 1.1.20), except that every
+    room-queue item is acknowledged. The SDK's version raises on a refused publication
+    without task_done(), and a cancelled wait leaves queued items unacknowledged; either
+    blocks the room's event loop for good (no later events, not even "disconnected"), so
+    the certification would observe the client instead of the server."""
+    req = proto_ffi.FfiRequest()
+    req.publish_track.track_handle = track._ffi_handle.handle
+    req.publish_track.local_participant_handle = local._ffi_handle.handle
+    req.publish_track.options.CopyFrom(options)
+    queue = local._room_queue.subscribe()
+    try:
+        resp = FfiClient.instance.request(req)
+        cb = await queue.wait_for(
+            lambda e: e.publish_track.async_id == resp.publish_track.async_id
+        )
+        queue.task_done()
+        if cb.publish_track.error:
+            raise RuntimeError(cb.publish_track.error)
+        publication = rtc.LocalTrackPublication(cb.publish_track.publication)
+        publication._track = track
+        track._info.sid = publication.sid
+        local._track_publications[publication.sid] = publication
+        return publication
+    finally:
+        local._room_queue.unsubscribe(queue)
+        while not queue.empty():
+            queue.get_nowait()
+            queue.task_done()
 
 
 class Client:
@@ -31,6 +71,8 @@ class Client:
         self.disconnected = asyncio.Event()
         self.disconnect_reason = None
         self.tasks = []
+        self.token = None
+        self.refreshed = []
 
     def _wire(self, room):
         @room.on("track_subscribed")
@@ -42,7 +84,13 @@ class Client:
             self.disconnect_reason = str(reason)
             self.disconnected.set()
 
+        # The SDK replaces its token with every refresh the server sends; capture each.
+        @room.on("token_refreshed")
+        def _on_refresh():
+            self.refreshed.append(room._token)
+
     async def connect(self, url, token):
+        self.token = token
         self.room = rtc.Room()
         self._wire(self.room)
         opts = rtc.RoomOptions(auto_subscribe=True)
@@ -50,7 +98,10 @@ class Client:
         return {"ok": True, "identity": self.room.local_participant.identity}
 
     def permission(self):
-        p = self.room.local_participant.permissions if self.room else None
+        try:
+            p = self.room.local_participant.permissions if self.room else None
+        except Exception:  # never connected: there is no local participant
+            p = None
         if p is None:
             return False, False
         return bool(p.can_publish), bool(p.can_subscribe)
@@ -79,20 +130,29 @@ class Client:
                     source.capture_frame(frame)
                     await asyncio.sleep(0.05)
         try:
-            await asyncio.wait_for(self.room.local_participant.publish_track(track, opts), 8)
+            await asyncio.wait_for(publish_track_acked(self.room.local_participant, track, opts), 8)
         except Exception as e:  # denied publications time out or raise
             return {"ok": False, "error": type(e).__name__}
         self.tasks.append(asyncio.create_task(feed()))
         return {"ok": True}
 
+    def connected(self):
+        try:
+            return bool(self.room is not None and self.room.isconnected() and not self.disconnected.is_set())
+        except Exception:
+            return False
+
     def status(self):
         can_publish, can_subscribe = self.permission()
         remote = []
         if self.room:
-            for p in self.room.remote_participants.values():
-                remote.append(p.identity)
+            try:
+                for p in self.room.remote_participants.values():
+                    remote.append(p.identity)
+            except Exception:
+                pass
         return {
-            "connected": bool(self.room) and self.room.isconnected() and not self.disconnected.is_set(),
+            "connected": self.connected(),
             "subscribed": self.subscribed,
             "remote": remote,
             "disconnect_reason": self.disconnect_reason,
@@ -125,6 +185,26 @@ class Client:
             await asyncio.sleep(0.1)
         return {"ok": False}
 
+    def latest_token(self):
+        return {"token": self.refreshed[-1] if self.refreshed else self.token,
+                "refreshes": len(self.refreshed)}
+
+    @staticmethod
+    def grant(token):
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload)).get("video", {})
+
+    async def wait_refreshed(self, publish, timeout):
+        loop = asyncio.get_event_loop()
+        end = loop.time() + timeout
+        while loop.time() < end:
+            for token in self.refreshed:
+                if bool(self.grant(token).get("canPublish")) == publish:
+                    return {"ok": True, "token": token}
+            await asyncio.sleep(0.1)
+        return {"ok": False, "refreshes": len(self.refreshed)}
+
     async def disconnect(self):
         for t in self.tasks:
             t.cancel()
@@ -134,6 +214,9 @@ class Client:
 
 
 async def main():
+    # SDK diagnostics go to stderr (the test harness keeps one log file per client).
+    logging.basicConfig(level=logging.INFO, stream=sys.stderr,
+                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
     client = Client()
     reader = asyncio.StreamReader()
     await asyncio.get_event_loop().connect_read_pipe(
@@ -158,6 +241,10 @@ async def main():
                 out = await client.wait_disconnected(msg["timeout"])
             elif cmd == "wait_permission":
                 out = await client.wait_permission(msg["publish"], msg["timeout"])
+            elif cmd == "token":
+                out = client.latest_token()
+            elif cmd == "wait_refreshed":
+                out = await client.wait_refreshed(msg["publish"], msg["timeout"])
             elif cmd == "disconnect":
                 out = await client.disconnect()
             elif cmd == "quit":
