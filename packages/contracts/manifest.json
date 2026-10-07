@@ -16,14 +16,36 @@
     },
     {
       "id": "cfmeet.calling.http-api",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "openapi",
       "path": "calling/http/v1.openapi.json",
       "owner": "calling",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface currently exposed by the Calling service: health, platform credential scheme and error envelope. The call API is not implemented yet."
+      "description": "HTTP surface exposed by the Calling service: health, the read-only call API (GET /v1/calls, GET /v1/calls/{call_id}), the platform credential scheme and the error envelope. Call creation and control are not public yet."
+    },
+    {
+      "id": "cfmeet.calling.call-common",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "calling/common/v1.schema.json",
+      "owner": "calling",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Canonical call-domain vocabulary (Part C sections 15-19): the 17 call states, call kind, normalized failure categories, terminal reasons, participant roles, session states, endpoint categories, call event types and the bounded safe event data object."
+    },
+    {
+      "id": "cfmeet.calling.call-lifecycle-event",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "calling/events/call-lifecycle/v1.schema.json",
+      "owner": "calling",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Payload of every call event published through Calling's transactional outbox inside the cfmeet.platform.event-envelope: ids, scope, gap-free sequence, call version, states, time, correlation id and safe data. Provider-independent; no telephone numbers, provider ids, credentials or tokens."
     },
     {
       "id": "cfmeet.platform.common",
@@ -93,14 +115,14 @@
     },
     {
       "id": "cfmeet.platform.event-envelope",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "kind": "json-schema",
       "path": "platform/events/envelope/v1.schema.json",
       "owner": "platform",
       "visibility": "internal",
       "lifecycle": "stable",
       "authority": "contract-first",
-      "description": "Envelope for durable cross-service events. Payload contracts are registered separately by the producing service."
+      "description": "Envelope for durable cross-service events. Payload contracts are registered separately by the producing service (Calling: cfmeet.calling.call-lifecycle-event)."
     }
   ]
 }

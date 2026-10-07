@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/calling/events/call-lifecycle/v1.schema.json",
+  "title": "CF Meet call lifecycle event v1",
+  "description": "Payload of every call event the Calling service publishes through its transactional outbox, inside the cfmeet.platform.event-envelope (schema_version 1; envelope event_type = 'calling.' + the lower-case, hyphenated event_type, e.g. calling.call-state-changed). Provider-independent and safe: no provider / carrier identifiers, telephone numbers, protected contact data, customer credentials or service tokens. sequence is gap-free per call; call_version is the Call's optimistic-concurrency version after the event; lifecycle events (CALL_REQUESTED, CALL_STATE_CHANGED) carry states, all other events carry none.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "call_id",
+    "tenant_id",
+    "application_id",
+    "application_environment_id",
+    "sequence",
+    "call_version",
+    "from_state",
+    "to_state",
+    "occurred_at",
+    "correlation_id",
+    "data"
+  ],
+  "properties": {
+    "event_id": {
+      "description": "Same value as the envelope event_id.",
+      "type": "string",
+      "pattern": "^evt_[0-9a-f]{32}$"
+    },
+    "event_type": { "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallEventType" },
+    "call_id": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+    "tenant_id": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+    "application_id": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+    "application_environment_id": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "call_version": { "type": "integer", "minimum": 1 },
+    "from_state": {
+      "oneOf": [
+        { "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallState" },
+        { "type": "null" }
+      ]
+    },
+    "to_state": {
+      "oneOf": [
+        { "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallState" },
+        { "type": "null" }
+      ]
+    },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "correlation_id": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/CorrelationId" },
+    "data": { "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/SafeEventData" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "event_type": { "const": "CALL_REQUESTED" } } },
+      "then": {
+        "properties": {
+          "from_state": { "type": "null" },
+          "to_state": { "const": "REQUESTED" },
+          "sequence": { "const": 1 },
+          "call_version": { "const": 1 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "CALL_STATE_CHANGED" } } },
+      "then": {
+        "properties": {
+          "from_state": { "type": "string" },
+          "to_state": { "type": "string" },
+          "call_version": { "minimum": 2 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "event_type": { "not": { "enum": ["CALL_REQUESTED", "CALL_STATE_CHANGED"] } } } },
+      "then": {
+        "properties": {
+          "from_state": { "type": "null" },
+          "to_state": { "type": "null" }
+        }
+      }
+    }
+  ]
+}

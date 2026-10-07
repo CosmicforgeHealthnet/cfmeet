@@ -1,0 +1,24 @@
+{
+  "event_id": "evt_8b3e4d1a5c6f4e7a8b92334455667788",
+  "event_type": "CALL_STATE_CHANGED",
+  "call_id": "0b8f6d2e-6c1a-4f5e-9a3b-2d7c8e9f0a11",
+  "tenant_id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+  "application_id": "2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a",
+  "application_environment_id": "3e4f5a6b-7c8d-4e9f-8a1b-2c3d4e5f6a7b",
+  "sequence": 3,
+  "call_version": 2,
+  "from_state": "REQUESTED",
+  "to_state": "FAILED",
+  "occurred_at": "2031-03-01T10:00:31Z",
+  "correlation_id": "corr_0123456789abcdef0123456789abcdef",
+  "data": {
+    "action": "DENY_BY_POLICY",
+    "authorization_id": "7c8d9e0f-1a2b-4c3d-8e5f-6a7b8c9d0e1f",
+    "authorization_reason": "LIMIT_EXCEEDED",
+    "terminal_reason": "FAILED",
+    "failure_category": "POLICY",
+    "sessions_closed": 0,
+    "intervals_closed": 0,
+    "participants_ended": 1
+  }
+}

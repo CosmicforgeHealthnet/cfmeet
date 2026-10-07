@@ -113,7 +113,7 @@ fn an_unmodified_copy_is_valid() {
 fn duplicate_contract_version_is_rejected() {
     let s = Sandbox::new();
     s.edit_manifest(|c| {
-        let mut dup = c[2].clone();
+        let mut dup = contract(c, "cfmeet.platform.common").clone();
         dup["path"] = json!("platform/common/v1.schema.json");
         c.push(dup);
     });
@@ -308,7 +308,8 @@ fn schema_ids_and_versioned_paths_are_enforced() {
 
     let s = Sandbox::new();
     s.edit_manifest(|c| {
-        contract(c, "cfmeet.calling.http-api")["version"] = json!("1.1.0");
+        // Any version other than the document's own info.version.
+        contract(c, "cfmeet.calling.http-api")["version"] = json!("1.99.0");
     });
     assert_rejected(&s.run(), "info.version");
 }

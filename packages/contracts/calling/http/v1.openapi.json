@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Calling service API",
-    "version": "1.0.0",
-    "description": "HTTP surface currently exposed by services/calling. The Calling business API (calls, participants, sessions) does not exist yet; this contract describes only what is implemented today: the health endpoint, the platform credential scheme customer routes will use, and the error envelope returned by every error response (including 404 for unknown paths and 405 for unsupported methods). Every response carries an x-request-id header with the server-generated request id; a well-formed client x-request-id is echoed as x-client-request-id."
+    "version": "1.1.0",
+    "description": "HTTP surface exposed by services/calling: the health endpoint, the read-only call API (GET /v1/calls, GET /v1/calls/{call_id}; Part C sections 15-19) and the error envelope returned by every error response (including 404 for unknown paths and 405 for unsupported methods). Call creation and control are not public yet: no route creates a call, sets a state, answers, rings, cancels, holds or transfers. Tenant, application and environment scope comes only from the authenticated platform credential; a call of another scope is answered exactly like a missing one (404). Every response carries an x-request-id header with the server-generated request id; a well-formed client x-request-id is echoed as x-client-request-id."
   },
   "paths": {
     "/health": {
@@ -44,6 +44,177 @@
           }
         }
       }
+    },
+    "/v1/calls": {
+      "get": {
+        "operationId": "listCalls",
+        "summary": "List the caller's calls (newest first, keyset pagination)",
+        "description": "Requires the calls.read scope. Ordered by createdAt descending, then callId descending. Only the bounded filters below are accepted; unknown or repeated query parameters are rejected with 400. The cursor is opaque, carries position only and never scope.",
+        "security": [
+          {
+            "platformCredential": [
+              "calls.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (default 25, at most 100).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque nextCursor of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallState"
+            }
+          },
+          {
+            "name": "createdAfter",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive lower bound of createdAt (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "createdBefore",
+            "in": "query",
+            "required": false,
+            "description": "Exclusive upper bound of createdAt (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "initiatorPrincipalId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of calls.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/InsufficientScope"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/calls/{call_id}": {
+      "get": {
+        "operationId": "getCall",
+        "summary": "Get one call with its participants, sessions and durations",
+        "description": "Requires the calls.read scope. A call that does not exist, belongs to another tenant, application or environment, or whose id is malformed is answered with the same 404.",
+        "security": [
+          {
+            "platformCredential": [
+              "calls.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.read",
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "required": true,
+            "description": "CF Meet call id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The call.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Call"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -52,7 +223,7 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "cfmk_<sbx|test|live>_<public id>_<secret>",
-        "description": "Customer platform API credential issued to an application environment's service account. Sent as `Authorization: Bearer <credential>`. Never accepted on internal routes."
+        "description": "Customer platform API credential issued to an application environment's service account. Sent as `Authorization: Bearer <credential>`. The roles listed in an operation's security requirement are the platform scopes the credential must hold (e.g. calls.read). Never accepted on internal routes."
       }
     },
     "headers": {
@@ -67,6 +238,12 @@
         "schema": {
           "type": "string",
           "pattern": "^[A-Za-z0-9._-]{1,64}$"
+        }
+      },
+      "CacheControlNoStore": {
+        "description": "Call data is never cached.",
+        "schema": {
+          "const": "no-store"
         }
       }
     },
@@ -141,11 +318,317 @@
             }
           }
         }
+      },
+      "CallCore": {
+        "description": "Fields shared by CallSummary and Call. Provider-independent: no provider or carrier identifiers, execution bindings, media identities, telephone numbers or protected contact data.",
+        "type": "object",
+        "required": [
+          "callId",
+          "kind",
+          "state",
+          "version",
+          "initiatorPrincipalId",
+          "terminalReason",
+          "failureCategory",
+          "requestedAt",
+          "authorizedAt",
+          "ringingAt",
+          "answeredAt",
+          "connectedAt",
+          "endingAt",
+          "endedAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "callId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "kind": {
+            "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallKind"
+          },
+          "state": {
+            "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallState"
+          },
+          "version": {
+            "description": "Optimistic-concurrency version: 1 at creation, +1 per state transition.",
+            "type": "integer",
+            "minimum": 1
+          },
+          "initiatorPrincipalId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "terminalReason": {
+            "oneOf": [
+              {
+                "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallTerminalReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failureCategory": {
+            "oneOf": [
+              {
+                "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallFailureCategory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "authorizedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "ringingAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "answeredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "connectedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "endingAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "endedAt": {
+            "description": "When the call reached a terminal state.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CallSummary": {
+        "description": "A call as listed.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CallCore"
+          }
+        ],
+        "unevaluatedProperties": false
+      },
+      "CallParticipant": {
+        "description": "A logical participant. displayName is presentation metadata only and never identifies anyone. connectedDurationMs is the union of the participant's session connection intervals (concurrent devices are not double counted).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "participantId",
+          "principalId",
+          "principalKind",
+          "role",
+          "displayName",
+          "createdAt",
+          "endedAt",
+          "connectedDurationMs"
+        ],
+        "properties": {
+          "participantId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "principalId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "principalKind": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/PrincipalKind"
+          },
+          "role": {
+            "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallParticipantRole"
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "connectedDurationMs": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "CallSession": {
+        "description": "Summary of one device / network participation of a participant (its media / signaling identity is not exposed). connectionCount is the number of connection intervals opened (1 + reconnects).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sessionId",
+          "participantId",
+          "endpointCategory",
+          "state",
+          "connectionCount",
+          "createdAt",
+          "firstConnectedAt",
+          "lastDisconnectedAt",
+          "endedAt",
+          "connectedDurationMs"
+        ],
+        "properties": {
+          "sessionId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "participantId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "endpointCategory": {
+            "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallEndpointCategory"
+          },
+          "state": {
+            "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSessionState"
+          },
+          "connectionCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "firstConnectedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "lastDisconnectedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "connectedDurationMs": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "Call": {
+        "description": "One call with participants, session summaries and durations. Durations of open connections are measured up to durationsAsOf (the call's end for terminal calls). connectedDurationMs runs from the first CONNECTED to the end (null if never connected).",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CallCore"
+          }
+        ],
+        "required": [
+          "connectedDurationMs",
+          "durationsAsOf",
+          "participants",
+          "sessions"
+        ],
+        "properties": {
+          "connectedDurationMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "durationsAsOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CallParticipant"
+            }
+          },
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CallSession"
+            }
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "CallList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "nextCursor"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallSummary"
+            }
+          },
+          "nextCursor": {
+            "description": "Opaque cursor of the next page; null on the last page.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          }
+        }
       }
     },
     "responses": {
       "NotFound": {
-        "description": "Returned for any path the service does not expose.",
+        "description": "Returned for any path the service does not expose, and for a call that does not exist in the caller's scope (indistinguishable from a call of another tenant, application or environment).",
         "headers": {
           "x-request-id": {
             "$ref": "#/components/headers/XRequestId"
@@ -161,6 +644,100 @@
       },
       "MethodNotAllowed": {
         "description": "Returned when the path exists but does not accept the HTTP method.",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "ValidationError": {
+        "description": "Invalid query parameters (unknown or repeated parameter, out-of-range limit, malformed cursor, filter or timestamp). Code VALIDATION_ERROR.",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "AuthenticationFailed": {
+        "description": "Missing, malformed, unknown, revoked, expired or otherwise unusable credential; uniform for every reason. Code AUTHENTICATION_FAILED.",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          },
+          "www-authenticate": {
+            "description": "Bearer challenge.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "InsufficientScope": {
+        "description": "The credential lacks the operation's required scope. Code INSUFFICIENT_SCOPE.",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          },
+          "www-authenticate": {
+            "description": "Bearer challenge naming the required scope.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Request-rate limit exceeded. Code RATE_LIMITED.",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          },
+          "retry-after": {
+            "description": "Seconds until the next window.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "ServiceUnavailable": {
+        "description": "A dependency (database) is unavailable. Code SERVICE_UNAVAILABLE.",
         "headers": {
           "x-request-id": {
             "$ref": "#/components/headers/XRequestId"

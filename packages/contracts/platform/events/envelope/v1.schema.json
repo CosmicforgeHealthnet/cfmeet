@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json",
   "title": "CF Meet cross-service durable event envelope v1",
-  "description": "Infrastructure envelope for durable cross-service events. Producers persist events transactionally (outbox) with the state change they describe. The payload is described by its own registered contract identified by event_type and schema_version; no payload contracts exist yet. The envelope never carries secrets, service tokens, customer credentials, provider credentials, telephone numbers or protected contact plaintext.",
+  "description": "Infrastructure envelope for durable cross-service events. Producers persist events transactionally (outbox) with the state change they describe. The payload is described by its own registered contract identified by event_type and schema_version (Calling: cfmeet.calling.call-lifecycle-event for every calling.* event type). The envelope never carries secrets, service tokens, customer credentials, provider credentials, telephone numbers or protected contact plaintext.",
   "type": "object",
   "additionalProperties": false,
   "required": [

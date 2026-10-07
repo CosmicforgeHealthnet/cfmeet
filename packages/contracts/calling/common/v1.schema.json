@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/calling/common/v1.schema.json",
+  "title": "CF Meet calling common definitions v1",
+  "description": "Canonical, provider-independent call-domain vocabulary shared by the Calling HTTP API and the call lifecycle event contract (Part C sections 15-19). Definitions only: the root schema places no constraints. Provider, SIP, carrier or RTC states are never canonical and must be mapped onto these values by the adapters that observe them.",
+  "$defs": {
+    "CallState": {
+      "description": "Canonical business state of a Call. Terminal: ENDED, DECLINED, BUSY, NO_ANSWER, FAILED, CANCELLED.",
+      "type": "string",
+      "enum": [
+        "REQUESTED",
+        "AUTHORIZED",
+        "RESOLVING",
+        "ROUTING",
+        "DIALING",
+        "RINGING",
+        "ANSWERED",
+        "CONNECTED",
+        "HELD",
+        "TRANSFERRING",
+        "ENDING",
+        "ENDED",
+        "DECLINED",
+        "BUSY",
+        "NO_ANSWER",
+        "FAILED",
+        "CANCELLED"
+      ]
+    },
+    "CallKind": {
+      "description": "Neutral media kind of a Call. No consumer business meaning.",
+      "type": "string",
+      "enum": ["VOICE", "VIDEO"]
+    },
+    "CallFailureCategory": {
+      "description": "Normalized failure category. Provider error codes never become categories.",
+      "type": "string",
+      "enum": [
+        "POLICY",
+        "TARGET_UNAVAILABLE",
+        "ROUTING",
+        "TIMEOUT",
+        "MEDIA",
+        "NETWORK",
+        "EXECUTION",
+        "INTERNAL",
+        "UNKNOWN"
+      ]
+    },
+    "CallTerminalReason": {
+      "description": "How a Call reached its terminal state. ENDED records its completion evidence; every other terminal state has the reason of the same name.",
+      "type": "string",
+      "enum": [
+        "CLEANUP_CONFIRMED",
+        "PARTICIPATION_ENDED",
+        "RECONCILIATION_TIMEOUT",
+        "DECLINED",
+        "BUSY",
+        "NO_ANSWER",
+        "FAILED",
+        "CANCELLED"
+      ]
+    },
+    "CallParticipantRole": {
+      "type": "string",
+      "enum": ["INITIATOR", "RECIPIENT"]
+    },
+    "CallSessionState": {
+      "type": "string",
+      "enum": ["CREATED", "CONNECTED", "DISCONNECTED", "ENDED"]
+    },
+    "CallEndpointCategory": {
+      "type": "string",
+      "enum": ["MOBILE", "WEB", "DESKTOP", "SERVER", "NETWORK"]
+    },
+    "CallEventType": {
+      "description": "Facts the call domain records. CALL_REQUESTED and CALL_STATE_CHANGED are lifecycle events (they carry states); the others are facts about the Call's children.",
+      "type": "string",
+      "enum": [
+        "CALL_REQUESTED",
+        "CALL_AUTHORIZATION_RECORDED",
+        "CALL_STATE_CHANGED",
+        "CALL_PARTICIPANT_ADDED",
+        "CALL_PARTICIPANT_UPDATED",
+        "CALL_SESSION_CREATED",
+        "CALL_SESSION_CONNECTED",
+        "CALL_SESSION_DISCONNECTED",
+        "CALL_SESSION_RECONNECTED",
+        "CALL_SESSION_ENDED",
+        "CALL_ROUTE_RECORDED",
+        "CALL_ROUTE_STATE_CHANGED",
+        "CALL_LEG_RECORDED",
+        "CALL_LEG_STATE_CHANGED",
+        "CALL_LEG_BINDING_ASSIGNED",
+        "CALL_ATTEMPT_RECORDED",
+        "CALL_ATTEMPT_FINISHED",
+        "CALL_QUALITY_RECORDED",
+        "CALL_USAGE_RECORDED",
+        "CALL_USAGE_FINALIZED"
+      ]
+    },
+    "SafeText": {
+      "description": "Bounded text without control characters that never looks like a telephone number (+<digit>) or a tel: / sip: URI.",
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$",
+      "allOf": [
+        { "not": { "pattern": "\\+[0-9]" } },
+        { "not": { "pattern": "^\\s*([Tt][Ee][Ll]|[Ss][Ii][Pp][Ss]?):" } }
+      ]
+    },
+    "SafeEventData": {
+      "description": "Bounded, flat, privacy-safe event data: at most 32 snake_case keys that never name secrets, credentials, contact data or provider / carrier identifiers; values are booleans, numbers, safe text or short lists of safe text.",
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]{0,62}$",
+        "not": {
+          "pattern": "(password|secret|token|credential|api_key|apikey|phone|msisdn|e164|contact|provider|carrier|vendor|sip|pstn|dialog|room_sid)"
+        }
+      },
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "boolean" },
+          { "type": "number" },
+          { "$ref": "#/$defs/SafeText" },
+          {
+            "type": "array",
+            "maxItems": 16,
+            "items": { "$ref": "#/$defs/SafeText" }
+          }
+        ]
+      }
+    }
+  }
+}

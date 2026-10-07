@@ -1,0 +1,22 @@
+{
+  "event_id": "evt_7a2d3c0f4b5e4d6f9a81223344556677",
+  "event_type": "CALL_STATE_CHANGED",
+  "call_id": "0b8f6d2e-6c1a-4f5e-9a3b-2d7c8e9f0a11",
+  "tenant_id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+  "application_id": "2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a",
+  "application_environment_id": "3e4f5a6b-7c8d-4e9f-8a1b-2c3d4e5f6a7b",
+  "sequence": 14,
+  "call_version": 8,
+  "from_state": null,
+  "to_state": "CONNECTED",
+  "occurred_at": "2031-03-01T10:01:02.250000Z",
+  "correlation_id": "corr_0123456789abcdef0123456789abcdef",
+  "data": {
+    "action": "CONFIRM_CONNECTED",
+    "evidence": "RTC_MEDIA_PATH_ESTABLISHED",
+    "evidence_session_ids": [
+      "5a6b7c8d-9e0f-4a1b-8c3d-4e5f6a7b8c9d",
+      "6b7c8d9e-0f1a-4b2c-9d4e-5f6a7b8c9d0e"
+    ]
+  }
+}
