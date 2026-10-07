@@ -38,6 +38,12 @@ impl<'a> MakeWriter<'a> for Capture {
     }
 }
 
+/// The log-capture test installs a thread-scoped subscriber, but tracing caches each
+/// callsite's interest process-wide: a callsite first hit by a concurrently running test
+/// while that subscriber is being installed can stay cached as "never" and escape the
+/// capture. The tests of this binary therefore run one at a time.
+static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 impl Capture {
     fn text(&self) -> String {
         String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
@@ -46,6 +52,7 @@ impl Capture {
 
 #[tokio::test]
 async fn structured_logs_never_contain_credentials_or_authorization_headers() {
+    let _serial = SERIAL.lock().await;
     let Some(h) = Harness::new().await else {
         return;
     };
@@ -118,6 +125,7 @@ async fn structured_logs_never_contain_credentials_or_authorization_headers() {
 
 #[tokio::test]
 async fn error_bodies_never_echo_presented_credentials() {
+    let _serial = SERIAL.lock().await;
     let Some(h) = Harness::new().await else {
         return;
     };
@@ -163,6 +171,7 @@ async fn error_bodies_never_echo_presented_credentials() {
 
 #[tokio::test]
 async fn debug_output_of_secret_bearing_types_is_redacted() {
+    let _serial = SERIAL.lock().await;
     let Some(h) = Harness::new().await else {
         return;
     };
