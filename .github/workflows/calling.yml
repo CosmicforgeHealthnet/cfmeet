@@ -197,6 +197,8 @@ jobs:
           export API_CREDENTIAL_PEPPER="$(openssl rand -base64 48)"
           export CALLING_SIGNALING_SIGNING_KEY="$(openssl rand -base64 48)"
           LK_SECRET="$(openssl rand -hex 32)"
+          EDGE_KEY="$(openssl rand -hex 32)"
+          LK_OK="CALLING_MEDIA_PROVIDER=livekit CALLING_LIVEKIT_URL=ws://127.0.0.1:7880 CALLING_LIVEKIT_API_URL=http://127.0.0.1:7880 CALLING_LIVEKIT_API_KEY=calling-ci CALLING_MEDIA_GATEWAY_URL=ws://127.0.0.1:8090/v1/calling/media"
 
           refuses() { # refuses <description> <env assignments...>: must exit 2 (config error)
             local what="$1"; shift
@@ -221,14 +223,26 @@ jobs:
           refuses "unknown media provider" CALLING_MEDIA_PROVIDER=other
           refuses "LiveKit selected without configuration" CALLING_MEDIA_PROVIDER=livekit
           refuses "weak LiveKit secret" CALLING_MEDIA_PROVIDER=livekit CALLING_LIVEKIT_URL=wss://media.example.com \
-            CALLING_LIVEKIT_API_KEY=k CALLING_LIVEKIT_API_SECRET=short
+            CALLING_LIVEKIT_API_KEY=k CALLING_LIVEKIT_API_URL=https://media.example.com CALLING_LIVEKIT_API_SECRET=short \
+            CALLING_MEDIA_GATEWAY_URL=wss://calling.example.com/v1/calling/media CALLING_MEDIA_EDGE_SIGNING_KEY="$EDGE_KEY"
           refuses "LiveKit without TLS off loopback" CALLING_MEDIA_PROVIDER=livekit CALLING_LIVEKIT_URL=ws://media.example.com \
-            CALLING_LIVEKIT_API_KEY=k CALLING_LIVEKIT_API_SECRET="$LK_SECRET"
+            CALLING_LIVEKIT_API_KEY=k CALLING_LIVEKIT_API_URL=https://media.example.com CALLING_LIVEKIT_API_SECRET="$LK_SECRET" \
+            CALLING_MEDIA_GATEWAY_URL=wss://calling.example.com/v1/calling/media CALLING_MEDIA_EDGE_SIGNING_KEY="$EDGE_KEY"
           refuses "media credential TTL above the maximum" CALLING_MEDIA_CREDENTIAL_TTL_SECONDS=3600
+          # The media edge key seals every client media credential; LiveKit must never know it.
+          refuses "missing media edge key" $LK_OK CALLING_LIVEKIT_API_SECRET="$LK_SECRET"
+          refuses "media edge key equal to the LiveKit secret" $LK_OK CALLING_LIVEKIT_API_SECRET="$LK_SECRET" \
+            CALLING_MEDIA_EDGE_SIGNING_KEY="$LK_SECRET"
+          refuses "missing media gateway URL" CALLING_MEDIA_PROVIDER=livekit CALLING_LIVEKIT_URL=ws://127.0.0.1:7880 \
+            CALLING_LIVEKIT_API_URL=http://127.0.0.1:7880 CALLING_LIVEKIT_API_KEY=calling-ci \
+            CALLING_LIVEKIT_API_SECRET="$LK_SECRET" CALLING_MEDIA_EDGE_SIGNING_KEY="$EDGE_KEY"
+          refuses "media gateway without TLS off loopback" CALLING_MEDIA_PROVIDER=livekit CALLING_LIVEKIT_URL=ws://127.0.0.1:7880 \
+            CALLING_LIVEKIT_API_URL=http://127.0.0.1:7880 CALLING_LIVEKIT_API_KEY=calling-ci \
+            CALLING_LIVEKIT_API_SECRET="$LK_SECRET" CALLING_MEDIA_EDGE_SIGNING_KEY="$EDGE_KEY" \
+            CALLING_MEDIA_GATEWAY_URL=ws://calling.example.com/v1/calling/media
 
           # A valid LiveKit configuration (loopback; no server needed to start).
-          CALLING_MEDIA_PROVIDER=livekit CALLING_LIVEKIT_URL=ws://127.0.0.1:7880 CALLING_LIVEKIT_API_URL=http://127.0.0.1:7880 \
-            CALLING_LIVEKIT_API_KEY=calling-ci CALLING_LIVEKIT_API_SECRET="$LK_SECRET" \
+          env $LK_OK CALLING_LIVEKIT_API_SECRET="$LK_SECRET" CALLING_MEDIA_EDGE_SIGNING_KEY="$EDGE_KEY" \
             ./target/debug/calling > "$K/run.log" 2>&1 &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true' EXIT
@@ -261,12 +275,20 @@ jobs:
           code=$(curl -s -o "$K/f.json" -w '%{http_code}' -X POST -H 'Authorization: eyJhbGciOiJIUzI1NiJ9.e30.forged' \
             -d '{"event":"room_started"}' http://127.0.0.1:8090/internal/provider/media/events)
           test "$code" = "401"
+          # The media connection gateway admits nothing without an edge-sealed media credential
+          # (API credentials, forged tokens and LiveKit-signed tokens are all refused).
+          for auth in "" "Bearer cfmk_live_x_y" "Bearer eyJhbGciOiJIUzI1NiJ9.e30.forged"; do
+            for path in /v1/calling/media/rtc/v1 /v1/calling/media/rtc /v1/calling/media/rtc/v1/validate; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' ${auth:+-H "Authorization: $auth"} "http://127.0.0.1:8090$path")
+              test "$code" = "401"
+            done
+          done
           # There is no generic state mutation.
           code=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH http://127.0.0.1:8090/v1/calls/00000000-0000-4000-8000-000000000000)
           test "$code" = "401" -o "$code" = "405"
           grep -q "internal service authentication ready" "$K/run.log"
           if grep -q -- "PRIVATE KEY" "$K/run.log"; then echo "::error::key material in logs"; exit 1; fi
-          for secret in "$LK_SECRET" "$CALLING_SIGNALING_SIGNING_KEY" "$API_CREDENTIAL_PEPPER"; do
+          for secret in "$LK_SECRET" "$EDGE_KEY" "$CALLING_SIGNALING_SIGNING_KEY" "$API_CREDENTIAL_PEPPER"; do
             if grep -qF -- "$secret" "$K/run.log" "$K"/*.json; then echo "::error::a secret appears in logs or responses"; exit 1; fi
           done
           rm -rf "$K"

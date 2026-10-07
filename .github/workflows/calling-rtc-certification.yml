@@ -8,6 +8,15 @@ name: Calling RTC certification
 # unknown-participant quarantine (services/calling/tests/rtc_certification.rs), plus
 # the shared provider contract (tests/common/provider_contract.rs).
 #
+# Security closure (ADR 0007 §5): every client media connection goes through Calling's
+# media connection gateway. The suite captures a REAL server-refreshed privileged token
+# from the real SDK, revokes its session and proves the saved token cannot re-enter —
+# neither through the gateway (refused before LiveKit) nor around it (LiveKit does not
+# accept edge-sealed tokens) — with no media window; it also proves superseded
+# generations / terminal Calls are refused and a legitimate reconnect works. The job
+# fails if the refreshed token cannot be captured, if a stale token re-enters, or if
+# the adversarial rounds did not run.
+#
 # CI-only: containers are allowed here. Local development never needs Docker (the
 # suite runs against any reachable LiveKit binary; see infra/livekit/README.md). The
 # LiveKit key pair is the loopback-only certification credential from
@@ -92,8 +101,26 @@ jobs:
           CALLING_RTC_CERT_LIVEKIT_API_KEY: calling-cert
           CALLING_RTC_CERT_LIVEKIT_API_SECRET: calling-cert-only-key-not-a-secret-0123456789
           CALLING_RTC_CERT_PYTHON: python
-        run: cargo test --locked --test rtc_certification -- --nocapture
+        run: |
+          set -euo pipefail
+          cargo test --locked --test rtc_certification -- --nocapture 2>&1 | tee "$RUNNER_TEMP/cert.log"
+          # The adversarial refreshed-token rounds must have run (and passed above).
+          rounds=$(grep -c '^refreshed-token re-entry (round' "$RUNNER_TEMP/cert.log" || true)
+          if [ "$rounds" -lt 3 ]; then
+            echo "::error::the refreshed-token re-entry certification did not run ($rounds rounds)"; exit 1
+          fi
+          grep '^refreshed-token re-entry' "$RUNNER_TEMP/cert.log"
+          grep -q 'test real_livekit_certification ... ok' "$RUNNER_TEMP/cert.log"
 
       - name: LiveKit logs
         if: always()
         run: docker logs livekit 2>&1 | tail -200 || true
+
+      - name: WebRTC client logs
+        if: failure()
+        working-directory: services/calling
+        run: |
+          for f in target/tmp/rtc-clients/*.log; do
+            [ -s "$f" ] || continue
+            echo "== $f"; tail -50 "$f"
+          done
