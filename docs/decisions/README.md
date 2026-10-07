@@ -9,3 +9,4 @@ Short, numbered records of significant architectural decisions.
 | [0003](0003-calling-platform-trust-model.md) | Calling platform consumer, credential and principal trust model | Accepted |
 | [0004](0004-internal-service-authentication.md) | Internal service authentication (Ed25519 service tokens, receiver-authoritative permissions) | Accepted |
 | [0005](0005-contract-authority-and-runtime-boundaries.md) | Contract authority, data ownership and runtime dependency direction | Accepted |
+| [0006](0006-canonical-call-aggregate-and-state-machine.md) | Canonical Call aggregate and state machine (Part C §15–§19) | Accepted |

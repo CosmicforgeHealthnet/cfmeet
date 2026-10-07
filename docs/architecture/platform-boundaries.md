@@ -7,7 +7,7 @@ This document defines where each CF Meet capability belongs. Anything marked *pl
 ```text
 services/
 ├── meeting-service/     ✅ current Meeting & Conference Platform backend
-├── calling/             ◐ active: platform trust foundation + internal service auth implemented; calling API planned
+├── calling/             ◐ active: trust foundation, internal service auth and Calling core (Part C §15–§19) implemented; call control / execution planned
 ├── privacy-relay/       ◻ planned: masked/private transaction communications
 ├── messaging/           ◻ planned: unified messaging
 ├── telephony/           ◻ planned: SIP/PSTN telephony
@@ -48,9 +48,15 @@ PRODUCTION environments, service accounts, HMAC-verified API credentials with
 server-authoritative scopes, rotation and revocation, application / credential limit
 policy, and communication principals resolved separately from API client identity. It
 also authenticates internal service calls on `/internal/v1/*` and signs its own outbound
-calls with `packages/service-auth` (Part B §11). The call model and Calling API (Part C)
-are not implemented yet. See [ADR 0003](../decisions/0003-calling-platform-trust-model.md),
-[ADR 0004](../decisions/0004-internal-service-authentication.md) and
+calls with `packages/service-auth` (Part B §11). The Calling core (Part C §15–§19) is
+implemented: the canonical, provider-independent Call aggregate and its 17-state machine,
+participants / sessions / connection intervals, routes / legs / attempts,
+authorization decisions, quality and usage records, immutable call events with a
+transactional outbox, and the read-only call API. Call creation / control APIs, RTC and
+telephony execution are later work. See
+[ADR 0003](../decisions/0003-calling-platform-trust-model.md),
+[ADR 0004](../decisions/0004-internal-service-authentication.md),
+[ADR 0006](../decisions/0006-canonical-call-aggregate-and-state-machine.md) and
 [`services/calling/README.md`](../../services/calling/README.md).
 
 ## When to create or extract another service

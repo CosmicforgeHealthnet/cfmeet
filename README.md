@@ -13,7 +13,7 @@ This monorepo contains the platform's applications, domain services, shared cont
 | **Current** | Video meetings: scheduled and instant meetings, pre-join, LiveKit rooms, waiting room/admission, participant list and media state, screen share, in-meeting chat |
 | **Current** | Accounts: email/password with verification, Google OAuth, password reset |
 | **Current** | Developer basics: API keys, external meeting create/join API, webhook registration, OpenAPI/Swagger |
-| **In progress** | Realtime app-to-app calling — `services/calling`: platform trust foundation (tenants, applications, environments, service accounts, API credentials, scopes, principals) implemented; call API not yet |
+| **In progress** | Realtime app-to-app calling — `services/calling`: platform trust foundation (tenants, applications, environments, service accounts, API credentials, scopes, principals) and Calling core (canonical Call aggregate, state machine, participants / sessions, legs / routes / attempts, authorizations, immutable events + outbox, read-only call API) implemented; call creation / control APIs, RTC and telephony execution not yet |
 | **Planned** | Unified messaging |
 | **Planned** | Privacy Relay communications |
 | **Planned** | SIP/PSTN telephony and Digital Communications Numbers |
@@ -30,7 +30,7 @@ cfmeet/
 │   └── web/                  Next.js CF Meet web application                         (current)
 ├── services/
 │   ├── meeting-service/      Rust/Axum Meeting & Conference Platform service         (current)
-│   └── calling/              Rust/Axum Calling service (platform trust foundation)   (active)
+│   └── calling/              Rust/Axum Calling service (trust foundation + Calling core)   (active)
 ├── packages/
 │   ├── contracts/            Contract authority: manifest, schemas, OpenAPI, validator (authority)
 │   └── service-auth/         Internal service authentication library (Ed25519)       (active)
@@ -56,7 +56,7 @@ cfmeet/
 |---|---|---|
 | `apps/web/` | CF Meet web experience | Vercel |
 | `services/meeting-service/` | Meeting/conference control plane: auth, meetings, participants, waiting room, chat, LiveKit token/control integration, API keys, webhooks, workers and related meeting-domain functionality | Docker image |
-| `services/calling/` | Calling domain service. Currently the platform trust foundation: tenant / application / environment / service-account model, API credentials, scopes, limits and communication principals ([README](services/calling/README.md)) | Docker image (context: repository root, `-f services/calling/Dockerfile`) |
+| `services/calling/` | Calling domain service: the platform trust foundation (tenant / application / environment / service-account model, API credentials, scopes, limits, communication principals) and the Calling core — the canonical, provider-independent Call aggregate, state machine, participants / sessions, legs / routes / attempts, authorizations, immutable events with a transactional outbox, and the read-only call API ([README](services/calling/README.md)) | Docker image (context: repository root, `-f services/calling/Dockerfile`) |
 
 The current Rust service is intentionally named **meeting-service** because it is the backend for the meeting/conferencing domain, not the universal backend for all future CF Meet capabilities.
 
@@ -83,7 +83,7 @@ Future domain services are created only when a real boundary exists, for example
 ```text
 services/
 ├── meeting-service/       current
-├── calling/               active (platform trust foundation)
+├── calling/               active (platform trust foundation + Calling core)
 ├── privacy-relay/         future
 ├── messaging/             future
 ├── telephony/             future
@@ -159,7 +159,7 @@ The web app and meeting service remain independently deployable and communicate 
 Workflows under `.github/workflows/` are path-aware:
 
 - **Meeting service:** `services/meeting-service/**` → fmt, clippy, test, build and Docker image
-- **Calling service:** `services/calling/**`, `packages/service-auth/**`, Calling / platform contracts → fmt, check, clippy, PostgreSQL tests (incl. internal service auth and contract conformance), architecture guards, migration smoke, startup refusal checks, build and Docker image
+- **Calling service:** `services/calling/**`, `packages/service-auth/**`, Calling / platform contracts → fmt, check, clippy, PostgreSQL tests (incl. internal service auth, the call state machine, concurrency races, transactional events / outbox and contract conformance), architecture guards, migration smoke, startup refusal checks, build and Docker image
 - **Contracts and service auth:** `packages/contracts/**`, `packages/service-auth/**` → contract validation (`make contracts-validate`), validator mutation tests, service-auth fmt / check / clippy / tests for both feature sets, private-key scan
 - **Service boundaries:** `services/**`, `packages/**` → repository data-ownership guard and its mutation tests (`make service-boundaries`)
 - **Frontend:** `apps/web/**` → install, lint, typecheck and Next.js build

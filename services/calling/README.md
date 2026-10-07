@@ -6,31 +6,171 @@ shares no source, models, migrations or database with the Meeting Service.
 
 ## What is implemented
 
-This service currently contains the **platform trust foundation** that the Calling
-domain is built on (CF Meet Part III, Part B §7–§14). There is no Calling business API
-yet: no calls, call participants, sessions, legs, routes, signaling, LiveKit calling,
-Privacy Relay, PSTN/SIP, telephony, voicemail or webhooks.
+**Part B §7–§14 (platform trust foundation) and Part C §15–§19 (Calling core).** The
+service is the canonical authority for the **logical Call**: a CF Meet object with a CF
+Meet-generated UUID that stays the same whatever later executes it (application RTC,
+SIP, the public network, a relay, enterprise infrastructure, several legs or attempts).
+Provider room / dialog / carrier / request identifiers are never Call identities.
 
 | Area | Status |
 |---|---|
-| §7 Platform consumer model: tenant → application → environment → service account → API credential; principals | Implemented |
-| §8 First-party and external consumers on one model (explicit trust classification + scopes, no product-specific code) | Implemented |
-| §9 API credential security: keyed verifiers, server-authoritative scopes, rotation with overlap, immediate revocation, limit-policy foundation, request-rate enforcement | Implemented |
-| §10 Separation of API client identity (`PlatformAuthContext`) from communication principal identity (`ResolvedPrincipal`) | Implemented |
-| Concurrent-communication and telecom-spend enforcement | Policy resolved here; enforcement belongs to the future call / telephony operations |
-| §11 Internal service authentication: Ed25519 service tokens (`packages/service-auth`), receiver-authoritative permissions, `/internal/v1/*` middleware, delegated context, authenticated internal HTTP client | Implemented (no internal business routes yet) |
-| §12 Contract authority: `packages/contracts/calling/http/v1.openapi.json` describes exactly the implemented routes; conformance tests | Implemented |
-| §13 Data ownership: own database only; no other service's database URL, tables or source | Enforced (`architecture_boundaries`, `make service-boundaries`) |
-| §14 Runtime direction: synchronous calls through the authenticated internal client; events only through the platform event envelope contract | Foundation only (no events produced yet) |
+| §7–§10 Platform consumer model, first-party / external consumers, API credential security, `PlatformAuthContext` vs `ResolvedPrincipal` | Implemented |
+| §11 Internal service authentication (`packages/service-auth`, `/internal/v1/*`, delegated context, internal client) | Implemented (no internal business routes yet) |
+| §12 Contract authority: `packages/contracts/calling/**` describes exactly what is implemented; conformance tests | Implemented |
+| §13 Data ownership: own database only | Enforced (`architecture_boundaries`, `make service-boundaries`) |
+| §14 Runtime direction: events only through the platform event envelope | Implemented for call events (transactional outbox; no publisher yet) |
+| **§15** Calling service responsibility: canonical logical Call, provider-independent, HTTP-independent domain service | **Implemented** (`src/calls/`) |
+| **§16** Required entities: Call, Call Participant, Call Session (+ connection intervals), Call Leg, Call Attempt, Call Route, Call Authorization, Call Event (+ outbox), Call Quality Record, Call Usage Record | **Implemented** (persistence, ownership, states, domain primitives) |
+| **§17** Canonical state machine: the 17 states, transition graph, terminal states, optimistic versioning | **Implemented** (Rust + database defence in depth) |
+| **§18** Transition rules: actions not client-set states, stale-command protection, no terminal resurrection, AUTHORIZED needs an APPROVED decision, paid public-network guard, CONNECTED / ENDED evidence, normalized failure categories | **Implemented** |
+| **§19** Participant / session model: principal-scoped participants, server media identities, multi-device sessions, explicit reconnect, interval-based participation time | **Implemented** |
+| Concurrent-call limit (Part B foundation) | **Enforced** at Call creation (race-safe) |
+| Read API: `GET /v1/calls`, `GET /v1/calls/{call_id}` (`calls.read`) | **Implemented** |
+| Telecom-spend limits | Resolved; enforced by future telephony operations |
 
-HTTP surface: `GET /health` only (contract:
+**Deferred (later sections / services):** multi-device ringing and answer arbitration
+(§20), route / attempt orchestration and the routing engine (§21), app-to-app voice and
+video calling, the RTC provider contract and LiveKit call rooms (§22–§24), provider
+execution of cancel / end / hold / transfer (§25), public call creation and control
+APIs, realtime signaling and push ringing, webhooks and event delivery (the outbox has
+no publisher yet), Privacy Relay, Contact Vault, Telephony (SIP / public network,
+carrier adapters, provider callbacks and reconciliation), enterprise calling and
+billing.
+
+HTTP surface: `GET /health`, `GET /v1/calls`, `GET /v1/calls/{call_id}` (contract:
 [`packages/contracts/calling/http/v1.openapi.json`](../../packages/contracts/calling/http/v1.openapi.json)).
 The customer authentication middleware and `PlatformAuthContext` extractor, and the
-internal service authentication middleware and `InternalCaller` extractor, are in place
-for future routes and are exercised by test-only routes. Every path under
-`/internal/v1/` — including unknown ones — requires a valid service token and answers
-`401 INTERNAL_AUTHENTICATION_FAILED` otherwise; customer API credentials are never
-accepted there, and service tokens are never accepted on customer routes.
+internal service authentication middleware and `InternalCaller` extractor, are in place.
+Every path under `/internal/v1/` — including unknown ones — requires a valid service
+token and answers `401 INTERNAL_AUTHENTICATION_FAILED` otherwise; customer API
+credentials are never accepted there, and service tokens are never accepted on customer
+routes.
+
+## Calling core (Part C §15–§19)
+
+ADR: [0006 — Canonical Call aggregate and state machine](../../docs/decisions/0006-canonical-call-aggregate-and-state-machine.md).
+
+### Entities
+
+```text
+Call (aggregate root: kind, state, version, first-entry timestamps, terminal reason / failure category)
+├── CallParticipant      a trusted principal of the Call's scope (one per principal per Call)
+│   └── CallSession      one device / network participation; server-generated media identity
+│       └── interval     one connected period (interval 1, 2, … = reconnects)
+├── CallRoute            provider-independent routing decision (class, state, policy version, snapshot)
+├── CallLeg              canonical Calling-side leg (direction, neutral kind, normalized state, timing,
+│                        opaque execution_binding_ref UUID only)
+├── CallAttempt          gap-free per-call number, previous-attempt link, explicit UNKNOWN outcome
+├── CallAuthorization    APPROVED / DENIED decision evidence; exactly one effective per Call
+├── CallEvent            immutable, gap-free per-call sequence (+ one outbox row each)
+├── CallQualityRecord    bounded numeric, provider-independent metrics
+└── CallUsageRecord      idempotent consumption facts with set-once finalization (not billing)
+```
+
+Every row carries `tenant_id / application_id / environment_id` and references its parent
+through composite foreign keys, so no child can point at a Call (or principal, session,
+leg, route, credential) of another scope; ownership columns are immutable.
+`communication_context_ref` / `privacy_relay_ref` / `execution_binding_ref` are opaque
+UUIDs of records owned by other services — never foreign keys, never provider ids or
+telephone numbers.
+
+### State machine
+
+States: `REQUESTED AUTHORIZED RESOLVING ROUTING DIALING RINGING ANSWERED CONNECTED HELD
+TRANSFERRING ENDING` and terminal `ENDED DECLINED BUSY NO_ANSWER FAILED CANCELLED`.
+
+| From | To |
+|---|---|
+| REQUESTED | AUTHORIZED, FAILED, CANCELLED |
+| AUTHORIZED | RESOLVING, FAILED, CANCELLED |
+| RESOLVING | ROUTING, FAILED, CANCELLED |
+| ROUTING | DIALING, FAILED, CANCELLED |
+| DIALING | RINGING, ANSWERED, DECLINED, BUSY, NO_ANSWER, FAILED, CANCELLED |
+| RINGING | ANSWERED, DECLINED, BUSY, NO_ANSWER, FAILED, CANCELLED |
+| ANSWERED | CONNECTED, ENDING, FAILED, CANCELLED |
+| CONNECTED | HELD, TRANSFERRING, ENDING, FAILED |
+| HELD | CONNECTED, TRANSFERRING, ENDING, FAILED |
+| TRANSFERRING | CONNECTED, HELD, ENDING, FAILED |
+| ENDING | ENDED, FAILED |
+| terminal | — |
+
+* **Actions, not states.** `CallService::transition(cmd, call_id, expected_version,
+  action)` takes an action (`Authorize`, `DenyByPolicy`, `BeginResolution`,
+  `BeginRouting`, `BeginDialing`, `MarkRinging`, `Accept`, `ConfirmConnected`, `Hold`,
+  `Resume`, `BeginTransfer`, `CompleteTransfer`, `RequestEnd`, `ConfirmEnded`,
+  `Decline`, `MarkBusy`, `MarkNoAnswer`, `Fail`, `Cancel`); the target state is derived
+  by the server. No API sets a state.
+* **Optimistic versioning.** Version 1 at creation, +1 exactly once per transition; a
+  command whose `expected_version` is stale gets `STALE_CALL_VERSION` and changes nothing.
+* **Evidence.** AUTHORIZED needs the Call's effective APPROVED authorization; a DENIED
+  decision can only lead to FAILED / `POLICY` (`DenyByPolicy` — there is no canonical
+  DENIED state). Every entry into CONNECTED needs positive evidence of a bidirectional
+  media path (`RtcMediaPathEstablished`: connected sessions of two participants;
+  `NetworkLegEstablished`: two connected legs; `MixedBridgeEstablished`: a connected
+  session and a connected leg) — ANSWERED never implies CONNECTED. ENDING → ENDED needs
+  `CleanupConfirmed`, verified `AllParticipationEnded`, or the `ReconciliationTimeout`
+  disposition (ENDING for at least 5 minutes); the evidence is the Call's
+  `terminal_reason` and is recorded in the event.
+* **Terminal is final.** Rust refuses every action on a terminal Call; the database
+  refuses any write that changes a terminal state, skips the graph, or changes the
+  version without a state change. Late lifecycle, session and leg commands cannot
+  resurrect a Call. Terminal transitions close open connection intervals
+  (`CALL_TERMINATED`) and end sessions and participants.
+* **Failure categories** are neutral: `POLICY TARGET_UNAVAILABLE ROUTING TIMEOUT MEDIA
+  NETWORK EXECUTION INTERNAL UNKNOWN`. Provider error codes never enter the call domain.
+* **Paid public-network guard.** `require_public_network_authorization(scope, call)`
+  returns a `PublicNetworkAuthorization` proof only for an authorized, executable
+  (not ENDING / terminal) Call whose effective decision is APPROVED in a live-telecom
+  environment. It executes nothing; future execution commands require the proof.
+
+### Participants, sessions and participation time
+
+* A participant is a logical identity — a `ResolvedPrincipal` of the caller's own scope
+  (foreign principals are reported as not found; the database pins principal scope and
+  kind snapshot). Exactly one participant per principal per Call: adding it again is
+  idempotent; concurrent additions cannot duplicate it. Display names are bounded,
+  normalized presentation metadata (no control / bidi characters, no telephone-number
+  content) and never identify or authorize anyone.
+* A session is one device / network participation. Its media identity is generated by
+  the server (`cfmid_` + 256 random bits) and never accepted as input. A participant may
+  hold several sessions at once.
+* Reconnect is explicit: `reconnect_session` renews the same session with connection
+  interval n + 1; `replace_session` ends a session whose device / connection identity
+  changed and creates a new session for the same participant. Neither changes the Call
+  or the participant.
+* Participation time comes from intervals: per session the sum, per participant the
+  **union** across its sessions (concurrent devices are not double counted), open
+  intervals up to the query instant.
+
+### Events and the transactional outbox
+
+Every mutation appends immutable `CallEvent`s (`CALL_REQUESTED`, `CALL_STATE_CHANGED`,
+`CALL_AUTHORIZATION_RECORDED`, participant / session / route / leg / attempt / quality /
+usage facts) and one `calling_outbox_events` row per event, in the same transaction as
+the mutation. The outbox row is a `cfmeet.platform.event-envelope` (event type
+`calling.<event-type>`, e.g. `calling.call-state-changed`) whose payload is a
+[`cfmeet.calling.call-lifecycle-event`](../../packages/contracts/calling/events/call-lifecycle/v1.schema.json).
+The database refuses `UPDATE` / `DELETE` / `TRUNCATE` of events, sequence gaps, events
+that misdescribe the Call, a new Call version without its state event and an event
+without its outbox row. Nothing is published yet; a future publisher consumes `PENDING`
+rows.
+
+### Concurrent-call limit
+
+Creating a Call takes a transaction-scoped advisory lock per application and counts
+non-terminal Calls against the effective per-credential limit and, when configured, the
+application-wide limit. Terminal Calls stop counting.
+
+### Read API
+
+`GET /v1/calls` (keyset pagination by `createdAt DESC, callId DESC`, `limit` 1–100,
+opaque `cursor`, filters `state`, `createdAfter`, `createdBefore`,
+`initiatorPrincipalId`; unknown or repeated parameters → 400) and
+`GET /v1/calls/{call_id}` (participants, session summaries, durations). Both require
+`calls.read`; scope comes only from the credential; a foreign or malformed id answers
+exactly like a missing one (404). Responses are `Cache-Control: no-store` and never
+contain media identities, execution bindings, provider data, credentials, principal
+references or telephone numbers.
 
 ## Internal service authentication
 
@@ -119,9 +259,10 @@ communications, daily / monthly telecom spend in minor units of the tenant's bil
 currency) are set by operators only. The effective policy takes the stricter value where
 both levels configure a limit, otherwise the configured one, otherwise the platform
 default. Telecom spend defaults to zero and is always zero where live telecom is not
-allowed. The request-rate limit is enforced now (shared PostgreSQL one-minute windows,
-per credential and per application); the other limits are resolved for the future
-operations that consume them.
+allowed. The request-rate limit is enforced (shared PostgreSQL one-minute windows, per
+credential and per application) and the concurrent-communication limit is enforced when a
+Call is created (see *Concurrent-call limit*); telecom spend is resolved for the future
+telephony operations that consume it.
 
 ## Configuration
 
@@ -189,7 +330,11 @@ Each test clones its own database from a migrated template (no Docker needed). W
 `scopes`, `rotation`, `secret_leakage`, `principals`, `limits`, `admin_cli`,
 `architecture_boundaries`, `internal_auth` (service-token authentication on
 `/internal/v1/*`), `outbound` (delegated context and the internal HTTP client over
-loopback HTTP) and `http_contract` (conformance with `packages/contracts`).
+loopback HTTP), `http_contract` (conformance with `packages/contracts`, including call
+responses, call vocabularies and every outbox envelope / lifecycle payload) and the
+Calling core suites `call_state_machine`, `call_concurrency` (repeated races),
+`call_authorization`, `call_participation`, `call_evidence` (events, outbox, injected
+failures), `call_records` and `call_api`.
 
 CI: [`.github/workflows/calling.yml`](../../.github/workflows/calling.yml).
 
@@ -208,4 +353,5 @@ The image runs as a non-root user and contains `calling`, `calling-migration` an
 * [ADR 0003 — Calling platform consumer, credential and principal trust model](../../docs/decisions/0003-calling-platform-trust-model.md)
 * [ADR 0004 — Internal service authentication](../../docs/decisions/0004-internal-service-authentication.md)
 * [ADR 0005 — Contract authority and runtime boundaries](../../docs/decisions/0005-contract-authority-and-runtime-boundaries.md)
+* [ADR 0006 — Canonical Call aggregate and state machine](../../docs/decisions/0006-canonical-call-aggregate-and-state-machine.md)
 * [Service data ownership](../../docs/architecture/service-data-ownership.md)

@@ -1,7 +1,9 @@
 name: Calling service
 
 # services/calling — the Rust/Axum Calling service (platform consumer, credential and
-# principal trust foundation; internal service authentication). Independent of
+# principal trust foundation; internal service authentication; Calling core: canonical
+# Call aggregate, state machine, events + transactional outbox, read-only call API).
+# Independent of
 # services/meeting-service: this workflow never builds or starts the Meeting Service.
 # It depends only on the shared packages/service-auth crate and the Calling / platform
 # contracts in packages/contracts.
@@ -116,7 +118,11 @@ jobs:
       # external, credential storage, authentication, environment isolation, scopes,
       # rotation, secret leakage, principals, limits, admin CLI, architecture, internal
       # service authentication, outbound delegation / internal client, HTTP contract
-      # conformance.
+      # conformance, and the Calling core: call state machine, concurrency races
+      # (stale versions, concurrent-call limits, reconnects), authorization and the paid
+      # public-network guard, participants / sessions / intervals, immutable events and
+      # the transactional outbox (with injected failures), routes / legs / attempts /
+      # quality / usage, and the read-only call API.
       - name: cargo test
         run: cargo test --workspace --no-fail-fast --locked
 
@@ -158,6 +164,12 @@ jobs:
           cargo run -q --locked -p calling-migration -- up
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'platform\_%'")" = "11"
+          # Call domain (Part C §15–§19): calls + 10 call_* tables + the outbox.
+          test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
+            "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' \
+             AND (tablename = 'calls' OR tablename LIKE 'call\_%' OR tablename = 'calling_outbox_events')")" = "12"
+          test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
+            "SELECT count(*) FROM calling_seaql_migrations")" = "9"
 
       - name: Service starts against the migrated database and refuses unsafe configuration
         env:
@@ -210,6 +222,11 @@ jobs:
           test "$code" = "401" && grep -q '"code":"INTERNAL_AUTHENTICATION_FAILED"' "$K/a.json"
           code=$(curl -s -o "$K/b.json" -w '%{http_code}' -H 'Authorization: Bearer cfmk_live_x_y' http://127.0.0.1:8090/internal/v1/anything)
           test "$code" = "401" && grep -q '"code":"INTERNAL_AUTHENTICATION_FAILED"' "$K/b.json"
+          # The call API requires a platform credential; there is no call mutation route.
+          code=$(curl -s -o "$K/c.json" -w '%{http_code}' http://127.0.0.1:8090/v1/calls)
+          test "$code" = "401" && grep -q '"code":"AUTHENTICATION_FAILED"' "$K/c.json"
+          code=$(curl -s -o "$K/d.json" -w '%{http_code}' -X POST http://127.0.0.1:8090/v1/calls)
+          test "$code" = "401" -o "$code" = "405"
           grep -q "internal service authentication ready" "$K/run.log"
           if grep -q -- "PRIVATE KEY" "$K/run.log"; then echo "::error::key material in logs"; exit 1; fi
           rm -rf "$K"

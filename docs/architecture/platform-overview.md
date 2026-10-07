@@ -6,7 +6,7 @@ CF Meet is growing from a video-meeting application into CosmicForge's unified c
 
 > **Components with working code:** `apps/web` (Next.js web client),
 > `services/meeting-service` (Rust/Axum Meeting & Conference Platform service) and
-> `services/calling` (Rust/Axum Calling service — platform trust foundation only; no call API yet).
+> `services/calling` (Rust/Axum Calling service — platform trust foundation and Calling core: canonical Call aggregate, state machine and read-only call API; no call creation / control API or call execution yet).
 > Every other service/app boundary below is planned until implementation begins.
 
 ## Four platform layers
@@ -49,7 +49,7 @@ INFRASTRUCTURE
 | Service | Path | Status / responsibility |
 |---|---|---|
 | Meeting & Conference Platform | `services/meeting-service` | **Current.** Meeting-domain control plane and Phase 2 backend. One deployable modular monolith during Phase 2. |
-| Realtime app-to-app calling | `services/calling` | **Active.** Platform consumer / credential / principal trust foundation (Part B §7–§10, [ADR 0003](../decisions/0003-calling-platform-trust-model.md)). Call model and API planned. |
+| Realtime app-to-app calling | `services/calling` | **Active.** Platform consumer / credential / principal trust foundation (Part B §7–§10, [ADR 0003](../decisions/0003-calling-platform-trust-model.md)) and Calling core (Part C §15–§19, [ADR 0006](../decisions/0006-canonical-call-aggregate-and-state-machine.md)): canonical Call model, state machine, events, read-only call API. Call creation / control, RTC and telephony execution planned. |
 | Privacy Relay communications | `services/privacy-relay` | Planned |
 | Unified messaging | `services/messaging` | Planned |
 | SIP/PSTN telephony | `services/telephony` | Planned |

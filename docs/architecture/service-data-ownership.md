@@ -17,7 +17,7 @@ schema or contract exists for them until their implementation phase begins.
 
 | Service | Status | Owns | Must not |
 |---|---|---|---|
-| **Calling** (`services/calling`) | **Active.** Platform-consumer foundation implemented; call domain planned (Part C) | • Calls<br>• Participants<br>• Sessions<br>• Routes<br>• Authorizations<br>• Call records<br>• Call quality<br>• Call-level usage<br>• Platform-consumer foundation *(implemented)*: tenants, applications, application environments, service accounts, API credentials and their scopes, limit policy, request-rate windows, communication principals | • read/write Privacy Relay private tables directly<br>• read/write Telephony private tables directly<br>• read Meeting Service tables<br>• receive ordinary plaintext protected contacts |
+| **Calling** (`services/calling`) | **Active.** Platform-consumer foundation and Calling core (Part C §15–§19: calls, participants, sessions, routes, legs, attempts, authorizations, events, quality, usage) implemented | • Calls<br>• Participants<br>• Sessions<br>• Routes<br>• Authorizations<br>• Call records<br>• Call quality<br>• Call-level usage<br>• Platform-consumer foundation *(implemented)*: tenants, applications, application environments, service accounts, API credentials and their scopes, limit policy, request-rate windows, communication principals | • read/write Privacy Relay private tables directly<br>• read/write Telephony private tables directly<br>• read Meeting Service tables<br>• receive ordinary plaintext protected contacts |
 | **Privacy Relay** (`services/privacy-relay`) | **Planned — not yet created** | • Communication Contexts<br>• Relay sessions<br>• Protected contact references<br>• Contact Vault metadata<br>• Relay authorization | • expose plaintext contacts to ordinary consumers<br>• become a general product/order database |
 | **Telephony** (`services/telephony`) | **Planned — not yet created** | • Call legs<br>• Provider bindings<br>• Carrier events<br>• Telephony routes<br>• SIP/provider operational state | • independently decide whether a business user is authorized to call<br>• bypass Calling / Privacy Relay policy |
 | **Meeting Service** (`services/meeting-service`) | **Current** | • Meeting Spaces<br>• Conference Sessions<br>• Meeting participants<br>• Meeting-specific media control | • act as the universal backend for calls or telephony |
@@ -26,8 +26,11 @@ schema or contract exists for them until their implementation phase begins.
 Notes on the model:
 
 * **Each service has its own database.** Calling's is configured by its own
-  `DATABASE_URL`, and every Calling table is `platform_*` today; the call-domain tables
-  arrive with Part C. The Meeting Service's database additionally holds the private
+  `DATABASE_URL`; its tables are the platform foundation (`platform_*`) and the call
+  domain (`calls`, `call_*`, `calling_outbox_events`). Calling's `call_legs` is the
+  canonical, provider-independent Calling-side leg; provider bindings, carrier ids, SIP
+  dialogs, callbacks and reconciliation state belong to Telephony's own database and are
+  referenced by Calling only through an opaque UUID (`execution_binding_ref`). The Meeting Service's database additionally holds the private
   records that support its domains (accounts, organizations and memberships,
   scheduling and recurrence, chat, polls, Q&A, breakouts, transcripts, artifacts,
   webinar registrations, meeting webhooks, `api_keys`, its outbox); no other service
@@ -99,6 +102,6 @@ Comments are ignored (documentation may discuss the rules); the data rules apply
 production code with `#[cfg(test)]` items removed, except database-location names, which
 are refused in tests and configuration too. Calling's
 `tests/architecture_boundaries.rs` additionally pins Calling-specific rules (own
-`platform_*` tables only, no Meeting Service crate or `ActorContext`, no customer
+`platform_*` and call-domain tables only, no Meeting Service crate or `ActorContext`, no customer
 credential machinery in internal service auth, no implicit conversions between context
 types).
