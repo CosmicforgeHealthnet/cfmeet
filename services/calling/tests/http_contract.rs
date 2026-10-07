@@ -511,6 +511,8 @@ fn every_operation_declares_its_authentication() {
                 .as_str();
             let expected = if path.starts_with("/internal/provider/") {
                 "mediaProviderSignature"
+            } else if path.starts_with("/v1/calling/media/") {
+                "mediaCredential"
             } else if path == "/v1/calling/signaling"
                 || path.starts_with("/v1/calling/invitations")
                 || path.starts_with("/v1/calling/sessions/")

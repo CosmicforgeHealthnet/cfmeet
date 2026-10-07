@@ -464,14 +464,14 @@
       "properties": {
         "sessionId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
         "url": {
-          "description": "Media connection URL (wss:// in production).",
+          "description": "Calling's media connection gateway URL (wss:// in production), never the media server itself.",
           "type": "string",
           "format": "uri",
           "pattern": "^wss?://",
           "maxLength": 512
         },
         "token": {
-          "description": "Opaque join token, bound to this session's media identity and the Call's media resource; it carries no administrative grant.",
+          "description": "Opaque join credential bound to this session's media identity, its current media generation and the Call's media resource, sealed by Calling's media edge: the media server does not accept it directly, and the gateway admits it only while that generation of the session holds media access. It carries no administrative grant.",
           "type": "string",
           "minLength": 1,
           "maxLength": 4096

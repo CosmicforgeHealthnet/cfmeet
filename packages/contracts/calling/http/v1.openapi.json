@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Calling service API",
-    "version": "1.2.0",
-    "description": "HTTP surface exposed by services/calling (Part C sections 15-25): the health endpoint; the call API (list, get, available actions); application call creation (POST /v1/calls) and control (accept, decline, cancel, end, hold, resume, transfer, session removal, media credentials); the application endpoint registry and signaling-credential minting; the endpoint's own signaling operations (WebSocket channel, offer recovery, accept / decline, media credentials) authenticated by a short-lived signaling credential; and the media provider callback, authenticated by the provider's signature. There is no generic state mutation: a client never sends a state, a scope, an authorization result, a route, a provider, a room, a media identity, a permission or a telephone number. Tenant, application and environment scope comes only from the authenticated credential; a call, principal, endpoint, offer or session of another scope is answered exactly like a missing one (404). Every state-changing command carries expectedVersion (the single concurrency mechanism); Idempotency-Key is required for call creation and transfer and honoured on every other command (a replay returns the recorded response with Idempotent-Replayed: true; a different request under the same key is 409 IDEMPOTENCY_CONFLICT). Every response carries an x-request-id header with the server-generated request id; a well-formed client x-request-id is echoed as x-client-request-id."
+    "version": "1.3.0",
+    "description": "HTTP surface exposed by services/calling (Part C sections 15-25): the health endpoint; the call API (list, get, available actions); application call creation (POST /v1/calls) and control (accept, decline, cancel, end, hold, resume, transfer, session removal, media credentials); the application endpoint registry and signaling-credential minting; the endpoint's own signaling operations (WebSocket channel, offer recovery, accept / decline, media credentials) authenticated by a short-lived signaling credential; the media connection gateway, which admits every media signaling connection against authoritative state before the media server is contacted; and the media provider callback, authenticated by the provider's signature. There is no generic state mutation: a client never sends a state, a scope, an authorization result, a route, a provider, a room, a media identity, a permission or a telephone number. Tenant, application and environment scope comes only from the authenticated credential; a call, principal, endpoint, offer or session of another scope is answered exactly like a missing one (404). Every state-changing command carries expectedVersion (the single concurrency mechanism); Idempotency-Key is required for call creation and transfer and honoured on every other command (a replay returns the recorded response with Idempotent-Replayed: true; a different request under the same key is 409 IDEMPOTENCY_CONFLICT). Every response carries an x-request-id header with the server-generated request id; a well-formed client x-request-id is echoed as x-client-request-id."
   },
   "paths": {
     "/health": {
@@ -1606,6 +1606,122 @@
         }
       }
     },
+    "/v1/calling/media/rtc": {
+      "get": {
+        "operationId": "connectMediaLegacy",
+        "summary": "Open a media signaling connection (SDK legacy path)",
+        "description": "Media connection gateway (WebSocket upgrade; the media SDK's signaling protocol is relayed opaquely). Before anything reaches the media server, the presented media credential is authenticated (edge signature, expiry, resource, identity, generation) and admitted against authoritative state: the session must exist in that Call, hold media access (AUTHORIZED, not removed or ended, participant still in the Call, Call in a media state) and the credential must carry the session's CURRENT media generation. Otherwise the upgrade is refused (401; 503 when the state cannot be read: fail closed). An admitted connection is relayed with a single-use, join-only media-server token; media rights are applied server-side after the join. Every token the media server refreshes is re-checked and re-sealed with the edge key before it reaches the client, so no client ever holds a token the media server accepts directly.",
+        "security": [
+          {
+            "mediaCredential": []
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols: the admitted connection is relayed to the media server."
+          },
+          "400": {
+            "description": "Malformed request (query, or no WebSocket upgrade)."
+          },
+          "401": {
+            "description": "Not admitted: missing, malformed, forged or expired credential; unknown identity; foreign resource; revoked, removed or ended session; stale generation; terminal Call. Plain-text body; uniform."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "description": "Authoritative state unreadable, or the media server unreachable: refused (fail closed)."
+          }
+        }
+      }
+    },
+    "/v1/calling/media/rtc/v1": {
+      "get": {
+        "operationId": "connectMedia",
+        "summary": "Open a media signaling connection",
+        "description": "Media connection gateway (WebSocket upgrade; the media SDK's signaling protocol is relayed opaquely). Before anything reaches the media server, the presented media credential is authenticated (edge signature, expiry, resource, identity, generation) and admitted against authoritative state: the session must exist in that Call, hold media access (AUTHORIZED, not removed or ended, participant still in the Call, Call in a media state) and the credential must carry the session's CURRENT media generation. Otherwise the upgrade is refused (401; 503 when the state cannot be read: fail closed). An admitted connection is relayed with a single-use, join-only media-server token; media rights are applied server-side after the join. Every token the media server refreshes is re-checked and re-sealed with the edge key before it reaches the client, so no client ever holds a token the media server accepts directly.",
+        "security": [
+          {
+            "mediaCredential": []
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols: the admitted connection is relayed to the media server."
+          },
+          "400": {
+            "description": "Malformed request (query, or no WebSocket upgrade)."
+          },
+          "401": {
+            "description": "Not admitted: missing, malformed, forged or expired credential; unknown identity; foreign resource; revoked, removed or ended session; stale generation; terminal Call. Plain-text body; uniform."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "description": "Authoritative state unreadable, or the media server unreachable: refused (fail closed)."
+          }
+        }
+      }
+    },
+    "/v1/calling/media/rtc/validate": {
+      "get": {
+        "operationId": "validateMediaLegacy",
+        "summary": "Check whether a media credential would be admitted (SDK legacy path)",
+        "description": "Media connection gateway (WebSocket upgrade; the media SDK's signaling protocol is relayed opaquely). Before anything reaches the media server, the presented media credential is authenticated (edge signature, expiry, resource, identity, generation) and admitted against authoritative state: the session must exist in that Call, hold media access (AUTHORIZED, not removed or ended, participant still in the Call, Call in a media state) and the credential must carry the session's CURRENT media generation. Otherwise the upgrade is refused (401; 503 when the state cannot be read: fail closed). An admitted connection is relayed with a single-use, join-only media-server token; media rights are applied server-side after the join. Every token the media server refreshes is re-checked and re-sealed with the edge key before it reaches the client, so no client ever holds a token the media server accepts directly.",
+        "security": [
+          {
+            "mediaCredential": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The credential would be admitted now (diagnostics only; nothing is relayed)."
+          },
+          "400": {
+            "description": "Malformed request (query, or no WebSocket upgrade)."
+          },
+          "401": {
+            "description": "Not admitted: missing, malformed, forged or expired credential; unknown identity; foreign resource; revoked, removed or ended session; stale generation; terminal Call. Plain-text body; uniform."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "description": "Authoritative state unreadable, or the media server unreachable: refused (fail closed)."
+          }
+        }
+      }
+    },
+    "/v1/calling/media/rtc/v1/validate": {
+      "get": {
+        "operationId": "validateMedia",
+        "summary": "Check whether a media credential would be admitted",
+        "description": "Media connection gateway (WebSocket upgrade; the media SDK's signaling protocol is relayed opaquely). Before anything reaches the media server, the presented media credential is authenticated (edge signature, expiry, resource, identity, generation) and admitted against authoritative state: the session must exist in that Call, hold media access (AUTHORIZED, not removed or ended, participant still in the Call, Call in a media state) and the credential must carry the session's CURRENT media generation. Otherwise the upgrade is refused (401; 503 when the state cannot be read: fail closed). An admitted connection is relayed with a single-use, join-only media-server token; media rights are applied server-side after the join. Every token the media server refreshes is re-checked and re-sealed with the edge key before it reaches the client, so no client ever holds a token the media server accepts directly.",
+        "security": [
+          {
+            "mediaCredential": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The credential would be admitted now (diagnostics only; nothing is relayed)."
+          },
+          "400": {
+            "description": "Malformed request (query, or no WebSocket upgrade)."
+          },
+          "401": {
+            "description": "Not admitted: missing, malformed, forged or expired credential; unknown identity; foreign resource; revoked, removed or ended session; stale generation; terminal Call. Plain-text body; uniform."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "description": "Authoritative state unreadable, or the media server unreachable: refused (fail closed)."
+          }
+        }
+      }
+    },
     "/internal/provider/media/events": {
       "post": {
         "operationId": "receiveMediaProviderEvent",
@@ -1674,6 +1790,12 @@
         "scheme": "bearer",
         "bearerFormat": "cfsig_<compact JWS>",
         "description": "Short-lived Call Signaling Credential of one endpoint of one principal (POST /v1/calling/signaling-credentials), sent as `Authorization: Bearer <credential>`. It authenticates only that endpoint's own signaling operations and is re-checked against the endpoint, the principal and the minting credential on every use. Platform API credentials (cfmk_...) and internal service tokens are refused on these routes. Browsers, which cannot set headers on a WebSocket, offer it on GET /v1/calling/signaling as the subprotocol pair `cfmeet.signaling.v1, bearer.<credential>`."
+      },
+      "mediaCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "media credential (JWT sealed by Calling's media edge)",
+        "description": "The short-lived media credential returned by a media-credentials operation, presented by the media SDK as `Authorization: Bearer <credential>` (or the `access_token` query parameter). It is sealed with Calling's media-edge key, which the media server does not know: it is usable only through this gateway, which admits the exact session generation against authoritative state on every connection and reconnection. Platform API credentials, signaling credentials and media-server tokens are refused."
       },
       "mediaProviderSignature": {
         "type": "apiKey",
