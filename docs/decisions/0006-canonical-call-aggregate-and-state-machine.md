@@ -113,7 +113,7 @@ Rust (`CallState::allowed_targets`) and is repeated in the database
 * A **CallSession** is one device / network participation with a server-generated
   media / signaling identity (`cfmid_` + 256 random bits; unique; never client input,
   never a provider participant id). A participant may hold many sessions at once (no
-  uniqueness on `participant_id`); multi-device answer arbitration is §20 and deferred.
+  uniqueness on `participant_id`); multi-device answer arbitration is §20 (ADR 0008).
 * **Reconnect** is explicit: *renewal* opens connection interval n + 1 on the same
   session; *replacement* ends the session and creates a new one (new media identity,
   `replaces_session_id`) for the same participant. Neither touches the Call or the
@@ -167,9 +167,12 @@ concurrent-call limit enforcement) for them.
 
 ## Deferred
 
-§20 multi-device ringing and answer arbitration; §21 route / attempt orchestration and
-the routing engine; §22–§24 application voice / video calling and the RTC provider
-contract; §25 provider execution of cancel / end / hold / transfer; the call
-authorization / policy engine; public call creation / control APIs; realtime signaling,
-push ringing, webhooks and event delivery; Privacy Relay, Contact Vault, Telephony and
+Delivered since by Part C §20–§25: multi-device ringing and answer arbitration
+(ADR 0008), application route / attempt orchestration, application voice / video /
+group calling and the media provider contract (ADR 0007), call creation / control APIs,
+realtime signaling and provider-enforced cancel / end / hold / transfer (ADR 0009).
+
+Still deferred: a general routing engine and failover across networks; the call
+authorization / policy engine beyond `APP_DIRECT_V1`; push delivery through a vendor,
+customer webhooks and event delivery; Privacy Relay, Contact Vault, Telephony and
 Numbering services.

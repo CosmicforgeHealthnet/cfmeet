@@ -7,7 +7,7 @@ This document defines where each CF Meet capability belongs. Anything marked *pl
 ```text
 services/
 ├── meeting-service/     ✅ current Meeting & Conference Platform backend
-├── calling/             ◐ active: trust foundation, internal service auth and Calling core (Part C §15–§19) implemented; call control / execution planned
+├── calling/             ◐ active: trust foundation, internal service auth, Calling core (Part C §15–§19) and application calling (§20–§25) implemented; telephony execution planned
 ├── privacy-relay/       ◻ planned: masked/private transaction communications
 ├── messaging/           ◻ planned: unified messaging
 ├── telephony/           ◻ planned: SIP/PSTN telephony
@@ -52,11 +52,17 @@ calls with `packages/service-auth` (Part B §11). The Calling core (Part C §15�
 implemented: the canonical, provider-independent Call aggregate and its 17-state machine,
 participants / sessions / connection intervals, routes / legs / attempts,
 authorization decisions, quality and usage records, immutable call events with a
-transactional outbox, and the read-only call API. Call creation / control APIs, RTC and
-telephony execution are later work. See
+transactional outbox, and the call API. Application calling (Part C §20–§25) is
+implemented too: endpoints and signaling credentials, realtime signaling, multi-device
+ringing with single-winner arbitration, app voice / video / group calls through
+Calling's own provider-neutral media boundary (LiveKit adapter; no Meeting Service
+dependency), and call control / transfer. Telephony execution is later work. See
 [ADR 0003](../decisions/0003-calling-platform-trust-model.md),
 [ADR 0004](../decisions/0004-internal-service-authentication.md),
-[ADR 0006](../decisions/0006-canonical-call-aggregate-and-state-machine.md) and
+[ADR 0006](../decisions/0006-canonical-call-aggregate-and-state-machine.md),
+[ADR 0007](../decisions/0007-calling-media-provider-boundary.md),
+[ADR 0008](../decisions/0008-calling-endpoints-ringing-and-answer-arbitration.md),
+[ADR 0009](../decisions/0009-calling-call-control-idempotency-and-transfer.md) and
 [`services/calling/README.md`](../../services/calling/README.md).
 
 ## When to create or extract another service

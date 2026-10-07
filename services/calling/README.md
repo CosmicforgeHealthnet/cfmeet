@@ -6,7 +6,7 @@ shares no source, models, migrations or database with the Meeting Service.
 
 ## What is implemented
 
-**Part B §7–§14 (platform trust foundation) and Part C §15–§19 (Calling core).** The
+**Part B §7–§14 (platform trust foundation), Part C §15–§19 (Calling core) and Part C §20–§25 (application calling).** The
 service is the canonical authority for the **logical Call**: a CF Meet object with a CF
 Meet-generated UUID that stays the same whatever later executes it (application RTC,
 SIP, the public network, a relay, enterprise infrastructure, several legs or attempts).
@@ -26,19 +26,35 @@ Provider room / dialog / carrier / request identifiers are never Call identities
 | **§19** Participant / session model: principal-scoped participants, server media identities, multi-device sessions, explicit reconnect, interval-based participation time | **Implemented** |
 | Concurrent-call limit (Part B foundation) | **Enforced** at Call creation (race-safe) |
 | Read API: `GET /v1/calls`, `GET /v1/calls/{call_id}` (`calls.read`) | **Implemented** |
+| **§20** Multi-device ringing and arbitration: endpoint registry, signaling credentials, invitations with server expiry, single winner per participant (DB constraint), one-device decline, DECLINED / NO_ANSWER, recovery API, WebSocket signaling, cross-instance fan-out | **Implemented** (ADR 0008) |
+| **§21** Call legs, attempts and routes: one APPLICATION route, RTC leg, idempotent attempt, deterministic media resource, private media binding | **Implemented** |
+| **§22** App-to-app voice: `POST /v1/calls`, APP_DIRECT_V1 authorization, join-only credentials, CONNECTED on verified media evidence of two parties, usage finalization | **Implemented** |
+| **§23** App-to-app video and group calls (≤ 16 participants), per-participant permissions, individual session removal with provider enforcement | **Implemented** |
+| **§24** Calling media provider boundary: `CallMediaProvider` trait + capabilities, LiveKit adapter with its own config, signed callbacks as evidence only, dedupe, reconciliation, stale re-entry prevention, real-LiveKit certification | **Implemented** (ADR 0007) |
+| **§25** Call control: accept, decline, cancel, end (ENDING → ENDED on cleanup evidence), hold / resume enforced at the provider, application transfer on the same Call with failure recovery, `expectedVersion`, `Idempotency-Key`, available actions | **Implemented** (ADR 0009) |
 | Telecom-spend limits | Resolved; enforced by future telephony operations |
 
-**Deferred (later sections / services):** multi-device ringing and answer arbitration
-(§20), route / attempt orchestration and the routing engine (§21), app-to-app voice and
-video calling, the RTC provider contract and LiveKit call rooms (§22–§24), provider
-execution of cancel / end / hold / transfer (§25), public call creation and control
-APIs, realtime signaling and push ringing, webhooks and event delivery (the outbox has
-no publisher yet), Privacy Relay, Contact Vault, Telephony (SIP / public network,
-carrier adapters, provider callbacks and reconciliation), enterprise calling and
-billing.
+**Deferred (later sections / services):** a general routing engine and network
+failover, the call policy engine beyond `APP_DIRECT_V1`, push delivery through a push
+vendor (a transport-neutral push-ready payload is produced), customer webhooks and
+outbox publishing, recording, quality metrics from providers that do not offer them,
+Privacy Relay, Contact Vault, Telephony (SIP / public network, carrier adapters),
+Numbering, enterprise calling and billing.
 
-HTTP surface: `GET /health`, `GET /v1/calls`, `GET /v1/calls/{call_id}` (contract:
-[`packages/contracts/calling/http/v1.openapi.json`](../../packages/contracts/calling/http/v1.openapi.json)).
+HTTP surface (contract:
+[`packages/contracts/calling/http/v1.openapi.json`](../../packages/contracts/calling/http/v1.openapi.json),
+bodies in [`calling/control`](../../packages/contracts/calling/control/v1.schema.json),
+signals in [`calling/realtime`](../../packages/contracts/calling/realtime/v1.schema.json)):
+`GET /health`; the call API `GET /v1/calls`, `GET /v1/calls/{call_id}`,
+`GET /v1/calls/{call_id}/actions`; call creation and control `POST /v1/calls`,
+`POST /v1/calls/{call_id}/accept|decline|cancel|end|hold|resume|transfer`,
+`POST /v1/calls/{call_id}/sessions/{session_id}/media-credentials|remove`; endpoints
+`POST|GET /v1/calling/endpoints`, `DELETE /v1/calling/endpoints/{endpoint_id}`,
+`POST /v1/calling/signaling-credentials` (all platform API credential); the endpoint's
+own `GET /v1/calling/signaling` (WebSocket), `GET /v1/calling/invitations`,
+`POST /v1/calling/invitations/{id}/accept|decline`,
+`POST /v1/calling/sessions/{session_id}/media-credentials` (signaling credential only);
+and `POST /internal/provider/media/events` (media provider signature only).
 The customer authentication middleware and `PlatformAuthContext` extractor, and the
 internal service authentication middleware and `InternalCaller` extractor, are in place.
 Every path under `/internal/v1/` — including unknown ones — requires a valid service
@@ -172,6 +188,64 @@ exactly like a missing one (404). Responses are `Cache-Control: no-store` and ne
 contain media identities, execution bindings, provider data, credentials, principal
 references or telephone numbers.
 
+## Application calling (Part C §20–§25)
+
+### Flow
+
+1. The application backend registers each device as an endpoint
+   (`POST /v1/calling/endpoints`) and mints a short-lived signaling credential for it
+   (`POST /v1/calling/signaling-credentials`); the device opens
+   `GET /v1/calling/signaling` with it (header, or subprotocols
+   `cfmeet.signaling.v1, bearer.<credential>` in browsers). Devices never see the API
+   credential.
+2. `POST /v1/calls` (`calls.write`, `Idempotency-Key`) with `kind`, the initiator's
+   principal and endpoint and the target principals. Calling authorizes (APP_DIRECT_V1),
+   resolves targets in scope, records one APPLICATION route / RTC leg / attempt,
+   ensures the Call's media resource `cfc-<call id>` at the provider, authorizes the
+   initiator's session and rings every eligible endpoint (`call.incoming`; offers expire
+   on the server, default 45 s).
+3. A device accepts (`…/invitations/{id}/accept`, or the backend with
+   `/v1/calls/{id}/accept`): exactly one device per participant wins; the others get
+   `call.answered_elsewhere` and no session. The first winner moves the Call to
+   ANSWERED.
+4. Each authorized session asks for a media credential (URL, join-only token, expiry,
+   capabilities) and joins; Calling admits the verified connection server-side with the
+   permissions it derives. CONNECTED needs admitted connections of two participants.
+5. Hold / resume / transfer / session removal / end are commands with `expectedVersion`;
+   the provider enforces them. END reaches ENDED only on cleanup evidence; usage is
+   finalized.
+
+Signals are sent only after the authoritative transaction commits; a reconnecting
+endpoint recovers with `GET /v1/calling/invitations`. Expiry and media reconciliation
+workers run on every instance (row leases / `SKIP LOCKED`).
+
+### Tables (migrations 000010–000014)
+
+`call_endpoints`, `call_invitations`, `call_answer_claims` (UNIQUE (call, participant):
+the single-winner guarantee), `call_participant_media_permissions`,
+`call_media_sessions` (private media binding), `call_commands` (idempotency),
+`call_transfers`, `call_media_provider_events` (verified, deduplicated callback
+evidence); `call_sessions` gained endpoint, media access (NONE → AUTHORIZED → REVOKED),
+media generation, admission and removal.
+
+### Configuration
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CALLING_SIGNALING_SIGNING_KEY` | — (required, ≥ 32 chars) | Key of the signaling credentials (separate from every other key) |
+| `CALLING_SIGNALING_CREDENTIAL_TTL_SECONDS` | 600 (≤ 3600) | Signaling credential lifetime |
+| `CALLING_MEDIA_PROVIDER` | `none` | `livekit` to enable application media; `none` answers `CAPABILITY_UNAVAILABLE` |
+| `CALLING_LIVEKIT_URL` / `CALLING_LIVEKIT_API_URL` | — | Client (wss) and server API (https) URLs; TLS required except loopback |
+| `CALLING_LIVEKIT_API_KEY` / `CALLING_LIVEKIT_API_SECRET` | — | Calling's own LiveKit key pair (secret ≥ 32 chars; never logged or returned) |
+| `CALLING_LIVEKIT_API_TIMEOUT_MS` | 5000 | Provider API timeout |
+| `CALLING_MEDIA_CREDENTIAL_TTL_SECONDS` | 300 (30–900) | Media join credential lifetime |
+| `CALLING_INVITATION_TTL_SECONDS` | 45 (10–300) | Ring offer lifetime |
+| `CALLING_MAX_GROUP_PARTICIPANTS` | 16 (2–64) | Participants per Call, initiator included |
+| `CALLING_MAX_ENDPOINTS_PER_PARTICIPANT` | 10 (1–50) | Devices rung per participant |
+| `CALLING_MEDIA_RECONCILE_INTERVAL_SECONDS` | 15 (2–300) | Media reconciliation interval |
+
+Invalid or partial media / signaling configuration stops the service at startup (exit 2).
+
 ## Internal service authentication
 
 ```text
@@ -266,7 +340,7 @@ telephony operations that consume it.
 
 ## Configuration
 
-See [`.env.example`](.env.example). Required: `DATABASE_URL`, `API_CREDENTIAL_PEPPER`
+See [`.env.example`](.env.example). Required: `DATABASE_URL`, `CALLING_SIGNALING_SIGNING_KEY`, `API_CREDENTIAL_PEPPER`
 (≥ 32 random bytes, e.g. `openssl rand -base64 48`; placeholder values are rejected and
 there is no fallback), `CF_RUNTIME_ENVIRONMENT`, `CF_SERVICE_AUTH_KEY_ID`,
 `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` and `CF_SERVICE_TRUST_BUNDLE_FILE`. The service exits
@@ -276,7 +350,7 @@ inconsistent. The Calling service owns its own database.
 ## Running locally (no Docker required)
 
 ```bash
-cp .env.example .env              # set DATABASE_URL and API_CREDENTIAL_PEPPER
+cp .env.example .env              # set DATABASE_URL, API_CREDENTIAL_PEPPER, CALLING_SIGNALING_SIGNING_KEY
 # A local signing key (outside the repository) and a trust bundle with no peers yet:
 mkdir -p ~/.cfmeet && cargo run -q --manifest-path ../../packages/service-auth/Cargo.toml \
   --bin cf-service-keygen -- generate --kid calling-local-1 --out ~/.cfmeet/calling-local-1.pem
@@ -334,7 +408,23 @@ loopback HTTP), `http_contract` (conformance with `packages/contracts`, includin
 responses, call vocabularies and every outbox envelope / lifecycle payload) and the
 Calling core suites `call_state_machine`, `call_concurrency` (repeated races),
 `call_authorization`, `call_participation`, `call_evidence` (events, outbox, injected
-failures), `call_records` and `call_api`.
+failures), `call_records` and `call_api`; application calling: `app_calls` (voice /
+video end to end), `app_ringing` (endpoints, signaling credentials, offers, expiry,
+decline semantics, group arbitration), `app_races` (repeated concurrent accepts, group
+contention, accept vs cancel, duplicate commands, the DB-level single-winner mutation,
+multi-application load, fan-out / credential / reconciliation bursts), `app_media`
+(provider contract on the test provider, credential security, callbacks as evidence,
+reconciliation, privacy of stored evidence), `app_control` (cancel / end / hold /
+resume / transfer, idempotency, versions, provider failures) and `signaling` (real
+WebSocket, subprotocol auth, expiry close 4001, recovery, two-instance LISTEN / NOTIFY
+fan-out).
+
+Real-provider certification (`rtc_certification`) runs against a real LiveKit server and
+real WebRTC clients (`tests/rtc/rtc_client.py`); it is skipped unless the
+`CALLING_RTC_CERT_*` variables are set (`CALLING_RTC_CERT_REQUIRED=1` turns a missing
+server into a failure). CI:
+[`.github/workflows/calling-rtc-certification.yml`](../../.github/workflows/calling-rtc-certification.yml);
+locally see [`infra/livekit/README.md`](../../infra/livekit/README.md) (no Docker needed).
 
 CI: [`.github/workflows/calling.yml`](../../.github/workflows/calling.yml).
 
@@ -354,4 +444,7 @@ The image runs as a non-root user and contains `calling`, `calling-migration` an
 * [ADR 0004 — Internal service authentication](../../docs/decisions/0004-internal-service-authentication.md)
 * [ADR 0005 — Contract authority and runtime boundaries](../../docs/decisions/0005-contract-authority-and-runtime-boundaries.md)
 * [ADR 0006 — Canonical Call aggregate and state machine](../../docs/decisions/0006-canonical-call-aggregate-and-state-machine.md)
+* [ADR 0007 — Calling media provider boundary](../../docs/decisions/0007-calling-media-provider-boundary.md)
+* [ADR 0008 — Endpoints, ringing and answer arbitration](../../docs/decisions/0008-calling-endpoints-ringing-and-answer-arbitration.md)
+* [ADR 0009 — Call control, idempotency and transfer](../../docs/decisions/0009-calling-call-control-idempotency-and-transfer.md)
 * [Service data ownership](../../docs/architecture/service-data-ownership.md)

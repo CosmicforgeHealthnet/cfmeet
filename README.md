@@ -13,7 +13,7 @@ This monorepo contains the platform's applications, domain services, shared cont
 | **Current** | Video meetings: scheduled and instant meetings, pre-join, LiveKit rooms, waiting room/admission, participant list and media state, screen share, in-meeting chat |
 | **Current** | Accounts: email/password with verification, Google OAuth, password reset |
 | **Current** | Developer basics: API keys, external meeting create/join API, webhook registration, OpenAPI/Swagger |
-| **In progress** | Realtime app-to-app calling — `services/calling`: platform trust foundation (tenants, applications, environments, service accounts, API credentials, scopes, principals) and Calling core (canonical Call aggregate, state machine, participants / sessions, legs / routes / attempts, authorizations, immutable events + outbox, read-only call API) implemented; call creation / control APIs, RTC and telephony execution not yet |
+| **In progress** | Realtime app-to-app calling — `services/calling`: platform trust foundation (tenants, applications, environments, service accounts, API credentials, scopes, principals) and Calling core (canonical Call aggregate, state machine, participants / sessions, legs / routes / attempts, authorizations, immutable events + outbox, call API) and application calling (endpoints, signaling, ringing / arbitration, app voice / video / group calls via Calling's own media provider boundary, call control and transfer) implemented; telephony execution not yet |
 | **Planned** | Unified messaging |
 | **Planned** | Privacy Relay communications |
 | **Planned** | SIP/PSTN telephony and Digital Communications Numbers |
@@ -56,7 +56,7 @@ cfmeet/
 |---|---|---|
 | `apps/web/` | CF Meet web experience | Vercel |
 | `services/meeting-service/` | Meeting/conference control plane: auth, meetings, participants, waiting room, chat, LiveKit token/control integration, API keys, webhooks, workers and related meeting-domain functionality | Docker image |
-| `services/calling/` | Calling domain service: the platform trust foundation (tenant / application / environment / service-account model, API credentials, scopes, limits, communication principals) and the Calling core — the canonical, provider-independent Call aggregate, state machine, participants / sessions, legs / routes / attempts, authorizations, immutable events with a transactional outbox, and the read-only call API ([README](services/calling/README.md)) | Docker image (context: repository root, `-f services/calling/Dockerfile`) |
+| `services/calling/` | Calling domain service: the platform trust foundation (tenant / application / environment / service-account model, API credentials, scopes, limits, communication principals) and the Calling core — the canonical, provider-independent Call aggregate, state machine, participants / sessions, legs / routes / attempts, authorizations, immutable events with a transactional outbox, the call API, and application calling (endpoints, signaling, ringing / arbitration, media provider boundary, call control) ([README](services/calling/README.md)) | Docker image (context: repository root, `-f services/calling/Dockerfile`) |
 
 The current Rust service is intentionally named **meeting-service** because it is the backend for the meeting/conferencing domain, not the universal backend for all future CF Meet capabilities.
 

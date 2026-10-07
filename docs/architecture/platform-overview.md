@@ -6,7 +6,7 @@ CF Meet is growing from a video-meeting application into CosmicForge's unified c
 
 > **Components with working code:** `apps/web` (Next.js web client),
 > `services/meeting-service` (Rust/Axum Meeting & Conference Platform service) and
-> `services/calling` (Rust/Axum Calling service — platform trust foundation and Calling core: canonical Call aggregate, state machine and read-only call API; no call creation / control API or call execution yet).
+> `services/calling` (Rust/Axum Calling service — platform trust foundation, Calling core (canonical Call aggregate, state machine, call API) and application calling: endpoints, signaling, ringing / answer arbitration, a provider-neutral media boundary with a LiveKit adapter, call control and transfer; no telephony execution yet).
 > Every other service/app boundary below is planned until implementation begins.
 
 ## Four platform layers
@@ -49,7 +49,7 @@ INFRASTRUCTURE
 | Service | Path | Status / responsibility |
 |---|---|---|
 | Meeting & Conference Platform | `services/meeting-service` | **Current.** Meeting-domain control plane and Phase 2 backend. One deployable modular monolith during Phase 2. |
-| Realtime app-to-app calling | `services/calling` | **Active.** Platform consumer / credential / principal trust foundation (Part B §7–§10, [ADR 0003](../decisions/0003-calling-platform-trust-model.md)) and Calling core (Part C §15–§19, [ADR 0006](../decisions/0006-canonical-call-aggregate-and-state-machine.md)): canonical Call model, state machine, events, read-only call API. Call creation / control, RTC and telephony execution planned. |
+| Realtime app-to-app calling | `services/calling` | **Active.** Platform consumer / credential / principal trust foundation (Part B §7–§10, [ADR 0003](../decisions/0003-calling-platform-trust-model.md)) and Calling core (Part C §15–§19, [ADR 0006](../decisions/0006-canonical-call-aggregate-and-state-machine.md)): canonical Call model, state machine, events, call API; application calling (Part C §20–§25, ADRs [0007](../decisions/0007-calling-media-provider-boundary.md), [0008](../decisions/0008-calling-endpoints-ringing-and-answer-arbitration.md), [0009](../decisions/0009-calling-call-control-idempotency-and-transfer.md)): endpoints, signaling, multi-device ringing, single-winner arbitration, app voice / video / group calls over Calling's own media provider boundary, call control and transfer. Telephony execution planned. |
 | Privacy Relay communications | `services/privacy-relay` | Planned |
 | Unified messaging | `services/messaging` | Planned |
 | SIP/PSTN telephony | `services/telephony` | Planned |
