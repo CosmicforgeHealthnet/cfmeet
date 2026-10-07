@@ -1,0 +1,106 @@
+{
+  "$schema": "./manifest.schema.json",
+  "manifest_version": 1,
+  "contracts": [
+    {
+      "id": "cfmeet.meeting-service.http-api",
+      "version": "1.1.0",
+      "kind": "openapi",
+      "path": "openapi/meeting-service.json",
+      "owner": "meeting-service",
+      "visibility": "public",
+      "lifecycle": "stable",
+      "authority": "generated",
+      "generated_by": "services/meeting-service: cargo run --bin export_openapi (checked by .github/workflows/backend.yml)",
+      "description": "Meeting & Conference Platform HTTP API (/api/v1, /api/v2)."
+    },
+    {
+      "id": "cfmeet.calling.http-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "calling/http/v1.openapi.json",
+      "owner": "calling",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "HTTP surface currently exposed by the Calling service: health, platform credential scheme and error envelope. The call API is not implemented yet."
+    },
+    {
+      "id": "cfmeet.platform.common",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "platform/common/v1.schema.json",
+      "owner": "platform",
+      "visibility": "internal",
+      "lifecycle": "stable",
+      "authority": "contract-first",
+      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions."
+    },
+    {
+      "id": "cfmeet.platform.service-token-header",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "platform/service-auth/token-header/v1.schema.json",
+      "owner": "platform",
+      "visibility": "internal",
+      "lifecycle": "stable",
+      "authority": "contract-first",
+      "description": "JOSE header of internal service tokens (EdDSA pinned)."
+    },
+    {
+      "id": "cfmeet.platform.service-token-claims",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "platform/service-auth/token-claims/v1.schema.json",
+      "owner": "platform",
+      "visibility": "internal",
+      "lifecycle": "stable",
+      "authority": "contract-first",
+      "description": "Claims of internal service tokens: issuer, exact audience, runtime environment, short lifetime, token id, signed request and correlation ids, optional delegated context."
+    },
+    {
+      "id": "cfmeet.platform.delegated-platform-context",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "platform/service-auth/delegated-platform-context/v1.schema.json",
+      "owner": "platform",
+      "visibility": "internal",
+      "lifecycle": "stable",
+      "authority": "contract-first",
+      "description": "Safe customer/application/actor identifiers carried inside a signed service token."
+    },
+    {
+      "id": "cfmeet.platform.service-trust-bundle",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "platform/service-auth/trust-bundle/v1.schema.json",
+      "owner": "platform",
+      "visibility": "internal",
+      "lifecycle": "stable",
+      "authority": "contract-first",
+      "description": "Receiver-controlled trust policy: trusted issuers, Ed25519 public keys and locally granted internal permissions."
+    },
+    {
+      "id": "cfmeet.platform.internal-http",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "platform/internal-http/v1.openapi.json",
+      "owner": "platform",
+      "visibility": "internal",
+      "lifecycle": "stable",
+      "authority": "contract-first",
+      "description": "Internal service-to-service HTTP conventions: service auth security scheme, request/correlation headers, normalized internal auth errors."
+    },
+    {
+      "id": "cfmeet.platform.event-envelope",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "platform/events/envelope/v1.schema.json",
+      "owner": "platform",
+      "visibility": "internal",
+      "lifecycle": "stable",
+      "authority": "contract-first",
+      "description": "Envelope for durable cross-service events. Payload contracts are registered separately by the producing service."
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "bundle_version": 1,
+  "receiver": "cfmeet.privacy-relay",
+  "runtime_environment": "staging",
+  "trusted_issuers": [
+    {
+      "issuer": "cfmeet.calling",
+      "audience": "cfmeet.privacy-relay",
+      "runtime_environment": "staging",
+      "keys": [
+        {
+          "kid": "calling-staging-2026-09",
+          "kty": "oct",
+          "crv": "Ed25519",
+          "x": "9QB95kkNvMe6SsLIvkxfFr1v7B_COHnQR0B0gRct7sU"
+        },
+        {
+          "kid": "calling-staging-2026-10",
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "x": "gz7hr6SGp_RqHckEojsY5mwGsD3d5IIVMwA-SXh2MMQ"
+        }
+      ],
+      "permissions": [
+        "communication.authorize",
+        "communication-context.read"
+      ]
+    },
+    {
+      "issuer": "cfmeet.telephony",
+      "audience": "cfmeet.privacy-relay",
+      "runtime_environment": "staging",
+      "keys": [
+        {
+          "kid": "telephony-staging-2026-10",
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "x": "P8rXnOcoHr4pxy6hboXDb2e4uJCs6mnFB4qyLCk2Zt4"
+        }
+      ],
+      "permissions": [
+        "communication-context.read",
+        "protected-contact.resolve-for-execution"
+      ]
+    }
+  ]
+}

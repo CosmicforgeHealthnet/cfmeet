@@ -1,0 +1,179 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet Calling service API",
+    "version": "1.0.0",
+    "description": "HTTP surface currently exposed by services/calling. The Calling business API (calls, participants, sessions) does not exist yet; this contract describes only what is implemented today: the health endpoint, the platform credential scheme customer routes will use, and the error envelope returned by every error response (including 404 for unknown paths and 405 for unsupported methods). Every response carries an x-request-id header with the server-generated request id; a well-formed client x-request-id is echoed as x-client-request-id."
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "Liveness and database reachability",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Service and database reachable.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unreachable.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "platformCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "cfmk_<sbx|test|live>_<public id>_<secret>",
+        "description": "Customer platform API credential issued to an application environment's service account. Sent as `Authorization: Bearer <credential>`. Never accepted on internal routes."
+      }
+    },
+    "headers": {
+      "XRequestId": {
+        "description": "Server-generated request id.",
+        "schema": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RequestId"
+        }
+      },
+      "XClientRequestId": {
+        "description": "Echo of a well-formed client-supplied x-request-id (diagnostic hint only).",
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]{1,64}$"
+        }
+      }
+    },
+    "schemas": {
+      "HealthStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "service"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unavailable"
+            ]
+          },
+          "service": {
+            "const": "calling"
+          }
+        }
+      },
+      "ErrorCode": {
+        "description": "Stable public error codes of the Calling service.",
+        "type": "string",
+        "enum": [
+          "AUTHENTICATION_FAILED",
+          "INSUFFICIENT_SCOPE",
+          "NOT_FOUND",
+          "METHOD_NOT_ALLOWED",
+          "VALIDATION_ERROR",
+          "RATE_LIMITED",
+          "SERVICE_UNAVAILABLE",
+          "INTERNAL_ERROR"
+        ]
+      },
+      "ErrorEnvelope": {
+        "description": "Error response body. Messages are fixed, safe strings; authentication failures are uniform.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message",
+              "requestId"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/ErrorCode"
+              },
+              "message": {
+                "type": "string"
+              },
+              "requestId": {
+                "oneOf": [
+                  {
+                    "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RequestId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "NotFound": {
+        "description": "Returned for any path the service does not expose.",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "MethodNotAllowed": {
+        "description": "Returned when the path exists but does not accept the HTTP method.",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet internal service HTTP conventions",
+    "version": "1.0.0",
+    "description": "Transport conventions every CF Meet internal (service-to-service) HTTP API uses. Internal routes live under /internal/v1/ and require service authentication by construction. Network location (localhost, same VM, cluster, VPC or Docker network) never authenticates a caller.\n\nEvery internal request carries exactly one of each header: X-CF-Service-Authorization (`Bearer <service token>`, see cfmeet.platform.service-token-header and cfmeet.platform.service-token-claims), X-CF-Request-Id (new for every hop) and X-CF-Correlation-Id (stable across the causal operation). Both id headers must equal the request_id / correlation_id claims signed in the token. Internal requests never carry a customer `Authorization` credential; customer routes never accept a service token.\n\nThis document defines components only. Concrete internal operations are registered by the service that owns them when they are implemented."
+  },
+  "components": {
+    "securitySchemes": {
+      "cfServiceAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Service-Authorization",
+        "description": "`Bearer <token>`: JWS compact serialization, alg EdDSA (Ed25519), typ cf-service+jwt, signed by the calling service's own key for exactly one audience and runtime environment; lifetime at most 300 seconds. Permissions come only from the receiver's trust bundle."
+      }
+    },
+    "parameters": {
+      "CfRequestId": {
+        "name": "X-CF-Request-Id",
+        "in": "header",
+        "required": true,
+        "description": "Identifier of this hop. Must equal the signed request_id claim.",
+        "schema": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RequestId" }
+      },
+      "CfCorrelationId": {
+        "name": "X-CF-Correlation-Id",
+        "in": "header",
+        "required": true,
+        "description": "Identifier of the causal operation. Must equal the signed correlation_id claim.",
+        "schema": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/CorrelationId" }
+      }
+    },
+    "schemas": {
+      "InternalErrorCode": {
+        "type": "string",
+        "enum": ["INTERNAL_AUTHENTICATION_FAILED", "INTERNAL_PERMISSION_DENIED"]
+      },
+      "InternalErrorEnvelope": {
+        "description": "Normalized internal authentication / authorization failure. It never says why authentication failed (unknown issuer, bad signature, wrong audience, ...); the reason is operator telemetry only.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "message", "requestId"],
+            "properties": {
+              "code": { "$ref": "#/components/schemas/InternalErrorCode" },
+              "message": { "type": "string" },
+              "requestId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RequestId" }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "InternalAuthenticationFailed": {
+        "description": "Missing, malformed, unverifiable or unacceptable service token, or id headers that disagree with the signed claims.",
+        "content": {
+          "application/json": { "schema": { "$ref": "#/components/schemas/InternalErrorEnvelope" } }
+        }
+      },
+      "InternalPermissionDenied": {
+        "description": "The authenticated service is not granted the permission this operation requires by the receiver's trust policy.",
+        "content": {
+          "application/json": { "schema": { "$ref": "#/components/schemas/InternalErrorEnvelope" } }
+        }
+      }
+    }
+  }
+}

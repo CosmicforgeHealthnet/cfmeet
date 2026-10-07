@@ -1,0 +1,6 @@
+{
+  "bundle_version": 1,
+  "receiver": "cfmeet.calling",
+  "runtime_environment": "production",
+  "trusted_issuers": []
+}
