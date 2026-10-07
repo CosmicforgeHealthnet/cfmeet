@@ -14,7 +14,7 @@ use crate::{
         errors::{CallError, CallResult},
         events::CallEventType,
         ids::{CallId, CallParticipantId, CallSessionId, CallSessionIntervalId, MediaIdentity},
-        kinds::{DisconnectReason, EndpointCategory, ParticipantRole, SessionState},
+        kinds::{DisconnectReason, EndpointCategory, MediaAccess, ParticipantRole, SessionState},
         participants::{CallParticipant, DisplayName},
         sessions::{CallSession, CallSessionInterval},
         state::CallState,
@@ -43,14 +43,46 @@ impl CallService {
         }
         let txn = self.db.begin().await?;
         let call = self.lock_open_call(&txn, cmd.scope(), call_id).await?;
+        let (participant, created) = self
+            .add_participant_in(&txn, cmd, &call, principal, display_name)
+            .await?;
+        txn.commit().await?;
+        if created {
+            tracing::info!(
+                call_id = %call.id,
+                participant_id = %participant.id,
+                request_id = %cmd.request_id(),
+                "call participant added"
+            );
+        }
+        Ok((participant.into(), created))
+    }
+
+    /// [`add_participant`](Self::add_participant) inside a caller's transaction (the Call
+    /// row must be locked by it).
+    pub(crate) async fn add_participant_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        principal: &ResolvedPrincipal,
+        display_name: Option<DisplayName>,
+    ) -> CallResult<(call_participants::Model, bool)> {
+        if CallScope::of_principal(principal) != cmd.scope() {
+            return Err(CallError::NotFound);
+        }
+        if call.current_state.is_terminal() {
+            return Err(CallError::Terminal {
+                state: call.current_state,
+            });
+        }
         if let Some(existing) = call_participants::Entity::find()
             .filter(call_participants::Column::CallId.eq(call.id))
             .filter(call_participants::Column::PrincipalId.eq(principal.id().as_uuid()))
-            .one(&txn)
+            .one(txn)
             .await?
         {
-            txn.commit().await?;
-            return Ok((existing.into(), false));
+            return Ok((existing, false));
         }
         let at = self.now().max(call.updated_at);
         let participant = call_participants::ActiveModel {
@@ -67,12 +99,12 @@ impl CallService {
             ended_at: Set(None),
             updated_at: Set(at),
         }
-        .insert(&txn)
+        .insert(txn)
         .await?;
         self.append_event(
-            &txn,
+            txn,
             cmd,
-            &call,
+            call,
             EventDraft::fact(
                 CallEventType::CallParticipantAdded,
                 data(vec![
@@ -88,14 +120,62 @@ impl CallService {
             at,
         )
         .await?;
-        txn.commit().await?;
-        tracing::info!(
-            call_id = %call.id,
-            participant_id = %participant.id,
-            request_id = %cmd.request_id(),
-            "call participant added"
-        );
-        Ok((participant.into(), true))
+        Ok((participant, true))
+    }
+
+    /// A participant leaves the Call for good (transfer retirement, removal): its open
+    /// sessions are ended (media access revoked) and `ended_at` is set. Idempotent.
+    pub(crate) async fn retire_participant_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        participant: call_participants::Model,
+        reason: &'static str,
+    ) -> CallResult<(call_participants::Model, Vec<call_sessions::Model>)> {
+        if participant.ended_at.is_some() {
+            return Ok((participant, Vec::new()));
+        }
+        let mut ended = Vec::new();
+        for session in call_sessions::Entity::find()
+            .filter(call_sessions::Column::ParticipantId.eq(participant.id))
+            .filter(call_sessions::Column::State.ne(SessionState::Ended))
+            .all(txn)
+            .await?
+        {
+            ended.push(
+                self.finish_session(
+                    txn,
+                    cmd,
+                    call,
+                    session,
+                    DisconnectReason::SessionEnded,
+                    true,
+                )
+                .await?,
+            );
+        }
+        let at = self.now().max(participant.updated_at);
+        let mut active: call_participants::ActiveModel = participant.into();
+        active.ended_at = Set(Some(at));
+        active.updated_at = Set(at);
+        let participant = active.update(txn).await?;
+        self.append_event(
+            txn,
+            cmd,
+            call,
+            EventDraft::fact(
+                CallEventType::CallParticipantRemoved,
+                data(vec![
+                    ("participant_id", text(participant.id)),
+                    ("removal_reason", text(reason)),
+                    ("sessions_ended", SafeValue::from(ended.len())),
+                ])?,
+            ),
+            at,
+        )
+        .await?;
+        Ok((participant, ended))
     }
 
     /// Changes a participant's presentation-only display name. Identity, role and
@@ -150,7 +230,15 @@ impl CallService {
         let call = self.lock_open_call(&txn, cmd.scope(), call_id).await?;
         let participant = participant_of(&txn, &call, participant_id).await?;
         let session = self
-            .insert_session(&txn, cmd, &call, &participant, endpoint_category, None)
+            .insert_session(
+                &txn,
+                cmd,
+                &call,
+                &participant,
+                endpoint_category,
+                None,
+                None,
+            )
             .await?;
         txn.commit().await?;
         Ok(session.into())
@@ -182,6 +270,7 @@ impl CallService {
                 &call,
                 old.clone(),
                 DisconnectReason::SessionReplaced,
+                false,
             )
             .await?;
         }
@@ -192,6 +281,7 @@ impl CallService {
                 &call,
                 &participant,
                 endpoint_category,
+                old.endpoint_id,
                 Some(old.id),
             )
             .await?;
@@ -240,22 +330,43 @@ impl CallService {
         let txn = self.db.begin().await?;
         let call = self.lock_call(&txn, cmd.scope(), call_id).await?;
         let session = session_of(&txn, &call, session_id).await?;
+        let (session, interval) = self
+            .disconnect_session_in(&txn, cmd, &call, session, reason)
+            .await?;
+        txn.commit().await?;
+        tracing::info!(
+            call_id = %call.id,
+            session_id = %session.id,
+            participant_id = %session.participant_id,
+            "call session disconnected"
+        );
+        Ok((session.into(), interval.into()))
+    }
+
+    pub(crate) async fn disconnect_session_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        session: call_sessions::Model,
+        reason: DisconnectReason,
+    ) -> CallResult<(call_sessions::Model, call_session_intervals::Model)> {
         if session.state != SessionState::Connected {
             return Err(CallError::InvalidState("the session is not connected"));
         }
         let at = self.now().max(session.updated_at);
-        let interval = close_open_interval(&txn, session.id, reason, at)
+        let interval = close_open_interval(txn, session.id, reason, at)
             .await?
             .ok_or(CallError::InvalidState("the session has no open interval"))?;
         let mut active: call_sessions::ActiveModel = session.into();
         active.state = Set(SessionState::Disconnected);
         active.last_disconnected_at = Set(Some(at));
         active.updated_at = Set(at);
-        let session = active.update(&txn).await?;
+        let session = active.update(txn).await?;
         self.append_event(
-            &txn,
+            txn,
             cmd,
-            &call,
+            call,
             EventDraft::fact(
                 CallEventType::CallSessionDisconnected,
                 data(vec![
@@ -271,14 +382,7 @@ impl CallService {
             at,
         )
         .await?;
-        txn.commit().await?;
-        tracing::info!(
-            call_id = %call.id,
-            session_id = %session.id,
-            participant_id = %session.participant_id,
-            "call session disconnected"
-        );
-        Ok((session.into(), interval.into()))
+        Ok((session, interval))
     }
 
     /// Ends a session for good (closing its open interval as SESSION_ENDED).
@@ -295,19 +399,31 @@ impl CallService {
             return Err(CallError::InvalidState("the session has ended"));
         }
         let session = self
-            .finish_session(&txn, cmd, &call, session, DisconnectReason::SessionEnded)
+            .finish_session(
+                &txn,
+                cmd,
+                &call,
+                session,
+                DisconnectReason::SessionEnded,
+                false,
+            )
             .await?;
         txn.commit().await?;
         Ok(session.into())
     }
 
-    async fn insert_session(
+    /// Creates a session for `participant` (optionally on `endpoint_id`, which must be an
+    /// endpoint of the participant's principal — database-enforced). The media identity is
+    /// generated here and nowhere else; the session starts without media authority.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn insert_session(
         &self,
         txn: &DatabaseTransaction,
         cmd: &CallCommandContext,
         call: &calls::Model,
         participant: &call_participants::Model,
         endpoint_category: EndpointCategory,
+        endpoint_id: Option<uuid::Uuid>,
         replaces: Option<uuid::Uuid>,
     ) -> CallResult<call_sessions::Model> {
         if participant.ended_at.is_some() {
@@ -331,6 +447,12 @@ impl CallService {
             last_disconnected_at: Set(None),
             ended_at: Set(None),
             updated_at: Set(at),
+            endpoint_id: Set(endpoint_id),
+            media_access: Set(MediaAccess::None),
+            media_generation: Set(0),
+            media_admitted_at: Set(None),
+            media_enforcement_pending: Set(false),
+            removed_at: Set(None),
         }
         .insert(txn)
         .await?;
@@ -341,6 +463,9 @@ impl CallService {
         ];
         if let Some(replaces) = replaces {
             details.push(("replaces_session_id", text(replaces)));
+        }
+        if let Some(endpoint_id) = endpoint_id {
+            details.push(("endpoint_id", text(endpoint_id)));
         }
         self.append_event(
             txn,
@@ -368,13 +493,43 @@ impl CallService {
     ) -> CallResult<(CallSession, CallSessionInterval)> {
         let txn = self.db.begin().await?;
         let call = self.lock_open_call(&txn, cmd.scope(), call_id).await?;
+        let session = session_of(&txn, &call, session_id).await?;
+        let (session, interval) = self
+            .open_interval_in(&txn, cmd, &call, session, from)
+            .await?;
+        txn.commit().await?;
+        tracing::info!(
+            call_id = %call.id,
+            session_id = %session.id,
+            participant_id = %session.participant_id,
+            interval_number = interval.interval_number,
+            "call session connected"
+        );
+        Ok((session.into(), interval.into()))
+    }
+
+    /// Opens the next connection interval of `session` (CREATED → CONNECTED with interval
+    /// 1, or DISCONNECTED → CONNECTED with interval n + 1), inside the caller's
+    /// transaction (Call row locked).
+    pub(crate) async fn open_interval_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        session: call_sessions::Model,
+        from: SessionState,
+    ) -> CallResult<(call_sessions::Model, call_session_intervals::Model)> {
+        if call.current_state.is_terminal() {
+            return Err(CallError::Terminal {
+                state: call.current_state,
+            });
+        }
         if call.current_state == CallState::Ending {
             return Err(CallError::InvalidTransition {
                 state: call.current_state,
                 action: "CONNECT_SESSION",
             });
         }
-        let session = session_of(&txn, &call, session_id).await?;
         if session.state != from {
             return Err(CallError::InvalidState(match from {
                 SessionState::Created => "only a new session connects; use reconnect",
@@ -396,7 +551,7 @@ impl CallService {
             disconnect_reason: Set(None),
             created_at: Set(at),
         }
-        .insert(&txn)
+        .insert(txn)
         .await?;
         let first = session.first_connected_at.is_none();
         let mut active: call_sessions::ActiveModel = session.into();
@@ -406,16 +561,16 @@ impl CallService {
             active.first_connected_at = Set(Some(at));
         }
         active.updated_at = Set(at);
-        let session = active.update(&txn).await?;
+        let session = active.update(txn).await?;
         let event_type = if from == SessionState::Created {
             CallEventType::CallSessionConnected
         } else {
             CallEventType::CallSessionReconnected
         };
         self.append_event(
-            &txn,
+            txn,
             cmd,
-            &call,
+            call,
             EventDraft::fact(
                 event_type,
                 data(vec![
@@ -427,35 +582,41 @@ impl CallService {
             at,
         )
         .await?;
-        txn.commit().await?;
-        tracing::info!(
-            call_id = %call.id,
-            session_id = %session.id,
-            participant_id = %session.participant_id,
-            interval_number = number,
-            "call session connected"
-        );
-        Ok((session.into(), interval.into()))
+        Ok((session, interval))
     }
 
-    /// Ends `session`: closes its open interval with `reason`, marks it ENDED, emits
-    /// CALL_SESSION_ENDED.
-    async fn finish_session(
+    /// Ends `session`: closes its open interval with `reason`, marks it ENDED, revokes
+    /// its media access (final), emits CALL_SESSION_ENDED. `removed` records an explicit
+    /// removal (`removed_at`) and marks provider enforcement pending until the media
+    /// provider confirms the removal.
+    pub(crate) async fn finish_session(
         &self,
         txn: &DatabaseTransaction,
         cmd: &CallCommandContext,
         call: &calls::Model,
         session: call_sessions::Model,
         reason: DisconnectReason,
+        removed: bool,
     ) -> CallResult<call_sessions::Model> {
         let at = self.now().max(session.updated_at);
         let closed = close_open_interval(txn, session.id, reason, at).await?;
         let was_connected = session.state == SessionState::Connected;
+        let had_media = session.media_access == MediaAccess::Authorized;
         let mut active: call_sessions::ActiveModel = session.into();
         active.state = Set(SessionState::Ended);
         active.ended_at = Set(Some(at));
         if was_connected {
             active.last_disconnected_at = Set(Some(at));
+        }
+        if had_media || removed {
+            active.media_access = Set(MediaAccess::Revoked);
+        }
+        if had_media {
+            // The provider may still hold the connection: enforce and confirm removal.
+            active.media_enforcement_pending = Set(true);
+        }
+        if removed {
+            active.removed_at = Set(Some(at));
         }
         active.updated_at = Set(at);
         let session = active.update(txn).await?;
@@ -463,6 +624,7 @@ impl CallService {
             ("session_id", text(session.id)),
             ("participant_id", text(session.participant_id)),
             ("end_reason", text(reason)),
+            ("removed", SafeValue::Bool(removed)),
         ];
         if let Some(interval) = &closed {
             details.push((
@@ -483,7 +645,7 @@ impl CallService {
 }
 
 /// Participant `id` of `call` (else not found).
-pub(super) async fn participant_of(
+pub(crate) async fn participant_of(
     txn: &DatabaseTransaction,
     call: &calls::Model,
     id: CallParticipantId,
@@ -496,7 +658,7 @@ pub(super) async fn participant_of(
 }
 
 /// Session `id` of `call` (else not found).
-pub(super) async fn session_of(
+pub(crate) async fn session_of(
     txn: &DatabaseTransaction,
     call: &calls::Model,
     id: CallSessionId,

@@ -1,8 +1,11 @@
-//! Routes, legs and attempts: provider-independent persistence primitives (Part C §16).
-//! No routing algorithm, carrier selection, failover or provider execution happens here.
+//! Routes, legs and attempts: provider-independent persistence primitives (Part C §16,
+//! §21). No routing algorithm, carrier selection, failover or provider execution happens
+//! here; the application-call orchestration composes these primitives inside its own
+//! transactions (`*_in` variants), the public methods run each in a transaction of its own.
 
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter,
+    TransactionTrait,
 };
 use uuid::Uuid;
 
@@ -32,6 +35,23 @@ impl CallService {
     ) -> CallResult<CallRoute> {
         let txn = self.db.begin().await?;
         let call = self.lock_open_call(&txn, cmd.scope(), call_id).await?;
+        let route = self.record_route_in(&txn, cmd, &call, new).await?;
+        txn.commit().await?;
+        Ok(route.into())
+    }
+
+    pub(crate) async fn record_route_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        new: NewRoute,
+    ) -> CallResult<call_routes::Model> {
+        if call.current_state.is_terminal() {
+            return Err(CallError::Terminal {
+                state: call.current_state,
+            });
+        }
         let at = self.now().max(call.updated_at);
         let route = call_routes::ActiveModel {
             id: Set(CallRouteId::generate().as_uuid()),
@@ -48,12 +68,12 @@ impl CallService {
             created_at: Set(at),
             updated_at: Set(at),
         }
-        .insert(&txn)
+        .insert(txn)
         .await?;
         self.append_event(
-            &txn,
+            txn,
             cmd,
-            &call,
+            call,
             EventDraft::fact(
                 CallEventType::CallRouteRecorded,
                 data(vec![
@@ -65,8 +85,7 @@ impl CallService {
             at,
         )
         .await?;
-        txn.commit().await?;
-        Ok(route.into())
+        Ok(route)
     }
 
     /// Moves a route along its state graph. After the Call is terminal only terminal
@@ -81,6 +100,19 @@ impl CallService {
         let txn = self.db.begin().await?;
         let call = self.lock_call(&txn, cmd.scope(), call_id).await?;
         let route = route_of(&txn, &call, route_id).await?;
+        let route = self.move_route_in(&txn, cmd, &call, route, target).await?;
+        txn.commit().await?;
+        Ok(route.into())
+    }
+
+    pub(crate) async fn move_route_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        route: call_routes::Model,
+        target: RouteState,
+    ) -> CallResult<call_routes::Model> {
         if call.current_state.is_terminal() && !target.is_terminal() {
             return Err(CallError::Terminal {
                 state: call.current_state,
@@ -97,11 +129,11 @@ impl CallService {
             active.ended_at = Set(Some(at));
         }
         active.updated_at = Set(at);
-        let route = active.update(&txn).await?;
+        let route = active.update(txn).await?;
         self.append_event(
-            &txn,
+            txn,
             cmd,
-            &call,
+            call,
             EventDraft::fact(
                 CallEventType::CallRouteStateChanged,
                 data(vec![
@@ -113,8 +145,7 @@ impl CallService {
             at,
         )
         .await?;
-        txn.commit().await?;
-        Ok(route.into())
+        Ok(route)
     }
 
     /// Records a canonical leg (state CREATED) for a non-terminal Call. Its route and
@@ -127,8 +158,25 @@ impl CallService {
     ) -> CallResult<CallLeg> {
         let txn = self.db.begin().await?;
         let call = self.lock_open_call(&txn, cmd.scope(), call_id).await?;
+        let leg = self.record_leg_in(&txn, cmd, &call, new).await?;
+        txn.commit().await?;
+        Ok(leg.into())
+    }
+
+    pub(crate) async fn record_leg_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        new: NewLeg,
+    ) -> CallResult<call_legs::Model> {
+        if call.current_state.is_terminal() {
+            return Err(CallError::Terminal {
+                state: call.current_state,
+            });
+        }
         if let Some(route_id) = new.route_id {
-            let route = route_of(&txn, &call, route_id).await?;
+            let route = route_of(txn, call, route_id).await?;
             if route.state.is_terminal() {
                 return Err(CallError::InvalidState("the route has ended"));
             }
@@ -136,7 +184,7 @@ impl CallService {
         if let Some(participant_id) = new.participant_id {
             call_participants::Entity::find_by_id(participant_id.as_uuid())
                 .filter(call_participants::Column::CallId.eq(call.id))
-                .one(&txn)
+                .one(txn)
                 .await?
                 .ok_or(CallError::NotFound)?;
         }
@@ -162,7 +210,7 @@ impl CallService {
             ended_at: Set(None),
             updated_at: Set(at),
         }
-        .insert(&txn)
+        .insert(txn)
         .await?;
         let mut details = vec![
             ("leg_id", text(leg.id)),
@@ -172,16 +220,18 @@ impl CallService {
         if let Some(route_id) = leg.route_id {
             details.push(("route_id", text(route_id)));
         }
+        if let Some(participant_id) = leg.participant_id {
+            details.push(("participant_id", text(participant_id)));
+        }
         self.append_event(
-            &txn,
+            txn,
             cmd,
-            &call,
+            call,
             EventDraft::fact(CallEventType::CallLegRecorded, data(details)?),
             at,
         )
         .await?;
-        txn.commit().await?;
-        Ok(leg.into())
+        Ok(leg)
     }
 
     /// Records a normalized leg state change (first-entry timestamps). FAILED requires a
@@ -196,14 +246,30 @@ impl CallService {
         target: LegState,
         failure_category: Option<FailureCategory>,
     ) -> CallResult<CallLeg> {
+        let txn = self.db.begin().await?;
+        let call = self.lock_call(&txn, cmd.scope(), call_id).await?;
+        let leg = leg_of(&txn, &call, leg_id).await?;
+        let leg = self
+            .move_leg_in(&txn, cmd, &call, leg, target, failure_category)
+            .await?;
+        txn.commit().await?;
+        Ok(leg.into())
+    }
+
+    pub(crate) async fn move_leg_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        leg: call_legs::Model,
+        target: LegState,
+        failure_category: Option<FailureCategory>,
+    ) -> CallResult<call_legs::Model> {
         if (target == LegState::Failed) != failure_category.is_some() {
             return Err(CallError::Validation(
                 "a failure category is required for FAILED and only for FAILED",
             ));
         }
-        let txn = self.db.begin().await?;
-        let call = self.lock_call(&txn, cmd.scope(), call_id).await?;
-        let leg = leg_of(&txn, &call, leg_id).await?;
         if call.current_state.is_terminal() && !target.is_terminal() {
             return Err(CallError::Terminal {
                 state: call.current_state,
@@ -228,7 +294,7 @@ impl CallService {
             t if t.is_terminal() => active.ended_at = Set(Some(at)),
             _ => {}
         }
-        let leg = active.update(&txn).await?;
+        let leg = active.update(txn).await?;
         let mut details = vec![
             ("leg_id", text(leg.id)),
             ("from_leg_state", text(from)),
@@ -238,15 +304,14 @@ impl CallService {
             details.push(("failure_category", text(category)));
         }
         self.append_event(
-            &txn,
+            txn,
             cmd,
-            &call,
+            call,
             EventDraft::fact(CallEventType::CallLegStateChanged, data(details)?),
             at,
         )
         .await?;
-        txn.commit().await?;
-        Ok(leg.into())
+        Ok(leg)
     }
 
     /// Assigns the opaque execution binding reference of a leg (set once; repeating the
@@ -303,14 +368,31 @@ impl CallService {
     ) -> CallResult<CallAttempt> {
         let txn = self.db.begin().await?;
         let call = self.lock_open_call(&txn, cmd.scope(), call_id).await?;
+        let attempt = self.record_attempt_in(&txn, cmd, &call, new).await?;
+        txn.commit().await?;
+        Ok(attempt.into())
+    }
+
+    pub(crate) async fn record_attempt_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        new: NewAttempt,
+    ) -> CallResult<call_attempts::Model> {
+        if call.current_state.is_terminal() {
+            return Err(CallError::Terminal {
+                state: call.current_state,
+            });
+        }
         if let Some(route_id) = new.route_id {
-            route_of(&txn, &call, route_id).await?;
+            route_of(txn, call, route_id).await?;
         }
         if let Some(leg_id) = new.leg_id {
-            leg_of(&txn, &call, leg_id).await?;
+            leg_of(txn, call, leg_id).await?;
         }
         if let Some(previous) = new.previous_attempt_id {
-            let previous = attempt_of(&txn, &call, previous).await?;
+            let previous = attempt_of(txn, call, previous).await?;
             if previous.outcome == AttemptOutcome::Pending {
                 return Err(CallError::InvalidState(
                     "the previous attempt is still pending",
@@ -318,7 +400,7 @@ impl CallService {
             }
         }
         let number = scalar_i64(
-            &txn,
+            txn,
             "SELECT COALESCE(MAX(attempt_number), 0)::bigint FROM call_attempts WHERE call_id = $1",
             vec![call.id.into()],
         )
@@ -345,7 +427,7 @@ impl CallService {
             created_at: Set(at),
             updated_at: Set(at),
         }
-        .insert(&txn)
+        .insert(txn)
         .await?;
         let mut details = vec![
             ("attempt_id", text(attempt.id)),
@@ -354,16 +436,18 @@ impl CallService {
         if let Some(previous) = attempt.previous_attempt_id {
             details.push(("previous_attempt_id", text(previous)));
         }
+        if let Some(route_id) = attempt.route_id {
+            details.push(("route_id", text(route_id)));
+        }
         self.append_event(
-            &txn,
+            txn,
             cmd,
-            &call,
+            call,
             EventDraft::fact(CallEventType::CallAttemptRecorded, data(details)?),
             at,
         )
         .await?;
-        txn.commit().await?;
-        Ok(attempt.into())
+        Ok(attempt)
     }
 
     /// Records an attempt outcome. UNKNOWN is explicit (not a failure) and can later be
@@ -376,14 +460,30 @@ impl CallService {
         outcome: AttemptOutcome,
         failure_category: Option<FailureCategory>,
     ) -> CallResult<CallAttempt> {
+        let txn = self.db.begin().await?;
+        let call = self.lock_call(&txn, cmd.scope(), call_id).await?;
+        let attempt = attempt_of(&txn, &call, attempt_id).await?;
+        let attempt = self
+            .finish_attempt_in(&txn, cmd, &call, attempt, outcome, failure_category)
+            .await?;
+        txn.commit().await?;
+        Ok(attempt.into())
+    }
+
+    pub(crate) async fn finish_attempt_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        attempt: call_attempts::Model,
+        outcome: AttemptOutcome,
+        failure_category: Option<FailureCategory>,
+    ) -> CallResult<call_attempts::Model> {
         if (outcome == AttemptOutcome::Failed) != failure_category.is_some() {
             return Err(CallError::Validation(
                 "a failure category is required for FAILED and only for FAILED",
             ));
         }
-        let txn = self.db.begin().await?;
-        let call = self.lock_call(&txn, cmd.scope(), call_id).await?;
-        let attempt = attempt_of(&txn, &call, attempt_id).await?;
         if !attempt.outcome.can_transition_to(outcome) {
             return Err(CallError::InvalidState(
                 "attempt outcome transition not allowed",
@@ -400,29 +500,29 @@ impl CallService {
             active.finished_at = Set(Some(at));
         }
         active.updated_at = Set(at);
-        let attempt = active.update(&txn).await?;
+        let attempt = active.update(txn).await?;
+        let mut details = vec![
+            ("attempt_id", text(attempt.id)),
+            ("outcome", text(outcome)),
+            ("unknown_outcome", SafeValue::Bool(unknown)),
+        ];
+        if let Some(category) = failure_category {
+            details.push(("failure_category", text(category)));
+        }
         self.append_event(
-            &txn,
+            txn,
             cmd,
-            &call,
-            EventDraft::fact(
-                CallEventType::CallAttemptFinished,
-                data(vec![
-                    ("attempt_id", text(attempt.id)),
-                    ("outcome", text(outcome)),
-                    ("unknown_outcome", SafeValue::Bool(unknown)),
-                ])?,
-            ),
+            call,
+            EventDraft::fact(CallEventType::CallAttemptFinished, data(details)?),
             at,
         )
         .await?;
-        txn.commit().await?;
-        Ok(attempt.into())
+        Ok(attempt)
     }
 }
 
-async fn route_of(
-    txn: &sea_orm::DatabaseTransaction,
+pub(crate) async fn route_of(
+    txn: &DatabaseTransaction,
     call: &calls::Model,
     id: CallRouteId,
 ) -> CallResult<call_routes::Model> {
@@ -433,8 +533,8 @@ async fn route_of(
         .ok_or(CallError::NotFound)
 }
 
-pub(super) async fn leg_of(
-    txn: &sea_orm::DatabaseTransaction,
+pub(crate) async fn leg_of(
+    txn: &DatabaseTransaction,
     call: &calls::Model,
     id: CallLegId,
 ) -> CallResult<call_legs::Model> {
@@ -445,8 +545,8 @@ pub(super) async fn leg_of(
         .ok_or(CallError::NotFound)
 }
 
-async fn attempt_of(
-    txn: &sea_orm::DatabaseTransaction,
+pub(crate) async fn attempt_of(
+    txn: &DatabaseTransaction,
     call: &calls::Model,
     id: CallAttemptId,
 ) -> CallResult<call_attempts::Model> {

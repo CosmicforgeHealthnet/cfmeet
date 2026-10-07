@@ -23,6 +23,7 @@ pub struct Model {
     pub actor_service_account_id: Uuid,
     pub actor_credential_id: Option<Uuid>,
     pub actor_service: Option<String>,
+    pub actor_endpoint_id: Option<Uuid>,
     pub request_id: String,
     pub correlation_id: String,
     #[sea_orm(column_type = "JsonBinary")]

@@ -34,6 +34,7 @@
 //! webhooks and event delivery.
 
 pub mod aggregate;
+pub mod app;
 pub mod attempts;
 pub mod attributes;
 pub mod authorizations;
@@ -43,6 +44,7 @@ pub mod errors;
 pub mod events;
 pub mod http;
 pub mod ids;
+pub mod invitations;
 pub mod kinds;
 pub mod legs;
 pub mod participants;

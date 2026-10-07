@@ -35,6 +35,21 @@ pub enum ErrorCode {
     InternalAuthenticationFailed,
     /// Internal routes only: the caller is not granted the required permission.
     InternalPermissionDenied,
+    StaleCallVersion,
+    CallStateConflict,
+    CallEvidenceRequired,
+    CallNotAuthorized,
+    ConcurrentCallLimitExceeded,
+    CallResourceStateConflict,
+    Conflict,
+    IdempotencyConflict,
+    InvitationExpired,
+    InvitationNotActionable,
+    AnsweredElsewhere,
+    CapabilityUnavailable,
+    MediaUnavailable,
+    ParticipantLimitExceeded,
+    TargetUnavailable,
 }
 
 impl ErrorCode {
@@ -49,6 +64,21 @@ impl ErrorCode {
         ErrorCode::InternalError,
         ErrorCode::InternalAuthenticationFailed,
         ErrorCode::InternalPermissionDenied,
+        ErrorCode::StaleCallVersion,
+        ErrorCode::CallStateConflict,
+        ErrorCode::CallEvidenceRequired,
+        ErrorCode::CallNotAuthorized,
+        ErrorCode::ConcurrentCallLimitExceeded,
+        ErrorCode::CallResourceStateConflict,
+        ErrorCode::Conflict,
+        ErrorCode::IdempotencyConflict,
+        ErrorCode::InvitationExpired,
+        ErrorCode::InvitationNotActionable,
+        ErrorCode::AnsweredElsewhere,
+        ErrorCode::CapabilityUnavailable,
+        ErrorCode::MediaUnavailable,
+        ErrorCode::ParticipantLimitExceeded,
+        ErrorCode::TargetUnavailable,
     ];
 
     /// Codes that only internal routes return.
@@ -57,6 +87,44 @@ impl ErrorCode {
             self,
             ErrorCode::InternalAuthenticationFailed | ErrorCode::InternalPermissionDenied
         )
+    }
+
+    /// Fixed, safe message of a call-domain code.
+    fn message(&self) -> &'static str {
+        match self {
+            ErrorCode::StaleCallVersion => {
+                "The call has changed since expectedVersion; fetch it and retry."
+            }
+            ErrorCode::CallStateConflict => {
+                "The action is not allowed in the call's current state."
+            }
+            ErrorCode::CallEvidenceRequired => {
+                "The required evidence for this transition is not present."
+            }
+            ErrorCode::CallNotAuthorized => "The call is not authorized for this action.",
+            ErrorCode::ConcurrentCallLimitExceeded => "The concurrent call limit is reached.",
+            ErrorCode::CallResourceStateConflict => {
+                "A call resource is not in a state that allows this action."
+            }
+            ErrorCode::Conflict => "The request conflicts with an existing resource.",
+            ErrorCode::IdempotencyConflict => {
+                "The Idempotency-Key was already used for a different request."
+            }
+            ErrorCode::InvitationExpired => "The invitation has expired.",
+            ErrorCode::InvitationNotActionable => "The invitation is no longer actionable.",
+            ErrorCode::AnsweredElsewhere => "The call was answered on another device.",
+            ErrorCode::CapabilityUnavailable => {
+                "The action is not available for this call's media capabilities."
+            }
+            ErrorCode::MediaUnavailable => {
+                "Media enforcement could not be confirmed; retry the request."
+            }
+            ErrorCode::ParticipantLimitExceeded => {
+                "The call's participant limit would be exceeded."
+            }
+            ErrorCode::TargetUnavailable => "The target has no eligible application endpoint.",
+            _ => "The request could not be completed.",
+        }
     }
 
     pub fn as_str(&self) -> &'static str {
@@ -71,6 +139,21 @@ impl ErrorCode {
             ErrorCode::InternalError => "INTERNAL_ERROR",
             ErrorCode::InternalAuthenticationFailed => "INTERNAL_AUTHENTICATION_FAILED",
             ErrorCode::InternalPermissionDenied => "INTERNAL_PERMISSION_DENIED",
+            ErrorCode::StaleCallVersion => "STALE_CALL_VERSION",
+            ErrorCode::CallStateConflict => "CALL_STATE_CONFLICT",
+            ErrorCode::CallEvidenceRequired => "CALL_EVIDENCE_REQUIRED",
+            ErrorCode::CallNotAuthorized => "CALL_NOT_AUTHORIZED",
+            ErrorCode::ConcurrentCallLimitExceeded => "CONCURRENT_CALL_LIMIT_EXCEEDED",
+            ErrorCode::CallResourceStateConflict => "CALL_RESOURCE_STATE_CONFLICT",
+            ErrorCode::Conflict => "CONFLICT",
+            ErrorCode::IdempotencyConflict => "IDEMPOTENCY_CONFLICT",
+            ErrorCode::InvitationExpired => "INVITATION_EXPIRED",
+            ErrorCode::InvitationNotActionable => "INVITATION_NOT_ACTIONABLE",
+            ErrorCode::AnsweredElsewhere => "ANSWERED_ELSEWHERE",
+            ErrorCode::CapabilityUnavailable => "CAPABILITY_UNAVAILABLE",
+            ErrorCode::MediaUnavailable => "MEDIA_UNAVAILABLE",
+            ErrorCode::ParticipantLimitExceeded => "PARTICIPANT_LIMIT_EXCEEDED",
+            ErrorCode::TargetUnavailable => "TARGET_UNAVAILABLE",
         }
     }
 }
@@ -103,6 +186,9 @@ pub enum CallingError {
     /// The authenticated service lacks the internal permission the route requires.
     #[error("internal permission denied")]
     InternalPermissionDenied,
+    /// A call-domain refusal with its stable code and status.
+    #[error("call operation refused")]
+    Call { code: ErrorCode, status: StatusCode },
 }
 
 impl CallingError {
@@ -118,6 +204,7 @@ impl CallingError {
             CallingError::Internal => ErrorCode::InternalError,
             CallingError::InternalAuthenticationFailed => ErrorCode::InternalAuthenticationFailed,
             CallingError::InternalPermissionDenied => ErrorCode::InternalPermissionDenied,
+            CallingError::Call { code, .. } => *code,
         }
     }
 
@@ -133,6 +220,7 @@ impl CallingError {
             CallingError::Internal => StatusCode::INTERNAL_SERVER_ERROR,
             CallingError::InternalAuthenticationFailed => StatusCode::UNAUTHORIZED,
             CallingError::InternalPermissionDenied => StatusCode::FORBIDDEN,
+            CallingError::Call { status, .. } => *status,
         }
     }
 
@@ -154,6 +242,7 @@ impl CallingError {
             CallingError::InternalPermissionDenied => {
                 "The calling service is not permitted to perform this operation."
             }
+            CallingError::Call { code, .. } => code.message(),
         }
     }
 }

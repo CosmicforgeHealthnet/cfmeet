@@ -163,6 +163,12 @@ pub enum CallAction {
     CompleteTransfer {
         evidence: ConnectedEvidence,
     },
+    /// A failed transfer returns the Call to CONNECTED over the original, still valid
+    /// media path (TRANSFERRING → CONNECTED, with fresh media-path evidence). A transfer
+    /// that started from HELD returns with [`CallAction::Hold`].
+    RevertTransfer {
+        evidence: ConnectedEvidence,
+    },
     RequestEnd,
     ConfirmEnded {
         evidence: EndedEvidence,
@@ -205,6 +211,7 @@ impl CallAction {
             CallAction::Resume { .. } => "RESUME",
             CallAction::BeginTransfer => "BEGIN_TRANSFER",
             CallAction::CompleteTransfer { .. } => "COMPLETE_TRANSFER",
+            CallAction::RevertTransfer { .. } => "REVERT_TRANSFER",
             CallAction::RequestEnd => "REQUEST_END",
             CallAction::ConfirmEnded { .. } => "CONFIRM_ENDED",
             CallAction::Decline => "DECLINE",
@@ -227,7 +234,8 @@ impl CallAction {
             CallAction::Accept => Answered,
             CallAction::ConfirmConnected { .. }
             | CallAction::Resume { .. }
-            | CallAction::CompleteTransfer { .. } => Connected,
+            | CallAction::CompleteTransfer { .. }
+            | CallAction::RevertTransfer { .. } => Connected,
             CallAction::Hold => Held,
             CallAction::BeginTransfer => Transferring,
             CallAction::RequestEnd => Ending,
@@ -254,7 +262,9 @@ impl CallAction {
             CallAction::Hold => &[Connected, Transferring],
             CallAction::Resume { .. } => &[Held],
             CallAction::BeginTransfer => &[Connected, Held],
-            CallAction::CompleteTransfer { .. } => &[Transferring],
+            CallAction::CompleteTransfer { .. } | CallAction::RevertTransfer { .. } => {
+                &[Transferring]
+            }
             CallAction::RequestEnd => &[Answered, Connected, Held, Transferring],
             CallAction::ConfirmEnded { .. } => &[Ending],
             CallAction::Decline | CallAction::MarkBusy | CallAction::MarkNoAnswer => {
@@ -270,7 +280,8 @@ impl CallAction {
         match self {
             CallAction::ConfirmConnected { evidence }
             | CallAction::Resume { evidence }
-            | CallAction::CompleteTransfer { evidence } => Some(evidence),
+            | CallAction::CompleteTransfer { evidence }
+            | CallAction::RevertTransfer { evidence } => Some(evidence),
             _ => None,
         }
     }
@@ -301,7 +312,10 @@ impl CallAction {
                 evidence: evidence.clone(),
             },
             CallAction::BeginTransfer,
-            CallAction::CompleteTransfer { evidence },
+            CallAction::CompleteTransfer {
+                evidence: evidence.clone(),
+            },
+            CallAction::RevertTransfer { evidence },
             CallAction::RequestEnd,
             CallAction::ConfirmEnded {
                 evidence: EndedEvidence::CleanupConfirmed,

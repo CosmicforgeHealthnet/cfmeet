@@ -1,6 +1,6 @@
 use sea_orm::entity::prelude::*;
 
-use crate::calls::kinds::{EndpointCategory, SessionState};
+use crate::calls::kinds::{EndpointCategory, MediaAccess, SessionState};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "call_sessions")]
@@ -22,6 +22,12 @@ pub struct Model {
     pub last_disconnected_at: Option<DateTimeUtc>,
     pub ended_at: Option<DateTimeUtc>,
     pub updated_at: DateTimeUtc,
+    pub endpoint_id: Option<Uuid>,
+    pub media_access: MediaAccess,
+    pub media_generation: i32,
+    pub media_admitted_at: Option<DateTimeUtc>,
+    pub media_enforcement_pending: bool,
+    pub removed_at: Option<DateTimeUtc>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -5,12 +5,15 @@ use std::{sync::Arc, time::Duration};
 use anyhow::anyhow;
 use axum::Router;
 use calling::{
+    calls::{app::AppCallingConfig, CallServiceConfig},
     config::CallingConfig,
     domain::{SharedClock, SystemClock},
     internal_auth::config::ServiceAuthSettings,
+    media::MediaSettings,
     platform::{error::summarize_db_error, scopes::ScopeRegistry},
     routes,
-    state::AppState,
+    signaling::{NoPushTransport, PgNotifySignalBus, RealtimeSignalBus, SignalingKeys},
+    state::{AppState, CallingRuntime},
     telemetry,
 };
 use calling_migration::MigratorTrait;
@@ -79,6 +82,48 @@ async fn main() -> anyhow::Result<()> {
         ));
     }
 
+    // Application calling (Part C §20–§25): no fallback signaling key or provider
+    // credential exists; an invalid configuration stops the service before it serves.
+    let lookup = |key: &str| std::env::var(key).ok();
+    let signaling_keys = match SignalingKeys::from_lookup(&lookup) {
+        Ok(keys) => Arc::new(keys),
+        Err(err) => {
+            tracing::error!(error = %err, "signaling configuration error");
+            std::process::exit(2);
+        }
+    };
+    let media_settings = match MediaSettings::from_lookup(&lookup) {
+        Ok(settings) => settings,
+        Err(err) => {
+            tracing::error!(error = %err, "media provider configuration error");
+            std::process::exit(2);
+        }
+    };
+    let media = match media_settings.build_provider() {
+        Ok(media) => media,
+        Err(err) => {
+            tracing::error!(error = %err, "media provider configuration error");
+            std::process::exit(2);
+        }
+    };
+    let app_config = match AppCallingConfig::from_lookup(&lookup) {
+        Ok(config) => config,
+        Err(err) => {
+            tracing::error!(error = %err, "application calling configuration error");
+            std::process::exit(2);
+        }
+    };
+    tracing::info!(
+        application_media = media.is_some(),
+        "application calling configured"
+    );
+    // Cross-instance realtime fanout over PostgreSQL LISTEN / NOTIFY.
+    let bus: Arc<dyn RealtimeSignalBus> = Arc::new(
+        PgNotifySignalBus::start(db.clone())
+            .await
+            .map_err(|e| anyhow!("cannot start the realtime signal listener ({e})"))?,
+    );
+
     let clock: SharedClock = Arc::new(SystemClock);
     let state = AppState::new(
         db,
@@ -87,7 +132,21 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(ScopeRegistry::standard()),
         config.limit_defaults,
         service_auth,
+        CallingRuntime {
+            signaling_keys,
+            media,
+            credential_policy: media_settings.credential_policy,
+            bus,
+            push: Arc::new(NoPushTransport),
+            app_config,
+            call_config: CallServiceConfig::default(),
+        },
     );
+
+    // Durable invitation expiry and media reconciliation on every instance (row locks /
+    // SKIP LOCKED leases make the sweeps multi-instance safe).
+    let workers = (*state.app).clone();
+    tokio::spawn(workers.run_workers(Duration::from_secs(1), Duration::from_secs(2)));
 
     let pruner = state.rate_limiter.clone();
     tokio::spawn(async move {
@@ -100,8 +159,8 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // Public customer API: the read-only call routes (Part C §15–§19). There are no
-    // internal routes yet; /internal/v1/* still requires service auth.
+    // Public customer API (call reads, creation, control, endpoints, signaling credentials).
+    // There are no internal routes yet; /internal/v1/* still requires service auth.
     let app = routes::app(state, routes::public_api(), Router::new());
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "calling service listening");

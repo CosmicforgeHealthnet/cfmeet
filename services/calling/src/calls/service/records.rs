@@ -134,6 +134,17 @@ impl CallService {
     ) -> CallResult<Vec<CallUsageRecord>> {
         let txn = self.db.begin().await?;
         let call = self.lock_call(&txn, cmd.scope(), call_id).await?;
+        let out = self.participation_usage_in(&txn, cmd, &call).await?;
+        txn.commit().await?;
+        Ok(out)
+    }
+
+    pub(crate) async fn participation_usage_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+    ) -> CallResult<Vec<CallUsageRecord>> {
         let Some(ended_at) = call.ended_at.filter(|_| call.current_state.is_terminal()) else {
             return Err(CallError::InvalidState(
                 "participation usage is final only for ended calls",
@@ -143,16 +154,16 @@ impl CallService {
             .filter(call_participants::Column::CallId.eq(call.id))
             .order_by_asc(call_participants::Column::CreatedAt)
             .order_by_asc(call_participants::Column::Id)
-            .all(&txn)
+            .all(txn)
             .await?;
         let sessions = call_sessions::Entity::find()
             .filter(call_sessions::Column::CallId.eq(call.id))
-            .all(&txn)
+            .all(txn)
             .await?;
         let owner: BTreeMap<_, _> = sessions.iter().map(|s| (s.id, s.participant_id)).collect();
         let intervals: Vec<CallSessionInterval> = call_session_intervals::Entity::find()
             .filter(call_session_intervals::Column::CallId.eq(call.id))
-            .all(&txn)
+            .all(txn)
             .await?
             .into_iter()
             .map(Into::into)
@@ -180,16 +191,158 @@ impl CallService {
                     participant.id
                 ))?,
             };
-            let (record, _) = self.insert_usage(&txn, cmd, &call, new).await?;
+            let (record, _) = self.insert_usage(txn, cmd, call, new).await?;
             let model = call_usage_records::Entity::find_by_id(record.id.as_uuid())
-                .one(&txn)
+                .one(txn)
                 .await?
                 .ok_or(CallError::NotFound)?;
-            let (record, _) = self.finalize_usage_row(&txn, cmd, &call, model).await?;
+            let (record, _) = self.finalize_usage_row(txn, cmd, call, model).await?;
             out.push(record);
         }
-        txn.commit().await?;
         Ok(out)
+    }
+
+    /// Usage of a finished application Call, from authoritative interval evidence:
+    /// CALL_CONNECTED_TIME (union of every session's intervals, clipped to the Call's
+    /// connected period), PARTICIPANT_CONNECTED_TIME per participant (union of its sessions —
+    /// concurrent devices are not double counted) and SESSION_CONNECTED_TIME per session.
+    /// Recorded and finalized idempotently (stable idempotency keys). Not billing.
+    pub(crate) async fn finalize_app_usage_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+    ) -> CallResult<Vec<CallUsageRecord>> {
+        let Some(ended_at) = call.ended_at.filter(|_| call.current_state.is_terminal()) else {
+            return Err(CallError::InvalidState(
+                "usage is final only for ended calls",
+            ));
+        };
+        let sessions = call_sessions::Entity::find()
+            .filter(call_sessions::Column::CallId.eq(call.id))
+            .order_by_asc(call_sessions::Column::CreatedAt)
+            .order_by_asc(call_sessions::Column::Id)
+            .all(txn)
+            .await?;
+        let intervals: Vec<CallSessionInterval> = call_session_intervals::Entity::find()
+            .filter(call_session_intervals::Column::CallId.eq(call.id))
+            .all(txn)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        let mut facts: Vec<NewUsage> = Vec::new();
+        let all_spans: Vec<_> = intervals.iter().map(CallSessionInterval::span).collect();
+        let call_quantity = match call.connected_at {
+            Some(connected_at) => {
+                let clipped: Vec<_> = all_spans
+                    .iter()
+                    .filter_map(|s| {
+                        let start = s.connected_at.max(connected_at);
+                        let end = s.disconnected_at.unwrap_or(ended_at).min(ended_at);
+                        (end > start).then_some(crate::calls::duration::ConnectionSpan {
+                            connected_at: start,
+                            disconnected_at: Some(end),
+                        })
+                    })
+                    .collect();
+                union_duration(&clipped, ended_at).num_milliseconds().max(0)
+            }
+            None => 0,
+        };
+        facts.push(NewUsage {
+            usage_type: UsageType::CallConnectedTime,
+            participant_id: None,
+            session_id: None,
+            leg_id: None,
+            quantity: call_quantity,
+            unit: UsageUnit::Milliseconds,
+            usage_started_at: call.connected_at,
+            usage_ended_at: call.connected_at.map(|_| ended_at),
+            idempotency_key: IdempotencyKey::parse(&format!("call-connected-time:{}", call.id))?,
+        });
+        for session in &sessions {
+            let spans: Vec<_> = intervals
+                .iter()
+                .filter(|i| i.session_id.as_uuid() == session.id)
+                .map(CallSessionInterval::span)
+                .collect();
+            let first = spans.iter().map(|s| s.connected_at).min();
+            facts.push(NewUsage {
+                usage_type: UsageType::SessionConnectedTime,
+                participant_id: Some(CallParticipantId::from_uuid(session.participant_id)),
+                session_id: Some(crate::calls::ids::CallSessionId::from_uuid(session.id)),
+                leg_id: None,
+                quantity: crate::calls::duration::total_duration(&spans, ended_at)
+                    .num_milliseconds()
+                    .max(0),
+                unit: UsageUnit::Milliseconds,
+                usage_started_at: first,
+                usage_ended_at: first.map(|_| ended_at),
+                idempotency_key: IdempotencyKey::parse(&format!(
+                    "session-connected-time:{}",
+                    session.id
+                ))?,
+            });
+        }
+        let mut out = Vec::new();
+        for new in facts {
+            let (record, _) = self.insert_usage(txn, cmd, call, new).await?;
+            let model = call_usage_records::Entity::find_by_id(record.id.as_uuid())
+                .one(txn)
+                .await?
+                .ok_or(CallError::NotFound)?;
+            let (record, _) = self.finalize_usage_row(txn, cmd, call, model).await?;
+            out.push(record);
+        }
+        out.extend(self.participation_usage_in(txn, cmd, call).await?);
+        Ok(out)
+    }
+
+    /// Records a quality record inside the caller's transaction.
+    pub(crate) async fn record_quality_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        new: NewQualityRecord,
+    ) -> CallResult<CallQualityRecord> {
+        if new.metrics.is_empty() || new.observed_to < new.observed_from {
+            return Err(CallError::Validation(
+                "a quality record needs a window and metrics",
+            ));
+        }
+        let at = self.now();
+        let record = call_quality_records::ActiveModel {
+            id: Set(CallQualityRecordId::generate().as_uuid()),
+            call_id: Set(call.id),
+            session_id: Set(new.session_id.map(|s| s.as_uuid())),
+            leg_id: Set(new.leg_id.map(|l| l.as_uuid())),
+            tenant_id: Set(call.tenant_id),
+            application_id: Set(call.application_id),
+            environment_id: Set(call.environment_id),
+            observed_from: Set(new.observed_from),
+            observed_to: Set(new.observed_to),
+            metrics: Set(new.metrics.to_json()),
+            created_at: Set(at),
+        }
+        .insert(txn)
+        .await?;
+        self.append_event(
+            txn,
+            cmd,
+            call,
+            EventDraft::fact(
+                CallEventType::CallQualityRecorded,
+                data(vec![
+                    ("quality_record_id", text(record.id)),
+                    ("metric_count", SafeValue::from(new.metrics.len())),
+                ])?,
+            ),
+            at.max(call.updated_at),
+        )
+        .await?;
+        Ok(record.into())
     }
 
     async fn insert_usage(

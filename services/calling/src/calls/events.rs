@@ -38,6 +38,7 @@ text_enum!(
         CallStateChanged = "CALL_STATE_CHANGED",
         CallParticipantAdded = "CALL_PARTICIPANT_ADDED",
         CallParticipantUpdated = "CALL_PARTICIPANT_UPDATED",
+        CallParticipantRemoved = "CALL_PARTICIPANT_REMOVED",
         CallSessionCreated = "CALL_SESSION_CREATED",
         CallSessionConnected = "CALL_SESSION_CONNECTED",
         CallSessionDisconnected = "CALL_SESSION_DISCONNECTED",
@@ -53,6 +54,23 @@ text_enum!(
         CallQualityRecorded = "CALL_QUALITY_RECORDED",
         CallUsageRecorded = "CALL_USAGE_RECORDED",
         CallUsageFinalized = "CALL_USAGE_FINALIZED",
+        CallInvitationIssued = "CALL_INVITATION_ISSUED",
+        CallInvitationAccepted = "CALL_INVITATION_ACCEPTED",
+        CallInvitationDeclined = "CALL_INVITATION_DECLINED",
+        CallInvitationAnsweredElsewhere = "CALL_INVITATION_ANSWERED_ELSEWHERE",
+        CallInvitationCancelled = "CALL_INVITATION_CANCELLED",
+        CallInvitationExpired = "CALL_INVITATION_EXPIRED",
+        CallTransferRequested = "CALL_TRANSFER_REQUESTED",
+        CallTransferCompleted = "CALL_TRANSFER_COMPLETED",
+        CallTransferFailed = "CALL_TRANSFER_FAILED",
+        CallTransferCancelled = "CALL_TRANSFER_CANCELLED",
+        CallMediaSessionCreated = "CALL_MEDIA_SESSION_CREATED",
+        CallMediaSessionTerminated = "CALL_MEDIA_SESSION_TERMINATED",
+        CallMediaPermissionsUpdated = "CALL_MEDIA_PERMISSIONS_UPDATED",
+        CallMediaCredentialIssued = "CALL_MEDIA_CREDENTIAL_ISSUED",
+        CallMediaParticipantEvicted = "CALL_MEDIA_PARTICIPANT_EVICTED",
+        CallMediaEnforcementPending = "CALL_MEDIA_ENFORCEMENT_PENDING",
+        CallMediaReconciled = "CALL_MEDIA_RECONCILED",
     }
 );
 
@@ -196,6 +214,9 @@ mod tests {
                 "PROVIDER",
                 "CARRIER",
                 "RECORDING",
+                "LIVEKIT",
+                "SIP",
+                "PSTN",
             ] {
                 assert!(!t.as_str().contains(future), "{t}");
             }

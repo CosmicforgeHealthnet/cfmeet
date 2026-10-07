@@ -55,6 +55,35 @@ typed_id!(
     OutboxEventId
 );
 
+typed_id!(
+    /// The ring offer of one Call to one application endpoint.
+    CallInvitationId
+);
+typed_id!(
+    /// The single winning answer of one logical participant.
+    CallAnswerClaimId
+);
+typed_id!(
+    /// Server-authoritative media permissions of one participant.
+    MediaPermissionsId
+);
+typed_id!(
+    /// The Calling-private binding of a Call to its media provider resource.
+    CallMediaSessionId
+);
+typed_id!(
+    /// An idempotent Calling command record.
+    CallCommandId
+);
+typed_id!(
+    /// An application-to-application transfer of one Call.
+    CallTransferId
+);
+typed_id!(
+    /// A recorded, authenticated media-provider callback.
+    MediaProviderEventId
+);
+
 impl CallEventId {
     /// Envelope form (`evt_<32 hex>`, contract `cfmeet.platform.event-envelope`).
     pub fn envelope_id(&self) -> String {

@@ -1,8 +1,14 @@
 //! HTTP routing.
 //!
 //! * `GET /health` is public.
-//! * Customer routes ([`public_api`]: the read-only call API) are passed to [`app`] as
-//!   `protected` and every one of them runs behind platform credential authentication.
+//! * Customer routes ([`public_api`]: the call API, call control, endpoints, signaling
+//!   credential minting) are passed to [`app`] as `protected` and every one of them runs
+//!   behind platform credential authentication.
+//! * Endpoint signaling routes (`/v1/calling/signaling`, `/v1/calling/invitations…`,
+//!   `/v1/calling/sessions/…/media-credentials`) authenticate with a short-lived signaling
+//!   credential and never accept a platform API credential.
+//! * The media provider callback (`POST /internal/provider/media/events`) is
+//!   authenticated by the provider's signature only and accepts nothing else.
 //! * Internal routes are passed as `internal`, are nested under `/internal/v1` and run
 //!   behind internal service authentication BY CONSTRUCTION — including unknown internal
 //!   paths, so internal routes cannot be enumerated without a valid service token.
@@ -28,10 +34,12 @@ use crate::{
     state::AppState,
 };
 
-/// The public customer API: today the read-only call routes (`GET /v1/calls`,
-/// `GET /v1/calls/{call_id}`). Mounted as `protected` by `main`.
+/// The public customer API (platform credential): call reads, creation and control,
+/// endpoint registry and signaling-credential minting. Mounted as `protected` by `main`.
 pub fn public_api() -> Router<AppState> {
     crate::calls::http::routes()
+        .merge(crate::calls::app::http::routes())
+        .merge(crate::endpoints::http::routes())
 }
 
 /// Builds the service router.
@@ -49,6 +57,8 @@ pub fn app(state: AppState, protected: Router<AppState>, internal: Router<AppSta
     let customer = Router::new()
         .route("/health", get(health))
         .merge(protected)
+        .merge(crate::signaling::http::routes())
+        .merge(crate::calls::app::http::callback_routes())
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
         .with_state(state.clone())

@@ -354,13 +354,32 @@ impl PrincipalResolver {
         ctx: &PlatformAuthContext,
         reference: &PrincipalReference,
     ) -> Result<ResolvedPrincipal, PrincipalResolutionError> {
+        self.resolve_in(
+            ctx.tenant_id(),
+            ctx.application_id(),
+            ctx.environment_id(),
+            reference,
+        )
+        .await
+    }
+
+    /// Resolves inside an ownership scope that was itself established by authentication
+    /// (an API credential's context or a verified signaling credential) — never by
+    /// request data.
+    pub async fn resolve_in(
+        &self,
+        tenant_id: TenantId,
+        application_id: ApplicationId,
+        environment_id: EnvironmentId,
+        reference: &PrincipalReference,
+    ) -> Result<ResolvedPrincipal, PrincipalResolutionError> {
         let unavailable = |e: sea_orm::DbErr| PrincipalResolutionError::Unavailable {
             summary: summarize_db_error(&e),
         };
         let scoped = principals::Entity::find()
-            .filter(principals::Column::TenantId.eq(ctx.tenant_id().as_uuid()))
-            .filter(principals::Column::ApplicationId.eq(ctx.application_id().as_uuid()))
-            .filter(principals::Column::EnvironmentId.eq(ctx.environment_id().as_uuid()));
+            .filter(principals::Column::TenantId.eq(tenant_id.as_uuid()))
+            .filter(principals::Column::ApplicationId.eq(application_id.as_uuid()))
+            .filter(principals::Column::EnvironmentId.eq(environment_id.as_uuid()));
         let query = match reference {
             PrincipalReference::Id(id) => scoped.filter(principals::Column::Id.eq(id.as_uuid())),
             PrincipalReference::External {

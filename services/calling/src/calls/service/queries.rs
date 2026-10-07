@@ -21,6 +21,7 @@ use crate::{
         errors::{CallError, CallResult},
         events::CallEvent,
         ids::{CallId, CallParticipantId},
+        invitations::{CallInvitation, CallTransfer},
         legs::CallLeg,
         participants::CallParticipant,
         quality::CallQualityRecord,
@@ -32,9 +33,9 @@ use crate::{
     },
     domain::PrincipalId,
     models::{
-        call_attempts, call_authorizations, call_events, call_legs, call_participants,
-        call_quality_records, call_routes, call_session_intervals, call_sessions,
-        call_usage_records, calls,
+        call_attempts, call_authorizations, call_events, call_invitations, call_legs,
+        call_participants, call_quality_records, call_routes, call_session_intervals,
+        call_sessions, call_transfers, call_usage_records, calls,
     },
 };
 
@@ -57,6 +58,8 @@ pub struct CallDetail {
     pub call: Call,
     pub participants: Vec<ParticipantDetail>,
     pub sessions: Vec<SessionDetail>,
+    pub invitations: Vec<CallInvitation>,
+    pub transfers: Vec<CallTransfer>,
     /// From first CONNECTED to the end of the Call (or `as_of`); `None` if never connected.
     pub connected_duration_ms: Option<i64>,
     /// Instant open intervals were measured up to.
@@ -117,6 +120,8 @@ impl CallService {
         let participants = self.participants(scope, call_id).await?;
         let sessions = self.sessions(scope, call_id).await?;
         let intervals = self.intervals(scope, call_id).await?;
+        let invitations = self.invitations(scope, call_id).await?;
+        let transfers = self.transfers(scope, call_id).await?;
 
         let mut by_session: BTreeMap<_, Vec<ConnectionSpan>> = BTreeMap::new();
         for interval in &intervals {
@@ -158,9 +163,47 @@ impl CallService {
             call,
             participants,
             sessions,
+            invitations,
+            transfers,
             connected_duration_ms,
             as_of,
         })
+    }
+
+    /// Ring offers of a Call in `scope`, oldest first.
+    pub async fn invitations(
+        &self,
+        scope: CallScope,
+        call_id: CallId,
+    ) -> CallResult<Vec<CallInvitation>> {
+        self.call_row(scope, call_id).await?;
+        Ok(call_invitations::Entity::find()
+            .filter(call_invitations::Column::CallId.eq(call_id.as_uuid()))
+            .order_by_asc(call_invitations::Column::IssuedAt)
+            .order_by_asc(call_invitations::Column::Id)
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
+    /// Transfers of a Call in `scope`, oldest first.
+    pub async fn transfers(
+        &self,
+        scope: CallScope,
+        call_id: CallId,
+    ) -> CallResult<Vec<CallTransfer>> {
+        self.call_row(scope, call_id).await?;
+        Ok(call_transfers::Entity::find()
+            .filter(call_transfers::Column::CallId.eq(call_id.as_uuid()))
+            .order_by_asc(call_transfers::Column::InitiatedAt)
+            .order_by_asc(call_transfers::Column::Id)
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect())
     }
 
     /// One page of Calls in `scope`, newest first (`created_at DESC, id DESC`, keyset).

@@ -17,11 +17,15 @@
 //! is independent of HTTP: handlers call it, and it never accepts database rows or client
 //! JSON as input.
 
+mod commands;
+mod invitations;
 mod lifecycle;
+mod media;
 mod participation;
 mod queries;
 mod records;
 mod routing;
+mod transfers;
 
 use cf_service_auth::RuntimeEnvironment;
 use chrono::{DateTime, Duration, Utc};
@@ -30,8 +34,13 @@ use sea_orm::{
     DbBackend, EntityTrait, QueryFilter, QuerySelect, Statement,
 };
 
+pub use commands::{fingerprint, CommandKey, IdempotencyKey, PriorCommand};
 pub use lifecycle::{CreatedCall, NewCall, TransitionOutcome};
+pub(crate) use media::{backoff, NewMediaBinding};
+pub(crate) use participation::{participant_of, session_of};
 pub use queries::{CallDetail, CallPage, ListCallsQuery, ParticipantDetail, SessionDetail};
+pub(crate) use routing::{attempt_of, leg_of, route_of};
+pub(crate) use transfers::NewTransfer;
 
 use super::{
     attributes::{SafeAttributes, SafeValue},
@@ -135,6 +144,10 @@ impl CallService {
         self.clock.now()
     }
 
+    pub(crate) fn db(&self) -> &DatabaseConnection {
+        &self.db
+    }
+
     /// Locks the Call row for the rest of the transaction. A Call outside `scope` is
     /// indistinguishable from a missing one.
     pub(crate) async fn lock_call(
@@ -218,6 +231,7 @@ impl CallService {
             actor_service_account_id: Set(cmd.actor().service_account_id().as_uuid()),
             actor_credential_id: Set(cmd.actor().credential_id().map(|c| c.as_uuid())),
             actor_service: Set(cmd.actor().service().map(|s| s.as_str().to_string())),
+            actor_endpoint_id: Set(cmd.actor().endpoint_id().map(|e| e.as_uuid())),
             request_id: Set(event.request_id.clone()),
             correlation_id: Set(event.correlation_id.clone()),
             payload: Set(event.data.clone()),

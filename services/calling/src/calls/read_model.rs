@@ -13,6 +13,7 @@ use serde::Serialize;
 use super::{
     aggregate::Call,
     ids::CallId,
+    invitations::{CallInvitation, CallTransfer},
     service::{CallDetail, CallPage, ParticipantDetail, SessionDetail},
 };
 
@@ -157,6 +158,10 @@ pub struct SessionView {
     pub last_disconnected_at: Option<String>,
     pub ended_at: Option<String>,
     pub connected_duration_ms: i64,
+    pub endpoint_id: Option<String>,
+    pub media_access: &'static str,
+    pub media_admitted_at: Option<String>,
+    pub removed_at: Option<String>,
 }
 
 impl From<&SessionDetail> for SessionView {
@@ -173,6 +178,82 @@ impl From<&SessionDetail> for SessionView {
             last_disconnected_at: ts_opt(s.last_disconnected_at),
             ended_at: ts_opt(s.ended_at),
             connected_duration_ms: d.connected_duration_ms,
+            endpoint_id: s.endpoint_id.map(|e| e.to_string()),
+            media_access: s.media_access.as_str(),
+            media_admitted_at: ts_opt(s.media_admitted_at),
+            removed_at: ts_opt(s.removed_at),
+        }
+    }
+}
+
+/// A ring offer as the public API shows it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InvitationView {
+    pub invitation_id: String,
+    pub participant_id: String,
+    pub endpoint_id: String,
+    pub purpose: &'static str,
+    pub status: &'static str,
+    pub invitation_generation: i32,
+    pub issued_at: String,
+    pub expires_at: String,
+    pub finished_at: Option<String>,
+    pub terminal_reason: Option<&'static str>,
+    pub session_id: Option<String>,
+}
+
+impl From<&CallInvitation> for InvitationView {
+    fn from(i: &CallInvitation) -> Self {
+        Self {
+            invitation_id: i.id.to_string(),
+            participant_id: i.participant_id.to_string(),
+            endpoint_id: i.endpoint_id.to_string(),
+            purpose: i.purpose.as_str(),
+            status: i.status.as_str(),
+            invitation_generation: i.invitation_generation,
+            issued_at: ts(i.issued_at),
+            expires_at: ts(i.expires_at),
+            finished_at: ts_opt(i.finished_at),
+            terminal_reason: i.terminal_reason.map(|r| r.as_str()),
+            session_id: i.session_id.map(|s| s.to_string()),
+        }
+    }
+}
+
+/// An application transfer as the public API shows it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferView {
+    pub transfer_id: String,
+    pub transferring_participant_id: String,
+    pub target_principal_id: String,
+    pub target_participant_id: Option<String>,
+    pub state: &'static str,
+    pub pre_transfer_state: &'static str,
+    pub failure_reason: Option<&'static str>,
+    pub failure_category: Option<&'static str>,
+    pub initiated_at: String,
+    pub completed_at: Option<String>,
+    pub failed_at: Option<String>,
+    pub cancelled_at: Option<String>,
+}
+
+impl From<&CallTransfer> for TransferView {
+    fn from(t: &CallTransfer) -> Self {
+        Self {
+            transfer_id: t.id.to_string(),
+            transferring_participant_id: t.transferring_participant_id.to_string(),
+            target_principal_id: t.target_principal_id.to_string(),
+            target_participant_id: t.target_participant_id.map(|p| p.to_string()),
+            state: t.state.as_str(),
+            pre_transfer_state: t.pre_transfer_state.as_str(),
+            failure_reason: t.failure_reason.map(|r| r.as_str()),
+            failure_category: t.failure_category.map(|c| c.as_str()),
+            initiated_at: ts(t.initiated_at),
+            completed_at: ts_opt(t.completed_at),
+            failed_at: ts_opt(t.failed_at),
+            cancelled_at: ts_opt(t.cancelled_at),
         }
     }
 }
@@ -186,6 +267,8 @@ pub struct CallView {
     pub durations_as_of: String,
     pub participants: Vec<ParticipantView>,
     pub sessions: Vec<SessionView>,
+    pub invitations: Vec<InvitationView>,
+    pub transfers: Vec<TransferView>,
 }
 
 impl From<&CallDetail> for CallView {
@@ -196,6 +279,8 @@ impl From<&CallDetail> for CallView {
             durations_as_of: ts(d.as_of),
             participants: d.participants.iter().map(Into::into).collect(),
             sessions: d.sessions.iter().map(Into::into).collect(),
+            invitations: d.invitations.iter().map(Into::into).collect(),
+            transfers: d.transfers.iter().map(Into::into).collect(),
         }
     }
 }

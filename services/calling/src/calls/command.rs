@@ -17,8 +17,11 @@ use cf_service_auth::{
 
 use super::{errors::CallError, kinds::ActorKind};
 use crate::{
-    domain::{ApplicationId, CredentialId, EnvironmentId, ServiceAccountId, TenantId},
+    domain::{ApplicationId, CredentialId, EnvironmentId, PrincipalId, ServiceAccountId, TenantId},
+    endpoints::CallEndpointId,
+    internal_auth::calling_service_id,
     platform::{context::PlatformAuthContext, principals::ResolvedPrincipal},
+    signaling::SignalingIdentity,
 };
 
 /// Tenant / application / environment every call-domain query and mutation is confined to.
@@ -90,6 +93,15 @@ pub enum CallActor {
         service_account_id: ServiceAccountId,
         credential_id: CredentialId,
     },
+    /// An application endpoint (device) authenticated by a short-lived signaling
+    /// credential. The credential was minted by `credential_id` of `service_account_id`
+    /// for exactly this endpoint and principal; both are recorded.
+    ApplicationEndpoint {
+        service_account_id: ServiceAccountId,
+        credential_id: CredentialId,
+        endpoint_id: CallEndpointId,
+        principal_id: PrincipalId,
+    },
     /// An authenticated CF Meet backend service acting for the delegated service account.
     InternalService {
         service: ServiceId,
@@ -101,6 +113,7 @@ impl CallActor {
     pub fn kind(&self) -> ActorKind {
         match self {
             CallActor::CustomerApplication { .. } => ActorKind::CustomerApplication,
+            CallActor::ApplicationEndpoint { .. } => ActorKind::ApplicationEndpoint,
             CallActor::InternalService { .. } => ActorKind::InternalService,
         }
     }
@@ -109,6 +122,9 @@ impl CallActor {
         match self {
             CallActor::CustomerApplication {
                 service_account_id, ..
+            }
+            | CallActor::ApplicationEndpoint {
+                service_account_id, ..
             } => *service_account_id,
             CallActor::InternalService { on_behalf_of, .. } => *on_behalf_of,
         }
@@ -116,15 +132,24 @@ impl CallActor {
 
     pub fn credential_id(&self) -> Option<CredentialId> {
         match self {
-            CallActor::CustomerApplication { credential_id, .. } => Some(*credential_id),
+            CallActor::CustomerApplication { credential_id, .. }
+            | CallActor::ApplicationEndpoint { credential_id, .. } => Some(*credential_id),
             CallActor::InternalService { .. } => None,
         }
     }
 
     pub fn service(&self) -> Option<&ServiceId> {
         match self {
-            CallActor::CustomerApplication { .. } => None,
+            CallActor::CustomerApplication { .. } | CallActor::ApplicationEndpoint { .. } => None,
             CallActor::InternalService { service, .. } => Some(service),
+        }
+    }
+
+    /// The endpoint an endpoint actor acts from.
+    pub fn endpoint_id(&self) -> Option<CallEndpointId> {
+        match self {
+            CallActor::ApplicationEndpoint { endpoint_id, .. } => Some(*endpoint_id),
+            _ => None,
         }
     }
 }
@@ -169,6 +194,37 @@ impl CallCommandContext {
             request_id: caller.request_id().clone(),
             correlation_id: caller.correlation_id().clone(),
         })
+    }
+
+    /// A command issued by an application endpoint through its verified signaling
+    /// credential (scope, principal and endpoint come only from the credential).
+    pub fn endpoint(identity: &SignalingIdentity) -> Self {
+        Self {
+            scope: identity.scope(),
+            actor: CallActor::ApplicationEndpoint {
+                service_account_id: identity.minted_by_service_account_id(),
+                credential_id: identity.minted_by_credential_id(),
+                endpoint_id: identity.endpoint_id(),
+                principal_id: identity.principal_id(),
+            },
+            request_id: identity.request_id().clone(),
+            correlation_id: identity.correlation_id().clone(),
+        }
+    }
+
+    /// A command the Calling service issues itself (workers, verified provider callbacks,
+    /// reconciliation) for a Call of `scope`, on behalf of the service account that
+    /// created the Call. Fresh request / correlation ids identify the run.
+    pub(crate) fn system(scope: CallScope, on_behalf_of: ServiceAccountId) -> Self {
+        Self {
+            scope,
+            actor: CallActor::InternalService {
+                service: calling_service_id(),
+                on_behalf_of,
+            },
+            request_id: RequestId::generate(),
+            correlation_id: CorrelationId::generate(),
+        }
     }
 
     pub fn scope(&self) -> CallScope {

@@ -22,7 +22,11 @@ use crate::{
         errors::{CallError, CallResult},
         events::{CallEvent, CallEventType},
         ids::{CallAuthorizationId, CallId, CallParticipantId},
-        kinds::{AuthorizationDecision, CallKind, LegState, ParticipantRole, SessionState},
+        kinds::{
+            AttemptOutcome, AuthorizationDecision, CallKind, FailureCategory, InvitationStatus,
+            InvitationTerminalReason, LegKind, LegState, ParticipantRole, RouteClass, RouteState,
+            SessionState, TransferFailureReason, TransferState,
+        },
         participants::{CallParticipant, DisplayName},
         state::CallState,
         transitions::{
@@ -31,7 +35,8 @@ use crate::{
     },
     domain::{EnvironmentKind, EnvironmentStatus},
     models::{
-        call_authorizations, call_legs, call_participants, call_sessions, calls, environments,
+        call_attempts, call_authorizations, call_invitations, call_legs, call_participants,
+        call_routes, call_sessions, call_transfers, calls, environments,
     },
     platform::{
         context::PlatformAuthContext, limits::concurrent_communication_limits,
@@ -76,6 +81,20 @@ pub struct TransitionOutcome {
     pub event: CallEvent,
 }
 
+/// A transition applied inside a caller's transaction.
+#[derive(Debug, Clone)]
+pub(crate) struct AppliedTransition {
+    pub call: calls::Model,
+    pub event: CallEvent,
+    /// Live invitations a terminal transition cancelled (for ring-cancel signals).
+    pub cancelled_invitations: Vec<call_invitations::Model>,
+}
+
+#[derive(Default)]
+struct TerminalCleanup {
+    cancelled_invitations: Vec<call_invitations::Model>,
+}
+
 /// Serializes Call creation per application (`pg_advisory_xact_lock`), so concurrent
 /// creations cannot both pass the concurrent-call check.
 const CREATION_LOCK_SQL: &str = "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))";
@@ -90,14 +109,34 @@ impl CallService {
         initiator: &ResolvedPrincipal,
         request: NewCall,
     ) -> CallResult<CreatedCall> {
+        let txn = self.db.begin().await?;
+        let (call, participant, event) = self
+            .create_requested_call_in(&txn, ctx, initiator, request)
+            .await?;
+        txn.commit().await?;
+        Ok(CreatedCall {
+            call: call.into(),
+            initiator: participant.into(),
+            event,
+        })
+    }
+
+    /// [`create_requested_call`](Self::create_requested_call) inside the caller's
+    /// transaction.
+    pub(crate) async fn create_requested_call_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &PlatformAuthContext,
+        initiator: &ResolvedPrincipal,
+        request: NewCall,
+    ) -> CallResult<(calls::Model, call_participants::Model, CallEvent)> {
         let cmd = CallCommandContext::customer(ctx);
         let scope = cmd.scope();
         // The initiator must have been resolved in the caller's own scope.
         if CallScope::of_principal(initiator) != scope {
             return Err(CallError::NotFound);
         }
-        let txn = self.db.begin().await?;
-        self.enforce_concurrent_call_limit(&txn, ctx).await?;
+        self.enforce_concurrent_call_limit(txn, ctx).await?;
 
         let at = self.now();
         let call_id = CallId::generate();
@@ -129,7 +168,7 @@ impl CallService {
             created_at: Set(at),
             updated_at: Set(at),
         }
-        .insert(&txn)
+        .insert(txn)
         .await?;
         let participant = call_participants::ActiveModel {
             id: Set(CallParticipantId::generate().as_uuid()),
@@ -148,11 +187,11 @@ impl CallService {
             ended_at: Set(None),
             updated_at: Set(at),
         }
-        .insert(&txn)
+        .insert(txn)
         .await?;
         let event = self
             .append_event(
-                &txn,
+                txn,
                 &cmd,
                 &call,
                 EventDraft {
@@ -176,7 +215,6 @@ impl CallService {
                 at,
             )
             .await?;
-        txn.commit().await?;
         tracing::info!(
             call_id = %call.id,
             call_state = %call.current_state,
@@ -189,11 +227,7 @@ impl CallService {
             correlation_id = %cmd.correlation_id(),
             "call requested"
         );
-        Ok(CreatedCall {
-            call: call.into(),
-            initiator: participant.into(),
-            event,
-        })
+        Ok((call, participant, event))
     }
 
     /// Enforces the effective concurrent-call limits inside the creating transaction:
@@ -277,15 +311,39 @@ impl CallService {
     ) -> CallResult<TransitionOutcome> {
         let txn = self.db.begin().await?;
         let row = self.lock_call(&txn, cmd.scope(), call_id).await?;
+        let applied = self
+            .transition_in(&txn, cmd, &row, expected_version, action)
+            .await?;
+        txn.commit().await?;
+        Ok(TransitionOutcome {
+            call: applied.call.into(),
+            event: applied.event,
+        })
+    }
+
+    /// [`transition`](Self::transition) inside the caller's transaction. `row` must be the
+    /// Call row as locked (`SELECT … FOR UPDATE`) by that transaction. A terminal
+    /// transition also closes all participation (intervals, sessions with their media
+    /// access, participants), cancels live invitations and an in-flight transfer, finishes
+    /// pending attempts, closes routes and legs and marks the media binding for teardown —
+    /// all in the same transaction, each with its evidence event.
+    pub(crate) async fn transition_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        row: &calls::Model,
+        expected_version: i64,
+        action: CallAction,
+    ) -> CallResult<AppliedTransition> {
         let current: Call = row.clone().into();
         let plan = plan_transition(&current, expected_version, &action, self.now())?;
-        let mut details = self.verify_evidence(&txn, &row, &action, &plan).await?;
+        let mut details = self.verify_evidence(txn, row, &action, &plan).await?;
 
         let mut update = <calls::ActiveModel as ActiveModelTrait>::default();
         update.current_state = Set(plan.to);
         update.version = Set(plan.new_version);
         update.updated_at = Set(plan.at);
-        set_first_entry(&mut update, &row, plan.to, plan.at);
+        set_first_entry(&mut update, row, plan.to, plan.at);
         if plan.to.is_terminal() {
             update.ended_at = Set(Some(plan.at));
             update.terminal_reason = Set(plan.terminal_reason);
@@ -295,7 +353,7 @@ impl CallService {
             .set(update)
             .filter(calls::Column::Id.eq(row.id))
             .filter(calls::Column::Version.eq(expected_version))
-            .exec(&txn)
+            .exec(txn)
             .await?;
         if updated.rows_affected != 1 {
             return Err(CallError::StaleVersion {
@@ -304,13 +362,14 @@ impl CallService {
             });
         }
         let call = calls::Entity::find_by_id(row.id)
-            .one(&txn)
+            .one(txn)
             .await?
             .ok_or(CallError::NotFound)?;
 
+        let mut closed = TerminalCleanup::default();
         if plan.to.is_terminal() {
             let (intervals, sessions, participants) =
-                close_participation(&txn, row.id, plan.at).await?;
+                close_participation(txn, row.id, plan.at).await?;
             details.push(("sessions_closed", SafeValue::Integer(sessions as i64)));
             details.push(("intervals_closed", SafeValue::Integer(intervals as i64)));
             details.push((
@@ -327,7 +386,7 @@ impl CallService {
         }
         let event = self
             .append_event(
-                &txn,
+                txn,
                 cmd,
                 &call,
                 EventDraft {
@@ -339,7 +398,9 @@ impl CallService {
                 plan.at,
             )
             .await?;
-        txn.commit().await?;
+        if plan.to.is_terminal() {
+            closed = self.close_subordinates_in(txn, cmd, &call).await?;
+        }
         tracing::info!(
             call_id = %call.id,
             call_state = %call.current_state,
@@ -353,9 +414,153 @@ impl CallService {
             correlation_id = %cmd.correlation_id(),
             "call state changed"
         );
-        Ok(TransitionOutcome {
-            call: call.into(),
+        Ok(AppliedTransition {
+            call,
             event,
+            cancelled_invitations: closed.cancelled_invitations,
+        })
+    }
+
+    /// Terminal Call: every subordinate operational record Calling executes itself reaches
+    /// a terminal state with its own evidence event — live invitations CANCELLED, an
+    /// in-flight transfer CANCELLED, pending attempts of APPLICATION routes finished, open
+    /// APPLICATION legs and routes closed, the media binding marked for provider teardown
+    /// (reconciliation confirms it). Routes, legs and attempts of other execution
+    /// boundaries (public network, private network) are closed by those boundaries with
+    /// their own closing evidence, as before.
+    async fn close_subordinates_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+    ) -> CallResult<TerminalCleanup> {
+        let state = call.current_state;
+        let reason = if state == CallState::Cancelled {
+            InvitationTerminalReason::CallCancelled
+        } else {
+            InvitationTerminalReason::CallTerminated
+        };
+        let cancelled_invitations = self
+            .finish_live_invitations_in(
+                txn,
+                cmd,
+                call,
+                None,
+                None,
+                InvitationStatus::Cancelled,
+                reason,
+            )
+            .await?;
+        if let Some(transfer) = call_transfers::Entity::find()
+            .filter(call_transfers::Column::CallId.eq(call.id))
+            .filter(call_transfers::Column::State.is_in([
+                TransferState::Requested,
+                TransferState::RingingTarget,
+                TransferState::Accepted,
+            ]))
+            .one(txn)
+            .await?
+        {
+            self.cancel_transfer_in(txn, cmd, call, transfer, TransferFailureReason::CallEnded)
+                .await?;
+        }
+        let application_routes: Vec<Uuid> = call_routes::Entity::find()
+            .filter(call_routes::Column::CallId.eq(call.id))
+            .filter(call_routes::Column::RouteClass.eq(RouteClass::Application))
+            .all(txn)
+            .await?
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        for attempt in call_attempts::Entity::find()
+            .filter(call_attempts::Column::CallId.eq(call.id))
+            .filter(call_attempts::Column::Outcome.eq(AttemptOutcome::Pending))
+            .all(txn)
+            .await?
+        {
+            if !attempt
+                .route_id
+                .is_some_and(|r| application_routes.contains(&r))
+            {
+                continue;
+            }
+            let (outcome, category) = match state {
+                CallState::Declined | CallState::Busy => (
+                    AttemptOutcome::Failed,
+                    Some(FailureCategory::TargetUnavailable),
+                ),
+                CallState::NoAnswer => (AttemptOutcome::Failed, Some(FailureCategory::Timeout)),
+                CallState::Failed => (
+                    AttemptOutcome::Failed,
+                    Some(call.failure_category.unwrap_or(FailureCategory::Unknown)),
+                ),
+                _ => (AttemptOutcome::Abandoned, None),
+            };
+            self.finish_attempt_in(txn, cmd, call, attempt, outcome, category)
+                .await?;
+        }
+        for leg in call_legs::Entity::find()
+            .filter(call_legs::Column::CallId.eq(call.id))
+            .filter(call_legs::Column::LegKind.eq(LegKind::Application))
+            .all(txn)
+            .await?
+        {
+            if leg.state.is_terminal() {
+                continue;
+            }
+            let preferred = match state {
+                CallState::Declined => LegState::Declined,
+                CallState::Busy => LegState::Busy,
+                CallState::NoAnswer => LegState::NoAnswer,
+                CallState::Failed => LegState::Failed,
+                CallState::Cancelled => LegState::Cancelled,
+                _ => LegState::Ended,
+            };
+            let target = [
+                preferred,
+                LegState::Cancelled,
+                LegState::Ended,
+                LegState::Failed,
+            ]
+            .into_iter()
+            .find(|t| leg.state.can_transition_to(*t))
+            .unwrap_or(LegState::Failed);
+            let category = (target == LegState::Failed)
+                .then(|| call.failure_category.unwrap_or(FailureCategory::Unknown));
+            self.move_leg_in(txn, cmd, call, leg, target, category)
+                .await?;
+        }
+        for route in call_routes::Entity::find()
+            .filter(call_routes::Column::CallId.eq(call.id))
+            .filter(call_routes::Column::RouteClass.eq(RouteClass::Application))
+            .all(txn)
+            .await?
+        {
+            if route.state.is_terminal() {
+                continue;
+            }
+            let target = match state {
+                CallState::Cancelled => RouteState::Cancelled,
+                CallState::Declined | CallState::Busy | CallState::NoAnswer => {
+                    RouteState::Exhausted
+                }
+                CallState::Failed => RouteState::Failed,
+                _ => RouteState::Ended,
+            };
+            self.move_route_in(txn, cmd, call, route, target).await?;
+        }
+        let at = self.now().max(call.updated_at);
+        execute(
+            txn,
+            "UPDATE call_media_sessions \
+                SET status = 'TERMINATING', enforcement_pending = TRUE, next_reconcile_at = $2, \
+                    updated_at = GREATEST($2, updated_at) \
+              WHERE call_id = $1 AND status IN ('ENSURING', 'ACTIVE')",
+            vec![call.id.into(), at.into()],
+        )
+        .await?;
+        Ok(TerminalCleanup {
+            cancelled_invitations,
         })
     }
 
@@ -402,7 +607,8 @@ impl CallService {
             }
             CallAction::ConfirmConnected { evidence }
             | CallAction::Resume { evidence }
-            | CallAction::CompleteTransfer { evidence } => {
+            | CallAction::CompleteTransfer { evidence }
+            | CallAction::RevertTransfer { evidence } => {
                 self.verify_connected(txn, call, evidence).await
             }
             CallAction::ConfirmEnded { evidence } => {
@@ -534,15 +740,34 @@ impl CallService {
     ) -> CallResult<CallAuthorization> {
         let txn = self.db.begin().await?;
         let call = self.lock_open_call(&txn, cmd.scope(), call_id).await?;
+        let model = self.record_authorization_in(&txn, cmd, &call, new).await?;
+        txn.commit().await?;
+        Ok(model.into())
+    }
+
+    /// [`record_authorization`](Self::record_authorization) inside the caller's
+    /// transaction (Call row locked, not terminal).
+    pub(crate) async fn record_authorization_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        new: NewAuthorization,
+    ) -> CallResult<call_authorizations::Model> {
+        if call.current_state.is_terminal() {
+            return Err(CallError::Terminal {
+                state: call.current_state,
+            });
+        }
         let at = self.now().max(call.updated_at);
         let id = CallAuthorizationId::generate();
-        let previous = self.effective_authorization(&txn, &call).await?;
+        let previous = self.effective_authorization(txn, call).await?;
         let decided_at = previous.as_ref().map_or(at, |p| at.max(p.decided_at));
         if let Some(previous) = &previous {
             let mut superseded: call_authorizations::ActiveModel = previous.clone().into();
             superseded.superseded_at = Set(Some(decided_at));
             superseded.superseded_by_authorization_id = Set(Some(id.as_uuid()));
-            superseded.update(&txn).await?;
+            superseded.update(txn).await?;
         }
         let decision = new.reason.decision();
         let model = call_authorizations::ActiveModel {
@@ -568,7 +793,7 @@ impl CallService {
             superseded_by_authorization_id: Set(None),
             created_at: Set(at),
         }
-        .insert(&txn)
+        .insert(txn)
         .await?;
         let mut details = vec![
             ("authorization_id", text(id)),
@@ -580,14 +805,13 @@ impl CallService {
             details.push(("supersedes_authorization_id", text(previous.id)));
         }
         self.append_event(
-            &txn,
+            txn,
             cmd,
-            &call,
+            call,
             EventDraft::fact(CallEventType::CallAuthorizationRecorded, data(details)?),
             decided_at,
         )
         .await?;
-        txn.commit().await?;
         tracing::info!(
             call_id = %call.id,
             authorization_id = %id,
@@ -596,7 +820,7 @@ impl CallService {
             correlation_id = %cmd.correlation_id(),
             "call authorization recorded"
         );
-        Ok(model.into())
+        Ok(model)
     }
 
     /// The guard every paid public-network action must pass (Part C §18). Succeeds only if
@@ -704,6 +928,8 @@ async fn close_participation(
                     THEN GREATEST($2, updated_at) ELSE last_disconnected_at END, \
                 state = 'ENDED', \
                 ended_at = GREATEST($2, updated_at), \
+                media_enforcement_pending = (media_enforcement_pending OR media_access = 'AUTHORIZED'), \
+                media_access = CASE WHEN media_access = 'AUTHORIZED' THEN 'REVOKED' ELSE media_access END, \
                 updated_at = GREATEST($2, updated_at) \
           WHERE call_id = $1 AND state <> 'ENDED'",
         vec![call_id.into(), at.into()],

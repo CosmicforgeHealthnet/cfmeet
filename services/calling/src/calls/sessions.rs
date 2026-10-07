@@ -21,7 +21,7 @@ use serde::Serialize;
 use super::{
     duration::ConnectionSpan,
     ids::{CallId, CallParticipantId, CallSessionId, CallSessionIntervalId, MediaIdentity},
-    kinds::{DisconnectReason, EndpointCategory, SessionState},
+    kinds::{DisconnectReason, EndpointCategory, MediaAccess, SessionState},
 };
 use crate::models::{call_session_intervals, call_sessions};
 
@@ -42,6 +42,15 @@ pub struct CallSession {
     pub first_connected_at: Option<DateTime<Utc>>,
     pub last_disconnected_at: Option<DateTime<Utc>>,
     pub ended_at: Option<DateTime<Utc>>,
+    /// The application endpoint the session runs on.
+    pub endpoint_id: Option<uuid::Uuid>,
+    /// NONE → AUTHORIZED → REVOKED.
+    pub media_access: MediaAccess,
+    /// Generation of the latest media credential (internal; never a credential).
+    #[serde(skip)]
+    pub media_generation: i32,
+    pub media_admitted_at: Option<DateTime<Utc>>,
+    pub removed_at: Option<DateTime<Utc>>,
 }
 
 impl From<call_sessions::Model> for CallSession {
@@ -59,6 +68,11 @@ impl From<call_sessions::Model> for CallSession {
             first_connected_at: m.first_connected_at,
             last_disconnected_at: m.last_disconnected_at,
             ended_at: m.ended_at,
+            endpoint_id: m.endpoint_id,
+            media_access: m.media_access,
+            media_generation: m.media_generation,
+            media_admitted_at: m.media_admitted_at,
+            removed_at: m.removed_at,
         }
     }
 }

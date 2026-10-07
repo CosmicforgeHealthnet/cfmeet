@@ -1,16 +1,17 @@
 //! Call-domain errors.
 //!
-//! Every variant has a stable, client-safe code ([`CallError::code`]). There are no public
-//! call mutation routes yet, so the codes that only mutations can produce
-//! (`CALL_STATE_CONFLICT`, `STALE_CALL_VERSION`, …) are not part of the published HTTP
-//! contract; [`CallError::http_status`] fixes how they will map when those routes exist.
+//! Every variant has a stable, client-safe code ([`CallError::code`]) and HTTP status
+//! ([`CallError::http_status`]); the public codes are part of the Calling HTTP contract.
 //! Messages never contain database errors, provider detail or foreign-scope existence:
 //! anything outside the caller's tenant / application / environment is `NotFound`.
 
 use axum::http::StatusCode;
 
 use super::{attributes::AttributeError, kinds::FailureCategory, state::CallState};
-use crate::{error::CallingError, platform::error::summarize_db_error};
+use crate::{
+    error::{CallingError, ErrorCode},
+    platform::error::summarize_db_error,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CallError {
@@ -57,6 +58,31 @@ pub enum CallError {
     /// A failure category the action may not use.
     #[error("failure category {0} is not allowed for this action")]
     FailureCategoryNotAllowed(FailureCategory),
+    /// The same Idempotency-Key was used for a different request.
+    #[error("idempotency key reused for a different request")]
+    IdempotencyConflict,
+    /// The invitation's server-time ring window has passed; it can never be revived.
+    #[error("invitation expired")]
+    InvitationExpired,
+    /// The invitation was declined, cancelled or is otherwise no longer actionable.
+    #[error("invitation is no longer actionable")]
+    InvitationNotActionable,
+    /// Another device of the same participant won the answer.
+    #[error("answered elsewhere")]
+    AnsweredElsewhere,
+    /// The configured media provider (or policy) cannot execute this action.
+    #[error("capability unavailable: {0}")]
+    CapabilityUnavailable(&'static str),
+    /// Provider enforcement of a command could not be confirmed; nothing was recorded as
+    /// done and the command may be retried.
+    #[error("media provider enforcement unavailable")]
+    MediaUnavailable,
+    /// The server-side participant limit of a Call would be exceeded.
+    #[error("participant limit exceeded")]
+    ParticipantLimitExceeded { limit: i64 },
+    /// A target principal has no eligible application endpoint.
+    #[error("target unavailable")]
+    TargetUnavailable,
     /// Unexpected database failure (summary: SQLSTATE + constraint only).
     #[error("database error ({summary})")]
     Database { summary: String, connectivity: bool },
@@ -84,6 +110,14 @@ impl CallError {
             CallError::Validation(_) | CallError::FailureCategoryNotAllowed(_) => {
                 "VALIDATION_ERROR"
             }
+            CallError::IdempotencyConflict => "IDEMPOTENCY_CONFLICT",
+            CallError::InvitationExpired => "INVITATION_EXPIRED",
+            CallError::InvitationNotActionable => "INVITATION_NOT_ACTIONABLE",
+            CallError::AnsweredElsewhere => "ANSWERED_ELSEWHERE",
+            CallError::CapabilityUnavailable(_) => "CAPABILITY_UNAVAILABLE",
+            CallError::MediaUnavailable => "MEDIA_UNAVAILABLE",
+            CallError::ParticipantLimitExceeded { .. } => "PARTICIPANT_LIMIT_EXCEEDED",
+            CallError::TargetUnavailable => "TARGET_UNAVAILABLE",
             CallError::Database { connectivity, .. } => {
                 if *connectivity {
                     "SERVICE_UNAVAILABLE"
@@ -94,7 +128,7 @@ impl CallError {
         }
     }
 
-    /// HTTP status the code maps to once call mutations are exposed.
+    /// HTTP status of the code.
     pub fn http_status(&self) -> StatusCode {
         match self {
             CallError::NotFound => StatusCode::NOT_FOUND,
@@ -111,6 +145,15 @@ impl CallError {
             CallError::Validation(_) | CallError::FailureCategoryNotAllowed(_) => {
                 StatusCode::BAD_REQUEST
             }
+            CallError::IdempotencyConflict
+            | CallError::InvitationNotActionable
+            | CallError::AnsweredElsewhere
+            | CallError::TargetUnavailable => StatusCode::CONFLICT,
+            CallError::InvitationExpired => StatusCode::GONE,
+            CallError::CapabilityUnavailable(_) | CallError::ParticipantLimitExceeded { .. } => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
+            CallError::MediaUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             CallError::Database { connectivity, .. } => {
                 if *connectivity {
                     StatusCode::SERVICE_UNAVAILABLE
@@ -137,27 +180,51 @@ impl From<AttributeError> for CallError {
     }
 }
 
-/// Errors reaching the (read-only) HTTP layer. Detail is logged, never returned.
+/// Errors reaching the HTTP layer: a stable code, its status and a fixed safe message.
+/// Database detail is logged, never returned; foreign-scope resources are NOT_FOUND.
 impl From<CallError> for CallingError {
     fn from(err: CallError) -> Self {
-        match err {
-            CallError::NotFound => CallingError::NotFound,
-            CallError::Validation(message) => CallingError::Validation(message),
+        let code = match &err {
+            CallError::NotFound => return CallingError::NotFound,
+            CallError::Validation(message) => return CallingError::Validation(message),
+            CallError::FailureCategoryNotAllowed(_) => {
+                return CallingError::Validation("The failure category is not allowed.")
+            }
             CallError::Database {
                 summary,
                 connectivity,
             } => {
                 tracing::error!(%summary, "call database error");
-                if connectivity {
+                return if *connectivity {
                     CallingError::ServiceUnavailable
                 } else {
                     CallingError::Internal
-                }
+                };
             }
-            other => {
-                tracing::warn!(code = other.code(), error = %other, "call operation refused");
-                CallingError::Internal
+            CallError::StaleVersion { .. } => ErrorCode::StaleCallVersion,
+            CallError::Terminal { .. } | CallError::InvalidTransition { .. } => {
+                ErrorCode::CallStateConflict
             }
+            CallError::InsufficientEvidence(_) => ErrorCode::CallEvidenceRequired,
+            CallError::AuthorizationRequired
+            | CallError::AuthorizationDenied
+            | CallError::LiveTelecomNotAllowed => ErrorCode::CallNotAuthorized,
+            CallError::ConcurrentCallLimitExceeded { .. } => ErrorCode::ConcurrentCallLimitExceeded,
+            CallError::InvalidState(_) => ErrorCode::CallResourceStateConflict,
+            CallError::Conflict(_) => ErrorCode::Conflict,
+            CallError::IdempotencyConflict => ErrorCode::IdempotencyConflict,
+            CallError::InvitationExpired => ErrorCode::InvitationExpired,
+            CallError::InvitationNotActionable => ErrorCode::InvitationNotActionable,
+            CallError::AnsweredElsewhere => ErrorCode::AnsweredElsewhere,
+            CallError::CapabilityUnavailable(_) => ErrorCode::CapabilityUnavailable,
+            CallError::MediaUnavailable => ErrorCode::MediaUnavailable,
+            CallError::ParticipantLimitExceeded { .. } => ErrorCode::ParticipantLimitExceeded,
+            CallError::TargetUnavailable => ErrorCode::TargetUnavailable,
+        };
+        tracing::info!(code = code.as_str(), error = %err, "call operation refused");
+        CallingError::Call {
+            code,
+            status: err.http_status(),
         }
     }
 }
