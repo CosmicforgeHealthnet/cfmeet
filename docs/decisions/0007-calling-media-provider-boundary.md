@@ -29,12 +29,15 @@ otherwise creation answers `CAPABILITY_UNAVAILABLE`. Hold / resume / transfer ar
 offered only when the provider can enforce them.
 
 LiveKit is **an adapter**, not the architecture: `src/media/livekit.rs` (Twirp
-RoomService over HTTPS, HS256 tokens, webhook verification). It is the only file that
-names the provider (architecture guard with mutation tests). No LiveKit SDK crate is
+RoomService over HTTPS, HS256 tokens, webhook verification) and
+`src/media/livekit_gateway.rs` (its connection gateway relay, §5) are the only files that
+name the provider (architecture guard with mutation tests). No LiveKit SDK crate is
 used; no LiveKit type crosses into `src/calls/`. Configuration is Calling's own:
-`CALLING_MEDIA_PROVIDER` (`none` default | `livekit`), `CALLING_LIVEKIT_URL`,
-`CALLING_LIVEKIT_API_URL`, `CALLING_LIVEKIT_API_KEY`, `CALLING_LIVEKIT_API_SECRET`
-(≥ 32 characters), `CALLING_LIVEKIT_API_TIMEOUT_MS`. TLS is required except on loopback;
+`CALLING_MEDIA_PROVIDER` (`none` default | `livekit`), `CALLING_LIVEKIT_URL` (LiveKit
+signaling, gateway upstream only), `CALLING_LIVEKIT_API_URL`, `CALLING_LIVEKIT_API_KEY`,
+`CALLING_LIVEKIT_API_SECRET` (≥ 32 characters), `CALLING_MEDIA_GATEWAY_URL` (the public
+gateway URL handed to clients), `CALLING_MEDIA_EDGE_SIGNING_KEY` (≥ 32 characters,
+distinct from the LiveKit secret), `CALLING_LIVEKIT_API_TIMEOUT_MS`. TLS is required except on loopback;
 invalid or partial configuration stops the service at startup (no fallback secret). The
 secret lives in a redacting wrapper; config types have no derived `Debug`.
 
@@ -48,49 +51,104 @@ failure count, next reconcile time) is Calling-private: no API, event or signal 
 the room name, provider ids or keys. LiveKit runs with `auto_create: false`, so only
 Calling creates rooms and a join can never resurrect a terminated one.
 
-### 3. Credentials are derived from server state and are join-only
+### 3. Credentials are derived from server state, join-only, and sealed by Calling
 
 `POST /v1/calls/{id}/sessions/{sid}/media-credentials` (API credential) and
 `POST /v1/calling/sessions/{sid}/media-credentials` (endpoint's signaling credential)
 issue a credential only for a session whose `media_access` is AUTHORIZED (the
 initiator's session, or the single winning device of a participant) while the Call is in
-a media state. The body must be empty. The response carries URL, token, expiry and the
-capabilities the connection will receive — nothing else. TTL:
+a media state. The body must be empty. The response carries the gateway URL, the token,
+its expiry and the capabilities the connection will receive — nothing else. TTL:
 `CALLING_MEDIA_CREDENTIAL_TTL_SECONDS` (default 300, 30–900).
 
-The LiveKit token grants **room join only**: `canPublish`, `canSubscribe`,
-`canPublishData` false, no publish sources, no room admin / create / list / record. It
-binds the session's server-generated media identity (`cfmid_…`) and the session's
-`media_generation` (attribute `cfm.gen`, incremented on every issuance).
+The token grants **room join only** (`canPublish`, `canSubscribe`, `canPublishData`
+false, no publish sources, no room admin / create / list / record), binds the session's
+server-generated media identity (`cfmid_…`) and the session's `media_generation`
+(attribute `cfm.gen`), and is **sealed with Calling's media-edge key**
+(`CALLING_MEDIA_EDGE_SIGNING_KEY`, issuer `cfmeet-media-edge`) — a key LiveKit does not
+know. The client never receives LiveKit's signaling URL or any token LiveKit accepts.
 
 ### 4. Join-then-admit, enforced by the provider
 
-Media rights are applied **server-side after the join is verified** (signed
-`participant_joined` callback, or reconciliation): the admission decision
-(`media/events.rs`) gives a connection permissions only if its identity is a known,
-AUTHORIZED, non-ended session of this Call, the generation matches, and the Call is in a
-media state; permissions are `MediaPermissions::effective(authorized, kind, state)`
-(VOICE: audio + subscribe; VIDEO: + camera; held: no publishing, subscription kept;
-never data). Anything else is stripped and removed (evicted). Unknown identities are
-quarantined and evicted, never attached to anyone.
+Media rights are applied **server-side after the join is verified** (gateway
+notification of the join, signed `participant_joined` callback, or reconciliation): the
+admission decision (`media/events.rs`) gives a connection permissions only if its
+identity is a known, AUTHORIZED, non-ended, non-removed session of this Call whose
+participant is still in the Call, the generation matches, and the Call is in a media
+state; permissions are `MediaPermissions::effective(authorized, kind, state)` (VOICE:
+audio + subscribe; VIDEO: + camera; held: no publishing, subscription kept; never data).
+Anything else is stripped and removed (evicted). Unknown identities are quarantined and
+evicted, never attached to anyone.
 
-### 5. Stale re-entry prevention
+### 5. Revocation and stale re-entry: the media connection gateway
 
-Removing a session (or ending a Call) revokes `media_access` for ever
-(NONE → AUTHORIZED → REVOKED, database trigger), stops further credential issuance,
-strips the connection's permissions, removes it at the provider and marks enforcement
-pending until the provider confirms. LiveKit does allow a removed identity to reconnect
-with a still-valid token; certified against a real server, such a connection holds no
-publish / subscribe right (join-only token), receives no media, and is evicted
-(`PARTICIPANT_REMOVED`) as soon as the join is reported, with reconciliation as the
-backstop.
+**Why LiveKit's own mechanisms are not enough.** Self-hosted LiveKit cannot revoke an
+access token. Removing a participant or updating its permissions does not invalidate
+anything the client holds; worse, after `UpdateParticipant` LiveKit sends the client a
+*refreshed* token reflecting the new grants (certified on a real server: `canPublish` /
+`canSubscribe` true, signed with the API key, valid 600 s, `cfm.gen` preserved). A client
+that saved it could rejoin after removal and publish immediately; webhook eviction,
+15-second reconciliation and short TTLs only shorten that window. LiveKit Cloud's token
+revocation is not available to a self-hosted deployment and is not relied on.
 
-**Residual risk (documented):** while a connection is admitted, LiveKit may hand the
-client refreshed tokens reflecting its *current* permissions. A client that saved such a
-token before being removed could rejoin with those grants until admission evicts it — a
-window bounded by webhook delivery (sub-second in certification) and, at worst, by the
-reconciliation interval (`CALLING_MEDIA_RECONCILE_INTERVAL_SECONDS`, default 15) and the
-token's expiry. Short credential TTLs and revocation-on-removal keep it bounded.
+**Decision.** Every media signaling connection — fresh or reconnecting — goes through
+Calling's **media connection gateway** (`GET /v1/calling/media/rtc[/v1]`, provider edge:
+`media/gateway.rs` neutral, `media/livekit_gateway.rs` LiveKit relay):
+
+1. the presented credential (Bearer header or `access_token`) must be edge-sealed,
+   unexpired and name one room, one identity and a generation (a LiveKit-signed token
+   is refused);
+2. Calling's authority (`ConnectionAdmission`, implemented against the database, no
+   cache) requires: the session exists, belongs to that Call (and scope),
+   `media_access == AUTHORIZED`, not ended, not removed, its participant still in the
+   Call, the Call in a media state with an active media binding, and the credential's
+   generation equal to the session's **current** `media_generation`. Otherwise the
+   upgrade is refused with 401 **before LiveKit is contacted** — no participant, no
+   ICE, no media;
+3. **fail closed:** a database error, unreadable state, missing or malformed generation,
+   unknown identity or malformed token is a refusal (503 / 401), never an admission;
+4. an admitted connection is relayed with a fresh, single-use, 30 s **join-only** token
+   minted for exactly that room / identity / generation; join-then-admit (§4) then
+   applies the media rights;
+5. on the way back, every `refresh_token` LiveKit sends is re-checked against the
+   database and **re-sealed with the edge key** (or the connection is closed);
+   `room_moved` (which carries a token) and non-protobuf frames close the connection;
+   client simulation requests are dropped; only the SDK's documented query parameters
+   are forwarded. The client therefore never holds a token LiveKit itself accepts — not
+   the original credential, not a refreshed one.
+
+**Generation semantics.** `media_generation` is the session's credential epoch: each
+issuance increments it, and only the current generation is admitted (generation N is
+refused once N+1 exists). Revocation (`media_access` REVOKED — removal, session end,
+participant retirement, terminal Call) is terminal in the database, so every generation
+of a revoked session is permanently unusable; both conditions are checked at the
+gateway and again at every join callback and reconciliation pass.
+
+**Legitimate reconnect.** An AUTHORIZED session presenting its current generation —
+original credential or the server-refreshed, edge-sealed one the SDK holds — is admitted
+again; the gateway notifies Calling when LiveKit accepts the (re)join, so permissions are
+re-applied immediately (also after a resume).
+
+**Performance.** Admission is per connection (a few indexed reads), never per packet;
+there is no cache and therefore no stale-cache window.
+
+**Deployment.** Clients are given only the gateway URL (`CALLING_MEDIA_GATEWAY_URL`).
+LiveKit's signaling port should not be exposed to clients either, but security does not
+depend on network location: a client has no token LiveKit accepts.
+
+**Proof.** The real-LiveKit certification (`rtc_certification.rs`, CI
+`calling-rtc-certification.yml`, three rounds per run) captures the server-refreshed
+privileged token from the real SDK, verifies it is the admitted session's (`canPublish` /
+`canSubscribe` true, current generation), removes the session, confirms REVOKED and the
+provider disconnect, then presents the saved token from a new client: refused by the
+gateway (401) and refused by LiveKit when sent around the gateway ("invalid API key"),
+with no join callback, no provider participant and no media delivered; the original
+join-only credential, a superseded generation and a terminal Call's credential are
+refused; a legitimate current-generation reconnect regains media. Mutation runs
+(generation comparison removed; revocation check removed; gateway admission bypassed;
+refreshed tokens passed through unsealed — the previous behaviour) each make the
+certification fail. The residual-risk statement of the first version of this ADR is
+withdrawn on that evidence.
 
 ### 6. Callbacks are evidence only
 
@@ -126,9 +184,10 @@ authority. Creation interrupted between transactions is resumed from the binding
 `tests/rtc_certification.rs` runs against a real LiveKit with real WebRTC clients and
 real webhooks (CI: `calling-rtc-certification.yml`): the shared provider contract,
 deterministic idempotent rooms, join-only grants, server permission changes, voice /
-video / group calls, hold / resume at the provider, removal and stale re-entry, room
-termination without resurrection, forged webhook rejection, reconciliation and
-unknown-participant quarantine. The same provider contract runs against the test
+video / group calls, hold / resume at the provider, removal and refreshed-token re-entry
+(§5), superseded generations, terminal Calls, legitimate reconnect, room termination
+without resurrection, forged webhook rejection, reconciliation and unknown-participant
+quarantine. The same provider contract runs against the test
 provider used by the PostgreSQL suites.
 
 ## Consequences
@@ -137,5 +196,7 @@ provider used by the PostgreSQL suites.
   contract and certification; no change to the Call domain.
 * The Meeting Service and Calling can use different LiveKit deployments, keys and
   versions independently.
-* Admission adds one provider round trip after each join; publishing starts only after
-  it.
+* Admission adds a few indexed database reads before each media connection and one
+  provider round trip after each join; publishing starts only after it.
+* Media signaling is relayed by Calling's gateway (provider edge); media itself
+  (WebRTC / UDP) flows directly between clients and LiveKit.

@@ -30,7 +30,7 @@ Provider room / dialog / carrier / request identifiers are never Call identities
 | **§21** Call legs, attempts and routes: one APPLICATION route, RTC leg, idempotent attempt, deterministic media resource, private media binding | **Implemented** |
 | **§22** App-to-app voice: `POST /v1/calls`, APP_DIRECT_V1 authorization, join-only credentials, CONNECTED on verified media evidence of two parties, usage finalization | **Implemented** |
 | **§23** App-to-app video and group calls (≤ 16 participants), per-participant permissions, individual session removal with provider enforcement | **Implemented** |
-| **§24** Calling media provider boundary: `CallMediaProvider` trait + capabilities, LiveKit adapter with its own config, signed callbacks as evidence only, dedupe, reconciliation, stale re-entry prevention, real-LiveKit certification | **Implemented** (ADR 0007) |
+| **§24** Calling media provider boundary: `CallMediaProvider` trait + capabilities, LiveKit adapter with its own config, media connection gateway (DB admission of every connection, edge-sealed credentials, refreshed-token re-sealing), signed callbacks as evidence only, dedupe, reconciliation, real-LiveKit certification incl. refreshed-token re-entry | **Implemented** (ADR 0007) |
 | **§25** Call control: accept, decline, cancel, end (ENDING → ENDED on cleanup evidence), hold / resume enforced at the provider, application transfer on the same Call with failure recovery, `expectedVersion`, `Idempotency-Key`, available actions | **Implemented** (ADR 0009) |
 | Telecom-spend limits | Resolved; enforced by future telephony operations |
 
@@ -54,7 +54,9 @@ signals in [`calling/realtime`](../../packages/contracts/calling/realtime/v1.sch
 own `GET /v1/calling/signaling` (WebSocket), `GET /v1/calling/invitations`,
 `POST /v1/calling/invitations/{id}/accept|decline`,
 `POST /v1/calling/sessions/{session_id}/media-credentials` (signaling credential only);
-and `POST /internal/provider/media/events` (media provider signature only).
+the media connection gateway `GET /v1/calling/media/rtc[/v1][/validate]` (edge-sealed
+media credential only); and `POST /internal/provider/media/events` (media provider
+signature only).
 The customer authentication middleware and `PlatformAuthContext` extractor, and the
 internal service authentication middleware and `InternalCaller` extractor, are in place.
 Every path under `/internal/v1/` — including unknown ones — requires a valid service
@@ -208,9 +210,13 @@ references or telephone numbers.
    `/v1/calls/{id}/accept`): exactly one device per participant wins; the others get
    `call.answered_elsewhere` and no session. The first winner moves the Call to
    ANSWERED.
-4. Each authorized session asks for a media credential (URL, join-only token, expiry,
-   capabilities) and joins; Calling admits the verified connection server-side with the
-   permissions it derives. CONNECTED needs admitted connections of two participants.
+4. Each authorized session asks for a media credential (gateway URL, join-only token
+   sealed by Calling's media edge, expiry, capabilities) and connects through Calling's
+   media connection gateway (`/v1/calling/media/rtc…`), which admits the exact session
+   generation against the database before LiveKit is contacted (fail closed); Calling
+   then applies the permissions it derives. Tokens LiveKit refreshes are re-sealed, so
+   no client ever holds a token LiveKit accepts directly (ADR 0007 §5). CONNECTED needs
+   admitted connections of two participants.
 5. Hold / resume / transfer / session removal / end are commands with `expectedVersion`;
    the provider enforces them. END reaches ENDED only on cleanup evidence; usage is
    finalized.
@@ -235,7 +241,9 @@ media generation, admission and removal.
 | `CALLING_SIGNALING_SIGNING_KEY` | — (required, ≥ 32 chars) | Key of the signaling credentials (separate from every other key) |
 | `CALLING_SIGNALING_CREDENTIAL_TTL_SECONDS` | 600 (≤ 3600) | Signaling credential lifetime |
 | `CALLING_MEDIA_PROVIDER` | `none` | `livekit` to enable application media; `none` answers `CAPABILITY_UNAVAILABLE` |
-| `CALLING_LIVEKIT_URL` / `CALLING_LIVEKIT_API_URL` | — | Client (wss) and server API (https) URLs; TLS required except loopback |
+| `CALLING_LIVEKIT_URL` / `CALLING_LIVEKIT_API_URL` | — | LiveKit signaling URL (gateway upstream only, never given to clients) and server API URL; TLS required except loopback |
+| `CALLING_MEDIA_GATEWAY_URL` | — | Public URL of Calling's media connection gateway handed to clients (`wss://<calling host>/v1/calling/media`) |
+| `CALLING_MEDIA_EDGE_SIGNING_KEY` | — (≥ 32 chars) | Seals client media credentials; LiveKit never knows it; must differ from the LiveKit secret |
 | `CALLING_LIVEKIT_API_KEY` / `CALLING_LIVEKIT_API_SECRET` | — | Calling's own LiveKit key pair (secret ≥ 32 chars; never logged or returned) |
 | `CALLING_LIVEKIT_API_TIMEOUT_MS` | 5000 | Provider API timeout |
 | `CALLING_MEDIA_CREDENTIAL_TTL_SECONDS` | 300 (30–900) | Media join credential lifetime |
@@ -414,7 +422,8 @@ decline semantics, group arbitration), `app_races` (repeated concurrent accepts,
 contention, accept vs cancel, duplicate commands, the DB-level single-winner mutation,
 multi-application load, fan-out / credential / reconciliation bursts), `app_media`
 (provider contract on the test provider, credential security, callbacks as evidence,
-reconciliation, privacy of stored evidence), `app_control` (cancel / end / hold /
+reconciliation, privacy of stored evidence), `app_admission` (the gateway's admission
+authority for every token case, fail closed), `app_control` (cancel / end / hold /
 resume / transfer, idempotency, versions, provider failures) and `signaling` (real
 WebSocket, subprotocol auth, expiry close 4001, recovery, two-instance LISTEN / NOTIFY
 fan-out).

@@ -18,7 +18,12 @@ directory when it is version-controlled.
 `services/calling` has its own, independent LiveKit integration (Part C §24): its own
 `CALLING_LIVEKIT_*` configuration, its own `cfc-<call id>` room namespace, join-only
 credentials and server-side admission. It shares nothing with the Meeting Service's
-LiveKit usage. To run the Calling certification locally without Docker, start any
+LiveKit usage. Calling's clients never connect to LiveKit's signaling port directly:
+they connect to Calling's media connection gateway, which admits every connection
+against Calling's database and relays it (ADR 0007 §5); media (WebRTC) still flows
+between clients and LiveKit's RTC ports. Do not publish LiveKit's signaling port to
+clients (defence in depth — security does not depend on it: no client holds a token
+LiveKit accepts). To run the Calling certification locally without Docker, start any
 LiveKit server binary with `livekit.calling-cert.yaml`, install
 `services/calling/tests/rtc/requirements.txt` into a Python environment and run
 `cargo test --test rtc_certification` with the `CALLING_RTC_CERT_*` variables documented
