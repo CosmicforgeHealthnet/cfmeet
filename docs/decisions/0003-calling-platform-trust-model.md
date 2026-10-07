@@ -129,3 +129,5 @@ No public credential-management endpoints exist until internal service authentic
   UNLOGGED table pruned by the service.
 * Not decided here: internal service authentication (§11), shared contract authority
   (§12), cross-service data ownership (§13), the Contact Vault, and the call model (Part C).
+  §11 is decided in [ADR 0004](0004-internal-service-authentication.md) and §12–§14 in
+  [ADR 0005](0005-contract-authority-and-runtime-boundaries.md).

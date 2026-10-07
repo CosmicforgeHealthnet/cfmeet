@@ -7,7 +7,7 @@ This document defines where each CF Meet capability belongs. Anything marked *pl
 ```text
 services/
 ├── meeting-service/     ✅ current Meeting & Conference Platform backend
-├── calling/             ◐ active: platform trust foundation implemented; calling API planned
+├── calling/             ◐ active: platform trust foundation + internal service auth implemented; calling API planned
 ├── privacy-relay/       ◻ planned: masked/private transaction communications
 ├── messaging/           ◻ planned: unified messaging
 ├── telephony/           ◻ planned: SIP/PSTN telephony
@@ -46,9 +46,11 @@ history, no source or table dependency on `meeting-service`). It currently imple
 platform trust foundation of Part B §7–§10: tenants, applications, SANDBOX / TEST /
 PRODUCTION environments, service accounts, HMAC-verified API credentials with
 server-authoritative scopes, rotation and revocation, application / credential limit
-policy, and communication principals resolved separately from API client identity. The
-call model and Calling API (Part C) are not implemented yet. See
-[ADR 0003](../decisions/0003-calling-platform-trust-model.md) and
+policy, and communication principals resolved separately from API client identity. It
+also authenticates internal service calls on `/internal/v1/*` and signs its own outbound
+calls with `packages/service-auth` (Part B §11). The call model and Calling API (Part C)
+are not implemented yet. See [ADR 0003](../decisions/0003-calling-platform-trust-model.md),
+[ADR 0004](../decisions/0004-internal-service-authentication.md) and
 [`services/calling/README.md`](../../services/calling/README.md).
 
 ## When to create or extract another service
@@ -80,10 +82,11 @@ Applications communicate with services through published HTTP/WebSocket/event co
 
 ```text
 packages/
-└── contracts/           ◐ shared contract boundary established
+├── contracts/           ✅ contract authority: manifest, JSON Schema 2020-12 / OpenAPI contracts, offline validator
+└── service-auth/        ✅ internal service authentication library (Ed25519 service tokens, trust bundles)
 ```
 
-`packages/contracts` is the source/artefact home for APIs, event schemas, webhook schemas, permission identifiers and future SDK generation inputs that cross component boundaries.
+`packages/contracts` is the authority for APIs, event schemas, webhook schemas, permission identifiers and future SDK generation inputs that cross component boundaries ([ADR 0005](../decisions/0005-contract-authority-and-runtime-boundaries.md)). `packages/service-auth` is linked by every Rust service that calls or is called by another service ([ADR 0004](../decisions/0004-internal-service-authentication.md)). Packages never depend on services.
 
 ## Dependency rules
 
@@ -91,9 +94,18 @@ packages/
 |---|---|
 | apps/* → services/* source code | ❌ Never; use APIs/realtime protocols |
 | services/* → apps/* source/build output | ❌ Never |
-| service → service source import | ❌ Avoid; use APIs/events/contracts |
+| service → service source import / Cargo path dependency | ❌ Never; use authenticated internal APIs or durable events |
+| service → another service's database, tables or database URL | ❌ Never ([service data ownership](service-data-ownership.md)) |
+| service → `packages/*` | ✅ |
+| `packages/*` → services/* | ❌ Never |
 | apps/services → generated shared contracts | ✅ |
 | contracts → application/service implementation | ❌ Never |
+
+Synchronous service-to-service calls use `X-CF-Service-Authorization` service tokens
+against `/internal/v1/` endpoints; asynchronous integration uses the
+`cfmeet.platform.event-envelope` contract. The Meeting Service is not an identity
+provider for other services. Enforced by `make service-boundaries`
+(`.github/workflows/service-boundaries.yml`).
 
 ## Infrastructure (`infra/`)
 

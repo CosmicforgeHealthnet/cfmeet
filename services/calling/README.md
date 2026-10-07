@@ -7,7 +7,7 @@ shares no source, models, migrations or database with the Meeting Service.
 ## What is implemented
 
 This service currently contains the **platform trust foundation** that the Calling
-domain is built on (CF Meet Part III, Part B §7–§10). There is no Calling business API
+domain is built on (CF Meet Part III, Part B §7–§14). There is no Calling business API
 yet: no calls, call participants, sessions, legs, routes, signaling, LiveKit calling,
 Privacy Relay, PSTN/SIP, telephony, voicemail or webhooks.
 
@@ -18,10 +18,43 @@ Privacy Relay, PSTN/SIP, telephony, voicemail or webhooks.
 | §9 API credential security: keyed verifiers, server-authoritative scopes, rotation with overlap, immediate revocation, limit-policy foundation, request-rate enforcement | Implemented |
 | §10 Separation of API client identity (`PlatformAuthContext`) from communication principal identity (`ResolvedPrincipal`) | Implemented |
 | Concurrent-communication and telecom-spend enforcement | Policy resolved here; enforcement belongs to the future call / telephony operations |
-| Internal service authentication, shared contracts, cross-service data ownership (§11+) | Not implemented |
+| §11 Internal service authentication: Ed25519 service tokens (`packages/service-auth`), receiver-authoritative permissions, `/internal/v1/*` middleware, delegated context, authenticated internal HTTP client | Implemented (no internal business routes yet) |
+| §12 Contract authority: `packages/contracts/calling/http/v1.openapi.json` describes exactly the implemented routes; conformance tests | Implemented |
+| §13 Data ownership: own database only; no other service's database URL, tables or source | Enforced (`architecture_boundaries`, `make service-boundaries`) |
+| §14 Runtime direction: synchronous calls through the authenticated internal client; events only through the platform event envelope contract | Foundation only (no events produced yet) |
 
-HTTP surface: `GET /health` only. The authentication middleware and `PlatformAuthContext`
-extractor are in place for the future Calling API and are exercised by test-only routes.
+HTTP surface: `GET /health` only (contract:
+[`packages/contracts/calling/http/v1.openapi.json`](../../packages/contracts/calling/http/v1.openapi.json)).
+The customer authentication middleware and `PlatformAuthContext` extractor, and the
+internal service authentication middleware and `InternalCaller` extractor, are in place
+for future routes and are exercised by test-only routes. Every path under
+`/internal/v1/` — including unknown ones — requires a valid service token and answers
+`401 INTERNAL_AUTHENTICATION_FAILED` otherwise; customer API credentials are never
+accepted there, and service tokens are never accepted on customer routes.
+
+## Internal service authentication
+
+```text
+customer request ─► PlatformAuthContext ─► delegated_context() ─► DelegatedPlatformContext
+                                                                     │ signed into
+peer service ◄─ X-CF-Service-Authorization: Bearer <EdDSA JWS> ◄──────┘ the service token
+                X-CF-Request-Id (new per hop) / X-CF-Correlation-Id (stable per operation)
+```
+
+* Calling signs as `cfmeet.calling` with its own key (`CF_SERVICE_AUTH_KEY_ID`,
+  `CF_SERVICE_AUTH_PRIVATE_KEY_FILE`); tokens are bound to exactly one audience and one
+  runtime environment, live 120 s by default (≤ 300 s) and carry no permissions.
+* Inbound, Calling verifies against its trust bundle (`CF_SERVICE_TRUST_BUNDLE_FILE`):
+  pinned algorithm and token type, known issuer and `kid`, exact audience, runtime
+  environment, lifetime, and header ids equal to the signed ids. Permissions come only
+  from Calling's own bundle (`InternalCaller::require_permission`). Calling grants
+  `operational-callback.deliver` at most, and it is never granted
+  `protected-contact.resolve-for-execution` by any receiver.
+* Outbound helpers: `internal_auth::delegation::{delegated_context,
+  outbound_for_customer, outbound_next_hop}` and `ServiceAuthRuntime::client()` (HTTPS in
+  staging / production, no redirects, no proxies, `/internal/v1/` paths only).
+
+ADR: [0004 — Internal service authentication](../../docs/decisions/0004-internal-service-authentication.md).
 
 ## Model
 
@@ -94,12 +127,21 @@ operations that consume them.
 
 See [`.env.example`](.env.example). Required: `DATABASE_URL`, `API_CREDENTIAL_PEPPER`
 (≥ 32 random bytes, e.g. `openssl rand -base64 48`; placeholder values are rejected and
-there is no fallback). The Calling service owns its own database.
+there is no fallback), `CF_RUNTIME_ENVIRONMENT`, `CF_SERVICE_AUTH_KEY_ID`,
+`CF_SERVICE_AUTH_PRIVATE_KEY_FILE` and `CF_SERVICE_TRUST_BUNDLE_FILE`. The service exits
+at startup if its identity, key, trust bundle or runtime environment is missing or
+inconsistent. The Calling service owns its own database.
 
 ## Running locally (no Docker required)
 
 ```bash
 cp .env.example .env              # set DATABASE_URL and API_CREDENTIAL_PEPPER
+# A local signing key (outside the repository) and a trust bundle with no peers yet:
+mkdir -p ~/.cfmeet && cargo run -q --manifest-path ../../packages/service-auth/Cargo.toml \
+  --bin cf-service-keygen -- generate --kid calling-local-1 --out ~/.cfmeet/calling-local-1.pem
+echo '{"bundle_version":1,"receiver":"cfmeet.calling","runtime_environment":"local","trusted_issuers":[]}' \
+  > ~/.cfmeet/calling-trust-bundle.json
+# then set CF_SERVICE_AUTH_PRIVATE_KEY_FILE / CF_SERVICE_TRUST_BUNDLE_FILE in .env
 cargo run -p calling-migration -- up
 cargo run --bin calling
 curl http://127.0.0.1:8090/health
@@ -145,14 +187,17 @@ Each test clones its own database from a migrated template (no Docker needed). W
 (explicit SKIPPED lines). Suites: `migrations`, `tenant_isolation`,
 `first_party_external`, `credential_storage`, `authentication`, `environment_isolation`,
 `scopes`, `rotation`, `secret_leakage`, `principals`, `limits`, `admin_cli`,
-`architecture_boundaries`.
+`architecture_boundaries`, `internal_auth` (service-token authentication on
+`/internal/v1/*`), `outbound` (delegated context and the internal HTTP client over
+loopback HTTP) and `http_contract` (conformance with `packages/contracts`).
 
 CI: [`.github/workflows/calling.yml`](../../.github/workflows/calling.yml).
 
 ## Container image
 
 ```bash
-docker build -t cfmeet-calling services/calling
+# from the repository root: the image also needs packages/service-auth
+docker build -f services/calling/Dockerfile -t cfmeet-calling .
 ```
 
 The image runs as a non-root user and contains `calling`, `calling-migration` and
@@ -160,4 +205,7 @@ The image runs as a non-root user and contains `calling`, `calling-migration` an
 
 ## Decisions
 
-[ADR 0003 — Calling platform consumer, credential and principal trust model](../../docs/decisions/0003-calling-platform-trust-model.md).
+* [ADR 0003 — Calling platform consumer, credential and principal trust model](../../docs/decisions/0003-calling-platform-trust-model.md)
+* [ADR 0004 — Internal service authentication](../../docs/decisions/0004-internal-service-authentication.md)
+* [ADR 0005 — Contract authority and runtime boundaries](../../docs/decisions/0005-contract-authority-and-runtime-boundaries.md)
+* [Service data ownership](../../docs/architecture/service-data-ownership.md)

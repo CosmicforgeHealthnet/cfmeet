@@ -32,7 +32,8 @@ cfmeet/
 │   ├── meeting-service/      Rust/Axum Meeting & Conference Platform service         (current)
 │   └── calling/              Rust/Axum Calling service (platform trust foundation)   (active)
 ├── packages/
-│   └── contracts/            Shared API / event / webhook contracts                  (boundary established)
+│   ├── contracts/            Contract authority: manifest, schemas, OpenAPI, validator (authority)
+│   └── service-auth/         Internal service authentication library (Ed25519)       (active)
 ├── infra/
 │   ├── livekit/              LiveKit configuration
 │   ├── docker/               Container/local orchestration notes
@@ -43,7 +44,7 @@ cfmeet/
 │   ├── decisions/            Architecture decision records
 │   ├── phases/               Delivery-phase specifications and closure reports
 │   └── migration/            Monorepo migration history
-├── scripts/
+├── scripts/                  dev helpers; service-boundaries/ data-ownership guard
 ├── .github/workflows/
 ├── docker-compose.yml
 └── Makefile
@@ -55,7 +56,7 @@ cfmeet/
 |---|---|---|
 | `apps/web/` | CF Meet web experience | Vercel |
 | `services/meeting-service/` | Meeting/conference control plane: auth, meetings, participants, waiting room, chat, LiveKit token/control integration, API keys, webhooks, workers and related meeting-domain functionality | Docker image |
-| `services/calling/` | Calling domain service. Currently the platform trust foundation: tenant / application / environment / service-account model, API credentials, scopes, limits and communication principals ([README](services/calling/README.md)) | Docker image (context `services/calling/`) |
+| `services/calling/` | Calling domain service. Currently the platform trust foundation: tenant / application / environment / service-account model, API credentials, scopes, limits and communication principals ([README](services/calling/README.md)) | Docker image (context: repository root, `-f services/calling/Dockerfile`) |
 
 The current Rust service is intentionally named **meeting-service** because it is the backend for the meeting/conferencing domain, not the universal backend for all future CF Meet capabilities.
 
@@ -149,6 +150,7 @@ OpenAPI: `http://localhost:8080/api-docs/openapi.json`
 - Vercel Root Directory: `apps/web`
 - Meeting service Docker build context: `services/meeting-service/`
 - Meeting service Dockerfile: `services/meeting-service/Dockerfile`
+- Calling service Docker build context: repository root (`docker build -f services/calling/Dockerfile .`; the context is filtered to `packages/service-auth` and `services/calling`)
 
 The web app and meeting service remain independently deployable and communicate over published APIs only.
 
@@ -157,7 +159,9 @@ The web app and meeting service remain independently deployable and communicate 
 Workflows under `.github/workflows/` are path-aware:
 
 - **Meeting service:** `services/meeting-service/**` → fmt, clippy, test, build and Docker image
-- **Calling service:** `services/calling/**` → fmt, check, clippy, PostgreSQL tests, architecture guards, migration smoke, build and Docker image
+- **Calling service:** `services/calling/**`, `packages/service-auth/**`, Calling / platform contracts → fmt, check, clippy, PostgreSQL tests (incl. internal service auth and contract conformance), architecture guards, migration smoke, startup refusal checks, build and Docker image
+- **Contracts and service auth:** `packages/contracts/**`, `packages/service-auth/**` → contract validation (`make contracts-validate`), validator mutation tests, service-auth fmt / check / clippy / tests for both feature sets, private-key scan
+- **Service boundaries:** `services/**`, `packages/**` → repository data-ownership guard and its mutation tests (`make service-boundaries`)
 - **Frontend:** `apps/web/**` → install, lint, typecheck and Next.js build
 - **Compose:** root compose/infra/meeting-service Dockerfile validation
 
@@ -165,6 +169,7 @@ Workflows under `.github/workflows/` are path-aware:
 
 - [Platform overview](docs/architecture/platform-overview.md)
 - [Platform boundaries](docs/architecture/platform-boundaries.md)
+- [Service data ownership](docs/architecture/service-data-ownership.md)
 - [API docs](docs/api/README.md)
 - [Meeting service guides](services/meeting-service/docs/README.md)
 - [Calling service](services/calling/README.md)
