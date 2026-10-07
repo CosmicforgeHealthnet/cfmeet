@@ -301,8 +301,17 @@ class RealRepository(unittest.TestCase):
         self.assertIn("meeting-service", self.repo.services)
         self.assertTrue({"privacy-relay", "telephony"} <= self.repo.known_services)
         self.assertTrue({"users", "organizations", "meeting_spaces"} <= self.repo.tables["meeting-service"])
-        self.assertTrue(self.repo.tables["calling"])
-        self.assertTrue(all(t.startswith("platform_") for t in self.repo.tables["calling"]))
+        calling = self.repo.tables["calling"]
+        self.assertTrue(calling)
+        # Calling owns its platform foundation and the call domain (Part C sections 15-19).
+        call_domain = {
+            "calls", "call_participants", "call_sessions", "call_session_intervals",
+            "call_routes", "call_legs", "call_attempts", "call_authorizations",
+            "call_events", "call_quality_records", "call_usage_records", "calling_outbox_events",
+        }
+        self.assertTrue(call_domain <= calling)
+        self.assertTrue(all(t.startswith("platform_") or t in call_domain for t in calling), calling)
+        self.assertFalse(calling & self.repo.tables["meeting-service"])
 
     def mutated(self, mutate) -> list[guard.Violation]:
         with tempfile.TemporaryDirectory() as tmp:

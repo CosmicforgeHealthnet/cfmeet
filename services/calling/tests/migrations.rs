@@ -1,5 +1,7 @@
-//! A. Migration certification: clean up / down / up, required constraints, no plaintext
-//! secret or contact columns, no Part C tables, no Meeting Service tables.
+//! A. Migration certification: clean up / down / up (also a partial rollback of the call
+//! domain on top of the Part B schema), required constraints / triggers / indexes, no
+//! plaintext secret or contact columns, no provider columns, no Privacy Relay /
+//! Telephony / Meeting Service tables.
 
 mod common;
 
@@ -14,6 +16,10 @@ async fn strings(conn: &DatabaseConnection, sql: &str) -> Vec<String> {
         .into_iter()
         .map(|r| r.try_get_by_index::<String>(0).unwrap())
         .collect()
+}
+
+async fn names(conn: &DatabaseConnection, sql: &str) -> Vec<String> {
+    strings(conn, sql).await
 }
 
 async fn tables(conn: &DatabaseConnection) -> Vec<String> {
@@ -38,6 +44,25 @@ const PLATFORM_TABLES: &[&str] = &[
     "platform_tenants",
 ];
 
+/// The Calling-owned call domain (Part C §15–§19).
+const CALL_TABLES: &[&str] = &[
+    "call_attempts",
+    "call_authorizations",
+    "call_events",
+    "call_legs",
+    "call_participants",
+    "call_quality_records",
+    "call_routes",
+    "call_session_intervals",
+    "call_sessions",
+    "call_usage_records",
+    "calling_outbox_events",
+    "calls",
+];
+
+const MIGRATIONS: usize = 9;
+const PART_B_MIGRATIONS: u32 = 4;
+
 #[tokio::test]
 async fn migrations_apply_roll_back_and_reapply_on_a_clean_database() {
     let Some(db) = TestDb::empty().await else {
@@ -47,7 +72,11 @@ async fn migrations_apply_roll_back_and_reapply_on_a_clean_database() {
     assert!(tables(conn).await.is_empty());
 
     calling_migration::Migrator::up(conn, None).await.unwrap();
-    let mut expected: Vec<String> = PLATFORM_TABLES.iter().map(|s| s.to_string()).collect();
+    let mut expected: Vec<String> = PLATFORM_TABLES
+        .iter()
+        .chain(CALL_TABLES)
+        .map(|s| s.to_string())
+        .collect();
     expected.push(MIGRATION_TABLE.to_string());
     expected.sort();
     assert_eq!(tables(conn).await, expected);
@@ -56,6 +85,34 @@ async fn migrations_apply_roll_back_and_reapply_on_a_clean_database() {
         .unwrap()
         .is_empty());
 
+    // Roll back only the call domain: the Part B schema is intact, including the
+    // principal ownership targets the call core added.
+    calling_migration::Migrator::down(conn, Some(MIGRATIONS as u32 - PART_B_MIGRATIONS))
+        .await
+        .unwrap();
+    let mut part_b: Vec<String> = PLATFORM_TABLES.iter().map(|s| s.to_string()).collect();
+    part_b.push(MIGRATION_TABLE.to_string());
+    part_b.sort();
+    assert_eq!(tables(conn).await, part_b);
+    let principal_constraints = names(
+        conn,
+        "SELECT conname::text FROM pg_constraint WHERE conname LIKE 'uq_platform_principals_owner%'",
+    )
+    .await;
+    assert!(
+        principal_constraints.is_empty(),
+        "{principal_constraints:?}"
+    );
+    let calling_functions = names(
+        conn,
+        "SELECT proname::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
+         WHERE n.nspname = 'public' AND proname LIKE 'calling\\_%'",
+    )
+    .await;
+    assert!(calling_functions.is_empty(), "{calling_functions:?}");
+    calling_migration::Migrator::up(conn, None).await.unwrap();
+    assert_eq!(tables(conn).await, expected);
+
     // Full rollback (reset): only the migration bookkeeping table remains, and the shared
     // guard functions are gone.
     calling_migration::Migrator::down(conn, None).await.unwrap();
@@ -63,7 +120,7 @@ async fn migrations_apply_roll_back_and_reapply_on_a_clean_database() {
     let functions = strings(
         conn,
         "SELECT proname::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
-         WHERE n.nspname = 'public' AND proname LIKE 'platform\\_%'",
+         WHERE n.nspname = 'public' AND (proname LIKE 'platform\\_%' OR proname LIKE 'calling\\_%')",
     )
     .await;
     assert!(functions.is_empty(), "{functions:?}");
@@ -72,7 +129,7 @@ async fn migrations_apply_roll_back_and_reapply_on_a_clean_database() {
             .await
             .unwrap()
             .len(),
-        4
+        MIGRATIONS
     );
 
     // And up again.
@@ -81,7 +138,7 @@ async fn migrations_apply_roll_back_and_reapply_on_a_clean_database() {
     let applied = calling_migration::Migrator::get_applied_migrations(conn)
         .await
         .unwrap();
-    assert_eq!(applied.len(), 4);
+    assert_eq!(applied.len(), MIGRATIONS);
 }
 
 #[tokio::test]
@@ -150,6 +207,67 @@ async fn required_constraints_and_guards_exist() {
         "ck_platform_principals_telephone_endpoint_opaque",
         "ck_platform_principals_service_account_link",
         "ck_platform_principals_service_account_reference",
+        // Call domain: ownership-consistent composite keys …
+        "uq_platform_principals_owner_id",
+        "uq_platform_principals_owner_kind_id",
+        "uq_calls_owner_id",
+        "fk_calls_credential",
+        "fk_calls_initiator_principal",
+        "fk_call_participants_call",
+        "fk_call_participants_principal",
+        "fk_call_sessions_participant",
+        "fk_call_sessions_replaces",
+        "fk_call_session_intervals_session",
+        "fk_call_routes_call",
+        "fk_call_legs_call",
+        "fk_call_legs_route",
+        "fk_call_legs_participant",
+        "fk_call_attempts_call",
+        "fk_call_attempts_route",
+        "fk_call_attempts_leg",
+        "fk_call_attempts_previous",
+        "fk_call_authorizations_call",
+        "fk_call_authorizations_credential",
+        "fk_call_authorizations_principal",
+        "fk_call_authorizations_superseded_by",
+        "fk_call_events_call",
+        "fk_call_events_actor_credential",
+        "fk_call_quality_records_session",
+        "fk_call_quality_records_leg",
+        "fk_call_usage_records_participant",
+        "fk_call_usage_records_session",
+        "fk_call_usage_records_leg",
+        "fk_calling_outbox_events_source",
+        "fk_calling_outbox_events_call",
+        // … uniqueness …
+        "uq_call_participants_call_principal",
+        "uq_call_sessions_media_identity",
+        "uq_call_session_intervals_session_number",
+        "uq_call_attempts_call_number",
+        "uq_call_events_call_sequence",
+        "uq_call_usage_records_idempotency",
+        "uq_calling_outbox_events_event_id",
+        "uq_calling_outbox_events_source",
+        // … and state / invariant checks.
+        "ck_calls_state",
+        "ck_calls_kind",
+        "ck_calls_version",
+        "ck_calls_terminal_complete",
+        "ck_calls_terminal_reason_matches_state",
+        "ck_calls_failure_only_when_failed",
+        "ck_calls_timestamps_ordered",
+        "ck_call_participants_display_name",
+        "ck_call_sessions_media_identity",
+        "ck_call_sessions_state",
+        "ck_call_session_intervals_order",
+        "ck_call_legs_state",
+        "ck_call_attempts_unknown",
+        "ck_call_authorizations_reason_matches_decision",
+        "ck_call_events_state_fields",
+        "ck_call_events_payload",
+        "ck_call_quality_records_metrics",
+        "ck_call_usage_records_quantity",
+        "ck_calling_outbox_events_envelope",
     ] {
         assert!(
             constraints.iter().any(|c| c == required),
@@ -172,6 +290,33 @@ async fn required_constraints_and_guards_exist() {
         "trg_platform_api_credentials_set_once",
         "trg_platform_api_credentials_revoked_terminal",
         "trg_platform_principals_immutable",
+        "trg_calls_guard_insert",
+        "trg_calls_guard_transition",
+        "trg_calls_immutable",
+        "trg_calls_set_once",
+        "trg_calls_no_delete",
+        "trg_calls_require_state_event_on_insert",
+        "trg_calls_require_state_event_on_transition",
+        "trg_call_participants_immutable",
+        "trg_call_sessions_state_transition",
+        "trg_call_sessions_monotonic",
+        "trg_call_session_intervals_guard_insert",
+        "trg_call_session_intervals_set_once",
+        "trg_call_routes_state_transition",
+        "trg_call_legs_state_transition",
+        "trg_call_legs_set_once",
+        "trg_call_attempts_guard_insert",
+        "trg_call_attempts_outcome_transition",
+        "trg_call_attempts_unknown_kept",
+        "trg_call_authorizations_immutable",
+        "trg_call_events_guard_insert",
+        "trg_call_events_immutable",
+        "trg_call_events_no_truncate",
+        "trg_call_events_require_outbox",
+        "trg_call_quality_records_immutable",
+        "trg_call_usage_records_set_once",
+        "trg_calling_outbox_events_immutable",
+        "trg_calling_outbox_events_guard_delete",
     ] {
         assert!(
             triggers.iter().any(|t| t == required),
@@ -183,15 +328,14 @@ async fn required_constraints_and_guards_exist() {
     let naive = strings(
         &db.conn,
         "SELECT table_name || '.' || column_name FROM information_schema.columns \
-         WHERE table_schema = 'public' AND table_name LIKE 'platform\\_%' \
-         AND data_type = 'timestamp without time zone'",
+         WHERE table_schema = 'public' AND data_type = 'timestamp without time zone'",
     )
     .await;
     assert!(naive.is_empty(), "naive timestamps: {naive:?}");
     let id_types = strings(
         &db.conn,
         "SELECT table_name || ':' || data_type FROM information_schema.columns \
-         WHERE table_schema = 'public' AND table_name LIKE 'platform\\_%' AND column_name = 'id'",
+         WHERE table_schema = 'public' AND table_name <> 'calling_seaql_migrations' AND column_name = 'id'",
     )
     .await;
     assert!(!id_types.is_empty());
@@ -212,6 +356,31 @@ async fn required_constraints_and_guards_exist() {
         "idx_platform_api_credentials_application_environment",
         "idx_platform_principals_environment",
         "idx_platform_application_scopes_tenant",
+        "idx_calls_scope_created",
+        "idx_calls_scope_state",
+        "idx_calls_initiator_principal",
+        "idx_calls_active_by_credential",
+        "idx_calls_active_by_application",
+        "idx_call_participants_principal",
+        "idx_call_sessions_call",
+        "idx_call_sessions_participant",
+        "uq_call_session_intervals_one_open",
+        "idx_call_session_intervals_call",
+        "idx_call_routes_call",
+        "idx_call_legs_call",
+        "idx_call_legs_route",
+        "idx_call_attempts_route",
+        "idx_call_attempts_leg",
+        "uq_call_authorizations_one_effective",
+        "idx_call_authorizations_call_decided",
+        "idx_call_authorizations_decision",
+        "uq_call_events_state_change_per_version",
+        "idx_call_quality_records_call",
+        "idx_call_quality_records_session",
+        "idx_call_quality_records_leg",
+        "uq_call_participants_one_initiator",
+        "idx_calling_outbox_events_pending",
+        "idx_calling_outbox_events_aggregate",
     ] {
         assert!(
             indexes.iter().any(|i| i == required),
@@ -288,30 +457,124 @@ async fn no_plaintext_secret_or_contact_columns_exist() {
 }
 
 #[tokio::test]
-async fn no_part_c_or_meeting_service_tables_exist() {
+async fn call_domain_columns_hold_no_contact_secret_or_provider_data() {
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let columns = strings(
+        &db.conn,
+        "SELECT table_name || '.' || column_name FROM information_schema.columns \
+         WHERE table_schema = 'public' AND (table_name LIKE 'call\\_%' OR table_name IN ('calls', 'calling_outbox_events'))",
+    )
+    .await;
+    assert!(columns.len() > 100, "{}", columns.len());
+    // Ordinal counters are the only `*_number` columns; they are integers.
+    const ORDINALS: &[&str] = &[
+        "call_session_intervals.interval_number",
+        "call_attempts.attempt_number",
+    ];
+    for column in &columns {
+        let name = column.split('.').nth(1).unwrap();
+        for forbidden in [
+            "secret",
+            "plaintext",
+            "raw",
+            "password",
+            "token",
+            "api_key",
+            "phone",
+            "e164",
+            "msisdn",
+            "email",
+            "contact",
+            "telephone",
+            "caller",
+            "callee",
+            "dialed",
+            "provider",
+            "carrier",
+            "vendor",
+            "sip",
+            "pstn",
+            "twilio",
+            "livekit",
+            "room",
+            "dialog",
+            "sid",
+            "payload_raw",
+        ] {
+            assert!(
+                !name.contains(forbidden),
+                "column {column} looks like contact / secret / provider storage"
+            );
+        }
+        if name.contains("number") {
+            assert!(ORDINALS.contains(&column.as_str()), "column {column}");
+        }
+    }
+    let ordinal_types = strings(
+        &db.conn,
+        "SELECT data_type::text FROM information_schema.columns \
+         WHERE column_name IN ('interval_number', 'attempt_number')",
+    )
+    .await;
+    assert_eq!(ordinal_types, ["integer", "integer"]);
+    // Opaque cross-service references are UUIDs (never free text).
+    let references = strings(
+        &db.conn,
+        "SELECT table_name || '.' || column_name || ':' || data_type FROM information_schema.columns \
+         WHERE column_name IN ('communication_context_ref', 'privacy_relay_ref', 'execution_binding_ref') \
+         ORDER BY 1",
+    )
+    .await;
+    assert_eq!(
+        references,
+        [
+            "call_legs.execution_binding_ref:uuid",
+            "calls.communication_context_ref:uuid",
+            "calls.privacy_relay_ref:uuid",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn no_privacy_relay_telephony_or_meeting_service_tables_exist() {
     let Some(db) = TestDb::new().await else {
         return;
     };
     let all = tables(&db.conn).await;
     for forbidden in [
-        "calls",
-        "call_participants",
-        "call_sessions",
-        "call_legs",
-        "call_routes",
+        // Privacy Relay / Contact Vault / Numbering (other services, not implemented).
+        "communication_contexts",
+        "privacy_relay_sessions",
+        "relay_sessions",
+        "protected_contacts",
+        "relay_number_inventory",
+        "contact_vault",
+        // Telephony execution (other service).
+        "provider_call_bindings",
+        "provider_events",
+        "telephony_commands",
+        "telephony_routes",
+        "carrier_events",
+        "sip_dialogs",
+        // Meeting Service.
         "users",
         "organizations",
         "organization_memberships",
         "meetings",
         "api_keys",
         "participants",
+        "outbox_events",
     ] {
         assert!(
             !all.iter().any(|t| t == forbidden),
             "unexpected table {forbidden}"
         );
     }
-    assert!(all
-        .iter()
-        .all(|t| t.starts_with("platform_") || t == MIGRATION_TABLE));
+    assert!(all.iter().all(|t| t.starts_with("platform_")
+        || t.starts_with("call_")
+        || t == "calls"
+        || t == "calling_outbox_events"
+        || t == MIGRATION_TABLE));
 }

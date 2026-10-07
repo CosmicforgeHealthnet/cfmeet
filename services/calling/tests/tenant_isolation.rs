@@ -1,5 +1,7 @@
 //! B. Tenant isolation: ownership chains are consistent and immutable at the database
 //! level, and principal resolution never crosses tenant / application / environment.
+//! Calls (Part C) are confined the same way: another tenant, application or environment
+//! can neither read nor mutate a Call, and call rows cannot be re-parented.
 
 mod common;
 
@@ -259,4 +261,137 @@ async fn principal_ownership_is_immutable_and_scoped_unique() {
     )
     .await;
     assert!(err.is_err());
+}
+
+#[tokio::test]
+async fn calls_are_confined_to_their_tenant_application_and_environment() {
+    use calling::calls::{
+        kinds::{AuthorizationReason, EndpointCategory},
+        CallAction, CallError, CallScope, CallState,
+    };
+    use common::calls::{sql, CallWorld};
+
+    let Some(w) = CallWorld::new().await else {
+        return;
+    };
+    let call = w.call_in(CallState::Connected).await;
+    let shared = || Harness::on(w.h.db.clone(), common::TEST_PEPPER, w.h.clock.clone());
+    let others = [
+        CallWorld::in_harness(shared(), "tenant-b", EnvironmentKind::Production).await,
+        CallWorld::for_consumer(
+            shared(),
+            w.h.application_in(&w.consumer.tenant, "app-b").await,
+            EnvironmentKind::Production,
+        )
+        .await,
+        CallWorld::for_consumer(
+            shared(),
+            w.h.application_in(&w.consumer.tenant, "app-c").await,
+            EnvironmentKind::Sandbox,
+        )
+        .await,
+    ];
+    let participant = w.calls().participants(w.scope(), call.id).await.unwrap()[0].id;
+    for other in &others {
+        let scope = CallScope::of_platform(&other.ctx);
+        assert!(matches!(
+            other.calls().call(scope, call.id).await,
+            Err(CallError::NotFound)
+        ));
+        assert!(matches!(
+            other.calls().call_detail(scope, call.id).await,
+            Err(CallError::NotFound)
+        ));
+        assert!(other
+            .calls()
+            .events(scope, call.id)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(other
+            .calls()
+            .participants(scope, call.id)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(matches!(
+            other
+                .calls()
+                .transition(&other.cmd, call.id, call.version, CallAction::Hold)
+                .await,
+            Err(CallError::NotFound)
+        ));
+        assert!(matches!(
+            other
+                .calls()
+                .create_session(&other.cmd, call.id, participant, EndpointCategory::Web)
+                .await,
+            Err(CallError::NotFound)
+        ));
+        assert!(matches!(
+            other
+                .calls()
+                .add_participant(&other.cmd, call.id, &other.recipient, None)
+                .await,
+            Err(CallError::NotFound)
+        ));
+        assert!(matches!(
+            other
+                .calls()
+                .record_authorization(
+                    &other.cmd,
+                    call.id,
+                    calling::calls::authorizations::NewAuthorization {
+                        reason: AuthorizationReason::Revoked,
+                        policy_version: calling::calls::routes::PolicyVersion::parse("x").unwrap(),
+                        policy_snapshot: Default::default(),
+                        limits_snapshot: Default::default(),
+                    }
+                )
+                .await,
+            Err(CallError::NotFound)
+        ));
+        assert!(other
+            .calls()
+            .list_calls(scope, Default::default())
+            .await
+            .unwrap()
+            .calls
+            .is_empty());
+    }
+    let after = w.call(call.id).await;
+    assert_eq!(
+        (after.state, after.version),
+        (CallState::Connected, call.version)
+    );
+
+    // Database: call rows cannot claim another scope or be re-parented.
+    let b = &others[0];
+    for statement in [
+        format!(
+            "UPDATE calls SET tenant_id = '{}' WHERE id = '{}'",
+            b.consumer.tenant.id, call.id
+        ),
+        format!(
+            "UPDATE call_participants SET call_id = gen_random_uuid() WHERE call_id = '{}'",
+            call.id
+        ),
+        format!(
+            "INSERT INTO call_events SELECT gen_random_uuid(), call_id, '{}', application_id, environment_id, \
+             sequence + 100, event_type, schema_version, from_state, to_state, call_version, actor_kind, \
+             actor_service_account_id, actor_credential_id, actor_service, request_id, correlation_id, payload, \
+             occurred_at, created_at FROM call_events WHERE call_id = '{}' AND sequence = 1",
+            b.consumer.tenant.id, call.id
+        ),
+        // A call whose credential belongs to another tenant's service account.
+        format!(
+            "INSERT INTO calls SELECT gen_random_uuid(), tenant_id, application_id, environment_id, \
+             '{}', created_by_credential_id, initiator_principal_id, call_kind, 'REQUESTED', 1, NULL, NULL, NULL, \
+             NULL, now(), NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, now(), now() FROM calls WHERE id = '{}'",
+            b.ctx.service_account_id(),
+            call.id
+        ),
+    ] {
+        assert!(sql(&w.h, &statement).await.is_err(), "{statement}");
+    }
 }

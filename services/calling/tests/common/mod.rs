@@ -9,6 +9,8 @@
 //! The harness uses a deterministic, test-only pepper and a manually driven clock.
 #![allow(dead_code)]
 
+pub mod calls;
+
 use std::{collections::HashMap, sync::Arc};
 
 use axum::{
@@ -542,7 +544,11 @@ impl Harness {
     }
 
     pub fn router(&self) -> Router {
-        routes::app(self.state.clone(), test_routes(), test_internal_routes())
+        routes::app(
+            self.state.clone(),
+            test_routes().merge(routes::public_api()),
+            test_internal_routes(),
+        )
     }
 
     /// One request through the full router (request id + authentication middleware).

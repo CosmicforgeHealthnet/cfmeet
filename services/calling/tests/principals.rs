@@ -350,11 +350,15 @@ async fn telephone_endpoints_store_only_opaque_references() {
     let dump = common::dump_database(h.conn()).await;
     assert!(!dump.contains("2348012345678"));
     assert!(!dump.contains("08012345678"));
+    // The only `*_number` columns are the call domain's integer ordinals
+    // (call_session_intervals.interval_number, call_attempts.attempt_number).
     let phone_columns = scalar_i64(
         h.conn(),
         "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' \
          AND (column_name ILIKE '%phone%' OR column_name ILIKE '%e164%' OR column_name ILIKE '%msisdn%' \
-              OR column_name ILIKE '%number%' OR column_name ILIKE '%contact%')",
+              OR column_name ILIKE '%number%' OR column_name ILIKE '%contact%') \
+         AND NOT (data_type = 'integer' AND (table_name, column_name) IN \
+              (('call_session_intervals', 'interval_number'), ('call_attempts', 'attempt_number')))",
     )
     .await;
     assert_eq!(phone_columns, 0);

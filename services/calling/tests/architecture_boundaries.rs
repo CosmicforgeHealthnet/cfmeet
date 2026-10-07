@@ -4,7 +4,11 @@
 //!   import, no Meeting Service crate names, no Meeting Service tables.
 //! * The platform core contains no consumer-specific domain types or product-name
 //!   branching.
-//! * No Part C (calls / call legs / routes …) schema exists yet.
+//! * Part C §15–§19: the call domain is provider-independent (no provider SDK, provider
+//!   names or provider / protocol states; no telephone-number fields), clients cannot set
+//!   a state (the state column is written only by the transition path; the public call
+//!   API is read-only), media identities are only server-generated, and no Privacy Relay /
+//!   Telephony / Numbering service, table or database dependency exists yet.
 //! * Raw credential exposure is confined to the single CLI display site.
 //! * Section 13: Calling's only path dependencies are its own migration crate and shared
 //!   `packages/`; it reads no other service's database URL.
@@ -94,6 +98,54 @@ fn production_sources() -> Vec<(String, String)> {
             )
         })
         .collect()
+}
+
+/// Tables owned by Calling: the platform foundation and the call domain.
+fn is_calling_table(name: &str) -> bool {
+    name.starts_with("platform_")
+        || name.starts_with("call_")
+        || name == "calls"
+        || name == "calling_outbox_events"
+}
+
+/// Code with the contents of string literals removed (identifiers, types and syntax
+/// only), so explicit deny-lists of forbidden words do not trip identifier guards.
+fn strip_strings(code: &str) -> String {
+    let bytes = code.as_bytes();
+    let mut out = String::with_capacity(code.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+        // Raw strings r"…" / r#"…"#.
+        if c == 'r' && (i == 0 || !(bytes[i - 1] as char).is_ascii_alphanumeric()) {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j] == b'#' {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'"' {
+                let hashes = j - i - 1;
+                let close = format!("\"{}", "#".repeat(hashes));
+                let end = code[j + 1..]
+                    .find(&close)
+                    .map_or(code.len(), |e| j + 1 + e + close.len());
+                out.push_str("\"\"");
+                i = end;
+                continue;
+            }
+        }
+        if c == '"' {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j] != b'"' {
+                j += if bytes[j] == b'\\' { 2 } else { 1 };
+            }
+            out.push_str("\"\"");
+            i = j + 1;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
 }
 
 /// Whether `code` contains `path` as a path root (not as the suffix of an identifier).
@@ -200,8 +252,8 @@ fn calling_never_touches_meeting_service_tables() {
                     .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
                     .collect();
                 assert!(
-                    name.starts_with("platform_") || name.is_empty(),
-                    "{file}: `{keyword}{name}` is not a Calling platform table"
+                    is_calling_table(&name) || name.is_empty(),
+                    "{file}: `{keyword}{name}` is not a Calling table"
                 );
             }
         }
@@ -227,30 +279,340 @@ fn platform_core_has_no_consumer_specific_code() {
     }
 }
 
+/// Provider / vendor names and provider-shaped identifiers that never belong in Calling's
+/// canonical call domain (execution adapters live behind other boundaries).
+const PROVIDER_TERMS: &[&str] = &[
+    "livekit",
+    "twilio",
+    "africastalking",
+    "africas_talking",
+    "vonage",
+    "nexmo",
+    "plivo",
+    "telnyx",
+    "sinch",
+    "agora",
+    "room_sid",
+    "carrier_call",
+    "provider_call",
+    "sip_dialog",
+    "dialog_id",
+    "pstn",
+    "voicemail",
+];
+
+/// Identifiers that would hold a telephone number.
+const TELEPHONE_FIELDS: &[&str] = &[
+    "phone",
+    "msisdn",
+    "e164",
+    "telephone_number",
+    "caller_number",
+    "callee_number",
+    "dialed_number",
+    "caller_id",
+];
+
+/// Tables of other services' domains (Part III §13) Calling must never create or name.
+const FOREIGN_DOMAIN_TABLES: &[&str] = &[
+    "communication_contexts",
+    "privacy_relay_sessions",
+    "relay_sessions",
+    "protected_contacts",
+    "relay_number_inventory",
+    "contact_vault",
+    "provider_call_bindings",
+    "provider_events",
+    "telephony_commands",
+    "telephony_routes",
+    "carrier_events",
+];
+
+/// Violations of the call-domain provider / contact rules in one production file.
+fn call_domain_violations(file: &str, code: &str) -> Vec<String> {
+    let identifiers = strip_strings(code).to_lowercase();
+    let mut out = Vec::new();
+    for term in PROVIDER_TERMS {
+        if identifiers.contains(term) {
+            out.push(format!("{file}: provider-specific `{term}`"));
+        }
+    }
+    let in_call_domain = file.starts_with("src/calls/") || file.starts_with("src/models/call");
+    if in_call_domain {
+        for field in TELEPHONE_FIELDS {
+            if identifiers.contains(field) {
+                out.push(format!("{file}: telephone-number field `{field}`"));
+            }
+        }
+    }
+    let lower = code.to_lowercase();
+    for table in FOREIGN_DOMAIN_TABLES {
+        if lower.contains(table) {
+            out.push(format!("{file}: other service's table `{table}`"));
+        }
+    }
+    out
+}
+
+/// Violations of "clients request actions; only the transition path writes a state".
+fn state_write_violations(file: &str, code: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for setter in [
+        "fn set_state",
+        "fn set_call_state",
+        "fn set_current_state",
+        "fn force_state",
+        "fn update_state(",
+        "fn override_state",
+    ] {
+        if code.contains(setter) {
+            out.push(format!("{file}: state setter `{setter}`"));
+        }
+    }
+    let writes_state = code.contains("current_state: Set(")
+        || code.contains("current_state = Set(")
+        || code.to_lowercase().contains("set current_state");
+    if writes_state && file != "src/calls/service/lifecycle.rs" {
+        out.push(format!(
+            "{file}: writes calls.current_state outside the transition path"
+        ));
+    }
+    if file == "src/calls/http.rs" {
+        // Read-only: no mutating methods, no request bodies, no deserialized input types.
+        for method in ["post(", "put(", "patch(", "delete(", "Json<", "Deserialize"] {
+            if code.contains(method) {
+                out.push(format!("{file}: public call API is read-only (`{method}`)"));
+            }
+        }
+    }
+    out
+}
+
+/// Violations of "media identities are generated by the server only".
+fn media_identity_violations(file: &str, code: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let writes = code.matches("media_identity: Set(").count();
+    let generated = code
+        .matches("media_identity: Set(MediaIdentity::generate()")
+        .count();
+    if writes != generated {
+        out.push(format!(
+            "{file}: media identity not from MediaIdentity::generate()"
+        ));
+    }
+    if code.contains("MediaIdentity::generate()") && file != "src/calls/service/participation.rs" {
+        out.push(format!(
+            "{file}: media identities are generated only when a session is created"
+        ));
+    }
+    if code.contains("MediaIdentity::from_persisted(") && file != "src/calls/sessions.rs" {
+        out.push(format!(
+            "{file}: MediaIdentity built from non-persisted input"
+        ));
+    }
+    out
+}
+
 #[test]
-fn no_part_c_schema_or_types_exist_yet() {
+fn call_domain_is_provider_independent_and_holds_no_telephone_numbers() {
+    let mut violations = Vec::new();
     for (file, code) in production_sources() {
-        let lower = code.to_lowercase();
-        for forbidden in [
-            "create table calls",
-            "call_participants",
-            "call_sessions",
-            "call_legs",
-            "call_routes",
-            "callparticipant",
-            "callsession",
-            "callleg",
-            "callroute",
+        violations.extend(call_domain_violations(&file, &code));
+    }
+    assert!(violations.is_empty(), "{violations:#?}");
+    // Canonical states and kinds are CF Meet vocabulary, not provider / protocol states
+    // or consumer products.
+    for state in calling::calls::CallState::ALL {
+        let s = state.as_str().to_lowercase();
+        for term in PROVIDER_TERMS
+            .iter()
+            .chain(&["sip", "joined", "200", "180", "carrier"])
+        {
+            assert!(!s.contains(term), "{state} looks provider-specific");
+        }
+    }
+    assert_eq!(calling::calls::CallState::ALL.len(), 17);
+    let kinds: Vec<_> = calling::calls::kinds::CallKind::ALL
+        .iter()
+        .map(|k| k.as_str())
+        .collect();
+    assert_eq!(kinds, ["VOICE", "VIDEO"]);
+    // No provider SDK in the dependency graph.
+    let root = manifest_dir();
+    for manifest in ["Cargo.toml", "migration/Cargo.toml", "Cargo.lock"] {
+        let text = std::fs::read_to_string(root.join(manifest))
+            .unwrap()
+            .to_lowercase();
+        for sdk in [
             "livekit",
-            "pstn",
-            "voicemail",
+            "twilio",
+            "vonage",
+            "africastalking",
+            "plivo",
+            "telnyx",
+            "agora",
         ] {
+            assert!(!text.contains(sdk), "{manifest} depends on `{sdk}`");
+        }
+    }
+}
+
+#[test]
+fn clients_request_actions_and_only_the_transition_path_writes_a_state() {
+    let mut violations = Vec::new();
+    for (file, code) in production_sources() {
+        violations.extend(state_write_violations(&file, &code));
+    }
+    assert!(violations.is_empty(), "{violations:#?}");
+    // The transition path does write it (the guard is not vacuous).
+    let lifecycle = production_code_of(&manifest_dir().join("src/calls/service/lifecycle.rs"));
+    assert!(lifecycle.contains("current_state: Set(CallState::Requested)"));
+    assert!(lifecycle.contains("update.current_state = Set(plan.to)"));
+}
+
+#[test]
+fn media_identities_are_only_server_generated() {
+    let mut violations = Vec::new();
+    for (file, code) in production_sources() {
+        violations.extend(media_identity_violations(&file, &code));
+    }
+    assert!(violations.is_empty(), "{violations:#?}");
+    let participation =
+        production_code_of(&manifest_dir().join("src/calls/service/participation.rs"));
+    assert_eq!(
+        participation
+            .matches("media_identity: Set(MediaIdentity::generate()")
+            .count(),
+        1
+    );
+    // No public operation takes a media identity as input.
+    for (file, code) in production_sources() {
+        for signature in code.split("pub async fn ").skip(1) {
+            let params = signature.split(')').next().unwrap_or_default();
             assert!(
-                !lower.contains(forbidden),
-                "{file} contains out-of-scope `{forbidden}`"
+                !params.contains("MediaIdentity") && !params.contains("media_identity"),
+                "{file}: an operation accepts a media identity"
             );
         }
     }
+}
+
+#[test]
+fn no_privacy_relay_telephony_or_numbering_service_exists_yet() {
+    let services = manifest_dir().join("..");
+    for future in ["privacy-relay", "telephony", "numbering", "contact-vault"] {
+        assert!(
+            !services.join(future).exists(),
+            "services/{future} must not exist before its implementation phase"
+        );
+    }
+    // Calling's migrations create only Calling tables.
+    let mut files = Vec::new();
+    rust_files(&manifest_dir().join("migration/src"), &mut files);
+    for file in files {
+        let lower = std::fs::read_to_string(&file).unwrap().to_lowercase();
+        for (i, _) in lower.match_indices("create table ") {
+            let name: String = lower[i + "create table ".len()..]
+                .trim_start_matches("unlogged table ")
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            assert!(
+                is_calling_table(&name),
+                "{}: creates {name}",
+                file.display()
+            );
+        }
+    }
+}
+
+#[test]
+fn call_domain_guards_detect_violations() {
+    // Mutation tests: each guard fires on a synthetic violation and stays quiet on the
+    // legitimate forms.
+    let provider = call_domain_violations(
+        "src/calls/legs.rs",
+        "pub struct Leg { pub livekit_room_sid: String, pub phone_number: String }",
+    );
+    assert!(
+        provider.iter().any(|v| v.contains("livekit")),
+        "{provider:?}"
+    );
+    assert!(provider.iter().any(|v| v.contains("room_sid")));
+    assert!(provider.iter().any(|v| v.contains("phone")));
+    assert!(!call_domain_violations(
+        "src/calls/x.rs",
+        "const DENY: &[&str] = &[\"pstn\", \"twilio\"];"
+    )
+    .iter()
+    .any(|v| v.contains("provider-specific")));
+    assert!(
+        !call_domain_violations("src/calls/x.rs", "SELECT * FROM provider_call_bindings")
+            .is_empty()
+    );
+    assert!(!call_domain_violations("src/calls/x.rs", "TwilioCallId").is_empty());
+
+    assert!(!state_write_violations(
+        "src/calls/service/x.rs",
+        "pub async fn set_call_state(&self)"
+    )
+    .is_empty());
+    assert!(!state_write_violations(
+        "src/calls/service/routing.rs",
+        "calls::ActiveModel { current_state: Set(s) }"
+    )
+    .is_empty());
+    assert!(!state_write_violations(
+        "src/calls/service/x.rs",
+        "UPDATE calls SET current_state = $1"
+    )
+    .is_empty());
+    assert!(state_write_violations(
+        "src/calls/service/lifecycle.rs",
+        "update.current_state = Set(plan.to)"
+    )
+    .is_empty());
+    assert!(!state_write_violations(
+        "src/calls/http.rs",
+        ".route(\"/v1/calls\", post(create_call))"
+    )
+    .is_empty());
+    assert!(!state_write_violations(
+        "src/calls/http.rs",
+        "#[derive(Deserialize)] struct SetState"
+    )
+    .is_empty());
+    assert!(
+        !state_write_violations("src/calls/http.rs", "async fn act(Json(body): Json<Value>)")
+            .is_empty()
+    );
+
+    assert!(!media_identity_violations(
+        "src/calls/service/participation.rs",
+        "media_identity: Set(input.identity)"
+    )
+    .is_empty());
+    assert!(
+        !media_identity_violations("src/calls/http.rs", "MediaIdentity::from_persisted(body)")
+            .is_empty()
+    );
+    assert!(!media_identity_violations(
+        "src/calls/service/lifecycle.rs",
+        "MediaIdentity::generate()"
+    )
+    .is_empty());
+    assert!(media_identity_violations(
+        "src/calls/service/participation.rs",
+        "media_identity: Set(MediaIdentity::generate().as_str().to_string())"
+    )
+    .is_empty());
+
+    assert!(is_calling_table("call_sessions") && is_calling_table("calls"));
+    assert!(!is_calling_table("communication_contexts") && !is_calling_table("users"));
+    assert_eq!(
+        strip_strings("let a = \"twilio\"; let b = r#\"pstn\"#; c"),
+        "let a = \"\"; let b = \"\"; c"
+    );
 }
 
 #[test]
