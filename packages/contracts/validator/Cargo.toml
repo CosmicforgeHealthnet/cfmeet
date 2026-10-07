@@ -1,0 +1,22 @@
+[package]
+name = "cfmeet-contracts-validator"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Deterministic validator for packages/contracts (manifest, JSON Schema 2020-12 contracts, OpenAPI documents, fixtures)"
+
+[workspace]
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "contracts-validate"
+path = "src/main.rs"
+
+[dependencies]
+jsonschema = { version = "0.58", default-features = false }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
