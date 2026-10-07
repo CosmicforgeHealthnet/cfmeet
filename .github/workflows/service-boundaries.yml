@@ -1,0 +1,51 @@
+name: Service boundaries
+
+# Repository-wide data-ownership guard (docs/architecture/service-data-ownership.md):
+# no service depends on, includes or reads the source, database or tables of another
+# service; shared packages never depend on services. Python standard library only.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/**"
+      - "packages/**"
+      - "scripts/service-boundaries/**"
+      - ".github/workflows/service-boundaries.yml"
+  pull_request:
+    paths:
+      - "services/**"
+      - "packages/**"
+      - "scripts/service-boundaries/**"
+      - ".github/workflows/service-boundaries.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: service-boundaries-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: service boundary guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Synthetic violations for every rule, and single-violation copies of this
+      # repository, must all be rejected.
+      - name: guard mutation tests
+        run: python3 -m unittest discover -s scripts/service-boundaries -v
+
+      - name: guard
+        run: python3 scripts/service-boundaries/check_service_boundaries.py
+
+      - name: no phase-03 path
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -i 'phase-03'; then
+            echo "::error::a phase-03 path exists in the repository"; exit 1
+          fi

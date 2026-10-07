@@ -1,0 +1,124 @@
+name: Contracts and service auth
+
+# packages/contracts — the contract authority (manifest, JSON Schema 2020-12 and
+# OpenAPI 3.x contracts, examples / counter-examples) and its offline validator — and
+# packages/service-auth, the internal service authentication library whose conformance
+# tests run against those contracts. Neither job starts a service or needs Docker.
+#
+# The Meeting Service contract (packages/contracts/openapi/meeting-service.json) is
+# still regenerated and diffed by backend.yml; this workflow only validates it as a
+# registered contract.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "packages/contracts/**"
+      - "packages/service-auth/**"
+      - ".github/workflows/contracts.yml"
+  pull_request:
+    paths:
+      - "packages/contracts/**"
+      - "packages/service-auth/**"
+      - ".github/workflows/contracts.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: contracts-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  contracts:
+    name: contracts validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/contracts/validator
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/contracts/validator -> target
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      # Mutation tests: every rule rejects a broken copy of a contract tree.
+      - name: validator tests
+        run: cargo test --locked --no-fail-fast
+
+      # Manifest, meta-schemas, $id / $ref resolution (offline), examples and
+      # counter-examples, OpenAPI documents and their versions.
+      - name: validate packages/contracts
+        run: cargo run -q --locked -- ../ ../../..
+
+  service-auth:
+    name: service-auth (${{ matrix.features.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - { name: core, flags: "" }
+          - { name: client, flags: "--features client" }
+    defaults:
+      run:
+        working-directory: packages/service-auth
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/service-auth -> target
+          key: ${{ matrix.features.name }}
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo check
+        run: cargo check --all-targets --locked ${{ matrix.features.flags }}
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets --locked ${{ matrix.features.flags }} -- -D warnings
+
+      # Authentication, policy, context, contract conformance (against packages/contracts)
+      # and key-generation tests.
+      - name: cargo test
+        run: cargo test --locked --no-fail-fast ${{ matrix.features.flags }}
+
+      - name: No private key material is committed
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -E '\.(pem|key)$'; then
+            echo "::error::a key file is committed"; exit 1
+          fi
+          python3 - <<'PY'
+          import os, re, subprocess, sys
+          # A PEM private-key block: header followed by base64 key material (raw or as a
+          # "\n"-escaped string literal). Bare header strings in assertions are not keys.
+          pem = re.compile(rb"-----BEGIN [A-Z ]*PRIVATE KEY-----(?:\\n|\s)+[A-Za-z0-9+/]{16,}")
+          paths = [p.decode() for p in subprocess.run(["git", "ls-files", "-z"], capture_output=True, check=True).stdout.split(b"\0") if p]
+          bad = [p for p in paths if os.path.isfile(p) and pem.search(open(p, "rb").read())]
+          for p in bad:
+              print(f"::error file={p}::private key material is committed")
+          sys.exit(1 if bad else 0)
+          PY

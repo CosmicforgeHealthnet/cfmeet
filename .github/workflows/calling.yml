@@ -1,8 +1,10 @@
 name: Calling service
 
 # services/calling — the Rust/Axum Calling service (platform consumer, credential and
-# principal trust foundation). Independent of services/meeting-service: this workflow
-# never builds or starts the Meeting Service.
+# principal trust foundation; internal service authentication). Independent of
+# services/meeting-service: this workflow never builds or starts the Meeting Service.
+# It depends only on the shared packages/service-auth crate and the Calling / platform
+# contracts in packages/contracts.
 #
 # CI builds carry no debug info and no incremental state (as in backend.yml);
 # debug assertions stay on.
@@ -12,12 +14,18 @@ on:
     branches: [main, staging]
     paths:
       - "services/calling/**"
+      - "packages/service-auth/**"
       - "packages/contracts/calling/**"
+      - "packages/contracts/platform/**"
+      - "packages/contracts/manifest.json"
       - ".github/workflows/calling.yml"
   pull_request:
     paths:
       - "services/calling/**"
+      - "packages/service-auth/**"
       - "packages/contracts/calling/**"
+      - "packages/contracts/platform/**"
+      - "packages/contracts/manifest.json"
       - ".github/workflows/calling.yml"
   workflow_dispatch:
 
@@ -106,7 +114,9 @@ jobs:
 
       # Unit + PostgreSQL integration tests: migrations, tenant isolation, first-party vs
       # external, credential storage, authentication, environment isolation, scopes,
-      # rotation, secret leakage, principals, limits, admin CLI, architecture.
+      # rotation, secret leakage, principals, limits, admin CLI, architecture, internal
+      # service authentication, outbound delegation / internal client, HTTP contract
+      # conformance.
       - name: cargo test
         run: cargo test --workspace --no-fail-fast --locked
 
@@ -149,29 +159,76 @@ jobs:
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'platform\_%'")" = "11"
 
-      - name: Service starts against the migrated database and refuses weak secrets
+      - name: Service starts against the migrated database and refuses unsafe configuration
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/calling_migration_smoke
           CALLING_BIND_ADDRESS: 127.0.0.1:8090
         run: |
           set -euo pipefail
-          if API_CREDENTIAL_PEPPER=changeme ./target/debug/calling; then
-            echo "::error::service started with a placeholder pepper"; exit 1
-          fi
+          # Fresh per-run signing key (never committed) and a trust bundle with no peers.
+          K="$RUNNER_TEMP/service-auth"
+          mkdir -p "$K"
+          cargo run -q --locked --manifest-path ../../packages/service-auth/Cargo.toml --bin cf-service-keygen -- \
+            generate --kid calling-ci-1 --out "$K/calling-ci-1.pem" > "$K/calling-ci-1.jwk.json"
+          test "$(stat -c %a "$K/calling-ci-1.pem")" = "600"
+          echo '{"bundle_version":1,"receiver":"cfmeet.calling","runtime_environment":"local","trusted_issuers":[]}' > "$K/bundle.json"
+          echo '{"bundle_version":1,"receiver":"cfmeet.calling","runtime_environment":"staging","trusted_issuers":[]}' > "$K/staging-bundle.json"
+          export CF_RUNTIME_ENVIRONMENT=local CF_SERVICE_AUTH_KEY_ID=calling-ci-1
+          export CF_SERVICE_AUTH_PRIVATE_KEY_FILE="$K/calling-ci-1.pem" CF_SERVICE_TRUST_BUNDLE_FILE="$K/bundle.json"
           export API_CREDENTIAL_PEPPER="$(openssl rand -base64 48)"
-          ./target/debug/calling &
+
+          refuses() { # refuses <description> <env assignments...>: must exit 2 (config error)
+            local what="$1"; shift
+            set +e; env "$@" timeout 30 ./target/debug/calling > "$K/out.log" 2>&1; local rc=$?; set -e
+            if [ "$rc" != "2" ]; then
+              echo "::error::service did not refuse to start ($what): exit $rc"; cat "$K/out.log"; exit 1
+            fi
+            if grep -q -- "PRIVATE KEY" "$K/out.log"; then echo "::error::key material in startup output"; exit 1; fi
+            echo "refused as expected: $what"
+          }
+          refuses "placeholder pepper" API_CREDENTIAL_PEPPER=changeme
+          refuses "missing signing key" CF_SERVICE_AUTH_PRIVATE_KEY_FILE=
+          refuses "unreadable signing key" CF_SERVICE_AUTH_PRIVATE_KEY_FILE="$K/missing.pem"
+          refuses "inline private key" CF_SERVICE_AUTH_PRIVATE_KEY=inline
+          refuses "missing trust bundle" CF_SERVICE_TRUST_BUNDLE_FILE=
+          refuses "bundle for another runtime environment" CF_SERVICE_TRUST_BUNDLE_FILE="$K/staging-bundle.json"
+          refuses "wrong service identity" CF_SERVICE_ID=cfmeet.meeting-service
+          refuses "unknown runtime environment" CF_RUNTIME_ENVIRONMENT=prod
+          refuses "token TTL above the hard maximum" CF_SERVICE_TOKEN_TTL_SECONDS=301
+
+          ./target/debug/calling > "$K/run.log" 2>&1 &
           pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8090/health; then break; fi
             sleep 1
           done
           curl -fsS http://127.0.0.1:8090/health | grep -q '"status":"ok"'
-          kill "$pid"
+          # Internal routes require a service token, including unknown paths and requests
+          # that carry a customer credential instead.
+          code=$(curl -s -o "$K/a.json" -w '%{http_code}' http://127.0.0.1:8090/internal/v1/anything)
+          test "$code" = "401" && grep -q '"code":"INTERNAL_AUTHENTICATION_FAILED"' "$K/a.json"
+          code=$(curl -s -o "$K/b.json" -w '%{http_code}' -H 'Authorization: Bearer cfmk_live_x_y' http://127.0.0.1:8090/internal/v1/anything)
+          test "$code" = "401" && grep -q '"code":"INTERNAL_AUTHENTICATION_FAILED"' "$K/b.json"
+          grep -q "internal service authentication ready" "$K/run.log"
+          if grep -q -- "PRIVATE KEY" "$K/run.log"; then echo "::error::key material in logs"; exit 1; fi
+          rm -rf "$K"
 
   docker:
-    name: Docker image (services/calling/ context)
+    name: Docker image (repository-root context)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The context is filtered by services/calling/Dockerfile.dockerignore to
+      # packages/service-auth and services/calling only.
       - name: docker build
-        run: docker build -t cfmeet-calling:ci .
+        working-directory: .
+        run: docker build -f services/calling/Dockerfile -t cfmeet-calling:ci .
+      - name: image contains only the Calling binaries and no key material
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint /bin/ls cfmeet-calling:ci /app | tr '\n' ' ')" = "calling calling-migration platform_admin "
+          if docker run --rm --entrypoint /bin/sh cfmeet-calling:ci -c 'grep -rlI -- "PRIVATE KEY-----" / --exclude-dir=proc --exclude-dir=sys 2>/dev/null'; then
+            echo "::error::private key material in the image"; exit 1
+          fi

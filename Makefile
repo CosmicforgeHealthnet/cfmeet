@@ -1,17 +1,22 @@
 # CF Meet — root developer commands.
 # Each target delegates to the app/service's own toolchain. services/meeting-service/,
 # services/calling/ and apps/web/ remain independently buildable and deployable.
+# Shared code lives in packages/ (contracts, service-auth); no service depends on another.
 
 MEETING_SERVICE := services/meeting-service
 CALLING         := services/calling
 WEB             := apps/web
+SERVICE_AUTH    := packages/service-auth
+CONTRACTS       := packages/contracts
 
 .PHONY: help deps deps-down meeting-service backend frontend web migrate dev test lint build \
         backend-test backend-lint backend-build frontend-test frontend-lint frontend-build \
-        frontend-install calling calling-migrate calling-test calling-lint calling-build calling-admin
+        frontend-install calling calling-migrate calling-test calling-lint calling-build calling-admin \
+        service-auth-test service-auth-lint contracts-validate contracts-test contracts-lint \
+        service-boundaries
 
 help: ## Show available commands
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 deps: ## Start local PostgreSQL, Redis and LiveKit (docker compose)
 	docker compose up -d postgres redis livekit
@@ -46,6 +51,29 @@ calling-lint: ## fmt + clippy for the Calling service
 calling-build: ## Build the Calling service
 	cd $(CALLING) && cargo build --workspace
 
+service-auth-test: ## Test packages/service-auth (core and client feature sets)
+	cd $(SERVICE_AUTH) && cargo test --no-fail-fast
+	cd $(SERVICE_AUTH) && cargo test --no-fail-fast --features client
+
+service-auth-lint: ## fmt + clippy for packages/service-auth
+	cd $(SERVICE_AUTH) && cargo fmt --all -- --check
+	cd $(SERVICE_AUTH) && cargo clippy --all-targets -- -D warnings
+	cd $(SERVICE_AUTH) && cargo clippy --all-targets --features client -- -D warnings
+
+contracts-validate: ## Validate packages/contracts (manifest, schemas, OpenAPI, fixtures; offline, no Docker)
+	cd $(CONTRACTS)/validator && cargo run -q -- ../ ../../..
+
+contracts-test: ## Contract validator mutation tests
+	cd $(CONTRACTS)/validator && cargo test --no-fail-fast
+
+contracts-lint: ## fmt + clippy for the contract validator
+	cd $(CONTRACTS)/validator && cargo fmt --all -- --check
+	cd $(CONTRACTS)/validator && cargo clippy --all-targets -- -D warnings
+
+service-boundaries: ## Repository service-boundary guard + its mutation tests (Python stdlib)
+	python3 -m unittest discover -s scripts/service-boundaries
+	python3 scripts/service-boundaries/check_service_boundaries.py
+
 frontend: frontend-install ## Run the web app dev server (apps/web)
 	cd $(WEB) && npm run dev
 
@@ -54,9 +82,9 @@ web: frontend ## Alias for `make frontend`
 dev: ## Start deps, then meeting service + web app together (Ctrl+C stops both)
 	./scripts/dev.sh
 
-test: backend-test calling-test frontend-test ## Run all tests
+test: backend-test calling-test service-auth-test contracts-test contracts-validate service-boundaries frontend-test ## Run all tests
 
-lint: backend-lint calling-lint frontend-lint ## Run all linters
+lint: backend-lint calling-lint service-auth-lint contracts-lint frontend-lint ## Run all linters
 
 build: backend-build calling-build frontend-build ## Build all applications and services
 
