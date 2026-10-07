@@ -1,8 +1,14 @@
 //! HTTP routing.
 //!
-//! Only `GET /health` is public. The Calling business API (Part C) does not exist yet;
-//! when it does, its routes are mounted through [`app`] as `protected` routes so that
-//! every one of them passes through platform credential authentication.
+//! * `GET /health` is public.
+//! * Customer routes (the future Calling API, Part C) are passed to [`app`] as
+//!   `protected` and every one of them runs behind platform credential authentication.
+//! * Internal routes are passed as `internal`, are nested under `/internal/v1` and run
+//!   behind internal service authentication BY CONSTRUCTION — including unknown internal
+//!   paths, so internal routes cannot be enumerated without a valid service token.
+//!
+//! Every error, including unknown paths (404) and unsupported methods (405), uses the
+//! error envelope of the Calling HTTP contract (`packages/contracts/calling/http`).
 
 use axum::{
     extract::State,
@@ -17,13 +23,13 @@ use serde_json::json;
 
 use crate::{
     error::CallingError,
+    internal_auth::{middleware::require_internal_service, INTERNAL_PREFIX},
     middleware::{platform_auth::require_platform_credential, request_id::request_id_middleware},
     state::AppState,
 };
 
-/// Builds the service router: public routes plus `protected` routes wrapped in platform
-/// credential authentication, all inside the request-id layer.
-pub fn app(state: AppState, protected: Router<AppState>) -> Router {
+/// Builds the service router.
+pub fn app(state: AppState, protected: Router<AppState>, internal: Router<AppState>) -> Router {
     // `route_layer` on a router without routes is rejected by axum; with no protected
     // routes there is nothing to wrap.
     let protected = if protected.has_routes() {
@@ -34,12 +40,25 @@ pub fn app(state: AppState, protected: Router<AppState>) -> Router {
     } else {
         protected
     };
-    Router::new()
+    let customer = Router::new()
         .route("/health", get(health))
         .merge(protected)
         .fallback(not_found)
-        .with_state(state)
-        .layer(from_fn(request_id_middleware))
+        .method_not_allowed_fallback(method_not_allowed)
+        .with_state(state.clone())
+        .layer(from_fn(request_id_middleware));
+
+    let internal = Router::new()
+        .nest(
+            INTERNAL_PREFIX,
+            internal
+                .fallback(not_found)
+                .method_not_allowed_fallback(method_not_allowed),
+        )
+        .layer(from_fn_with_state(state.clone(), require_internal_service))
+        .with_state(state);
+
+    customer.merge(internal)
 }
 
 /// Liveness + database reachability.
@@ -58,4 +77,8 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
 
 async fn not_found() -> CallingError {
     CallingError::NotFound
+}
+
+async fn method_not_allowed() -> CallingError {
+    CallingError::MethodNotAllowed
 }

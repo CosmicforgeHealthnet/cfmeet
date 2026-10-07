@@ -23,6 +23,8 @@ path = "src/bin/platform_admin.rs"
 
 [dependencies]
 calling-migration = { path = "migration" }
+# Shared internal service authentication protocol (packages/, never another service).
+cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
 tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync"] }
 sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono", "with-json", "postgres-array"] }
 axum = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio", "query"] }
@@ -45,5 +47,6 @@ secrecy = "0.10"
 zeroize = "1.8"
 
 [dev-dependencies]
+jsonschema = { version = "0.58", default-features = false }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

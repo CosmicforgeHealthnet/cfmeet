@@ -1,6 +1,9 @@
 //! Platform credential authentication middleware.
 //!
-//! Accepts only `Authorization: Bearer <credential>`. On success a
+//! Accepts only `Authorization: Bearer <credential>`. A request that also carries an
+//! internal service token (`X-CF-Service-Authorization`) is rejected: customer routes
+//! never accept service credentials and the two mechanisms never fall through into each
+//! other. On success a
 //! [`PlatformAuthContext`] built from persisted state is inserted into the request
 //! extensions (handlers extract it), the request-rate limit is enforced, and the
 //! platform identifiers are recorded on the request span. On failure the client receives
@@ -17,7 +20,7 @@ use axum::{
 use zeroize::Zeroizing;
 
 use crate::{
-    domain::RequestId,
+    domain::RequestContext,
     error::CallingError,
     platform::{
         authentication::{AuthFailureReason, AuthenticationError},
@@ -59,18 +62,24 @@ pub async fn require_platform_credential(
     mut request: Request,
     next: Next,
 ) -> Response {
-    let request_id = request
+    let request_context = request
         .extensions()
-        .get::<RequestId>()
+        .get::<RequestContext>()
         .cloned()
-        .unwrap_or_else(RequestId::generate);
+        .unwrap_or_else(RequestContext::generate);
+    if request
+        .headers()
+        .contains_key(&cf_service_auth::headers::SERVICE_AUTHORIZATION)
+    {
+        return reject(AuthFailureReason::ServiceCredentialPresented, None);
+    }
     let Some(credential) = bearer_credential(request.headers()) else {
         return reject(AuthFailureReason::MissingCredential, None);
     };
 
     let ctx = match state
         .authenticator
-        .authenticate(&credential, request_id)
+        .authenticate(&credential, request_context)
         .await
     {
         Ok(ctx) => ctx,

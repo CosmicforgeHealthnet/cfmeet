@@ -33,7 +33,7 @@ use super::{
 use crate::{
     domain::{
         ApplicationId, ApplicationStatus, CredentialId, CredentialStatus, EnvironmentId,
-        EnvironmentKind, EnvironmentStatus, RequestId, ServiceAccountId, ServiceAccountStatus,
+        EnvironmentKind, EnvironmentStatus, RequestContext, ServiceAccountId, ServiceAccountStatus,
         SharedClock, TenantClassification, TenantId, TenantStatus,
     },
     models::api_credentials::Verifier,
@@ -43,6 +43,8 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthFailureReason {
     MissingCredential,
+    /// An internal service token was presented to a customer route.
+    ServiceCredentialPresented,
     MalformedCredential,
     UnknownCredential,
     SecretMismatch,
@@ -63,6 +65,7 @@ impl AuthFailureReason {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::MissingCredential => "missing_credential",
+            Self::ServiceCredentialPresented => "service_credential_presented",
             Self::MalformedCredential => "malformed_credential",
             Self::UnknownCredential => "unknown_credential",
             Self::SecretMismatch => "secret_mismatch",
@@ -200,7 +203,7 @@ impl CredentialAuthenticator {
     pub async fn authenticate(
         &self,
         presented: &str,
-        request_id: RequestId,
+        request: RequestContext,
     ) -> Result<PlatformAuthContext, AuthenticationError> {
         let Some(presented) = credential_format::parse(presented) else {
             return Err(AuthenticationError::rejected(
@@ -252,7 +255,7 @@ impl CredentialAuthenticator {
 
         let authority = evaluate(&row, &presented, self.clock.now(), &self.registry)
             .map_err(|reason| AuthenticationError::rejected(reason, Some(&presented)))?;
-        Ok(PlatformAuthContext::from_trusted(authority, request_id))
+        Ok(PlatformAuthContext::from_trusted(authority, request))
     }
 
     async fn load(&self, public_id: &str) -> Result<Option<AuthorityRow>, DbErr> {

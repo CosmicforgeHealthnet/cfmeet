@@ -7,6 +7,7 @@ use axum::Router;
 use calling::{
     config::CallingConfig,
     domain::{SharedClock, SystemClock},
+    internal_auth::config::ServiceAuthSettings,
     platform::{error::summarize_db_error, scopes::ScopeRegistry},
     routes,
     state::AppState,
@@ -28,7 +29,29 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(2);
         }
     };
+    let service_auth_settings = match ServiceAuthSettings::from_env() {
+        Ok(settings) => settings,
+        Err(err) => {
+            eprintln!("calling: service authentication configuration error: {err}");
+            std::process::exit(2);
+        }
+    };
     telemetry::init(config.log_format);
+    // Fail closed on a missing / malformed key or trust bundle before touching the network.
+    let service_auth = match service_auth_settings.load(Arc::new(cf_service_auth::SystemClock)) {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            tracing::error!(error = %err, "service authentication configuration error");
+            std::process::exit(2);
+        }
+    };
+    tracing::info!(
+        service = %service_auth.signer().issuer(),
+        runtime_environment = %service_auth.signer().runtime_environment(),
+        kid = %service_auth.signer().key_id(),
+        trusted_issuers = service_auth.verifier().policy().grants().count(),
+        "internal service authentication ready"
+    );
 
     let mut options = ConnectOptions::new(config.database_url().to_string());
     options
@@ -63,6 +86,7 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(config.keyring),
         Arc::new(ScopeRegistry::standard()),
         config.limit_defaults,
+        service_auth,
     );
 
     let pruner = state.rate_limiter.clone();
@@ -76,8 +100,9 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // The Calling business API (Part C) is not implemented yet: no protected routes.
-    let app = routes::app(state, Router::new());
+    // The Calling business API (Part C) and internal operations are not implemented yet:
+    // no protected or internal routes. /internal/v1/* still requires service auth.
+    let app = routes::app(state, Router::new(), Router::new());
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "calling service listening");
     axum::serve(listener, app)

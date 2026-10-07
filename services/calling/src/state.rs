@@ -6,6 +6,7 @@ use sea_orm::DatabaseConnection;
 
 use crate::{
     domain::SharedClock,
+    internal_auth::ServiceAuthRuntime,
     platform::{
         authentication::CredentialAuthenticator,
         limits::{LimitDefaults, LimitPolicyResolver, RequestRateLimiter},
@@ -22,6 +23,8 @@ pub struct AppState {
     pub rate_limiter: Arc<RequestRateLimiter>,
     pub limits: Arc<LimitPolicyResolver>,
     pub principals: Arc<PrincipalResolver>,
+    /// Internal service authentication (separate from customer credentials).
+    pub service_auth: ServiceAuthRuntime,
 }
 
 impl AppState {
@@ -31,6 +34,7 @@ impl AppState {
         keyring: Arc<VerifierKeyring>,
         registry: Arc<ScopeRegistry>,
         limit_defaults: LimitDefaults,
+        service_auth: ServiceAuthRuntime,
     ) -> Self {
         Self {
             authenticator: Arc::new(CredentialAuthenticator::new(
@@ -42,6 +46,7 @@ impl AppState {
             rate_limiter: Arc::new(RequestRateLimiter::new(db.clone(), limit_defaults, clock)),
             limits: Arc::new(LimitPolicyResolver::new(db.clone(), limit_defaults)),
             principals: Arc::new(PrincipalResolver::new(db.clone())),
+            service_auth,
             db,
         }
     }

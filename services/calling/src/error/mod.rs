@@ -26,22 +26,51 @@ pub enum ErrorCode {
     AuthenticationFailed,
     InsufficientScope,
     NotFound,
+    MethodNotAllowed,
     ValidationError,
     RateLimited,
     ServiceUnavailable,
     InternalError,
+    /// Internal (service-to-service) routes only; contract `cfmeet.platform.internal-http`.
+    InternalAuthenticationFailed,
+    /// Internal routes only: the caller is not granted the required permission.
+    InternalPermissionDenied,
 }
 
 impl ErrorCode {
+    pub const ALL: &'static [ErrorCode] = &[
+        ErrorCode::AuthenticationFailed,
+        ErrorCode::InsufficientScope,
+        ErrorCode::NotFound,
+        ErrorCode::MethodNotAllowed,
+        ErrorCode::ValidationError,
+        ErrorCode::RateLimited,
+        ErrorCode::ServiceUnavailable,
+        ErrorCode::InternalError,
+        ErrorCode::InternalAuthenticationFailed,
+        ErrorCode::InternalPermissionDenied,
+    ];
+
+    /// Codes that only internal routes return.
+    pub fn is_internal(&self) -> bool {
+        matches!(
+            self,
+            ErrorCode::InternalAuthenticationFailed | ErrorCode::InternalPermissionDenied
+        )
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             ErrorCode::AuthenticationFailed => "AUTHENTICATION_FAILED",
             ErrorCode::InsufficientScope => "INSUFFICIENT_SCOPE",
             ErrorCode::NotFound => "NOT_FOUND",
+            ErrorCode::MethodNotAllowed => "METHOD_NOT_ALLOWED",
             ErrorCode::ValidationError => "VALIDATION_ERROR",
             ErrorCode::RateLimited => "RATE_LIMITED",
             ErrorCode::ServiceUnavailable => "SERVICE_UNAVAILABLE",
             ErrorCode::InternalError => "INTERNAL_ERROR",
+            ErrorCode::InternalAuthenticationFailed => "INTERNAL_AUTHENTICATION_FAILED",
+            ErrorCode::InternalPermissionDenied => "INTERNAL_PERMISSION_DENIED",
         }
     }
 }
@@ -57,6 +86,8 @@ pub enum CallingError {
     /// Resource absent or outside the caller's scope (indistinguishable by design).
     #[error("not found")]
     NotFound,
+    #[error("method not allowed")]
+    MethodNotAllowed,
     /// Invalid request input. The message must be a fixed, safe string.
     #[error("validation failed")]
     Validation(&'static str),
@@ -66,6 +97,12 @@ pub enum CallingError {
     ServiceUnavailable,
     #[error("internal error")]
     Internal,
+    /// Normalized internal service authentication failure (every reason looks the same).
+    #[error("internal authentication failed")]
+    InternalAuthenticationFailed,
+    /// The authenticated service lacks the internal permission the route requires.
+    #[error("internal permission denied")]
+    InternalPermissionDenied,
 }
 
 impl CallingError {
@@ -74,10 +111,13 @@ impl CallingError {
             CallingError::AuthenticationFailed => ErrorCode::AuthenticationFailed,
             CallingError::InsufficientScope { .. } => ErrorCode::InsufficientScope,
             CallingError::NotFound => ErrorCode::NotFound,
+            CallingError::MethodNotAllowed => ErrorCode::MethodNotAllowed,
             CallingError::Validation(_) => ErrorCode::ValidationError,
             CallingError::RateLimited { .. } => ErrorCode::RateLimited,
             CallingError::ServiceUnavailable => ErrorCode::ServiceUnavailable,
             CallingError::Internal => ErrorCode::InternalError,
+            CallingError::InternalAuthenticationFailed => ErrorCode::InternalAuthenticationFailed,
+            CallingError::InternalPermissionDenied => ErrorCode::InternalPermissionDenied,
         }
     }
 
@@ -86,10 +126,13 @@ impl CallingError {
             CallingError::AuthenticationFailed => StatusCode::UNAUTHORIZED,
             CallingError::InsufficientScope { .. } => StatusCode::FORBIDDEN,
             CallingError::NotFound => StatusCode::NOT_FOUND,
+            CallingError::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
             CallingError::Validation(_) => StatusCode::BAD_REQUEST,
             CallingError::RateLimited { .. } => StatusCode::TOO_MANY_REQUESTS,
             CallingError::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             CallingError::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            CallingError::InternalAuthenticationFailed => StatusCode::UNAUTHORIZED,
+            CallingError::InternalPermissionDenied => StatusCode::FORBIDDEN,
         }
     }
 
@@ -100,12 +143,17 @@ impl CallingError {
                 "The credential is not authorized for this operation."
             }
             CallingError::NotFound => "The requested resource was not found.",
+            CallingError::MethodNotAllowed => "The method is not allowed for this resource.",
             CallingError::Validation(message) => message,
             CallingError::RateLimited { .. } => "Request rate limit exceeded; retry later.",
             CallingError::ServiceUnavailable => {
                 "The service is temporarily unavailable; retry later."
             }
             CallingError::Internal => "An internal error occurred.",
+            CallingError::InternalAuthenticationFailed => "Internal service authentication failed.",
+            CallingError::InternalPermissionDenied => {
+                "The calling service is not permitted to perform this operation."
+            }
         }
     }
 }

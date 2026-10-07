@@ -56,6 +56,6 @@ pub use kinds::{
     ApplicationStatus, CredentialStatus, EnvironmentKind, EnvironmentStatus, PrincipalKind,
     PrincipalStatus, ServiceAccountStatus, TenantClassification, TenantStatus,
 };
-pub use request_id::{ClientCorrelationId, RequestId};
+pub use request_id::{ClientCorrelationId, CorrelationId, RequestContext, RequestId};
 pub use secret::IssuedSecret;
 pub use slug::Slug;

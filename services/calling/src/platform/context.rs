@@ -15,8 +15,8 @@ use axum::{extract::FromRequestParts, http::request::Parts};
 use super::scopes::ScopeSet;
 use crate::{
     domain::{
-        ApplicationId, CredentialId, EnvironmentId, EnvironmentKind, RequestId, ServiceAccountId,
-        TenantClassification, TenantId,
+        ApplicationId, CorrelationId, CredentialId, EnvironmentId, EnvironmentKind, RequestContext,
+        RequestId, ServiceAccountId, TenantClassification, TenantId,
     },
     error::CallingError,
 };
@@ -33,6 +33,7 @@ pub struct PlatformAuthContext {
     credential_id: CredentialId,
     scopes: ScopeSet,
     request_id: RequestId,
+    correlation_id: CorrelationId,
 }
 
 /// Values loaded from the credential's persisted authority chain.
@@ -49,7 +50,7 @@ pub(crate) struct TrustedAuthority {
 }
 
 impl PlatformAuthContext {
-    pub(crate) fn from_trusted(authority: TrustedAuthority, request_id: RequestId) -> Self {
+    pub(crate) fn from_trusted(authority: TrustedAuthority, request: RequestContext) -> Self {
         Self {
             tenant_id: authority.tenant_id,
             tenant_classification: authority.tenant_classification,
@@ -63,7 +64,8 @@ impl PlatformAuthContext {
             service_account_id: authority.service_account_id,
             credential_id: authority.credential_id,
             scopes: authority.scopes,
-            request_id,
+            request_id: request.request_id,
+            correlation_id: request.correlation_id,
         }
     }
 
@@ -107,6 +109,11 @@ impl PlatformAuthContext {
 
     pub fn request_id(&self) -> &RequestId {
         &self.request_id
+    }
+
+    /// Correlation id of the operation this request started (server-generated).
+    pub fn correlation_id(&self) -> &CorrelationId {
+        &self.correlation_id
     }
 
     pub fn has_scope(&self, scope: &str) -> bool {

@@ -21,10 +21,11 @@ use axum::{
 use calling::{
     config::CredentialPolicy,
     domain::{
-        EnvironmentKind, ManualClock, PrincipalId, PrincipalKind, RequestId, ServiceAccountId,
+        EnvironmentKind, ManualClock, PrincipalId, PrincipalKind, RequestContext, ServiceAccountId,
         TenantClassification,
     },
     error::CallingError,
+    internal_auth::{middleware::InternalCaller, ServiceAuthRuntime},
     platform::{
         applications::{ApplicationView, NewApplication},
         authentication::AuthenticationError,
@@ -43,6 +44,11 @@ use calling::{
     state::AppState,
 };
 use calling_migration::MigratorTrait;
+use cf_service_auth::{
+    client::{InternalServiceClient, InternalTargets},
+    InternalPermission, KeyId, RuntimeEnvironment, ServiceId, ServiceSigningKey,
+    ServiceTokenSigner, ServiceTokenVerifier, TokenTtl, TrustPolicy,
+};
 use chrono::{DateTime, Utc};
 use http_body_util::BodyExt;
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, Statement};
@@ -231,12 +237,144 @@ pub fn test_keyring(pepper: &str) -> VerifierKeyring {
     .unwrap()
 }
 
+/// Fixed service-auth time (seconds), 2031-03-01T10:00:00Z.
+pub const SERVICE_T0: i64 = 1_930_212_000;
+
+/// Independent service identities that talk to Calling in tests (no deployable services
+/// are created): their own keys and signers, in the `test` runtime environment.
+pub struct Peers {
+    pub clock: cf_service_auth::ManualClock,
+    pub privacy_relay: Arc<ServiceTokenSigner>,
+    pub telephony: Arc<ServiceTokenSigner>,
+    /// A correctly signing service that Calling does NOT trust.
+    pub untrusted: Arc<ServiceTokenSigner>,
+    /// A verifier for a privacy-relay identity that trusts Calling (outbound tests).
+    pub privacy_relay_verifier: Arc<ServiceTokenVerifier>,
+}
+
+fn service_key(kid: &str) -> ServiceSigningKey {
+    ServiceSigningKey::generate(KeyId::parse(kid).unwrap())
+}
+
+pub fn trust_bundle_json(
+    receiver: &str,
+    env: RuntimeEnvironment,
+    grants: &[(&str, Vec<cf_service_auth::PublicJwk>, &[&str])],
+) -> String {
+    json!({
+        "bundle_version": 1,
+        "receiver": receiver,
+        "runtime_environment": env,
+        "trusted_issuers": grants.iter().map(|(issuer, keys, permissions)| json!({
+            "issuer": issuer,
+            "audience": receiver,
+            "runtime_environment": env,
+            "keys": keys,
+            "permissions": permissions,
+        })).collect::<Vec<_>>(),
+    })
+    .to_string()
+}
+
+/// Calling's service-auth runtime (test runtime environment) and its peers.
+pub fn service_auth_fixture() -> (ServiceAuthRuntime, Peers) {
+    let env = RuntimeEnvironment::Test;
+    let clock = cf_service_auth::ManualClock::new(SERVICE_T0);
+    let shared: cf_service_auth::SharedClock = Arc::new(clock.clone());
+    let calling_key = service_key("calling-test-1");
+    let relay_key = service_key("privacy-relay-test-1");
+    let telephony_key = service_key("telephony-test-1");
+    let untrusted_key = service_key("untrusted-test-1");
+    let calling_jwk = calling_key.public_jwk();
+
+    let calling_policy = TrustPolicy::from_json(
+        &trust_bundle_json(
+            cf_service_auth::services::CALLING,
+            env,
+            &[
+                (
+                    cf_service_auth::services::PRIVACY_RELAY,
+                    vec![relay_key.public_jwk()],
+                    &["operational-callback.deliver"],
+                ),
+                (
+                    cf_service_auth::services::TELEPHONY,
+                    vec![telephony_key.public_jwk()],
+                    &["operational-callback.deliver"],
+                ),
+            ],
+        ),
+        &ServiceId::calling(),
+        env,
+    )
+    .unwrap();
+    let relay_policy = TrustPolicy::from_json(
+        &trust_bundle_json(
+            cf_service_auth::services::PRIVACY_RELAY,
+            env,
+            &[(
+                cf_service_auth::services::CALLING,
+                vec![calling_jwk],
+                &["communication.authorize", "communication-context.read"],
+            )],
+        ),
+        &ServiceId::privacy_relay(),
+        env,
+    )
+    .unwrap();
+
+    let calling_signer = Arc::new(ServiceTokenSigner::new(
+        ServiceId::calling(),
+        env,
+        calling_key,
+        TokenTtl::default(),
+        shared.clone(),
+    ));
+    let verifier = Arc::new(ServiceTokenVerifier::new(calling_policy, shared.clone()));
+    let client = Arc::new(
+        InternalServiceClient::new(
+            calling_signer.clone(),
+            InternalTargets::new(env),
+            std::time::Duration::from_secs(5),
+        )
+        .unwrap(),
+    );
+    let runtime = ServiceAuthRuntime::new(calling_signer, verifier, client).unwrap();
+    let peers = Peers {
+        privacy_relay: Arc::new(ServiceTokenSigner::new(
+            ServiceId::privacy_relay(),
+            env,
+            relay_key,
+            TokenTtl::default(),
+            shared.clone(),
+        )),
+        telephony: Arc::new(ServiceTokenSigner::new(
+            ServiceId::telephony(),
+            env,
+            telephony_key,
+            TokenTtl::default(),
+            shared.clone(),
+        )),
+        untrusted: Arc::new(ServiceTokenSigner::new(
+            ServiceId::parse("cfmeet.numbering").unwrap(),
+            env,
+            untrusted_key,
+            TokenTtl::default(),
+            shared.clone(),
+        )),
+        privacy_relay_verifier: Arc::new(ServiceTokenVerifier::new(relay_policy, shared)),
+        clock,
+    };
+    (runtime, peers)
+}
+
 /// Database + platform service + HTTP state wired with a manual clock.
 pub struct Harness {
     pub db: Arc<TestDb>,
     pub clock: ManualClock,
     pub platform: PlatformService,
     pub state: AppState,
+    pub peers: Arc<Peers>,
 }
 
 /// One consumer: tenant + application + all three environments, a `backend` service
@@ -291,18 +429,21 @@ impl Harness {
             CredentialPolicy::default(),
             LimitDefaults::default(),
         );
+        let (service_auth, peers) = service_auth_fixture();
         let state = AppState::new(
             db.conn.clone(),
             Arc::new(clock.clone()),
             keyring,
             registry,
             LimitDefaults::default(),
+            service_auth,
         );
         Self {
             db,
             clock,
             platform,
             state,
+            peers: Arc::new(peers),
         }
     }
 
@@ -392,7 +533,7 @@ impl Harness {
     ) -> Result<PlatformAuthContext, AuthenticationError> {
         self.state
             .authenticator
-            .authenticate(token, RequestId::generate())
+            .authenticate(token, RequestContext::generate())
             .await
     }
 
@@ -401,7 +542,7 @@ impl Harness {
     }
 
     pub fn router(&self) -> Router {
-        routes::app(self.state.clone(), test_routes())
+        routes::app(self.state.clone(), test_routes(), test_internal_routes())
     }
 
     /// One request through the full router (request id + authentication middleware).
@@ -492,6 +633,7 @@ pub fn context_json(ctx: &PlatformAuthContext) -> Value {
         "credential_id": ctx.credential_id(),
         "scopes": ctx.scopes().names(),
         "request_id": ctx.request_id().as_str(),
+        "correlation_id": ctx.correlation_id().as_str(),
     })
 }
 
@@ -568,6 +710,69 @@ pub fn test_routes() -> Router<AppState> {
         .route("/test/calls-write", get(calls_write))
         .route("/test/resolve", post(resolve_principal))
         .route("/test/limits", get(limits_handler))
+}
+
+// ---------------------------------------------------------------------------
+// Test-only internal routes (mounted under /internal/v1 by routes::app).
+// ---------------------------------------------------------------------------
+
+pub fn internal_context_json(caller: &InternalCaller) -> Value {
+    let c = caller.context();
+    json!({
+        "service": c.authenticated_service(),
+        "audience": c.audience(),
+        "runtime_environment": c.runtime_environment(),
+        "kid": c.key_id().as_str(),
+        "request_id": c.request_id(),
+        "correlation_id": c.correlation_id(),
+        "permissions": c.permissions().names(),
+        "delegated_context": c.delegated_platform_context(),
+        "current_request_id": calling::middleware::request_id::current_request_id().map(|r| r.as_str().to_string()),
+    })
+}
+
+async fn internal_caller(caller: InternalCaller, _body: Option<Json<Value>>) -> Json<Value> {
+    Json(internal_context_json(&caller))
+}
+
+async fn internal_callback(caller: InternalCaller) -> Result<Json<Value>, CallingError> {
+    caller.require_permission(InternalPermission::OperationalCallbackDeliver)?;
+    Ok(Json(json!({ "accepted": true })))
+}
+
+/// Requires a permission Calling can never grant (received by Privacy Relay only).
+async fn internal_never_granted(caller: InternalCaller) -> Result<Json<Value>, CallingError> {
+    caller.require_permission(InternalPermission::CommunicationAuthorize)?;
+    Ok(Json(json!({ "unreachable": true })))
+}
+
+async fn internal_slow(_caller: InternalCaller) -> Json<Value> {
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    Json(json!({ "slow": true }))
+}
+
+/// Location for the redirect test route (set by the test that uses it).
+pub static REDIRECT_TARGET: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+async fn internal_redirect(_caller: InternalCaller) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (
+        axum::http::StatusCode::TEMPORARY_REDIRECT,
+        [(
+            axum::http::header::LOCATION,
+            REDIRECT_TARGET.get().cloned().unwrap_or_default(),
+        )],
+    )
+        .into_response()
+}
+
+pub fn test_internal_routes() -> Router<AppState> {
+    Router::new()
+        .route("/test/caller", get(internal_caller).post(internal_caller))
+        .route("/test/callback", post(internal_callback))
+        .route("/test/never-granted", post(internal_never_granted))
+        .route("/test/slow", get(internal_slow))
+        .route("/test/redirect", get(internal_redirect))
 }
 
 /// The hex secret part of a raw credential (`cfmk_<env>_<public>_<secret>`).

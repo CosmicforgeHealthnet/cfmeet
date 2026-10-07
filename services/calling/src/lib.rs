@@ -9,12 +9,16 @@
 //! * the separation between API client identity ([`platform::context::PlatformAuthContext`])
 //!   and communication principal identity ([`platform::principals::ResolvedPrincipal`]).
 //!
+//! It also integrates internal service authentication (Part B §11) through the shared
+//! `packages/service-auth` protocol ([`internal_auth`]).
+//!
 //! The service is independent of `services/meeting-service`: it shares no source, models
-//! or database with it.
+//! or database with it, and it never imports another deployable service.
 
 pub mod config;
 pub mod domain;
 pub mod error;
+pub mod internal_auth;
 pub mod middleware;
 pub mod models;
 pub mod platform;
