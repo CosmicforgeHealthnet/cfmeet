@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/calling/push/invitation/v1.schema.json",
+  "title": "CF Meet calling push-ready invitation v1",
+  "description": "Transport-neutral payload a push service delivers to an endpoint's push target for a new ring offer. The device acts on it with its own signaling credential (recover, then accept or decline); it never contains a media credential, provider token, API credential, telephone number or provider identifier. caller.displayName is presentation metadata the initiator chose, present only when set.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schemaVersion",
+    "callId",
+    "invitationId",
+    "callKind",
+    "caller",
+    "issuedAt",
+    "expiresAt"
+  ],
+  "properties": {
+    "schema": { "const": "cfmeet.calling.push-invitation" },
+    "schemaVersion": { "const": 1 },
+    "callId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+    "invitationId": {
+      "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+    },
+    "callKind": { "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallKind" },
+    "caller": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "allOf": [
+            { "not": { "pattern": "\\+[0-9]" } },
+            { "not": { "pattern": "^\\s*([Tt][Ee][Ll]|[Ss][Ii][Pp][Ss]?):" } }
+          ]
+        }
+      }
+    },
+    "issuedAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" }
+  }
+}

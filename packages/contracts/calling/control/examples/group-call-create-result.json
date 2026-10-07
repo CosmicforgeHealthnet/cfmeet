@@ -1,0 +1,40 @@
+{
+  "call": {
+    "callId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e6f7",
+    "kind": "VOICE",
+    "state": "RINGING",
+    "version": 6,
+    "initiatorPrincipalId": "11111111-2222-4333-8444-555555555555",
+    "terminalReason": null,
+    "failureCategory": null,
+    "requestedAt": "2026-10-07T09:00:00.000000Z",
+    "authorizedAt": "2026-10-07T09:00:00.010000Z",
+    "ringingAt": "2026-10-07T09:00:00.120000Z",
+    "answeredAt": null,
+    "connectedAt": null,
+    "endingAt": null,
+    "endedAt": null,
+    "createdAt": "2026-10-07T09:00:00.000000Z",
+    "updatedAt": "2026-10-07T09:00:00.120000Z"
+  },
+  "initiatorParticipantId": "9e8d7c6b-5a49-4382-9170-6f5e4d3c2b1a",
+  "initiatorSessionId": "3c4d5e6f-7081-4293-a4b5-c6d7e8f9a0b1",
+  "participants": [
+    {
+      "participantId": "9e8d7c6b-5a49-4382-9170-6f5e4d3c2b1a",
+      "principalId": "11111111-2222-4333-8444-555555555555",
+      "role": "INITIATOR"
+    },
+    {
+      "participantId": "1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9",
+      "principalId": "66666666-7777-4888-9999-aaaaaaaaaaaa",
+      "role": "RECIPIENT"
+    },
+    {
+      "participantId": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f9a0",
+      "principalId": "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff",
+      "role": "RECIPIENT"
+    }
+  ],
+  "liveInvitationCount": 3
+}

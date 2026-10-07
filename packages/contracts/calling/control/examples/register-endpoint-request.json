@@ -1,0 +1,6 @@
+{
+  "principalId": "66666666-7777-4888-9999-aaaaaaaaaaaa",
+  "endpointKey": "bob-phone-01",
+  "endpointKind": "MOBILE",
+  "capabilities": { "audio": true, "video": true }
+}

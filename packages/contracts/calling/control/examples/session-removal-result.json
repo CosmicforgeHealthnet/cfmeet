@@ -1,0 +1,23 @@
+{
+  "call": {
+    "callId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e6f7",
+    "kind": "VOICE",
+    "state": "CONNECTED",
+    "version": 9,
+    "initiatorPrincipalId": "11111111-2222-4333-8444-555555555555",
+    "terminalReason": null,
+    "failureCategory": null,
+    "requestedAt": "2026-10-07T09:00:00.000000Z",
+    "authorizedAt": "2026-10-07T09:00:00.010000Z",
+    "ringingAt": "2026-10-07T09:00:00.120000Z",
+    "answeredAt": "2026-10-07T09:00:04.500000Z",
+    "connectedAt": "2026-10-07T09:00:05.900000Z",
+    "endingAt": null,
+    "endedAt": null,
+    "createdAt": "2026-10-07T09:00:00.000000Z",
+    "updatedAt": "2026-10-07T09:00:05.900000Z"
+  },
+  "operation": "REMOVE_SESSION",
+  "sessionId": "4d5e6f70-8192-43a4-b5c6-d7e8f9a0b1c2",
+  "removed": true
+}

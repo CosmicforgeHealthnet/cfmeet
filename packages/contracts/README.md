@@ -11,9 +11,12 @@ This package is the permanent home for shared, externally visible contracts acro
 | Id | Version | Kind | Path | Authority |
 |---|---|---|---|---|
 | `cfmeet.meeting-service.http-api` | 1.1.0 | OpenAPI 3.0 | [`openapi/meeting-service.json`](openapi/meeting-service.json) | generated from `services/meeting-service` (`export_openapi`, diffed by `backend.yml`) |
-| `cfmeet.calling.http-api` | 1.1.0 (beta) | OpenAPI 3.1 | [`calling/http/v1.openapi.json`](calling/http/v1.openapi.json) | contract-first; only implemented routes (`GET /health`, `GET /v1/calls`, `GET /v1/calls/{call_id}`) and the error envelope |
-| `cfmeet.calling.call-common` | 1.0.0 (beta) | JSON Schema 2020-12 | [`calling/common/v1.schema.json`](calling/common/v1.schema.json) | contract-first; canonical call vocabulary (17 call states, failure categories, terminal reasons, event types, safe event data), defined once |
+| `cfmeet.calling.http-api` | 1.2.0 (beta) | OpenAPI 3.1 | [`calling/http/v1.openapi.json`](calling/http/v1.openapi.json) | contract-first; exactly the implemented routes: health, call API, call creation / control, endpoints, signaling credentials, endpoint signaling routes, media provider callback; security schemes and the error envelope |
+| `cfmeet.calling.call-common` | 1.1.0 (beta) | JSON Schema 2020-12 | [`calling/common/v1.schema.json`](calling/common/v1.schema.json) | contract-first; canonical call vocabulary (17 call states, failure categories, terminal reasons, event types, ring-offer / media-access / transfer / endpoint vocabularies, call representation, media capabilities, safe event data), defined once |
 | `cfmeet.calling.call-lifecycle-event` | 1.0.0 (beta) | JSON Schema 2020-12 | [`calling/events/call-lifecycle/v1.schema.json`](calling/events/call-lifecycle/v1.schema.json) | contract-first; payload of every Calling outbox event (inside the event envelope) |
+| `cfmeet.calling.call-control` | 1.0.0 (beta) | JSON Schema 2020-12 | [`calling/control/v1.schema.json`](calling/control/v1.schema.json) | contract-first; request / response bodies of the application-calling API (creation, answers, control, transfer, media credentials, endpoints, signaling credentials, recovery) |
+| `cfmeet.calling.realtime-signal` | 1.0.0 (beta) | JSON Schema 2020-12 | [`calling/realtime/v1.schema.json`](calling/realtime/v1.schema.json) | contract-first; frames of the endpoint signaling channel (call signals, control frames) |
+| `cfmeet.calling.push-invitation` | 1.0.0 (experimental) | JSON Schema 2020-12 | [`calling/push/invitation/v1.schema.json`](calling/push/invitation/v1.schema.json) | contract-first; transport-neutral push-ready ring offer |
 | `cfmeet.platform.common` | 1.0.0 | JSON Schema 2020-12 | [`platform/common/v1.schema.json`](platform/common/v1.schema.json) | contract-first |
 | `cfmeet.platform.service-token-header` | 1.0.0 | JSON Schema 2020-12 | [`platform/service-auth/token-header/v1.schema.json`](platform/service-auth/token-header/v1.schema.json) | contract-first |
 | `cfmeet.platform.service-token-claims` | 1.0.0 | JSON Schema 2020-12 | [`platform/service-auth/token-claims/v1.schema.json`](platform/service-auth/token-claims/v1.schema.json) | contract-first |
@@ -54,7 +57,7 @@ to fire.
 | Webhook definitions | payloads delivered to customer webhooks | Planned |
 | Permission identifiers | internal service permissions (`cfmeet.platform.common`); role/permission keys shared by service and UI | Internal permissions registered; UI keys planned |
 | Shared enums | call states and call vocabulary (`cfmeet.calling.call-common`); meeting/session/participant states | Call vocabulary registered; meeting enums planned |
-| External protocol definitions | published signalling/control formats | Planned |
+| External protocol definitions | published signalling/control formats | Calling realtime signals and push-ready offers registered |
 | SDK generation sources | future client SDK inputs | Planned |
 
 ## Current Meeting Service authority

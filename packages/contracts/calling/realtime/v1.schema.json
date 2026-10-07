@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/calling/realtime/v1.schema.json",
+  "title": "CF Meet calling realtime signal v1",
+  "description": "Frames the server sends on an endpoint's signaling channel (GET /v1/calling/signaling, subprotocol cfmeet.signaling.v1): realtime call signals and channel control frames. Transport-neutral: the same signal objects are fanned out across Calling instances. Provider-independent; no telephone numbers, provider ids, credentials or tokens.",
+  "oneOf": [
+    { "$ref": "#/$defs/RealtimeSignal" },
+    { "$ref": "#/$defs/SignalingReady" },
+    { "$ref": "#/$defs/SignalingPong" },
+    { "$ref": "#/$defs/SignalingError" }
+  ],
+  "$defs": {
+    "SignalType": {
+      "description": "Semantic signal category.",
+      "type": "string",
+      "enum": [
+        "call.incoming",
+        "call.ringing",
+        "call.ring_cancelled",
+        "call.accepted",
+        "call.declined",
+        "call.cancelled",
+        "call.answered",
+        "call.connected",
+        "call.held",
+        "call.resumed",
+        "call.transfer_started",
+        "call.transferred",
+        "call.transfer_failed",
+        "call.ended",
+        "call.failed",
+        "call.no_answer",
+        "call.busy",
+        "call.answered_elsewhere",
+        "call.invitation_expired"
+      ]
+    },
+    "SignalInvitation": {
+      "description": "The ring offer a signal concerns, with its server-owned expiry.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["invitationId", "participantId", "status", "purpose", "issuedAt", "expiresAt"],
+      "properties": {
+        "invitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallInvitationStatus"
+        },
+        "purpose": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallInvitationPurpose"
+        },
+        "issuedAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "SignalTarget": {
+      "description": "The receiving endpoint and its principal, stamped by the delivering instance.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpointId", "principalId"],
+      "properties": {
+        "endpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "SignalData": {
+      "description": "Small bounded payload: camelCase keys that never name secrets, credentials, contact data or provider identifiers; values are ids, booleans or integers.",
+      "type": "object",
+      "maxProperties": 8,
+      "propertyNames": {
+        "pattern": "^[a-z][A-Za-z0-9]{0,62}$",
+        "not": {
+          "pattern": "([Pp]assword|[Ss]ecret|[Tt]oken|[Cc]redential|[Aa]piKey|[Pp]hone|[Mm]sisdn|[Ee]164|[Cc]ontact|[Pp]rovider|[Cc]arrier|[Ss]ip|[Rr]oom|[Ss]id$)"
+        }
+      },
+      "additionalProperties": {
+        "oneOf": [
+          { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+          { "type": "boolean" },
+          { "type": "integer" }
+        ]
+      }
+    },
+    "RealtimeSignal": {
+      "description": "A low-latency notification derived from committed state (the durable evidence is the call event written in the same transaction). It is sent only after that transaction committed; losing it never loses state. sequence is the Call's latest event sequence and callVersion its version, so a client can order signals and detect gaps. Never a telephone number, provider identifier, media credential, API credential or secret.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "schemaVersion",
+        "eventId",
+        "type",
+        "callId",
+        "callKind",
+        "callState",
+        "callVersion",
+        "sequence",
+        "issuedAt",
+        "correlationId",
+        "data",
+        "target"
+      ],
+      "properties": {
+        "schema": { "const": "cfmeet.calling.realtime-signal" },
+        "schemaVersion": { "const": 1 },
+        "eventId": { "type": "string", "pattern": "^sig_[0-9a-f]{32}$" },
+        "type": { "$ref": "#/$defs/SignalType" },
+        "callId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "callKind": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallKind"
+        },
+        "callState": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallState"
+        },
+        "callVersion": { "type": "integer", "minimum": 1 },
+        "sequence": { "type": "integer", "minimum": 0 },
+        "issuedAt": { "type": "string", "format": "date-time" },
+        "correlationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/CorrelationId"
+        },
+        "data": { "$ref": "#/$defs/SignalData" },
+        "invitation": { "$ref": "#/$defs/SignalInvitation" },
+        "target": { "$ref": "#/$defs/SignalTarget" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["call.incoming", "call.answered_elsewhere", "call.invitation_expired"] }
+            },
+            "required": ["type"]
+          },
+          "then": { "required": ["invitation"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "call.incoming" } }, "required": ["type"] },
+          "then": {
+            "properties": {
+              "invitation": { "properties": { "status": { "const": "RINGING" } } }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "call.answered_elsewhere" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "invitation": { "properties": { "status": { "const": "ANSWERED_ELSEWHERE" } } }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "call.invitation_expired" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "invitation": { "properties": { "status": { "const": "EXPIRED" } } }
+            }
+          }
+        }
+      ]
+    },
+    "SignalingReady": {
+      "description": "First frame after the channel opened.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "endpointId", "principalId", "credentialExpiresAt"],
+      "properties": {
+        "type": { "const": "signaling.ready" },
+        "endpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "credentialExpiresAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "SignalingPong": {
+      "description": "Answer to a client {\"type\":\"ping\"}.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "at"],
+      "properties": {
+        "type": { "const": "signaling.pong" },
+        "at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "SignalingError": {
+      "description": "The channel accepts only pings; commands use the HTTP API.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "code"],
+      "properties": {
+        "type": { "const": "signaling.error" },
+        "code": { "type": "string", "enum": ["UNSUPPORTED_MESSAGE"] }
+      }
+    },
+    "ClientPing": {
+      "description": "The only client frame: a keep-alive that also refreshes the endpoint's presence hint.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": { "type": { "const": "ping" } }
+    }
+  }
+}

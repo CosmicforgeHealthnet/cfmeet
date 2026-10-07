@@ -1,0 +1,6 @@
+{
+  "principalId": "66666666-7777-4888-9999-aaaaaaaaaaaa",
+  "endpointKey": "sip:bob@example.com",
+  "endpointKind": "DESKTOP",
+  "capabilities": { "audio": true, "video": false }
+}

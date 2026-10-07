@@ -1,0 +1,19 @@
+{
+  "endpointId": "f6f6f6f6-0707-4818-9929-3a3a3a3a3a3a",
+  "data": [
+    {
+      "invitationId": "5e6f7081-92a3-44b5-86d7-e8f9a0b1c2d3",
+      "callId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e6f7",
+      "callKind": "VOICE",
+      "callState": "RINGING",
+      "callVersion": 6,
+      "purpose": "CALL",
+      "status": "EXPIRED",
+      "actionable": true,
+      "issuedAt": "2026-10-07T09:00:00.120Z",
+      "expiresAt": "2026-10-07T09:00:45.120Z",
+      "terminalReason": "EXPIRED",
+      "sessionId": null
+    }
+  ]
+}

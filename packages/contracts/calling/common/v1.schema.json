@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/calling/common/v1.schema.json",
   "title": "CF Meet calling common definitions v1",
-  "description": "Canonical, provider-independent call-domain vocabulary shared by the Calling HTTP API and the call lifecycle event contract (Part C sections 15-19). Definitions only: the root schema places no constraints. Provider, SIP, carrier or RTC states are never canonical and must be mapped onto these values by the adapters that observe them.",
+  "description": "Canonical, provider-independent call-domain vocabulary shared by the Calling HTTP API, the call-control bodies, the realtime signals and the call lifecycle event contract (Part C sections 15-25). Definitions only: the root schema places no constraints. Provider, SIP, carrier or RTC states are never canonical and must be mapped onto these values by the adapters that observe them.",
   "$defs": {
     "CallState": {
       "description": "Canonical business state of a Call. Terminal: ENDED, DECLINED, BUSY, NO_ANSWER, FAILED, CANCELLED.",
@@ -61,10 +61,7 @@
         "CANCELLED"
       ]
     },
-    "CallParticipantRole": {
-      "type": "string",
-      "enum": ["INITIATOR", "RECIPIENT"]
-    },
+    "CallParticipantRole": { "type": "string", "enum": ["INITIATOR", "RECIPIENT"] },
     "CallSessionState": {
       "type": "string",
       "enum": ["CREATED", "CONNECTED", "DISCONNECTED", "ENDED"]
@@ -74,7 +71,7 @@
       "enum": ["MOBILE", "WEB", "DESKTOP", "SERVER", "NETWORK"]
     },
     "CallEventType": {
-      "description": "Facts the call domain records. CALL_REQUESTED and CALL_STATE_CHANGED are lifecycle events (they carry states); the others are facts about the Call's children.",
+      "description": "Facts the call domain records. CALL_REQUESTED and CALL_STATE_CHANGED are lifecycle events (they carry states); the others are facts about the Call's children: participants, sessions, routes, legs, attempts, quality, usage, ring offers (invitations), transfers and the Call's media resource. Media facts never carry provider identifiers.",
       "type": "string",
       "enum": [
         "CALL_REQUESTED",
@@ -82,6 +79,7 @@
         "CALL_STATE_CHANGED",
         "CALL_PARTICIPANT_ADDED",
         "CALL_PARTICIPANT_UPDATED",
+        "CALL_PARTICIPANT_REMOVED",
         "CALL_SESSION_CREATED",
         "CALL_SESSION_CONNECTED",
         "CALL_SESSION_DISCONNECTED",
@@ -96,8 +94,158 @@
         "CALL_ATTEMPT_FINISHED",
         "CALL_QUALITY_RECORDED",
         "CALL_USAGE_RECORDED",
-        "CALL_USAGE_FINALIZED"
+        "CALL_USAGE_FINALIZED",
+        "CALL_INVITATION_ISSUED",
+        "CALL_INVITATION_ACCEPTED",
+        "CALL_INVITATION_DECLINED",
+        "CALL_INVITATION_ANSWERED_ELSEWHERE",
+        "CALL_INVITATION_CANCELLED",
+        "CALL_INVITATION_EXPIRED",
+        "CALL_TRANSFER_REQUESTED",
+        "CALL_TRANSFER_COMPLETED",
+        "CALL_TRANSFER_FAILED",
+        "CALL_TRANSFER_CANCELLED",
+        "CALL_MEDIA_SESSION_CREATED",
+        "CALL_MEDIA_SESSION_TERMINATED",
+        "CALL_MEDIA_PERMISSIONS_UPDATED",
+        "CALL_MEDIA_CREDENTIAL_ISSUED",
+        "CALL_MEDIA_PARTICIPANT_EVICTED",
+        "CALL_MEDIA_ENFORCEMENT_PENDING",
+        "CALL_MEDIA_RECONCILED"
       ]
+    },
+    "CallInvitationPurpose": {
+      "description": "Why a ring offer exists: the Call itself, or an application transfer to a new target.",
+      "type": "string",
+      "enum": ["CALL", "TRANSFER"]
+    },
+    "CallInvitationStatus": {
+      "description": "State of a ring offer to one endpoint. PENDING and RINGING are live; every other state is terminal and final (an offer is never revived). The server owns expiry.",
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "RINGING",
+        "ACCEPTED",
+        "DECLINED",
+        "ANSWERED_ELSEWHERE",
+        "CANCELLED",
+        "EXPIRED"
+      ]
+    },
+    "CallInvitationTerminalReason": {
+      "description": "Why a ring offer ended.",
+      "type": "string",
+      "enum": [
+        "ACCEPTED",
+        "DECLINED",
+        "ANSWERED_ELSEWHERE",
+        "EXPIRED",
+        "CALL_CANCELLED",
+        "CALL_TERMINATED",
+        "ENDPOINT_REVOKED",
+        "PARTICIPANT_REMOVED",
+        "TRANSFER_ENDED"
+      ]
+    },
+    "CallMediaAccess": {
+      "description": "A session's media authority: NONE until the server authorizes it (initiator, or the single winning device of a participant), AUTHORIZED while it may hold media credentials, REVOKED for ever after removal or the end of the session.",
+      "type": "string",
+      "enum": ["NONE", "AUTHORIZED", "REVOKED"]
+    },
+    "CallTransferState": {
+      "description": "Application transfer lifecycle, kept out of the Call state (the Call is TRANSFERRING while a transfer is active).",
+      "type": "string",
+      "enum": ["REQUESTED", "RINGING_TARGET", "ACCEPTED", "COMPLETED", "FAILED", "CANCELLED"]
+    },
+    "CallTransferFailureReason": {
+      "description": "Why a transfer did not complete. A failed transfer returns the Call to its pre-transfer state when the remaining parties still have a media path.",
+      "type": "string",
+      "enum": [
+        "TARGET_DECLINED",
+        "TARGET_NO_ANSWER",
+        "TARGET_UNAVAILABLE",
+        "MEDIA_PATH_LOST",
+        "CALL_ENDED",
+        "CANCELLED"
+      ]
+    },
+    "CallEndpointKind": {
+      "description": "Neutral kind of a registered application endpoint (a device / client instance of a principal).",
+      "type": "string",
+      "enum": ["WEB", "MOBILE", "DESKTOP", "ENTERPRISE_APP"]
+    },
+    "CallEndpointStatus": { "type": "string", "enum": ["ACTIVE", "REVOKED"] },
+    "CallEndpointPresence": {
+      "description": "Presence hint used to order ringing; never an authorization.",
+      "type": "string",
+      "enum": ["ONLINE", "OFFLINE"]
+    },
+    "CallMediaCapabilities": {
+      "description": "Media capabilities the server authorizes for one session's media connection. Derived from server state (call kind, participant permissions, hold); never chosen by the client. There is no administrative, recording, room-creation or room-listing capability.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canPublishAudio", "canPublishVideo", "canPublishData", "canSubscribe"],
+      "properties": {
+        "canPublishAudio": { "type": "boolean" },
+        "canPublishVideo": { "type": "boolean" },
+        "canPublishData": { "type": "boolean" },
+        "canSubscribe": { "type": "boolean" }
+      }
+    },
+    "CallCore": {
+      "description": "Fields of every Call representation (HTTP API, call-control results). Provider-independent: no provider or carrier identifiers, execution bindings, media identities, telephone numbers or protected contact data.",
+      "type": "object",
+      "required": [
+        "callId",
+        "kind",
+        "state",
+        "version",
+        "initiatorPrincipalId",
+        "terminalReason",
+        "failureCategory",
+        "requestedAt",
+        "authorizedAt",
+        "ringingAt",
+        "answeredAt",
+        "connectedAt",
+        "endingAt",
+        "endedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "callId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "kind": { "$ref": "#/$defs/CallKind" },
+        "state": { "$ref": "#/$defs/CallState" },
+        "version": {
+          "description": "Optimistic-concurrency version: 1 at creation, +1 per state transition.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "initiatorPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "terminalReason": { "oneOf": [{ "$ref": "#/$defs/CallTerminalReason" }, { "type": "null" }] },
+        "failureCategory": { "oneOf": [{ "$ref": "#/$defs/CallFailureCategory" }, { "type": "null" }] },
+        "requestedAt": { "type": "string", "format": "date-time" },
+        "authorizedAt": { "type": ["string", "null"], "format": "date-time" },
+        "ringingAt": { "type": ["string", "null"], "format": "date-time" },
+        "answeredAt": { "type": ["string", "null"], "format": "date-time" },
+        "connectedAt": { "type": ["string", "null"], "format": "date-time" },
+        "endingAt": { "type": ["string", "null"], "format": "date-time" },
+        "endedAt": {
+          "description": "When the call reached a terminal state.",
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "CallSummary": {
+      "description": "A call as listed and as returned by call-control commands.",
+      "allOf": [{ "$ref": "#/$defs/CallCore" }],
+      "unevaluatedProperties": false
     },
     "SafeText": {
       "description": "Bounded text without control characters that never looks like a telephone number (+<digit>) or a tel: / sip: URI.",
@@ -124,11 +272,7 @@
           { "type": "boolean" },
           { "type": "number" },
           { "$ref": "#/$defs/SafeText" },
-          {
-            "type": "array",
-            "maxItems": 16,
-            "items": { "$ref": "#/$defs/SafeText" }
-          }
+          { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/SafeText" } }
         ]
       }
     }

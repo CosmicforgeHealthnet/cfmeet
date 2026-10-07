@@ -1,0 +1,26 @@
+{
+  "schema": "cfmeet.calling.realtime-signal",
+  "schemaVersion": 1,
+  "eventId": "sig_00000000000000000000000000024bbd",
+  "type": "call.answered_elsewhere",
+  "callId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e6f7",
+  "callKind": "VOICE",
+  "callState": "ANSWERED",
+  "callVersion": 7,
+  "sequence": 19,
+  "issuedAt": "2026-10-07T09:00:00.130Z",
+  "correlationId": "corr_33333333333333333333333333333333",
+  "data": {},
+  "invitation": {
+    "invitationId": "6f708192-a3b4-45c6-97e8-f9a0b1c2d3e4",
+    "participantId": "1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9",
+    "status": "ANSWERED_ELSEWHERE",
+    "purpose": "CALL",
+    "issuedAt": "2026-10-07T09:00:00.120Z",
+    "expiresAt": "2026-10-07T09:00:45.120Z"
+  },
+  "target": {
+    "endpointId": "4b4b4b4b-5c5c-4d6d-8e7e-8f8f8f8f8f8f",
+    "principalId": "66666666-7777-4888-9999-aaaaaaaaaaaa"
+  }
+}

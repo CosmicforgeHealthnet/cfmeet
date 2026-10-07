@@ -1,0 +1,699 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/calling/control/v1.schema.json",
+  "title": "CF Meet call control bodies v1",
+  "description": "Request and response bodies of Calling's application-calling API (Part C sections 20-25): call creation, ring-offer answers, cancel / end / hold / resume / transfer, session removal, available actions, media credentials, the endpoint registry, signaling credentials and offer recovery. Requests carry CF Meet concepts only: never a tenant, application or environment (taken from the authenticated credential), a call state, an authorization result, a route, a provider, a room, a media identity, a permission or a telephone number. Responses never carry provider identifiers, provider keys or administrative media capabilities. The root accepts exactly one of the bodies (fixtures); the HTTP contract references the $defs.",
+  "oneOf": [
+    { "$ref": "#/$defs/CreateCallRequest" },
+    { "$ref": "#/$defs/CreateCallResult" },
+    { "$ref": "#/$defs/CommandRequest" },
+    { "$ref": "#/$defs/InvitationCommandRequest" },
+    { "$ref": "#/$defs/EmptyRequest" },
+    { "$ref": "#/$defs/TransferRequest" },
+    { "$ref": "#/$defs/AcceptResult" },
+    { "$ref": "#/$defs/DeclineResult" },
+    { "$ref": "#/$defs/ControlResult" },
+    { "$ref": "#/$defs/SessionRemovalResult" },
+    { "$ref": "#/$defs/TransferResult" },
+    { "$ref": "#/$defs/AvailableActions" },
+    { "$ref": "#/$defs/MediaCredential" },
+    { "$ref": "#/$defs/RegisterEndpointRequest" },
+    { "$ref": "#/$defs/Endpoint" },
+    { "$ref": "#/$defs/EndpointList" },
+    { "$ref": "#/$defs/SignalingCredentialRequest" },
+    { "$ref": "#/$defs/SignalingCredential" },
+    { "$ref": "#/$defs/RecoveredInvitation" },
+    { "$ref": "#/$defs/RecoveredInvitationList" },
+    { "$ref": "#/$defs/ProviderCallbackAck" }
+  ],
+  "$defs": {
+    "CreateCallRequest": {
+      "description": "Body of POST /v1/calls. The initiator calls from one of its registered ACTIVE endpoints; every target is a principal of the same application environment (resolved inside the credential's scope; an unknown or foreign principal is 404). One target is a one-to-one call, several targets a group call (at most the configured participant limit, 16 by default, including the initiator). The server decides authorization, routing, ringing and media; nothing of that can be sent.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "initiatorPrincipalId", "initiatorEndpointId", "targetPrincipalIds"],
+      "properties": {
+        "kind": { "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallKind" },
+        "initiatorPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "initiatorEndpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "targetPrincipalIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" }
+        },
+        "initiatorDisplayName": {
+          "description": "Presentation metadata only.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "allOf": [{ "not": { "pattern": "\\+[0-9]" } }]
+        }
+      }
+    },
+    "CreatedParticipant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["participantId", "principalId", "role"],
+      "properties": {
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "role": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallParticipantRole"
+        }
+      }
+    },
+    "CreateCallResult": {
+      "description": "Response of POST /v1/calls (201; replays return the same body with Idempotent-Replayed: true). The call is normally RINGING with one live offer per eligible target endpoint; it can still be ROUTING while the media resource is being prepared (the reconciler resumes it), or already FAILED (ROUTING when no target has an eligible endpoint, MEDIA when the resource could not be prepared in time).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "call",
+        "initiatorParticipantId",
+        "initiatorSessionId",
+        "participants",
+        "liveInvitationCount"
+      ],
+      "properties": {
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "initiatorParticipantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "initiatorSessionId": {
+          "oneOf": [
+            { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+            { "type": "null" }
+          ]
+        },
+        "participants": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/CreatedParticipant" }
+        },
+        "liveInvitationCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "CommandRequest": {
+      "description": "Body of cancel, end, hold, resume and session removal: the expected Call version and nothing else (no state, reason or permission can be sent).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expectedVersion"],
+      "properties": {
+        "expectedVersion": {
+          "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "InvitationCommandRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/accept|decline (backend answering on behalf of one of the target's endpoints).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["invitationId", "endpointId", "expectedVersion"],
+      "properties": {
+        "invitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "endpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "expectedVersion": {
+          "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "EmptyRequest": {
+      "description": "A command without parameters (media credentials): an empty object or no body. The server derives every capability; any field is refused.",
+      "type": "object",
+      "maxProperties": 0
+    },
+    "TransferRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/transfer (Idempotency-Key required): the participant who hands its place over, and the principal who takes it. The same Call continues; no second Call is created.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transferringParticipantId", "targetPrincipalId", "expectedVersion"],
+      "properties": {
+        "transferringParticipantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "targetPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "expectedVersion": {
+          "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "AcceptResult": {
+      "description": "The offer was accepted: this endpoint's device won its participant's answer (single winner), the participant's other offers became ANSWERED_ELSEWHERE, and sessionId is the winning session that may now request media credentials. callAnswered is true when this acceptance moved the Call to ANSWERED.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["call", "invitationId", "participantId", "sessionId", "outcome", "callAnswered"],
+      "properties": {
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "invitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sessionId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "outcome": { "const": "ACCEPTED" },
+        "callAnswered": { "type": "boolean" }
+      }
+    },
+    "DeclineResult": {
+      "description": "The offer was declined. Only this endpoint's offer ends; the Call ends as DECLINED only when every live offer of every pending target has been declined.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["call", "invitationId", "participantId", "outcome"],
+      "properties": {
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "invitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "outcome": { "const": "DECLINED" }
+      }
+    },
+    "ControlResult": {
+      "description": "Result of cancel, end, hold and resume: the Call after the command. END answers with ENDING until provider cleanup is confirmed, or ENDED once it is.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["call", "operation"],
+      "properties": {
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "operation": { "type": "string", "enum": ["CANCEL", "END", "HOLD", "RESUME"] }
+      }
+    },
+    "SessionRemovalResult": {
+      "description": "Result of removing one session: its media access is revoked and the provider connection removed (or queued for enforcement).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["call", "operation", "sessionId", "removed"],
+      "properties": {
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "operation": { "const": "REMOVE_SESSION" },
+        "sessionId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "removed": { "const": true }
+      }
+    },
+    "CallInvitation": {
+      "description": "A ring offer of a Call to one endpoint of one target participant. Status and terminal reason always agree: an offer that expired, was cancelled or was answered elsewhere can never be accepted, and a live offer has neither.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "invitationId",
+        "participantId",
+        "endpointId",
+        "purpose",
+        "status",
+        "invitationGeneration",
+        "issuedAt",
+        "expiresAt",
+        "finishedAt",
+        "terminalReason",
+        "sessionId"
+      ],
+      "properties": {
+        "invitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "endpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "purpose": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallInvitationPurpose"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallInvitationStatus"
+        },
+        "invitationGeneration": { "type": "integer", "minimum": 1 },
+        "issuedAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "finishedAt": { "type": ["string", "null"], "format": "date-time" },
+        "terminalReason": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallInvitationTerminalReason"
+            },
+            { "type": "null" }
+          ]
+        },
+        "sessionId": {
+          "oneOf": [
+            { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "status": { "enum": ["PENDING", "RINGING"] } },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": { "terminalReason": { "type": "null" }, "finishedAt": { "type": "null" } }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "ACCEPTED" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "terminalReason": { "enum": ["ACCEPTED"] },
+              "finishedAt": { "type": "string" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "DECLINED" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "terminalReason": { "enum": ["DECLINED"] },
+              "finishedAt": { "type": "string" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "ANSWERED_ELSEWHERE" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "terminalReason": { "enum": ["ANSWERED_ELSEWHERE"] },
+              "finishedAt": { "type": "string" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "EXPIRED" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "terminalReason": { "enum": ["EXPIRED"] },
+              "finishedAt": { "type": "string" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "CANCELLED" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "terminalReason": {
+                "enum": [
+                  "CALL_CANCELLED",
+                  "CALL_TERMINATED",
+                  "ENDPOINT_REVOKED",
+                  "PARTICIPANT_REMOVED",
+                  "TRANSFER_ENDED"
+                ]
+              },
+              "finishedAt": { "type": "string" }
+            }
+          }
+        }
+      ]
+    },
+    "CallTransfer": {
+      "description": "An application transfer of a Call (kept out of the Call state).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transferId",
+        "transferringParticipantId",
+        "targetPrincipalId",
+        "targetParticipantId",
+        "state",
+        "preTransferState",
+        "failureReason",
+        "failureCategory",
+        "initiatedAt",
+        "completedAt",
+        "failedAt",
+        "cancelledAt"
+      ],
+      "properties": {
+        "transferId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "transferringParticipantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "targetPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "targetParticipantId": {
+          "oneOf": [
+            { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+            { "type": "null" }
+          ]
+        },
+        "state": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallTransferState"
+        },
+        "preTransferState": { "type": "string", "enum": ["CONNECTED", "HELD"] },
+        "failureReason": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallTransferFailureReason"
+            },
+            { "type": "null" }
+          ]
+        },
+        "failureCategory": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallFailureCategory"
+            },
+            { "type": "null" }
+          ]
+        },
+        "initiatedAt": { "type": "string", "format": "date-time" },
+        "completedAt": { "type": ["string", "null"], "format": "date-time" },
+        "failedAt": { "type": ["string", "null"], "format": "date-time" },
+        "cancelledAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "TransferResult": {
+      "description": "Result of POST /v1/calls/{call_id}/transfer: the same Call (TRANSFERRING) and the transfer now ringing its target.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["call", "transfer"],
+      "properties": {
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "transfer": { "$ref": "#/$defs/CallTransfer" }
+      }
+    },
+    "AvailableAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "available"],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "ACCEPT",
+            "DECLINE",
+            "CANCEL",
+            "END",
+            "HOLD",
+            "RESUME",
+            "TRANSFER",
+            "ISSUE_MEDIA_CREDENTIAL"
+          ]
+        },
+        "available": { "type": "boolean" },
+        "reason": {
+          "description": "Why the action is unavailable: the credential lacks calls.write, the Call's state does not allow it, or the configured media provider cannot enforce it.",
+          "type": "string",
+          "enum": ["INSUFFICIENT_SCOPE", "STATE", "CAPABILITY_UNAVAILABLE"]
+        }
+      },
+      "if": { "properties": { "available": { "const": true } } },
+      "then": { "not": { "required": ["reason"] } },
+      "else": { "required": ["reason"] }
+    },
+    "AvailableActions": {
+      "description": "Server-derived actions currently valid for a Call and the authenticated credential. The client never computes them from local state.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["callId", "callState", "callVersion", "actions"],
+      "properties": {
+        "callId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "callState": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallState"
+        },
+        "callVersion": { "type": "integer", "minimum": 1 },
+        "actions": { "type": "array", "items": { "$ref": "#/$defs/AvailableAction" } }
+      }
+    },
+    "MediaCredential": {
+      "description": "A short-lived join credential for one authorized session's connection to the Call's media resource: the connection URL, the opaque token, its expiry and the capabilities the connection receives once admitted. Room names, provider identifiers, provider keys and administrative grants are never part of it. A losing device, a removed session, an expired offer or a terminal Call never receives one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "url", "token", "expiresAt", "capabilities"],
+      "properties": {
+        "sessionId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "url": {
+          "description": "Media connection URL (wss:// in production).",
+          "type": "string",
+          "format": "uri",
+          "pattern": "^wss?://",
+          "maxLength": 512
+        },
+        "token": {
+          "description": "Opaque join token, bound to this session's media identity and the Call's media resource; it carries no administrative grant.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "capabilities": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallMediaCapabilities"
+        }
+      }
+    },
+    "EndpointCapabilities": {
+      "description": "Media the endpoint can handle. Every application call needs audio: endpoints without audio are never rung; an audio-only endpoint is rung for VIDEO calls too and simply publishes no camera.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["audio", "video"],
+      "properties": { "audio": { "type": "boolean" }, "video": { "type": "boolean" } }
+    },
+    "RegisterEndpointRequest": {
+      "description": "Body of POST /v1/calling/endpoints. Registering the same key for the same principal again refreshes it (200).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principalId", "endpointKey", "endpointKind", "capabilities"],
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "endpointKey": {
+          "description": "Opaque client-chosen device key, unique per principal while ACTIVE. Never a telephone number or a tel: / sip: URI.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "allOf": [
+            { "not": { "pattern": "^[0-9]{7,15}$" } },
+            { "not": { "pattern": "^([Tt][Ee][Ll]|[Ss][Ii][Pp][Ss]?):" } }
+          ]
+        },
+        "endpointKind": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallEndpointKind"
+        },
+        "capabilities": { "$ref": "#/$defs/EndpointCapabilities" },
+        "pushTargetRef": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+              "description": "Opaque reference to a push target held by the application (no push token)."
+            },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "Endpoint": {
+      "description": "A registered application endpoint of a principal. Presence is a routing hint only.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpointId",
+        "principalId",
+        "endpointKey",
+        "endpointKind",
+        "capabilities",
+        "status",
+        "presence",
+        "lastSeenAt",
+        "pushTargetRef",
+        "createdAt",
+        "revokedAt"
+      ],
+      "properties": {
+        "endpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "endpointKey": {
+          "description": "Opaque client-chosen device key, unique per principal while ACTIVE. Never a telephone number or a tel: / sip: URI.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "allOf": [
+            { "not": { "pattern": "^[0-9]{7,15}$" } },
+            { "not": { "pattern": "^([Tt][Ee][Ll]|[Ss][Ii][Pp][Ss]?):" } }
+          ]
+        },
+        "endpointKind": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallEndpointKind"
+        },
+        "capabilities": { "$ref": "#/$defs/EndpointCapabilities" },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallEndpointStatus"
+        },
+        "presence": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallEndpointPresence"
+        },
+        "lastSeenAt": { "type": ["string", "null"], "format": "date-time" },
+        "pushTargetRef": {
+          "oneOf": [
+            { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+            { "type": "null" }
+          ]
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "revokedAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "EndpointList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["data"],
+      "properties": { "data": { "type": "array", "items": { "$ref": "#/$defs/Endpoint" } } }
+    },
+    "SignalingCredentialRequest": {
+      "description": "Body of POST /v1/calling/signaling-credentials: one ACTIVE endpoint of one principal.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principalId", "endpointId"],
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "endpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "SignalingCredential": {
+      "description": "A short-lived Call Signaling Credential for one endpoint, handed to the device by the application backend. It authenticates only the endpoint's own signaling operations and never a platform API operation; the platform API credential never reaches the device.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpointId", "principalId", "token", "expiresAt", "signalingUrl"],
+      "properties": {
+        "endpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "token": {
+          "type": "string",
+          "pattern": "^cfsig_[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+          "maxLength": 2048
+        },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "signalingUrl": { "const": "/v1/calling/signaling" }
+      }
+    },
+    "RecoveredInvitation": {
+      "description": "An offer of the endpoint as recovered after a reconnect, with the authoritative Call state. actionable is true only for a RINGING, unexpired offer of a Call that can still be answered.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "invitationId",
+        "callId",
+        "callKind",
+        "callState",
+        "callVersion",
+        "purpose",
+        "status",
+        "actionable",
+        "issuedAt",
+        "expiresAt",
+        "terminalReason",
+        "sessionId"
+      ],
+      "properties": {
+        "invitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "callKind": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallKind"
+        },
+        "callState": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallState"
+        },
+        "callVersion": { "type": "integer", "minimum": 1 },
+        "purpose": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallInvitationPurpose"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallInvitationStatus"
+        },
+        "actionable": { "type": "boolean" },
+        "issuedAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "terminalReason": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallInvitationTerminalReason"
+            },
+            { "type": "null" }
+          ]
+        },
+        "sessionId": {
+          "oneOf": [
+            { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "if": { "properties": { "actionable": { "const": true } } },
+      "then": {
+        "properties": { "status": { "const": "RINGING" }, "terminalReason": { "type": "null" } }
+      }
+    },
+    "RecoveredInvitationList": {
+      "description": "Response of GET /v1/calling/invitations (signaling credential): the endpoint's live and recently finished offers.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpointId", "data"],
+      "properties": {
+        "endpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "data": { "type": "array", "items": { "$ref": "#/$defs/RecoveredInvitation" } }
+      }
+    },
+    "ProviderCallbackAck": {
+      "description": "A verified media-provider callback was recorded (also for duplicates, which are no-ops).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": { "status": { "const": "accepted" } }
+    }
+  }
+}

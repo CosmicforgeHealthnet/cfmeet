@@ -1,0 +1,34 @@
+{
+  "call": {
+    "callId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e6f7",
+    "kind": "VOICE",
+    "state": "TRANSFERRING",
+    "version": 10,
+    "initiatorPrincipalId": "11111111-2222-4333-8444-555555555555",
+    "terminalReason": null,
+    "failureCategory": null,
+    "requestedAt": "2026-10-07T09:00:00.000000Z",
+    "authorizedAt": "2026-10-07T09:00:00.010000Z",
+    "ringingAt": "2026-10-07T09:00:00.120000Z",
+    "answeredAt": "2026-10-07T09:00:04.500000Z",
+    "connectedAt": "2026-10-07T09:00:05.900000Z",
+    "endingAt": null,
+    "endedAt": null,
+    "createdAt": "2026-10-07T09:00:00.000000Z",
+    "updatedAt": "2026-10-07T09:03:00.000000Z"
+  },
+  "transfer": {
+    "transferId": "708192a3-b4c5-46d7-88f9-a0b1c2d3e4f5",
+    "transferringParticipantId": "1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9",
+    "targetPrincipalId": "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff",
+    "targetParticipantId": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f9a0",
+    "state": "RINGING_TARGET",
+    "preTransferState": "CONNECTED",
+    "failureReason": null,
+    "failureCategory": null,
+    "initiatedAt": "2026-10-07T09:03:00.000000Z",
+    "completedAt": null,
+    "failedAt": null,
+    "cancelledAt": null
+  }
+}
