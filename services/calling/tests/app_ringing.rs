@@ -650,3 +650,27 @@ async fn group_size_is_limited_and_targets_are_validated() {
         .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn past_the_endpoint_cap_the_newest_registrations_ring() {
+    let Some(a) = AppWorld::new().await else {
+        return;
+    };
+    let caller = a.device(&a.w.initiator, "cap-caller").await;
+    let mut devices = Vec::new();
+    for i in 0..11 {
+        a.h().clock.advance(chrono::Duration::seconds(1));
+        devices.push(a.device(&a.w.recipient, &format!("cap-device-{i}")).await);
+    }
+    let r = a
+        .create_call("VOICE", &a.w.initiator, &caller, &[&a.w.recipient], "cap-1")
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    assert_eq!(r.json["liveInvitationCount"], 10, "at most the cap is rung");
+    let call = call_id(&r);
+    assert!(
+        status_of(&a, call, devices[0].endpoint).await.is_empty(),
+        "the oldest (never seen) registration is the one left out"
+    );
+    assert_eq!(status_of(&a, call, devices[10].endpoint).await, ["RINGING"]);
+}

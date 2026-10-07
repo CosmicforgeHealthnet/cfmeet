@@ -237,18 +237,9 @@ impl AppWorld {
     /// A ringing one-to-one VOICE call between the world's initiator and recipient, each
     /// with one device: (call id, initiator device, recipient device).
     pub async fn ringing_call(&self, kind: &str) -> (Uuid, Device, Device) {
-        let caller = self
-            .device(
-                &self.w.initiator,
-                &format!("caller-{}", Uuid::new_v4().simple()),
-            )
-            .await;
-        let callee = self
-            .device(
-                &self.w.recipient,
-                &format!("callee-{}", Uuid::new_v4().simple()),
-            )
-            .await;
+        // One stable device per party: helpers never pile up endpoints past the ringing cap.
+        let caller = self.device(&self.w.initiator, "caller-main").await;
+        let callee = self.device(&self.w.recipient, "callee-main").await;
         let r = self
             .create_call(
                 kind,

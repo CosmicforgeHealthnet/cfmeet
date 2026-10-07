@@ -260,8 +260,8 @@ impl EndpointService {
 
     /// The endpoints a principal may be rung on (every application Call needs audio; video
     /// is optional per endpoint), in routing order:
-    /// recently-online first, then most recently seen, then oldest registration; at most
-    /// `cap`. Presence only orders the list — every candidate is an ACTIVE endpoint of the
+    /// recently-online first, then most recently seen, then newest registration (a fresh
+    /// device is not crowded out by stale registrations); at most `cap`. Presence only orders the list — every candidate is an ACTIVE endpoint of the
     /// principal itself, in the Call's own scope.
     pub(crate) async fn eligible_in(
         &self,
@@ -286,7 +286,7 @@ impl EndpointService {
             online(b)
                 .cmp(&online(a))
                 .then(b.last_seen_at.cmp(&a.last_seen_at))
-                .then(a.created_at.cmp(&b.created_at))
+                .then(b.created_at.cmp(&a.created_at))
                 .then(a.id.cmp(&b.id))
         });
         candidates.truncate(cap);
