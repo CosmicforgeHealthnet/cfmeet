@@ -12,8 +12,11 @@
 //! Enforcement implemented here: the request-rate limit, counted per credential (against
 //! the effective limit) and per application (against the application-wide limit, when
 //! configured) in PostgreSQL fixed one-minute windows, so every service replica shares
-//! the same counters. Concurrent-communication and telecom-spend limits are resolved
-//! here but enforced by the future call / telephony operations that consume them.
+//! the same counters. The concurrent-communication limit is resolved here
+//! ([`concurrent_communication_limits`]) and enforced by Call creation
+//! (`calls::service`), with the same per-credential / application-aggregate semantics.
+//! Telecom-spend limits are resolved here and enforced by the future telephony
+//! operations that consume them.
 
 use chrono::{DateTime, Duration, DurationRound, Utc};
 use sea_orm::{
@@ -198,6 +201,28 @@ async fn load_levels<C: ConnectionTrait>(
         .map(LimitValues::from)
         .unwrap_or_default();
     Ok((application, credential))
+}
+
+/// Concurrent-communication limits of a credential: the effective per-credential limit
+/// (stricter of application and credential level, else the platform default) and the
+/// application-wide aggregate ceiling, when the application configures one.
+pub(crate) async fn concurrent_communication_limits<C: ConnectionTrait>(
+    db: &C,
+    application_id: ApplicationId,
+    credential_id: CredentialId,
+    defaults: LimitDefaults,
+) -> Result<(i64, Option<i64>), DbErr> {
+    let (application, credential) = load_levels(db, application_id, credential_id).await?;
+    let per_credential = stricter(
+        application.max_concurrent_communications.map(i64::from),
+        credential.max_concurrent_communications.map(i64::from),
+        defaults.max_concurrent_communications,
+    )
+    .value;
+    Ok((
+        per_credential,
+        application.max_concurrent_communications.map(i64::from),
+    ))
 }
 
 async fn tenant_currency<C: ConnectionTrait>(

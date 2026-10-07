@@ -41,6 +41,47 @@ macro_rules! text_enum {
     };
 }
 
+/// Server-generated UUID identifier with its own type, so one kind of id can never be
+/// passed where another is expected.
+macro_rules! typed_id {
+    ($(#[$meta:meta])* $name:ident) => {
+        $(#[$meta])*
+        #[derive(
+            Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord,
+            serde::Serialize, serde::Deserialize,
+        )]
+        #[serde(transparent)]
+        pub struct $name(uuid::Uuid);
+
+        impl $name {
+            /// A fresh, server-generated identifier.
+            pub(crate) fn generate() -> Self {
+                Self(uuid::Uuid::new_v4())
+            }
+
+            pub fn from_uuid(id: uuid::Uuid) -> Self {
+                Self(id)
+            }
+
+            pub fn as_uuid(&self) -> uuid::Uuid {
+                self.0
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                self.0.fmt(f)
+            }
+        }
+
+        impl From<$name> for uuid::Uuid {
+            fn from(id: $name) -> uuid::Uuid {
+                id.0
+            }
+        }
+    };
+}
+
 pub mod clock;
 pub mod ids;
 pub mod kinds;

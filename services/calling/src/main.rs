@@ -100,9 +100,9 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // The Calling business API (Part C) and internal operations are not implemented yet:
-    // no protected or internal routes. /internal/v1/* still requires service auth.
-    let app = routes::app(state, Router::new(), Router::new());
+    // Public customer API: the read-only call routes (Part C §15–§19). There are no
+    // internal routes yet; /internal/v1/* still requires service auth.
+    let app = routes::app(state, routes::public_api(), Router::new());
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "calling service listening");
     axum::serve(listener, app)

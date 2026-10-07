@@ -12,11 +12,20 @@
 //! It also integrates internal service authentication (Part B §11) through the shared
 //! `packages/service-auth` protocol ([`internal_auth`]).
 //!
+//! On that foundation [`calls`] implements the canonical Calling core (Part C §15–§19):
+//! the provider-independent Call aggregate, its participants, sessions, routes, legs,
+//! attempts, authorizations, immutable events, quality and usage records, the canonical
+//! call state machine, the transactional outbox and the read-only call API.
+//!
 //! The service is independent of `services/meeting-service`: it shares no source, models
 //! or database with it, and it never imports another deployable service.
 
-pub mod config;
+// `domain` first: its `text_enum!` / `typed_id!` macros are used by later modules.
+#[macro_use]
 pub mod domain;
+
+pub mod calls;
+pub mod config;
 pub mod error;
 pub mod internal_auth;
 pub mod middleware;

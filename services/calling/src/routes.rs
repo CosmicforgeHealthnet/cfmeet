@@ -1,7 +1,7 @@
 //! HTTP routing.
 //!
 //! * `GET /health` is public.
-//! * Customer routes (the future Calling API, Part C) are passed to [`app`] as
+//! * Customer routes ([`public_api`]: the read-only call API) are passed to [`app`] as
 //!   `protected` and every one of them runs behind platform credential authentication.
 //! * Internal routes are passed as `internal`, are nested under `/internal/v1` and run
 //!   behind internal service authentication BY CONSTRUCTION — including unknown internal
@@ -27,6 +27,12 @@ use crate::{
     middleware::{platform_auth::require_platform_credential, request_id::request_id_middleware},
     state::AppState,
 };
+
+/// The public customer API: today the read-only call routes (`GET /v1/calls`,
+/// `GET /v1/calls/{call_id}`). Mounted as `protected` by `main`.
+pub fn public_api() -> Router<AppState> {
+    crate::calls::http::routes()
+}
 
 /// Builds the service router.
 pub fn app(state: AppState, protected: Router<AppState>, internal: Router<AppState>) -> Router {
