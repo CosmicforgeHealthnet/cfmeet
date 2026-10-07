@@ -7,7 +7,7 @@ This document defines where each CF Meet capability belongs. Anything marked *pl
 ```text
 services/
 ├── meeting-service/     ✅ current Meeting & Conference Platform backend
-├── calling/             ◻ planned: realtime app-to-app calling
+├── calling/             ◐ active: platform trust foundation implemented; calling API planned
 ├── privacy-relay/       ◻ planned: masked/private transaction communications
 ├── messaging/           ◻ planned: unified messaging
 ├── telephony/           ◻ planned: SIP/PSTN telephony
@@ -38,6 +38,18 @@ During Phase 2 it remains **one deployable modular monolith**. Its current inter
 Phase 2 may add internal modules for Meeting Spaces, Conference Sessions, memberships/invitations, roles/permissions, scheduling/recurrence, recording orchestration, breakouts, polls, Q&A, webinar controls, attendance, realtime event delivery and related meeting features. These remain modules of `meeting-service` unless an explicit later ADR approves extraction.
 
 The name **meeting-service** is deliberate. This service is not the universal backend for future calling, Privacy Relay, messaging, telephony or numbering. Those domains receive their own services when their implementation phases begin.
+
+## Calling service
+
+`services/calling` is an independent Rust/Axum service (own database, own migration
+history, no source or table dependency on `meeting-service`). It currently implements the
+platform trust foundation of Part B §7–§10: tenants, applications, SANDBOX / TEST /
+PRODUCTION environments, service accounts, HMAC-verified API credentials with
+server-authoritative scopes, rotation and revocation, application / credential limit
+policy, and communication principals resolved separately from API client identity. The
+call model and Calling API (Part C) are not implemented yet. See
+[ADR 0003](../decisions/0003-calling-platform-trust-model.md) and
+[`services/calling/README.md`](../../services/calling/README.md).
 
 ## When to create or extract another service
 

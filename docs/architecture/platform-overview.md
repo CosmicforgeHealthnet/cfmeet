@@ -4,8 +4,9 @@
 
 CF Meet is growing from a video-meeting application into CosmicForge's unified communications platform. This document distinguishes what exists today from the planned platform boundaries.
 
-> **Only two components currently contain working application code:**
-> `apps/web` (Next.js web client) and `services/meeting-service` (Rust/Axum Meeting & Conference Platform service).
+> **Components with working code:** `apps/web` (Next.js web client),
+> `services/meeting-service` (Rust/Axum Meeting & Conference Platform service) and
+> `services/calling` (Rust/Axum Calling service — platform trust foundation only; no call API yet).
 > Every other service/app boundary below is planned until implementation begins.
 
 ## Four platform layers
@@ -17,7 +18,7 @@ APPLICATION SURFACES
 
 PLATFORM SERVICES
   services/meeting-service ✅
-  services/calling ◻
+  services/calling ◐
   services/privacy-relay ◻
   services/messaging ◻
   services/telephony ◻
@@ -48,7 +49,7 @@ INFRASTRUCTURE
 | Service | Path | Status / responsibility |
 |---|---|---|
 | Meeting & Conference Platform | `services/meeting-service` | **Current.** Meeting-domain control plane and Phase 2 backend. One deployable modular monolith during Phase 2. |
-| Realtime app-to-app calling | `services/calling` | Planned |
+| Realtime app-to-app calling | `services/calling` | **Active.** Platform consumer / credential / principal trust foundation (Part B §7–§10, [ADR 0003](../decisions/0003-calling-platform-trust-model.md)). Call model and API planned. |
 | Privacy Relay communications | `services/privacy-relay` | Planned |
 | Unified messaging | `services/messaging` | Planned |
 | SIP/PSTN telephony | `services/telephony` | Planned |

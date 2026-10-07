@@ -13,7 +13,7 @@ This monorepo contains the platform's applications, domain services, shared cont
 | **Current** | Video meetings: scheduled and instant meetings, pre-join, LiveKit rooms, waiting room/admission, participant list and media state, screen share, in-meeting chat |
 | **Current** | Accounts: email/password with verification, Google OAuth, password reset |
 | **Current** | Developer basics: API keys, external meeting create/join API, webhook registration, OpenAPI/Swagger |
-| **Planned** | Realtime app-to-app calling |
+| **In progress** | Realtime app-to-app calling — `services/calling`: platform trust foundation (tenants, applications, environments, service accounts, API credentials, scopes, principals) implemented; call API not yet |
 | **Planned** | Unified messaging |
 | **Planned** | Privacy Relay communications |
 | **Planned** | SIP/PSTN telephony and Digital Communications Numbers |
@@ -29,7 +29,8 @@ cfmeet/
 ├── apps/
 │   └── web/                  Next.js CF Meet web application                         (current)
 ├── services/
-│   └── meeting-service/      Rust/Axum Meeting & Conference Platform service         (current)
+│   ├── meeting-service/      Rust/Axum Meeting & Conference Platform service         (current)
+│   └── calling/              Rust/Axum Calling service (platform trust foundation)   (active)
 ├── packages/
 │   └── contracts/            Shared API / event / webhook contracts                  (boundary established)
 ├── infra/
@@ -54,10 +55,11 @@ cfmeet/
 |---|---|---|
 | `apps/web/` | CF Meet web experience | Vercel |
 | `services/meeting-service/` | Meeting/conference control plane: auth, meetings, participants, waiting room, chat, LiveKit token/control integration, API keys, webhooks, workers and related meeting-domain functionality | Docker image |
+| `services/calling/` | Calling domain service. Currently the platform trust foundation: tenant / application / environment / service-account model, API credentials, scopes, limits and communication principals ([README](services/calling/README.md)) | Docker image (context `services/calling/`) |
 
 The current Rust service is intentionally named **meeting-service** because it is the backend for the meeting/conferencing domain, not the universal backend for all future CF Meet capabilities.
 
-Future services such as `calling`, `privacy-relay`, `messaging`, `telephony` and `numbering` will be added under `services/` when their implementation phases begin. They are not scaffolded prematurely.
+`services/calling/` is the second domain service; it is independent of `meeting-service` (own database and migrations, no shared source). Future services such as `privacy-relay`, `messaging`, `telephony` and `numbering` will be added under `services/` when their implementation phases begin. They are not scaffolded prematurely.
 
 ## Phase 2 implementation home
 
@@ -80,7 +82,7 @@ Future domain services are created only when a real boundary exists, for example
 ```text
 services/
 ├── meeting-service/       current
-├── calling/               future
+├── calling/               active (platform trust foundation)
 ├── privacy-relay/         future
 ├── messaging/             future
 ├── telephony/             future
@@ -101,6 +103,7 @@ See [`docs/architecture/platform-boundaries.md`](docs/architecture/platform-boun
 
 ```bash
 cp services/meeting-service/.env.example services/meeting-service/.env
+cp services/calling/.env.example         services/calling/.env
 cp apps/web/.env.example                 apps/web/.env.local
 ```
 
@@ -154,6 +157,7 @@ The web app and meeting service remain independently deployable and communicate 
 Workflows under `.github/workflows/` are path-aware:
 
 - **Meeting service:** `services/meeting-service/**` → fmt, clippy, test, build and Docker image
+- **Calling service:** `services/calling/**` → fmt, check, clippy, PostgreSQL tests, architecture guards, migration smoke, build and Docker image
 - **Frontend:** `apps/web/**` → install, lint, typecheck and Next.js build
 - **Compose:** root compose/infra/meeting-service Dockerfile validation
 
@@ -163,6 +167,7 @@ Workflows under `.github/workflows/` are path-aware:
 - [Platform boundaries](docs/architecture/platform-boundaries.md)
 - [API docs](docs/api/README.md)
 - [Meeting service guides](services/meeting-service/docs/README.md)
+- [Calling service](services/calling/README.md)
 - [Contracts](packages/contracts/README.md)
 - [Deployment](infra/deployment/README.md)
 - [Architecture decisions](docs/decisions/README.md)
