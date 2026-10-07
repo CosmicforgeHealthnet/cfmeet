@@ -44,23 +44,31 @@ const PLATFORM_TABLES: &[&str] = &[
     "platform_tenants",
 ];
 
-/// The Calling-owned call domain (Part C §15–§19).
+/// The Calling-owned call domain (Part C §15–§25).
 const CALL_TABLES: &[&str] = &[
+    "call_answer_claims",
     "call_attempts",
     "call_authorizations",
+    "call_commands",
+    "call_endpoints",
     "call_events",
+    "call_invitations",
     "call_legs",
+    "call_media_provider_events",
+    "call_media_sessions",
+    "call_participant_media_permissions",
     "call_participants",
     "call_quality_records",
     "call_routes",
     "call_session_intervals",
     "call_sessions",
+    "call_transfers",
     "call_usage_records",
     "calling_outbox_events",
     "calls",
 ];
 
-const MIGRATIONS: usize = 9;
+const MIGRATIONS: usize = 14;
 const PART_B_MIGRATIONS: u32 = 4;
 
 #[tokio::test]
@@ -268,6 +276,25 @@ async fn required_constraints_and_guards_exist() {
         "ck_call_quality_records_metrics",
         "ck_call_usage_records_quantity",
         "ck_calling_outbox_events_envelope",
+        // Part C §20–§25: single-winner arbitration, idempotency, dedupe, one media
+        // resource per Call with a deterministic name, transfer and invitation rules.
+        "uq_call_answer_claims_participant",
+        "uq_call_answer_claims_invitation",
+        "uq_call_answer_claims_session",
+        "uq_call_commands_idempotency",
+        "uq_call_media_provider_events_dedupe",
+        "uq_call_media_sessions_call",
+        "uq_call_media_sessions_name",
+        "uq_call_media_sessions_leg",
+        "uq_call_participant_media_permissions_participant",
+        "uq_call_participants_owner_principal",
+        "ck_call_endpoints_key",
+        "ck_call_invitations_expiry",
+        "ck_call_invitations_status",
+        "ck_call_media_sessions_name",
+        "ck_call_commands_snapshot",
+        "ck_call_transfers_pre_state",
+        "ck_call_transfers_distinct_parties",
     ] {
         assert!(
             constraints.iter().any(|c| c == required),
@@ -281,6 +308,18 @@ async fn required_constraints_and_guards_exist() {
     )
     .await;
     for required in [
+        "trg_call_answer_claims_immutable",
+        "trg_call_invitations_guard_insert",
+        "trg_call_invitations_require_claim",
+        "trg_call_invitations_status_transition",
+        "trg_call_sessions_guard_media",
+        "trg_call_sessions_guard_endpoint",
+        "trg_call_sessions_media_access_transition",
+        "trg_call_commands_status_transition",
+        "trg_call_transfers_state_transition",
+        "trg_call_media_sessions_status_transition",
+        "trg_call_media_provider_events_immutable",
+        "trg_call_endpoints_status_transition",
         "trg_platform_tenants_immutable",
         "trg_platform_applications_immutable",
         "trg_platform_environments_immutable",
@@ -381,6 +420,10 @@ async fn required_constraints_and_guards_exist() {
         "uq_call_participants_one_initiator",
         "idx_calling_outbox_events_pending",
         "idx_calling_outbox_events_aggregate",
+        "uq_call_endpoints_active_key",
+        "uq_call_invitations_one_live_per_endpoint",
+        "uq_call_transfers_one_active",
+        "idx_call_invitations_live_expiry",
     ] {
         assert!(
             indexes.iter().any(|i| i == required),
@@ -473,8 +516,23 @@ async fn call_domain_columns_hold_no_contact_secret_or_provider_data() {
         "call_session_intervals.interval_number",
         "call_attempts.attempt_number",
     ];
+    // Calling-private media evidence (Part C §24, §46): the adapter name, the provider's
+    // opaque resource reference and its event id (dedupe key) live only in the two
+    // private media tables and are never exposed by an API, event or signal.
+    const PRIVATE_PROVIDER_EVIDENCE: &[&str] = &[
+        "call_media_sessions.provider_adapter",
+        "call_media_sessions.provider_resource_ref",
+        "call_media_provider_events.provider_adapter",
+        "call_media_provider_events.provider_event_id",
+    ];
+    for column in PRIVATE_PROVIDER_EVIDENCE {
+        assert!(columns.contains(&column.to_string()), "{column}");
+    }
     for column in &columns {
         let name = column.split('.').nth(1).unwrap();
+        if PRIVATE_PROVIDER_EVIDENCE.contains(&column.as_str()) {
+            continue;
+        }
         for forbidden in [
             "secret",
             "plaintext",

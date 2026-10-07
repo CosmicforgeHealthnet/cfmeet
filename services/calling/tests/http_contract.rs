@@ -458,7 +458,8 @@ async fn call_api_responses_validate_against_the_calling_contract() {
             "{path}: {expected} is not documented"
         );
     }
-    // The documented security requirement is the scope the handlers enforce.
+    // The documented security requirement is the scope the handlers enforce; reads
+    // never mutate and no route sets a call's state generically.
     let documented = read(CALLING_HTTP);
     for path in ["/v1/calls", "/v1/calls/{call_id}"] {
         assert_eq!(
@@ -469,12 +470,119 @@ async fn call_api_responses_validate_against_the_calling_contract() {
             documented["paths"][path]["get"]["x-cfmeet-required-scope"],
             names::CALLS_READ
         );
-        for method in ["post", "put", "patch", "delete"] {
+        for method in ["put", "patch", "delete"] {
             assert!(
                 documented["paths"][path].get(method).is_none(),
                 "{method} {path}"
             );
         }
+    }
+    assert!(documented["paths"]["/v1/calls/{call_id}"]
+        .get("post")
+        .is_none());
+    assert_eq!(
+        documented["paths"]["/v1/calls"]["post"]["security"],
+        json!([{ "platformCredential": [names::CALLS_WRITE] }])
+    );
+}
+
+/// Every documented operation names exactly one authentication: the platform credential
+/// with the scope its handler enforces, the endpoint's signaling credential, or the
+/// media provider's signature (callback only); `/health` alone is public.
+#[test]
+fn every_operation_declares_its_authentication() {
+    let documented = read(CALLING_HTTP);
+    for (path, item) in documented["paths"].as_object().unwrap() {
+        for (method, op) in item.as_object().unwrap() {
+            let security = op["security"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{method} {path}"));
+            if path == "/health" {
+                assert!(security.is_empty());
+                continue;
+            }
+            assert_eq!(security.len(), 1, "{method} {path}");
+            let scheme = security[0]
+                .as_object()
+                .unwrap()
+                .keys()
+                .next()
+                .unwrap()
+                .as_str();
+            let expected = if path.starts_with("/internal/provider/") {
+                "mediaProviderSignature"
+            } else if path == "/v1/calling/signaling"
+                || path.starts_with("/v1/calling/invitations")
+                || path.starts_with("/v1/calling/sessions/")
+            {
+                "signalingCredential"
+            } else {
+                "platformCredential"
+            };
+            assert_eq!(scheme, expected, "{method} {path}");
+            if scheme == "platformCredential" {
+                let scope = security[0][scheme][0].as_str().unwrap();
+                let expected_scope = if method == "get" {
+                    names::CALLS_READ
+                } else {
+                    names::CALLS_WRITE
+                };
+                assert_eq!(scope, expected_scope, "{method} {path}");
+                assert_eq!(op["x-cfmeet-required-scope"], scope, "{method} {path}");
+            }
+            assert!(
+                op["responses"]["401"].is_object(),
+                "{method} {path}: authentication failure is not documented"
+            );
+        }
+    }
+    // No generic state mutation and no provider vocabulary in the public contracts.
+    // (Forbidden-key patterns name such terms on purpose and are skipped.)
+    fn texts(value: &Value, out: &mut String) {
+        match value {
+            Value::String(s) => {
+                out.push_str(&s.to_lowercase());
+                out.push('\n');
+            }
+            Value::Array(items) => items.iter().for_each(|v| texts(v, out)),
+            Value::Object(map) => {
+                for (k, v) in map {
+                    out.push_str(&k.to_lowercase());
+                    out.push('\n');
+                    if k != "pattern" {
+                        texts(v, out);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    for rel in [
+        CALLING_HTTP,
+        CALL_CONTROL,
+        REALTIME,
+        PUSH_INVITATION,
+        CALLING_COMMON,
+    ] {
+        let mut text = String::new();
+        texts(&read(rel), &mut text);
+        for term in [
+            "livekit",
+            "twilio",
+            "vonage",
+            "roomsid",
+            "room_sid",
+            "participantsid",
+            "apisecret",
+            "api_secret",
+        ] {
+            assert!(!text.contains(term), "{rel} mentions {term}");
+        }
+    }
+    let paths: Vec<&String> = documented["paths"].as_object().unwrap().keys().collect();
+    assert!(paths.iter().all(|p| !p.ends_with("/state")), "{paths:?}");
+    for (_, item) in documented["paths"].as_object().unwrap() {
+        assert!(item.get("patch").is_none() && item.get("put").is_none());
     }
 }
 
@@ -515,6 +623,72 @@ fn call_vocabularies_equal_the_shared_contract() {
         names(CallEventType::ALL, |v| v.as_str()),
         common_enum("CallEventType")
     );
+    {
+        use calling::calls::kinds::{
+            InvitationPurpose, InvitationStatus, InvitationTerminalReason, MediaAccess,
+            TransferFailureReason, TransferState,
+        };
+        use calling::endpoints::{EndpointKind, EndpointStatus, PresenceState};
+        assert_eq!(
+            names(InvitationPurpose::ALL, |v| v.as_str()),
+            common_enum("CallInvitationPurpose")
+        );
+        assert_eq!(
+            names(InvitationStatus::ALL, |v| v.as_str()),
+            common_enum("CallInvitationStatus")
+        );
+        assert_eq!(
+            names(InvitationTerminalReason::ALL, |v| v.as_str()),
+            common_enum("CallInvitationTerminalReason")
+        );
+        assert_eq!(
+            names(MediaAccess::ALL, |v| v.as_str()),
+            common_enum("CallMediaAccess")
+        );
+        assert_eq!(
+            names(TransferState::ALL, |v| v.as_str()),
+            common_enum("CallTransferState")
+        );
+        assert_eq!(
+            names(TransferFailureReason::ALL, |v| v.as_str()),
+            common_enum("CallTransferFailureReason")
+        );
+        assert_eq!(
+            names(EndpointKind::ALL, |v| v.as_str()),
+            common_enum("CallEndpointKind")
+        );
+        assert_eq!(
+            names(EndpointStatus::ALL, |v| v.as_str()),
+            common_enum("CallEndpointStatus")
+        );
+        assert_eq!(
+            names(PresenceState::ALL, |v| v.as_str()),
+            common_enum("CallEndpointPresence")
+        );
+        // Realtime signal types and the server-authorized media capabilities.
+        let signal_types: Vec<String> = read(REALTIME)["$defs"]["SignalType"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            names(calling::signaling::signals::SignalType::ALL, |v| v.as_str()),
+            signal_types
+        );
+        let capabilities = serde_json::to_value(calling::media::MediaPermissions::NONE).unwrap();
+        let mut keys: Vec<&String> = capabilities.as_object().unwrap().keys().collect();
+        keys.sort();
+        let mut documented: Vec<String> = read(CALLING_COMMON)["$defs"]["CallMediaCapabilities"]
+            ["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        documented.sort();
+        assert_eq!(keys, documented.iter().collect::<Vec<_>>());
+    }
     // The safe-data key rule is the same in Rust and in the contract.
     let pattern = read(CALLING_COMMON)["$defs"]["SafeEventData"]["propertyNames"]["not"]["pattern"]
         .as_str()
@@ -523,7 +697,7 @@ fn call_vocabularies_equal_the_shared_contract() {
     assert_eq!(pattern, format!("({})", FORBIDDEN_KEY_FRAGMENTS.join("|")));
     // Canonical states are defined once: the HTTP contract and the event contract refer
     // to the shared definition instead of repeating it.
-    for rel in [CALLING_HTTP, CALL_LIFECYCLE] {
+    for rel in [CALLING_HTTP, CALL_LIFECYCLE, CALL_CONTROL, REALTIME] {
         let text = std::fs::read_to_string(contracts().join(rel)).unwrap();
         assert!(
             !text.contains("\"TRANSFERRING\""),
@@ -536,13 +710,147 @@ fn call_vocabularies_equal_the_shared_contract() {
     }
 }
 
+/// Application calling flows producing every ring-offer, transfer and media fact.
+async fn exercise_app_calling(a: &common::app::AppWorld) {
+    use calling::media::{provider::ProviderParticipant, MediaPermissions};
+    use common::fake_media::FakeOp;
+
+    let alice = a.w.initiator.clone();
+    let bob = a.w.recipient.clone();
+    let carol = a.principal("events-carol").await;
+    let dave = a.principal("events-dave").await;
+    let erin = a.principal("events-erin").await;
+    let frank = a.principal("events-frank").await;
+    let alice_d = a.device(&alice, "events-alice").await;
+    let bob_1 = a.device(&bob, "events-bob-1").await;
+    let bob_2 = a.device(&bob, "events-bob-2").await;
+    let carol_d = a.device(&carol, "events-carol").await;
+    let dave_d = a.device(&dave, "events-dave").await;
+    let erin_d = a.device(&erin, "events-erin").await;
+    a.device(&frank, "events-frank").await;
+    let r = a
+        .create_call("VOICE", &alice, &alice_d, &[&bob, &carol], "events-1")
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let call: uuid::Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+    let room = common::app::AppWorld::room(call);
+    let invitation = a.invitation_for(call, bob_1.endpoint).await.unwrap();
+    let (_, version) = a.state(call).await;
+    assert_eq!(
+        a.accept(call, invitation, &bob_1, version).await.status,
+        StatusCode::OK
+    );
+    let invitation = a.invitation_for(call, carol_d.endpoint).await.unwrap();
+    let (_, version) = a.state(call).await;
+    assert_eq!(
+        a.decline(call, invitation, &carol_d, version).await.status,
+        StatusCode::OK
+    );
+    assert!(a.invitation_for(call, bob_2.endpoint).await.is_none());
+    a.connect(call, a.session_on(call, alice_d.endpoint).await.unwrap())
+        .await;
+    let bob_p = a
+        .connect(call, a.session_on(call, bob_1.endpoint).await.unwrap())
+        .await;
+    assert_eq!(a.state(call).await.0, CallState::Connected);
+    for action in ["hold", "resume"] {
+        let (_, version) = a.state(call).await;
+        assert_eq!(
+            a.command(call, action, version).await.status,
+            StatusCode::OK
+        );
+    }
+    // An unknown connection is quarantined and evicted; drift is reconciled.
+    let intruder = ProviderParticipant {
+        identity: "intruder".into(),
+        generation: None,
+        permissions: MediaPermissions::NONE,
+        active: true,
+        published_audio: false,
+        published_video: false,
+        joined_at: None,
+    };
+    a.media().inject(&room, intruder.clone());
+    let (auth, body) = a
+        .media()
+        .signed_event("participant_joined", &room, Some(&intruder));
+    assert_eq!(a.callback(&auth, body).await.status, StatusCode::OK);
+    let mut drift = bob_p.permissions;
+    drift.can_publish_video = true;
+    a.media().force_permissions(&room, &bob_p.identity, drift);
+    a.h().clock.advance(chrono::Duration::seconds(30));
+    a.h().state.app.reconcile_due(100).await.unwrap();
+    // A failed transfer (target declines), then a completed one.
+    let bob_participant = a.participant_of(call, bob.id().as_uuid()).await;
+    let (_, version) = a.state(call).await;
+    let r = a
+        .transfer(call, bob_participant, &erin, version, "events-t1")
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let offer = a.invitation_for(call, erin_d.endpoint).await.unwrap();
+    let (_, version) = a.state(call).await;
+    assert_eq!(
+        a.decline(call, offer, &erin_d, version).await.status,
+        StatusCode::OK
+    );
+    assert_eq!(a.state(call).await.0, CallState::Connected);
+    let (_, version) = a.state(call).await;
+    let r = a
+        .transfer(call, bob_participant, &dave, version, "events-t2")
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let offer = a.invitation_for(call, dave_d.endpoint).await.unwrap();
+    let (_, version) = a.state(call).await;
+    assert_eq!(
+        a.accept(call, offer, &dave_d, version).await.status,
+        StatusCode::OK
+    );
+    let dave_session = a.session_on(call, dave_d.endpoint).await.unwrap();
+    a.connect(call, dave_session).await;
+    assert_eq!(a.state(call).await.0, CallState::Connected);
+    // Provider removal times out: enforcement stays pending (reconciled later).
+    a.media().fail_next(
+        FakeOp::Remove,
+        calling::media::provider::MediaProviderError::Timeout,
+        1,
+    );
+    let (_, version) = a.state(call).await;
+    let r = a
+        .post(
+            &format!("/v1/calls/{call}/sessions/{dave_session}/remove"),
+            json!({ "expectedVersion": version }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    // A transfer cut short by END is cancelled; the media resource is terminated.
+    let alice_participant = a.participant_of(call, alice.id().as_uuid()).await;
+    let (_, version) = a.state(call).await;
+    let r = a
+        .transfer(call, alice_participant, &frank, version, "events-t3")
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let (_, version) = a.state(call).await;
+    let r = a.command(call, "end", version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    // An offer nobody answers expires.
+    let r = a
+        .create_call("VIDEO", &alice, &alice_d, &[&carol], "events-2")
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    a.h().clock.advance(chrono::Duration::seconds(120));
+    a.h().state.app.expire_due(100).await.unwrap();
+}
+
 #[tokio::test]
 async fn every_outbox_row_is_a_valid_envelope_with_a_valid_lifecycle_payload() {
     let Some(w) = CallWorld::new().await else {
         return;
     };
+    let a = common::app::AppWorld { w };
+    let w = &a.w;
     let envelope = schema(EVENT_ENVELOPE);
     let lifecycle = schema(CALL_LIFECYCLE);
+    exercise_app_calling(&a).await;
     // Exercise every kind of event the domain produces.
     let call = w.call_in(CallState::Connected).await;
     let sessions = w.calls().sessions(w.scope(), call.id).await.unwrap();
@@ -755,6 +1063,9 @@ fn contract_versions_match_the_manifest() {
     for (id, path) in [
         ("cfmeet.calling.call-common", CALLING_COMMON),
         ("cfmeet.calling.call-lifecycle-event", CALL_LIFECYCLE),
+        ("cfmeet.calling.call-control", CALL_CONTROL),
+        ("cfmeet.calling.realtime-signal", REALTIME),
+        ("cfmeet.calling.push-invitation", PUSH_INVITATION),
         ("cfmeet.platform.event-envelope", EVENT_ENVELOPE),
     ] {
         let entry = manifest["contracts"]
@@ -766,4 +1077,379 @@ fn contract_versions_match_the_manifest() {
         assert_eq!(entry["path"], path);
         assert_eq!(read(path)["$id"], format!("{SCHEMA_BASE_URI}{path}"));
     }
+}
+
+const CALL_CONTROL: &str = "calling/control/v1.schema.json";
+const REALTIME: &str = "calling/realtime/v1.schema.json";
+const PUSH_INVITATION: &str = "calling/push/invitation/v1.schema.json";
+
+/// A JSON-pointer segment, percent-encoded for use in a URI fragment.
+fn escape(segment: &str) -> String {
+    segment
+        .replace('~', "~0")
+        .replace('/', "~1")
+        .replace('{', "%7B")
+        .replace('}', "%7D")
+}
+
+/// Asserts that `response` is a documented response of `method template` and that its
+/// body (and request id / cache headers) validate against the documented schema.
+fn conforms(response: &common::TestResponse, template: &str, method: &str) {
+    let doc = read(CALLING_HTTP);
+    let status = response.status.as_u16().to_string();
+    let documented = &doc["paths"][template][method]["responses"][&status];
+    assert!(
+        documented.is_object(),
+        "{method} {template}: {status} is not documented ({})",
+        response.text
+    );
+    let pointer = match documented.get("$ref").and_then(Value::as_str) {
+        Some(reference) => format!(
+            "{}/content/application~1json/schema",
+            reference.trim_start_matches('#')
+        ),
+        None => format!(
+            "/paths/{}/{method}/responses/{status}/content/application~1json/schema",
+            escape(template)
+        ),
+    };
+    assert_valid(
+        &component(CALLING_HTTP, &pointer),
+        &response.json,
+        &format!("{method} {template} {status}"),
+    );
+    assert_valid(
+        &component(CALLING_HTTP, "/components/headers/XRequestId/schema"),
+        &json!(response.headers["x-request-id"].to_str().unwrap()),
+        "x-request-id",
+    );
+    if response.status.is_success() {
+        assert_eq!(response.headers["cache-control"], "no-store", "{template}");
+    }
+    if let Some(replayed) = response.headers.get("idempotent-replayed") {
+        assert!(
+            doc["paths"][template][method]["responses"][&status]["headers"]
+                .get("idempotent-replayed")
+                .is_some(),
+            "{method} {template}: Idempotent-Replayed is not documented"
+        );
+        assert_eq!(replayed, "true");
+    }
+}
+
+#[tokio::test]
+async fn app_calling_responses_signals_and_pushes_validate_against_the_contracts() {
+    use calling::signaling::RealtimeSignalBus;
+    use common::app::{AppWorld, Device};
+
+    let Some(a) = AppWorld::new().await else {
+        return;
+    };
+    let alice = a.w.initiator.clone();
+    let bob = a.w.recipient.clone();
+    let carol = a.principal("contract-carol").await;
+    let dave = a.principal("contract-dave").await;
+    let register = |principal: &calling::platform::principals::ResolvedPrincipal,
+                    key: &str,
+                    push: Option<uuid::Uuid>| {
+        json!({
+            "principalId": principal.id(),
+            "endpointKey": key,
+            "endpointKind": "MOBILE",
+            "capabilities": { "audio": true, "video": true },
+            "pushTargetRef": push,
+        })
+    };
+    let mut devices = Vec::new();
+    let push_target = uuid::Uuid::new_v4();
+    for (principal, key, push) in [
+        (&alice, "alice-1", None),
+        (&bob, "bob-1", Some(push_target)),
+        (&bob, "bob-2", None),
+        (&carol, "carol-1", None),
+        (&dave, "dave-1", None),
+    ] {
+        let r = a
+            .post("/v1/calling/endpoints", register(principal, key, push))
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        conforms(&r, "/v1/calling/endpoints", "post");
+        devices.push(Device {
+            principal: principal.id().as_uuid(),
+            endpoint: r.json["endpointId"].as_str().unwrap().parse().unwrap(),
+        });
+    }
+    let [alice_d, bob_1, bob_2, carol_d, dave_d] = devices.try_into().unwrap();
+    let r = a
+        .post("/v1/calling/endpoints", register(&alice, "alice-1", None))
+        .await;
+    assert_eq!(r.status, StatusCode::OK);
+    conforms(&r, "/v1/calling/endpoints", "post");
+    let r = a
+        .get(&format!("/v1/calling/endpoints?principalId={}", bob.id()))
+        .await;
+    conforms(&r, "/v1/calling/endpoints", "get");
+    assert_eq!(r.json["data"].as_array().unwrap().len(), 2);
+    let r = a
+        .post(
+            "/v1/calling/signaling-credentials",
+            json!({ "principalId": bob.id(), "endpointId": bob_1.endpoint }),
+        )
+        .await;
+    conforms(&r, "/v1/calling/signaling-credentials", "post");
+    let bob_token = r.json["token"].as_str().unwrap().to_string();
+    let subscriptions: Vec<_> = [&alice_d, &bob_1, &bob_2, &carol_d, &dave_d]
+        .iter()
+        .map(|d| (d.endpoint, d.principal, a.h().bus.subscribe(d.endpoint)))
+        .collect();
+
+    // Group call alice → bob (2 devices), carol; replayed creation.
+    let r = a
+        .create_call(
+            "VOICE",
+            &alice,
+            &alice_d,
+            &[&bob, &carol],
+            "contract-create",
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    conforms(&r, "/v1/calls", "post");
+    let call: uuid::Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+    let replay = a
+        .create_call(
+            "VOICE",
+            &alice,
+            &alice_d,
+            &[&bob, &carol],
+            "contract-create",
+        )
+        .await;
+    conforms(&replay, "/v1/calls", "post");
+    assert_eq!(replay.json, r.json);
+    let conflict = a
+        .create_call("VIDEO", &alice, &alice_d, &[&bob], "contract-create")
+        .await;
+    assert_eq!(conflict.status, StatusCode::CONFLICT);
+    assert_eq!(conflict.json["error"]["code"], "IDEMPOTENCY_CONFLICT");
+    conforms(&conflict, "/v1/calls", "post");
+    let r = a.get(&format!("/v1/calls/{call}/actions")).await;
+    conforms(&r, "/v1/calls/{call_id}/actions", "get");
+
+    // Bob recovers and accepts on device 1 (signaling credential); device 2 lost.
+    let r = a
+        .as_endpoint(
+            &bob_token,
+            Method::GET,
+            "/v1/calling/invitations",
+            None,
+            &[],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{} {bob_token}", r.text);
+    conforms(&r, "/v1/calling/invitations", "get");
+    let invitation = a.invitation_for(call, bob_1.endpoint).await.unwrap();
+    let (_, version) = a.state(call).await;
+    let r = a
+        .as_endpoint(
+            &bob_token,
+            Method::POST,
+            &format!("/v1/calling/invitations/{invitation}/accept"),
+            Some(json!({ "expectedVersion": version })),
+            &[],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    conforms(&r, "/v1/calling/invitations/{invitation_id}/accept", "post");
+    let other = a.call_view(call).await["invitations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["endpointId"] == bob_2.endpoint.to_string())
+        .map(|i| {
+            i["invitationId"]
+                .as_str()
+                .unwrap()
+                .parse::<uuid::Uuid>()
+                .unwrap()
+        })
+        .unwrap();
+    let (_, version) = a.state(call).await;
+    let r = a.accept(call, other, &bob_2, version).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
+    conforms(&r, "/v1/calls/{call_id}/accept", "post");
+    let carol_invitation = a.invitation_for(call, carol_d.endpoint).await.unwrap();
+    let r = a.decline(call, carol_invitation, &carol_d, version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    conforms(&r, "/v1/calls/{call_id}/decline", "post");
+    let r = a.command(call, "hold", 1).await;
+    assert_eq!(r.json["error"]["code"], "STALE_CALL_VERSION");
+    conforms(&r, "/v1/calls/{call_id}/hold", "post");
+
+    // Media credentials (both routes), verified joins, forged callback.
+    let alice_session = a.session_on(call, alice_d.endpoint).await.unwrap();
+    let bob_session = a.session_on(call, bob_1.endpoint).await.unwrap();
+    let r = a.media_credential(call, alice_session).await;
+    conforms(
+        &r,
+        "/v1/calls/{call_id}/sessions/{session_id}/media-credentials",
+        "post",
+    );
+    a.join(call, r.json["token"].as_str().unwrap()).await;
+    let r = a
+        .as_endpoint(
+            &bob_token,
+            Method::POST,
+            &format!("/v1/calling/sessions/{bob_session}/media-credentials"),
+            None,
+            &[],
+        )
+        .await;
+    conforms(
+        &r,
+        "/v1/calling/sessions/{session_id}/media-credentials",
+        "post",
+    );
+    let participant = a.media().join(r.json["token"].as_str().unwrap()).unwrap();
+    let (auth, body) = a.media().signed_event(
+        "participant_joined",
+        &AppWorld::room(call),
+        Some(&participant),
+    );
+    let r = a.callback(&auth, body.clone()).await;
+    conforms(&r, "/internal/provider/media/events", "post");
+    let r = a.callback("Bearer forged.token.value", body).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    conforms(&r, "/internal/provider/media/events", "post");
+    assert_eq!(a.state(call).await.0, CallState::Connected);
+
+    // Hold / resume / transfer bob → dave / removal / end.
+    for action in ["hold", "resume"] {
+        let (_, version) = a.state(call).await;
+        let r = a.command(call, action, version).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        conforms(&r, &format!("/v1/calls/{{call_id}}/{action}"), "post");
+    }
+    let bob_participant = a.participant_of(call, bob.id().as_uuid()).await;
+    let (_, version) = a.state(call).await;
+    let r = a
+        .transfer(call, bob_participant, &dave, version, "contract-transfer")
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    conforms(&r, "/v1/calls/{call_id}/transfer", "post");
+    let replay = a
+        .transfer(call, bob_participant, &dave, version, "contract-transfer")
+        .await;
+    conforms(&replay, "/v1/calls/{call_id}/transfer", "post");
+    assert_eq!(replay.json, r.json);
+    let dave_invitation = a.invitation_for(call, dave_d.endpoint).await.unwrap();
+    let (_, version) = a.state(call).await;
+    let r = a.accept(call, dave_invitation, &dave_d, version).await;
+    conforms(&r, "/v1/calls/{call_id}/accept", "post");
+    let dave_session = a.session_on(call, dave_d.endpoint).await.unwrap();
+    a.connect(call, dave_session).await;
+    let view = a.call_view(call).await;
+    assert_eq!(view["state"], "CONNECTED", "{view:#}");
+    assert_eq!(view["transfers"][0]["state"], "COMPLETED", "{view:#}");
+    assert_valid(
+        &component(CALLING_HTTP, "/components/schemas/Call"),
+        &view,
+        "call with invitations and a transfer",
+    );
+    let (_, version) = a.state(call).await;
+    let r = a
+        .post(
+            &format!("/v1/calls/{call}/sessions/{dave_session}/remove"),
+            json!({ "expectedVersion": version }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    conforms(
+        &r,
+        "/v1/calls/{call_id}/sessions/{session_id}/remove",
+        "post",
+    );
+    let (_, version) = a.state(call).await;
+    let r = a.command(call, "end", version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    conforms(&r, "/v1/calls/{call_id}/end", "post");
+    let r = a.media_credential(call, alice_session).await;
+    conforms(
+        &r,
+        "/v1/calls/{call_id}/sessions/{session_id}/media-credentials",
+        "post",
+    );
+
+    // Cancel; late accept; expired offer.
+    let r = a
+        .create_call("VIDEO", &alice, &alice_d, &[&bob], "contract-cancel")
+        .await;
+    let cancelled: uuid::Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+    let late = a.invitation_for(cancelled, bob_2.endpoint).await.unwrap();
+    let (_, version) = a.state(cancelled).await;
+    let r = a.command(cancelled, "cancel", version).await;
+    conforms(&r, "/v1/calls/{call_id}/cancel", "post");
+    let r = a.accept(cancelled, late, &bob_2, version + 1).await;
+    assert_eq!(r.status, StatusCode::CONFLICT);
+    conforms(&r, "/v1/calls/{call_id}/accept", "post");
+    let r = a
+        .create_call("VOICE", &alice, &alice_d, &[&carol], "contract-expire")
+        .await;
+    let expiring: uuid::Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+    let offer = a.invitation_for(expiring, carol_d.endpoint).await.unwrap();
+    a.h().clock.advance(chrono::Duration::seconds(120));
+    let (_, version) = a.state(expiring).await;
+    let r = a.accept(expiring, offer, &carol_d, version).await;
+    assert_eq!(r.status, StatusCode::GONE, "{}", r.text);
+    conforms(&r, "/v1/calls/{call_id}/accept", "post");
+    a.h().state.app.expire_due(100).await.unwrap();
+    assert_eq!(a.state(expiring).await.0, CallState::NoAnswer);
+
+    // Every delivered signal is a valid realtime signal; every push a valid push offer.
+    let realtime = schema(REALTIME);
+    let mut kinds = BTreeSet::new();
+    for (endpoint, principal, mut subscription) in subscriptions {
+        while let Some(signal) = subscription.try_recv() {
+            let delivered = calling::signaling::signals::for_target(signal, endpoint, principal);
+            assert_valid(&realtime, &delivered, "realtime signal");
+            kinds.insert(delivered["type"].as_str().unwrap().to_string());
+        }
+    }
+    for expected in [
+        "call.incoming",
+        "call.ringing",
+        "call.accepted",
+        "call.answered",
+        "call.answered_elsewhere",
+        "call.declined",
+        "call.connected",
+        "call.held",
+        "call.resumed",
+        "call.transfer_started",
+        "call.transferred",
+        "call.ended",
+        "call.cancelled",
+        "call.ring_cancelled",
+        "call.invitation_expired",
+        "call.no_answer",
+    ] {
+        assert!(
+            kinds.contains(expected),
+            "{expected} not delivered: {kinds:?}"
+        );
+    }
+    let pushes = a.h().push.sent();
+    assert!(!pushes.is_empty(), "push-ready offers were produced");
+    let push = schema(PUSH_INVITATION);
+    for (target, payload) in pushes {
+        assert_eq!(target, push_target);
+        assert_valid(&push, &payload, "push-ready offer");
+    }
+    // Requests the service accepted are valid contract bodies, too.
+    let control = schema(CALL_CONTROL);
+    assert_valid(
+        &control,
+        &json!({ "kind": "VOICE", "initiatorPrincipalId": alice.id(), "initiatorEndpointId": alice_d.endpoint, "targetPrincipalIds": [bob.id(), carol.id()] }),
+        "create request",
+    );
 }

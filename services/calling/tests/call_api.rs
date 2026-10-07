@@ -74,7 +74,7 @@ async fn call_detail_requires_calls_read_and_returns_the_safe_read_model() {
     for key in &all {
         let lower = key.to_lowercase();
         for forbidden in [
-            "media",
+            "mediaidentity",
             "identity",
             "binding",
             "provider",
@@ -428,8 +428,10 @@ async fn list_filters_are_bounded_and_strict() {
     }
 }
 
+/// Calls are created and controlled only through explicit commands (Part C §55): no
+/// route sets a state, and no command body accepts one.
 #[tokio::test]
-async fn there_are_no_public_call_mutation_routes() {
+async fn there_is_no_generic_call_state_mutation() {
     let Some(w) = CallWorld::new().await else {
         return;
     };
@@ -438,7 +440,7 @@ async fn there_are_no_public_call_mutation_routes() {
         (
             Method::POST,
             "/v1/calls".to_string(),
-            StatusCode::METHOD_NOT_ALLOWED,
+            StatusCode::BAD_REQUEST,
         ),
         (
             Method::PATCH,
@@ -468,7 +470,17 @@ async fn there_are_no_public_call_mutation_routes() {
         (
             Method::POST,
             format!("/v1/calls/{}/cancel", call.id),
-            StatusCode::NOT_FOUND,
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            Method::POST,
+            format!("/v1/calls/{}/end", call.id),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            Method::POST,
+            format!("/v1/calls/{}/hold", call.id),
+            StatusCode::BAD_REQUEST,
         ),
     ] {
         let r =

@@ -1,0 +1,28 @@
+# LiveKit server configuration for the Calling RTC CERTIFICATION SUITE ONLY
+# (services/calling/tests/rtc_certification.rs, .github/workflows/calling-rtc-certification.yml).
+#
+# * Loopback only; never used by a shared, staging or production deployment.
+# * The key pair below is a well-known, test-only certification credential (like the
+#   development `devkey`), not a secret. Production Calling reads its own
+#   CALLING_LIVEKIT_* configuration and refuses to start without it.
+# * Webhooks are signed with that key and delivered to Calling's provider callback route
+#   on the certification test's listener.
+port: 7880
+bind_addresses: ["127.0.0.1"]
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50200
+  use_external_ip: false
+  node_ip: 127.0.0.1
+keys:
+  calling-cert: calling-cert-only-key-not-a-secret-0123456789
+webhook:
+  api_key: calling-cert
+  urls:
+    - http://127.0.0.1:18089/internal/provider/media/events
+room:
+  # Calling creates its rooms explicitly; a join can never resurrect a terminated room.
+  auto_create: false
+logging:
+  level: info

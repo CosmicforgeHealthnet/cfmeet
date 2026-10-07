@@ -9,7 +9,10 @@
 //! The harness uses a deterministic, test-only pepper and a manually driven clock.
 #![allow(dead_code)]
 
+pub mod app;
 pub mod calls;
+pub mod fake_media;
+pub mod provider_contract;
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -21,6 +24,7 @@ use axum::{
     Json, Router,
 };
 use calling::{
+    calls::{app::AppCallingConfig, CallServiceConfig},
     config::CredentialPolicy,
     domain::{
         EnvironmentKind, ManualClock, PrincipalId, PrincipalKind, RequestContext, ServiceAccountId,
@@ -28,6 +32,7 @@ use calling::{
     },
     error::CallingError,
     internal_auth::{middleware::InternalCaller, ServiceAuthRuntime},
+    media::{CallMediaProvider, MediaCredentialPolicy},
     platform::{
         applications::{ApplicationView, NewApplication},
         authentication::AuthenticationError,
@@ -43,7 +48,8 @@ use calling::{
         PlatformService,
     },
     routes,
-    state::AppState,
+    signaling::{InMemorySignalBus, NoPushTransport, RealtimeSignalBus, SignalingKeys},
+    state::{AppState, CallingRuntime},
 };
 use calling_migration::MigratorTrait;
 use cf_service_auth::{
@@ -377,6 +383,60 @@ pub struct Harness {
     pub platform: PlatformService,
     pub state: AppState,
     pub peers: Arc<Peers>,
+    /// The in-memory media provider wired into `state` (unless a test chose another).
+    pub media: Arc<fake_media::FakeMediaProvider>,
+    /// The single-process signal bus wired into `state`.
+    pub bus: Arc<InMemorySignalBus>,
+    /// Push-ready offers Calling dispatched (recording transport).
+    pub push: Arc<RecordingPush>,
+}
+
+/// Deterministic test-only signaling key (never used outside tests).
+/// A push transport that records what Calling dispatched.
+#[derive(Default)]
+pub struct RecordingPush {
+    sent: std::sync::Mutex<Vec<(uuid::Uuid, Value)>>,
+}
+
+impl RecordingPush {
+    pub fn sent(&self) -> Vec<(uuid::Uuid, Value)> {
+        self.sent.lock().unwrap().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl calling::signaling::PushDispatcher for RecordingPush {
+    async fn dispatch(&self, push_target_ref: uuid::Uuid, payload: Value) {
+        self.sent.lock().unwrap().push((push_target_ref, payload));
+    }
+}
+
+pub const TEST_SIGNALING_KEY: &str = "calling-test-signaling-key-4b8e2f6a1d9c3e7b5a0f";
+
+pub fn test_signaling_keys() -> Arc<SignalingKeys> {
+    Arc::new(
+        SignalingKeys::from_lookup(&|k: &str| {
+            (k == "CALLING_SIGNALING_SIGNING_KEY").then(|| TEST_SIGNALING_KEY.to_string())
+        })
+        .unwrap(),
+    )
+}
+
+/// Calling runtime of a test deployment: test signaling key, the given media provider
+/// and bus, default tunables.
+pub fn test_runtime(
+    media: Option<Arc<dyn CallMediaProvider>>,
+    bus: Arc<dyn RealtimeSignalBus>,
+) -> CallingRuntime {
+    CallingRuntime {
+        signaling_keys: test_signaling_keys(),
+        media,
+        credential_policy: MediaCredentialPolicy::default(),
+        bus,
+        push: Arc::new(NoPushTransport),
+        app_config: AppCallingConfig::default(),
+        call_config: CallServiceConfig::default(),
+    }
 }
 
 /// One consumer: tenant + application + all three environments, a `backend` service
@@ -421,6 +481,29 @@ impl Harness {
     }
 
     pub fn on(db: Arc<TestDb>, pepper: &str, clock: ManualClock) -> Self {
+        let media = Arc::new(fake_media::FakeMediaProvider::default());
+        let bus = Arc::new(InMemorySignalBus::new());
+        Self::with_runtime(
+            db,
+            pepper,
+            clock,
+            media.clone(),
+            bus.clone(),
+            test_runtime(Some(media), bus),
+        )
+    }
+
+    /// A deployment with an explicit Calling runtime (real provider, other bus, config).
+    pub fn with_runtime(
+        db: Arc<TestDb>,
+        pepper: &str,
+        clock: ManualClock,
+        media: Arc<fake_media::FakeMediaProvider>,
+        bus: Arc<InMemorySignalBus>,
+        mut runtime: CallingRuntime,
+    ) -> Self {
+        let push = Arc::new(RecordingPush::default());
+        runtime.push = push.clone();
         let keyring = Arc::new(test_keyring(pepper));
         let registry = Arc::new(ScopeRegistry::standard());
         let platform = PlatformService::new(
@@ -439,6 +522,7 @@ impl Harness {
             registry,
             LimitDefaults::default(),
             service_auth,
+            runtime,
         );
         Self {
             db,
@@ -446,6 +530,9 @@ impl Harness {
             platform,
             state,
             peers: Arc::new(peers),
+            media,
+            bus,
+            push,
         }
     }
 

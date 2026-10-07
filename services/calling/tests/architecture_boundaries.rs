@@ -328,11 +328,29 @@ const FOREIGN_DOMAIN_TABLES: &[&str] = &[
     "carrier_events",
 ];
 
+/// The media provider adapter (Part C §24): the only files that may name the current
+/// provider. Everything else — the Call aggregate, orchestration, the provider trait,
+/// models, migrations, HTTP — stays provider-independent.
+const MEDIA_ADAPTER_FILES: &[&str] = &["src/media/livekit.rs", "src/media/mod.rs"];
+
+/// Whether `haystack` contains `word` as a whole identifier (not inside a longer name).
+fn contains_word(haystack: &str, word: &str) -> bool {
+    let is_ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    haystack.match_indices(word).any(|(i, _)| {
+        let before = haystack[..i].chars().next_back();
+        let after = haystack[i + word.len()..].chars().next();
+        !before.is_some_and(is_ident) && !after.is_some_and(is_ident)
+    })
+}
+
 /// Violations of the call-domain provider / contact rules in one production file.
 fn call_domain_violations(file: &str, code: &str) -> Vec<String> {
     let identifiers = strip_strings(code).to_lowercase();
     let mut out = Vec::new();
     for term in PROVIDER_TERMS {
+        if *term == "livekit" && MEDIA_ADAPTER_FILES.contains(&file) {
+            continue;
+        }
         if identifiers.contains(term) {
             out.push(format!("{file}: provider-specific `{term}`"));
         }
@@ -347,7 +365,7 @@ fn call_domain_violations(file: &str, code: &str) -> Vec<String> {
     }
     let lower = code.to_lowercase();
     for table in FOREIGN_DOMAIN_TABLES {
-        if lower.contains(table) {
+        if contains_word(&lower, table) {
             out.push(format!("{file}: other service's table `{table}`"));
         }
     }
@@ -551,6 +569,37 @@ fn call_domain_guards_detect_violations() {
             .is_empty()
     );
     assert!(!call_domain_violations("src/calls/x.rs", "TwilioCallId").is_empty());
+    // The provider may be named only by its adapter; the trait, orchestration and the
+    // Call aggregate stay neutral. Calling's own neutral evidence table is not a foreign
+    // `provider_events` table, but that table name is.
+    let adapter = "pub struct LiveKitAdapter; const ADAPTER_NAME: &str = \"livekit\";";
+    assert!(call_domain_violations("src/media/livekit.rs", adapter).is_empty());
+    for file in [
+        "src/media/provider.rs",
+        "src/calls/app/media.rs",
+        "src/calls/aggregate.rs",
+        "src/models/calls.rs",
+    ] {
+        assert!(
+            call_domain_violations(file, adapter)
+                .iter()
+                .any(|v| v.contains("livekit")),
+            "{file}"
+        );
+    }
+    assert!(
+        call_domain_violations("src/media/livekit.rs", "struct TwilioRoom;")
+            .iter()
+            .any(|v| v.contains("twilio"))
+    );
+    assert!(call_domain_violations(
+        "src/calls/app/media.rs",
+        "INSERT INTO call_media_provider_events"
+    )
+    .is_empty());
+    assert!(
+        !call_domain_violations("src/calls/app/media.rs", "INSERT INTO provider_events").is_empty()
+    );
 
     assert!(!state_write_violations(
         "src/calls/service/x.rs",
@@ -777,4 +826,103 @@ fn context_types_have_no_implicit_conversions() {
             assert!(!code.contains("Deserialize"));
         }
     }
+}
+
+/// Fields a client request body must never carry (Part C §75, §127): scope, state,
+/// authorization, routing, provider, room, media identity or permissions.
+const FORBIDDEN_REQUEST_FIELDS: &[&str] = &[
+    "tenant_id",
+    "application_id",
+    "environment_id",
+    "state",
+    "current_state",
+    "call_state",
+    "authorized",
+    "authorization",
+    "route",
+    "provider",
+    "room",
+    "room_name",
+    "media_identity",
+    "identity",
+    "permissions",
+    "can_publish_audio",
+    "can_publish_video",
+    "can_publish_data",
+    "can_subscribe",
+    "grants",
+    "phone_number",
+];
+
+/// Field names of every `Deserialize` struct in `code`.
+fn request_body_fields(code: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    for (i, _) in code.match_indices("Deserialize") {
+        let Some(start) = code[i..].find("struct ") else {
+            continue;
+        };
+        let rest = &code[i + start..];
+        let (Some(open), Some(close)) = (rest.find('{'), rest.find('}')) else {
+            continue;
+        };
+        if open > close {
+            continue;
+        }
+        for line in rest[open + 1..close].lines() {
+            let line = line
+                .trim()
+                .trim_start_matches("pub ")
+                .trim_start_matches("pub(crate) ");
+            if let Some((name, _)) = line.split_once(':') {
+                if !name.starts_with('#') && !name.is_empty() {
+                    fields.push(name.trim().to_string());
+                }
+            }
+        }
+    }
+    fields
+}
+
+fn request_body_violations(file: &str, code: &str) -> Vec<String> {
+    request_body_fields(code)
+        .into_iter()
+        .filter(|f| FORBIDDEN_REQUEST_FIELDS.contains(&f.as_str()))
+        .map(|f| format!("{file}: request body accepts `{f}`"))
+        .collect()
+}
+
+#[test]
+fn request_bodies_carry_cf_meet_concepts_only() {
+    let mut violations = Vec::new();
+    let mut checked = 0;
+    for (file, code) in production_sources() {
+        if file.ends_with("http.rs") {
+            checked += request_body_fields(&code).len();
+            violations.extend(request_body_violations(&file, &code));
+            if code.contains("Deserialize") {
+                assert!(
+                    code.contains("deny_unknown_fields"),
+                    "{file}: request bodies must refuse unknown fields"
+                );
+            }
+        }
+    }
+    assert!(checked > 10, "request bodies were found ({checked} fields)");
+    assert!(violations.is_empty(), "{violations:#?}");
+    // Mutation: a client-chosen state, scope or permission is detected.
+    for field in ["state", "tenant_id", "can_publish_video", "room"] {
+        let code = format!(
+            "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\nstruct Body {{\n    expected_version: i64,\n    {field}: String,\n}}"
+        );
+        assert_eq!(
+            request_body_violations("src/x/http.rs", &code).len(),
+            1,
+            "{field}"
+        );
+    }
+    assert!(request_body_violations(
+        "src/x/http.rs",
+        "#[derive(Deserialize)]\nstruct Body {\n    expected_version: i64,\n}"
+    )
+    .is_empty());
 }

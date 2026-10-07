@@ -303,11 +303,14 @@ class RealRepository(unittest.TestCase):
         self.assertTrue({"users", "organizations", "meeting_spaces"} <= self.repo.tables["meeting-service"])
         calling = self.repo.tables["calling"]
         self.assertTrue(calling)
-        # Calling owns its platform foundation and the call domain (Part C sections 15-19).
+        # Calling owns its platform foundation and the call domain (Part C sections 15-25).
         call_domain = {
             "calls", "call_participants", "call_sessions", "call_session_intervals",
             "call_routes", "call_legs", "call_attempts", "call_authorizations",
             "call_events", "call_quality_records", "call_usage_records", "calling_outbox_events",
+            "call_endpoints", "call_invitations", "call_answer_claims",
+            "call_participant_media_permissions", "call_media_sessions", "call_commands",
+            "call_transfers", "call_media_provider_events",
         }
         self.assertTrue(call_domain <= calling)
         self.assertTrue(all(t.startswith("platform_") or t in call_domain for t in calling), calling)
