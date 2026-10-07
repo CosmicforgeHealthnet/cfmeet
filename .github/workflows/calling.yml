@@ -1,0 +1,177 @@
+name: Calling service
+
+# services/calling — the Rust/Axum Calling service (platform consumer, credential and
+# principal trust foundation). Independent of services/meeting-service: this workflow
+# never builds or starts the Meeting Service.
+#
+# CI builds carry no debug info and no incremental state (as in backend.yml);
+# debug assertions stay on.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/calling/**"
+      - "packages/contracts/calling/**"
+      - ".github/workflows/calling.yml"
+  pull_request:
+    paths:
+      - "services/calling/**"
+      - "packages/contracts/calling/**"
+      - ".github/workflows/calling.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: calling-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: services/calling
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  lint:
+    name: fmt / check / clippy / boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/calling -> target
+          key: lint
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo check
+        run: cargo check --workspace --locked
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Architecture / boundary tests
+        run: cargo test --locked --test architecture_boundaries
+
+      - name: Repository guards (no Meeting Service source coupling, no phase-03 paths)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -i 'phase-03'; then
+            echo "::error::a phase-03 path exists in the repository"; exit 1
+          fi
+          # Code lines only (comments may describe the boundary).
+          if grep -rIn --include='*.rs' -E 'meeting-service|meeting_service' services/calling/src services/calling/migration/src \
+               | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//'; then
+            echo "::error::services/calling source references the Meeting Service"; exit 1
+          fi
+          if grep -n -E 'meeting-service|meeting_service' services/calling/Cargo.toml services/calling/migration/Cargo.toml; then
+            echo "::error::services/calling depends on the Meeting Service"; exit 1
+          fi
+
+  test:
+    name: test (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      # Each test clones its own database from a migrated template.
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/calling -> target
+          key: test
+
+      # Unit + PostgreSQL integration tests: migrations, tenant isolation, first-party vs
+      # external, credential storage, authentication, environment isolation, scopes,
+      # rotation, secret leakage, principals, limits, admin CLI, architecture.
+      - name: cargo test
+        run: cargo test --workspace --no-fail-fast --locked
+
+  build:
+    name: build / migration smoke
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/calling -> target
+          key: build
+
+      - name: cargo build
+        run: cargo build --workspace --locked
+
+      - name: Migration smoke (up / reset / up)
+        env:
+          PGPASSWORD: postgres
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/calling_migration_smoke
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE calling_migration_smoke"
+          cargo run -q --locked -p calling-migration -- up
+          cargo run -q --locked -p calling-migration -- status
+          cargo run -q --locked -p calling-migration -- reset
+          cargo run -q --locked -p calling-migration -- up
+          test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
+            "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'platform\_%'")" = "11"
+
+      - name: Service starts against the migrated database and refuses weak secrets
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/calling_migration_smoke
+          CALLING_BIND_ADDRESS: 127.0.0.1:8090
+        run: |
+          set -euo pipefail
+          if API_CREDENTIAL_PEPPER=changeme ./target/debug/calling; then
+            echo "::error::service started with a placeholder pepper"; exit 1
+          fi
+          export API_CREDENTIAL_PEPPER="$(openssl rand -base64 48)"
+          ./target/debug/calling &
+          pid=$!
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8090/health; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8090/health | grep -q '"status":"ok"'
+          kill "$pid"
+
+  docker:
+    name: Docker image (services/calling/ context)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker build
+        run: docker build -t cfmeet-calling:ci .

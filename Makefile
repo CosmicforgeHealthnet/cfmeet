@@ -1,13 +1,14 @@
 # CF Meet — root developer commands.
-# Each target delegates to the app/service's own toolchain. services/meeting-service/
-# and apps/web/ remain independently buildable and deployable.
+# Each target delegates to the app/service's own toolchain. services/meeting-service/,
+# services/calling/ and apps/web/ remain independently buildable and deployable.
 
 MEETING_SERVICE := services/meeting-service
+CALLING         := services/calling
 WEB             := apps/web
 
 .PHONY: help deps deps-down meeting-service backend frontend web migrate dev test lint build \
         backend-test backend-lint backend-build frontend-test frontend-lint frontend-build \
-        frontend-install
+        frontend-install calling calling-migrate calling-test calling-lint calling-build calling-admin
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -26,6 +27,25 @@ meeting-service: ## Run the Meeting & Conference Platform service
 
 backend: meeting-service ## Legacy alias for `make meeting-service`
 
+calling-migrate: ## Apply Calling service database migrations (services/calling/.env)
+	cd $(CALLING) && cargo run -p calling-migration -- up
+
+calling: ## Run the Calling service
+	cd $(CALLING) && cargo run --bin calling
+
+calling-admin: ## Calling platform administration CLI, e.g. make calling-admin ARGS="tenant list"
+	cd $(CALLING) && cargo run --bin platform_admin -- $(ARGS)
+
+calling-test: ## Run Calling tests (requires TEST_DATABASE_URL; no Docker needed)
+	cd $(CALLING) && cargo test --workspace --no-fail-fast
+
+calling-lint: ## fmt + clippy for the Calling service
+	cd $(CALLING) && cargo fmt --all -- --check
+	cd $(CALLING) && cargo clippy --workspace --all-targets -- -D warnings
+
+calling-build: ## Build the Calling service
+	cd $(CALLING) && cargo build --workspace
+
 frontend: frontend-install ## Run the web app dev server (apps/web)
 	cd $(WEB) && npm run dev
 
@@ -34,11 +54,11 @@ web: frontend ## Alias for `make frontend`
 dev: ## Start deps, then meeting service + web app together (Ctrl+C stops both)
 	./scripts/dev.sh
 
-test: backend-test frontend-test ## Run all tests
+test: backend-test calling-test frontend-test ## Run all tests
 
-lint: backend-lint frontend-lint ## Run all linters
+lint: backend-lint calling-lint frontend-lint ## Run all linters
 
-build: backend-build frontend-build ## Build both applications
+build: backend-build calling-build frontend-build ## Build all applications and services
 
 backend-test:
 	cd $(MEETING_SERVICE) && cargo test --workspace
