@@ -35,6 +35,7 @@ pub mod models;
 pub mod platform;
 pub mod privacy_relay;
 pub mod routes;
+pub mod routing;
 pub mod signaling;
 pub mod state;
 pub mod telemetry;

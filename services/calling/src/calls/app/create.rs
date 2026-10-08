@@ -36,6 +36,13 @@ use crate::{
         principals::{PrincipalReference, PrincipalResolutionError, ResolvedPrincipal},
     },
     privacy_relay::{AuthorizationPurpose, PRIVACY_RELAY_POLICY},
+    routing::{
+        engine::{
+            DestinationFacts, DuplicateRisk, EndpointClass, Evidence, RouteDecision,
+            RouteDirection, RouteInputs, TelecomFlags,
+        },
+        RoutingClass,
+    },
     signaling::signals::SignalType,
 };
 
@@ -283,6 +290,7 @@ impl AppCallService {
             .await?;
         let mut endpoint_count = 0usize;
         let mut unreachable = 0usize;
+        let mut destinations = Vec::with_capacity(targets.len());
         for target in &targets {
             let (participant, _) = self
                 .calls
@@ -304,11 +312,48 @@ impl AppCallService {
                 unreachable += 1;
             }
             endpoint_count += endpoints.len();
+            destinations.push(DestinationFacts {
+                class: EndpointClass::Application,
+                app_reachable: Evidence::Known(!endpoints.is_empty()),
+                contact: None,
+            });
         }
         let call = self.locked(&txn, &call).await?;
-        if unreachable > 0 {
-            // Route unavailable: every target is required and only APPLICATION exists
-            // today. No fake public-network fallback.
+        // Routing Engine (§37–§38): principal targets with application endpoints route
+        // APP_RTC; a principal target is never silently moved to a paid route.
+        let policy =
+            crate::routing::store::load_policy(&txn, scope.environment_id().as_uuid()).await?;
+        let decision = crate::routing::engine::select(
+            &policy.policy,
+            &RouteInputs {
+                direction: RouteDirection::Outbound,
+                source: EndpointClass::Application,
+                source_contact: None,
+                destinations,
+                requested: None,
+                authorized: true,
+                permitted_classes: vec![RoutingClass::AppRtc],
+                relay_session_id: privacy.as_ref().map(|d| d.relay_session_id),
+                context_id: privacy.as_ref().map(|d| d.context_id),
+                live_telecom_allowed: false,
+                flags: TelecomFlags::default(),
+                routes: Evidence::Unknown,
+                spend_headroom_minor: Evidence::Unknown,
+                operational_incident: Evidence::Unknown,
+                duplicate_risk: DuplicateRisk::None,
+            },
+            self.calls.now(),
+        );
+        let plan = match decision {
+            RouteDecision::Selected(mut plan) => {
+                plan.policy_version = policy.version_label();
+                Some(*plan)
+            }
+            RouteDecision::Denied(_) => None,
+        };
+        if unreachable > 0 || plan.is_none() {
+            // Route unavailable: every target is required and only APPLICATION reaches a
+            // principal. No fake public-network fallback.
             let call = self
                 .calls
                 .transition_in(
@@ -376,6 +421,7 @@ impl AppCallService {
                     route_class: RouteClass::Application,
                     policy_version: PolicyVersion::parse(APP_ROUTE_POLICY)?,
                     decision_snapshot: decision,
+                    plan,
                 },
             )
             .await?;

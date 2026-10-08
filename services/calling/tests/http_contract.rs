@@ -980,6 +980,7 @@ async fn every_outbox_row_is_a_valid_envelope_with_a_valid_lifecycle_payload() {
                 route_class: calling::calls::kinds::RouteClass::Mixed,
                 policy_version: calling::calls::routes::PolicyVersion::parse("v1").unwrap(),
                 decision_snapshot: calling::calls::attributes::SafeAttributes::new(),
+                plan: None,
             },
         )
         .await

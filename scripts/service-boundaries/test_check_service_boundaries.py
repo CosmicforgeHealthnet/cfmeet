@@ -313,6 +313,8 @@ class RealRepository(unittest.TestCase):
             "call_transfers", "call_media_provider_events",
             # Part D sections 26-30: evidence of Privacy Relay decisions / enforcement.
             "call_privacy_authorizations", "call_privacy_enforcements",
+            # Part E sections 37-38: the typed routing policy of the Routing Engine.
+            "call_routing_policies",
         }
         self.assertTrue(call_domain <= calling)
         self.assertTrue(all(t.startswith("platform_") or t in call_domain for t in calling), calling)

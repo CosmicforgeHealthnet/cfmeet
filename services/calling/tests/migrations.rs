@@ -62,6 +62,7 @@ const CALL_TABLES: &[&str] = &[
     "call_privacy_enforcements",
     "call_quality_records",
     "call_routes",
+    "call_routing_policies",
     "call_session_intervals",
     "call_sessions",
     "call_transfers",
@@ -70,7 +71,7 @@ const CALL_TABLES: &[&str] = &[
     "calls",
 ];
 
-const MIGRATIONS: usize = 16;
+const MIGRATIONS: usize = 17;
 const PART_B_MIGRATIONS: u32 = 4;
 
 #[tokio::test]

@@ -34,6 +34,7 @@ fn route(class: RouteClass) -> NewRoute {
             .unwrap()
             .with("candidate_count", 1)
             .unwrap(),
+        plan: None,
     }
 }
 

@@ -267,6 +267,7 @@ impl AppCallService {
                     route_class: RouteClass::Application,
                     policy_version: PolicyVersion::parse(super::create::APP_ROUTE_POLICY)?,
                     decision_snapshot: decision,
+                    plan: None,
                 },
             )
             .await?;

@@ -366,8 +366,15 @@ fn contains_word(haystack: &str, word: &str) -> bool {
 }
 
 /// Violations of the call-domain provider / contact rules in one production file.
+/// The canonical Part E route classes (APP_TO_PSTN, PSTN_TO_APP, PSTN_RELAY) are CF Meet
+/// vocabulary, not provider code: only these exact variant names may contain `pstn`.
+const CANONICAL_ROUTE_VARIANTS: &[&str] = &["apptopstn", "pstntoapp", "pstnrelay"];
+
 fn call_domain_violations(file: &str, code: &str) -> Vec<String> {
-    let identifiers = strip_strings(code).to_lowercase();
+    let mut identifiers = strip_strings(code).to_lowercase();
+    for variant in CANONICAL_ROUTE_VARIANTS {
+        identifiers = identifiers.replace(variant, "");
+    }
     let mut out = Vec::new();
     for term in PROVIDER_TERMS {
         if *term == "livekit" && MEDIA_ADAPTER_FILES.contains(&file) {

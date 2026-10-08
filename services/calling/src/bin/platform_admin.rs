@@ -76,6 +76,24 @@ enum Command {
     /// Application / credential limit policy.
     #[command(subcommand)]
     Limits(LimitsCmd),
+    /// Typed routing policy of an environment (Part E §37–§38).
+    #[command(subcommand)]
+    RoutingPolicy(RoutingPolicyCmd),
+}
+
+#[derive(Subcommand)]
+enum RoutingPolicyCmd {
+    /// Replace the routing policy of an environment with a validated JSON document
+    /// (camelCase RoutingPolicy; unknown fields are refused).
+    Set {
+        #[command(flatten)]
+        environment: EnvironmentPath,
+        /// Path of the policy document.
+        #[arg(long)]
+        file: std::path::PathBuf,
+    },
+    /// The effective routing policy (the restrictive default when none is stored).
+    Show(EnvironmentPath),
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -384,6 +402,7 @@ enum LimitsCmd {
 
 struct Admin {
     platform: PlatformService,
+    db: sea_orm::DatabaseConnection,
     clock: SystemClock,
 }
 
@@ -758,6 +777,59 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                 print(&p.effective_limits(id).await?)
             }
         },
+        Command::RoutingPolicy(cmd) => {
+            use calling::routing::{policy::RoutingPolicy, store};
+            let db_error = |_| PlatformError::Database {
+                summary: "routing policy".to_string(),
+                connectivity: false,
+            };
+            match cmd {
+                RoutingPolicyCmd::Set { environment, file } => {
+                    let env = admin.environment(&environment).await?;
+                    let text = std::fs::read_to_string(&file).map_err(|_| {
+                        PlatformError::Validation("cannot read the policy file".to_string())
+                    })?;
+                    let value: serde_json::Value = serde_json::from_str(&text).map_err(|_| {
+                        PlatformError::Validation("the policy file is not JSON".to_string())
+                    })?;
+                    let policy = RoutingPolicy::parse(&value)
+                        .map_err(|e| PlatformError::Validation(e.to_string()))?;
+                    let revision = store::store_policy(
+                        &admin.db,
+                        env.tenant_id.as_uuid(),
+                        env.application_id.as_uuid(),
+                        env.id.as_uuid(),
+                        &policy,
+                        admin.clock.now(),
+                    )
+                    .await
+                    .map_err(|e| match e {
+                        store::PolicyStoreError::Invalid(m) => {
+                            PlatformError::Validation(m.to_string())
+                        }
+                        store::PolicyStoreError::Database(_) => PlatformError::Database {
+                            summary: "routing policy".to_string(),
+                            connectivity: false,
+                        },
+                    })?;
+                    print(
+                        &json!({ "environmentId": env.id, "revision": revision, "policy": policy }),
+                    )
+                }
+                RoutingPolicyCmd::Show(environment) => {
+                    let env = admin.environment(&environment).await?;
+                    let effective = store::load_policy(&admin.db, env.id.as_uuid())
+                        .await
+                        .map_err(db_error)?;
+                    print(&json!({
+                        "environmentId": env.id,
+                        "revision": effective.revision,
+                        "policyVersion": effective.version_label(),
+                        "policy": effective.policy,
+                    }))
+                }
+            }
+        }
     }
 }
 
@@ -790,6 +862,7 @@ async fn main() -> ExitCode {
         }
     };
     let admin = Admin {
+        db: db.clone(),
         platform: PlatformService::new(
             db,
             Arc::new(SystemClock),

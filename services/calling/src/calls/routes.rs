@@ -47,6 +47,9 @@ pub struct NewRoute {
     pub route_class: RouteClass,
     pub policy_version: PolicyVersion,
     pub decision_snapshot: SafeAttributes,
+    /// The Routing Engine's provider-independent plan (Part E). Without one, an
+    /// APPLICATION route is recorded as APP_RTC.
+    pub plan: Option<crate::routing::engine::RoutePlan>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -58,6 +61,8 @@ pub struct CallRoute {
     pub policy_version: String,
     pub selected_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub routing_class: Option<crate::routing::RoutingClass>,
 }
 
 impl From<call_routes::Model> for CallRoute {
@@ -70,6 +75,7 @@ impl From<call_routes::Model> for CallRoute {
             policy_version: m.policy_version,
             selected_at: m.selected_at,
             ended_at: m.ended_at,
+            routing_class: m.routing_class,
         }
     }
 }

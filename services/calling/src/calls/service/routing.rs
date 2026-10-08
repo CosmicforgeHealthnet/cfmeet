@@ -18,7 +18,7 @@ use crate::{
         errors::{CallError, CallResult},
         events::CallEventType,
         ids::{CallAttemptId, CallId, CallLegId, CallRouteId},
-        kinds::{AttemptOutcome, FailureCategory, LegState, RouteState},
+        kinds::{AttemptOutcome, FailureCategory, LegState, RouteClass, RouteState},
         legs::{CallLeg, NewLeg},
         routes::{CallRoute, NewRoute},
     },
@@ -52,8 +52,57 @@ impl CallService {
                 state: call.current_state,
             });
         }
+        let routing_class = match &new.plan {
+            Some(plan) => {
+                if plan.route_class.network_class() != new.route_class {
+                    return Err(CallError::Validation(
+                        "the route plan does not match the route class",
+                    ));
+                }
+                Some(plan.route_class)
+            }
+            None if new.route_class == RouteClass::Application => {
+                Some(crate::routing::RoutingClass::AppRtc)
+            }
+            None => None,
+        };
+        // Idempotent selection: the same plan (fingerprint) is active at most once.
+        let fingerprint = new.plan.as_ref().map(|p| p.fingerprint());
+        if let Some(fp) = &fingerprint {
+            if let Some(existing) = call_routes::Entity::find()
+                .filter(call_routes::Column::CallId.eq(call.id))
+                .filter(call_routes::Column::PlanFingerprint.eq(fp.clone()))
+                .filter(
+                    call_routes::Column::State.is_in([RouteState::Selected, RouteState::Active]),
+                )
+                .one(txn)
+                .await?
+            {
+                return Ok(existing);
+            }
+        }
+        let plan_json = match &new.plan {
+            Some(plan) => Some(
+                serde_json::to_value(plan)
+                    .map_err(|_| CallError::Validation("the route plan cannot be encoded"))?,
+            ),
+            None => None,
+        };
         let at = self.now().max(call.updated_at);
         let route = call_routes::ActiveModel {
+            routing_class: Set(routing_class),
+            route_plan: Set(plan_json),
+            plan_fingerprint: Set(fingerprint),
+            selected_route_ref: Set(new
+                .plan
+                .as_ref()
+                .and_then(|p| p.candidate_routes.first().cloned())),
+            max_attempts: Set(new
+                .plan
+                .as_ref()
+                .map(|p| i16::from(p.failover.max_attempts))),
+            plan_expires_at: Set(new.plan.as_ref().and_then(|p| p.expires_at)),
+            route_version: Set(1),
             id: Set(CallRouteId::generate().as_uuid()),
             call_id: Set(call.id),
             tenant_id: Set(call.tenant_id),
@@ -74,14 +123,17 @@ impl CallService {
             txn,
             cmd,
             call,
-            EventDraft::fact(
-                CallEventType::CallRouteRecorded,
-                data(vec![
+            EventDraft::fact(CallEventType::CallRouteRecorded, {
+                let mut details = vec![
                     ("route_id", text(route.id)),
                     ("route_class", text(route.route_class)),
                     ("policy_version", text(&route.policy_version)),
-                ])?,
-            ),
+                ];
+                if let Some(class) = route.routing_class {
+                    details.push(("routing_class", text(class)));
+                }
+                data(details)?
+            }),
             at,
         )
         .await?;
@@ -123,8 +175,10 @@ impl CallService {
         }
         let from = route.state;
         let at = self.now().max(route.updated_at);
+        let version = route.route_version + 1;
         let mut active: call_routes::ActiveModel = route.into();
         active.state = Set(target);
+        active.route_version = Set(version);
         if target.is_terminal() {
             active.ended_at = Set(Some(at));
         }
