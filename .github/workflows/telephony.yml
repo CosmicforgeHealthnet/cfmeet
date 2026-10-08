@@ -361,12 +361,12 @@ jobs:
         run: |
           set -euo pipefail
           test "$(docker run --rm --entrypoint /bin/ls cfmeet-telephony:ci /app | tr '\n' ' ')" = "telephony telephony-admin telephony-migration "
-          if docker run --rm --entrypoint /bin/sh cfmeet-telephony:ci -c 'grep -rlI -- "PRIVATE KEY-----" / --exclude-dir=proc --exclude-dir=sys 2>/dev/null'; then
+          if docker run --rm --entrypoint /bin/sh cfmeet-telephony:ci -c 'grep -rlI --exclude-dir=proc --exclude-dir=sys -- "PRIVATE KEY-----" / 2>/dev/null'; then
             echo "::error::private key material in the image"; exit 1
           fi
           # No Asterisk / trunk configuration, certification password or test number.
           # (bracketed patterns so the scan never matches its own command line)
           if docker run --rm --entrypoint /bin/sh cfmeet-telephony:ci -c \
-               'grep -rlIE -- "certification-only-ari-passwor[d]|\[cfmeet-trun[k]|234803123456[7]" / --exclude-dir=proc --exclude-dir=sys 2>/dev/null'; then
+               'grep -rlIE --exclude-dir=proc --exclude-dir=sys -- "certification-only-ari-passwor[d]|\[cfmeet-trun[k]|234803123456[7]" / 2>/dev/null'; then
             echo "::error::edge / trunk configuration or test material in the image"; exit 1
           fi

@@ -339,12 +339,12 @@ jobs:
         run: |
           set -euo pipefail
           test "$(docker run --rm --entrypoint /bin/ls cfmeet-privacy-relay:ci /app | tr '\n' ' ')" = "privacy-relay privacy-relay-admin privacy-relay-migration "
-          if docker run --rm --entrypoint /bin/sh cfmeet-privacy-relay:ci -c 'grep -rlI -- "PRIVATE KEY-----" / --exclude-dir=proc --exclude-dir=sys 2>/dev/null'; then
+          if docker run --rm --entrypoint /bin/sh cfmeet-privacy-relay:ci -c 'grep -rlI --exclude-dir=proc --exclude-dir=sys -- "PRIVATE KEY-----" / 2>/dev/null'; then
             echo "::error::private key material in the image"; exit 1
           fi
           # No Contact Vault keyring, no test canary numbers, no fallback key in the image.
           if docker run --rm --entrypoint /bin/sh cfmeet-privacy-relay:ci -c \
-               'grep -rlE -- "\"keyring_version\"|CONTACT_ENCRYPTION\",|2079460(123|958)|390212345678" / --exclude-dir=proc --exclude-dir=sys --exclude-dir=app 2>/dev/null'; then
+               'grep -rlE --exclude-dir=proc --exclude-dir=sys --exclude-dir=app -- "\"keyring_version\"|CONTACT_ENCRYPTION\",|2079460(123|958)|390212345678" / 2>/dev/null'; then
             echo "::error::keyring or canary material in the image"; exit 1
           fi
           if docker run --rm --entrypoint /bin/sh cfmeet-privacy-relay:ci -c 'grep -c -- "2079460123" /app/privacy-relay /app/privacy-relay-admin | grep -v ":0$"'; then

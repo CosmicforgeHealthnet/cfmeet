@@ -320,6 +320,6 @@ jobs:
         run: |
           set -euo pipefail
           test "$(docker run --rm --entrypoint /bin/ls cfmeet-calling:ci /app | tr '\n' ' ')" = "calling calling-migration platform_admin "
-          if docker run --rm --entrypoint /bin/sh cfmeet-calling:ci -c 'grep -rlI -- "PRIVATE KEY-----" / --exclude-dir=proc --exclude-dir=sys 2>/dev/null'; then
+          if docker run --rm --entrypoint /bin/sh cfmeet-calling:ci -c 'grep -rlI --exclude-dir=proc --exclude-dir=sys -- "PRIVATE KEY-----" / 2>/dev/null'; then
             echo "::error::private key material in the image"; exit 1
           fi
