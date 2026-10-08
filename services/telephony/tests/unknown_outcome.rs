@@ -294,3 +294,42 @@ async fn native_provider_idempotency_is_used_and_its_reference_persisted() {
         format!("idem-{command}")
     );
 }
+
+#[tokio::test]
+async fn the_database_failing_at_the_transmit_fence_means_nothing_is_sent() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    // Part E §206: the database refuses the transmit-fence commit (as if it went down
+    // between the command becoming durable and the provider request).
+    h.sql(
+        "CREATE FUNCTION test_fence_down() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN \
+           IF NEW.transmitted_at IS NOT NULL AND OLD.transmitted_at IS NULL THEN \
+             RAISE EXCEPTION 'database unavailable (injected)'; END IF; RETURN NEW; END $$",
+    )
+    .await;
+    h.sql(
+        "CREATE TRIGGER test_fence_down BEFORE UPDATE ON telephony_commands \
+         FOR EACH ROW EXECUTE FUNCTION test_fence_down()",
+    )
+    .await;
+    let (leg, _) = h.originate().await;
+    for _ in 0..3 {
+        h.run().await;
+    }
+    // No provider request left Telephony; the leg never moved; nothing is marked done.
+    assert!(h.provider_a.requests().is_empty());
+    assert_eq!(h.leg_status(leg).await, "PLANNED");
+    assert!(h.calling.event_types_for(leg).is_empty());
+    // §207: the database is back; the expired lease is recovered (nothing was
+    // transmitted, so a retry is safe) and the leg executes exactly once.
+    h.sql("DROP TRIGGER test_fence_down ON telephony_commands")
+        .await;
+    h.advance(31);
+    for _ in 0..3 {
+        h.run().await;
+    }
+    assert_eq!(h.provider_a.requests().len(), 1);
+    assert_eq!(h.provider_a.effects().len(), 1);
+    assert_eq!(h.leg_status(leg).await, "ORIGINATING");
+}

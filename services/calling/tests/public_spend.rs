@@ -410,3 +410,50 @@ async fn estimated_cost_is_reserved_and_actual_cost_settled_without_pretending()
         1
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn spend_reservation_contention_is_serialized_and_measured() {
+    let Some(x) = world().await else { return };
+    let call = x.call("contention").await;
+    let legs = x.legs(&call, 60).await;
+    let started = std::time::Instant::now();
+    let tasks: Vec<_> = legs
+        .into_iter()
+        .map(|leg| {
+            let conn = x.w.h().conn().clone();
+            let call = call.clone();
+            tokio::spawn(async move {
+                let txn = conn.begin().await.unwrap();
+                let r =
+                    spend::reserve_in(&txn, &call, leg, Some(Uuid::new_v4()), chrono::Utc::now())
+                        .await
+                        .unwrap();
+                txn.commit().await.unwrap();
+                r.is_ok()
+            })
+        })
+        .collect();
+    let mut granted = 0;
+    for t in tasks {
+        if t.await.unwrap() {
+            granted += 1;
+        }
+    }
+    let elapsed = started.elapsed();
+    assert_eq!(granted, 60);
+    eprintln!(
+        "LOAD: 60 contending spend reservations (one environment lock) in {elapsed:?} ({:.0}/s)",
+        60.0 / elapsed.as_secs_f64()
+    );
+    assert_eq!(
+        scalar_i64(
+            x.w.h().conn(),
+            &format!(
+                "SELECT count(*) FROM call_spend_reservations WHERE call_id = '{}'",
+                call.id
+            )
+        )
+        .await,
+        61
+    );
+}

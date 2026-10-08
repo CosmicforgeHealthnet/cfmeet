@@ -341,3 +341,35 @@ async fn callback_relay_requires_its_policy_and_switch() {
         .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_identical_callback_requests_create_one_call_and_one_paid_leg() {
+    let Some(x) = world(true).await else { return };
+    let (a, b, c, d) = tokio::join!(
+        x.request("cb-concurrent"),
+        x.request("cb-concurrent"),
+        x.request("cb-concurrent"),
+        x.request("cb-concurrent")
+    );
+    let rs = [a, b, c, d];
+    let ids: std::collections::BTreeSet<String> = rs
+        .iter()
+        .filter(|r| r.status.is_success())
+        .map(|r| r.json["call"]["callId"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        ids.len(),
+        1,
+        "{:?}",
+        rs.iter().map(|r| r.text.clone()).collect::<Vec<_>>()
+    );
+    // Losers of the race are replays of the winner or told to retry — never a second Call.
+    assert!(rs
+        .iter()
+        .all(|r| r.status.is_success() || r.status == StatusCode::CONFLICT));
+    assert_eq!(x.telephony.originates().len(), 1, "one paid first leg");
+    assert_eq!(
+        scalar_i64(x.w.h().conn(), "SELECT count(*) FROM calls").await,
+        1
+    );
+}
