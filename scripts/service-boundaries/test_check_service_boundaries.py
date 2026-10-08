@@ -328,9 +328,11 @@ class RealRepository(unittest.TestCase):
         } <= relay, relay)
         self.assertFalse(relay & self.repo.tables["calling"])
         self.assertFalse(relay & self.repo.tables["meeting-service"])
-        # Contact Vault (sections 31-33) is not implemented: no contact storage anywhere.
-        everything = set().union(*self.repo.tables.values())
-        self.assertFalse({"protected_contacts", "contact_vault_entries", "relay_numbers"} & everything)
+        # Contact Vault (Part D sections 31-33) lives inside Privacy Relay only.
+        self.assertTrue({"protected_contacts", "contact_access_audit"} <= relay, relay)
+        for other in ("calling", "meeting-service"):
+            self.assertFalse({t for t in self.repo.tables[other] if t.startswith(("protected_contact", "contact_"))},
+                             f"{other} owns contact tables")
 
     def mutated(self, mutate) -> list[guard.Violation]:
         with tempfile.TemporaryDirectory() as tmp:
@@ -423,6 +425,18 @@ class RealRepository(unittest.TestCase):
         self.assertMutationFails(
             "CROSS_SERVICE_SOURCE_INCLUDE",
             lambda r: append(r, "services/privacy-relay/src/lib.rs", '\n#[path = "../../calling/src/privacy_relay/mod.rs"]\nmod calling_privacy;\n'),
+        )
+
+    def test_calling_reading_protected_contacts(self):
+        self.assertMutationFails(
+            "CROSS_SERVICE_TABLE_ACCESS",
+            lambda r: append(r, "services/calling/src/privacy_relay/contacts.rs", '\nconst C: &str = "SELECT ciphertext FROM protected_contacts WHERE id = $1";\n'),
+        )
+
+    def test_calling_reading_the_contact_vault_database(self):
+        self.assertMutationFails(
+            "CROSS_SERVICE_DATABASE_URL",
+            lambda r: append(r, "services/calling/.env.example", "\nCONTACT_VAULT_DATABASE_URL=postgres://vault\n"),
         )
 
     def test_calling_querying_privacy_relay_tables(self):

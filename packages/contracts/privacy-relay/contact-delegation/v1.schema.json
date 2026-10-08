@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/privacy-relay/contact-delegation/v1.schema.json",
+  "title": "CF Meet Contact Vault delegated access v1",
+  "description": "Contact Vault delegated access (Part D section 31): the grant request / response served by Calling, the access token claims and the receiver trust bundle. The root accepts exactly one of them (fixtures).",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ContactScope"
+    },
+    {
+      "$ref": "#/$defs/ContactAccessGrantRequest"
+    },
+    {
+      "$ref": "#/$defs/ContactAccessGrant"
+    },
+    {
+      "$ref": "#/$defs/ContactAccessGrantResult"
+    },
+    {
+      "$ref": "#/$defs/ContactDelegationClaims"
+    },
+    {
+      "$ref": "#/$defs/ContactDelegationTrustBundle"
+    }
+  ],
+  "$defs": {
+    "ContactScope": {
+      "description": "Contact Vault scopes. A credential can delegate only scopes it holds, and Privacy Relay accepts only scopes its contact delegation trust bundle allows the issuer to delegate.",
+      "type": "string",
+      "enum": [
+        "privacy.contacts.read",
+        "privacy.contacts.write",
+        "privacy.contacts.verify"
+      ]
+    },
+    "ContactAccessGrantRequest": {
+      "description": "POST /v1/privacy-relay/contact-access-grants (platform credential). Contains no telephone number.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scopes"
+      ],
+      "properties": {
+        "scopes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/ContactScope"
+          }
+        }
+      }
+    },
+    "ContactAccessGrant": {
+      "description": "A short-lived (default 120 s, at most 300 s) Contact Vault access token, returned once (Cache-Control: no-store).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grantId",
+        "accessToken",
+        "tokenType",
+        "authorizationHeader",
+        "audience",
+        "scopes",
+        "expiresAt"
+      ],
+      "properties": {
+        "grantId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "accessToken": {
+          "description": "Compact JWS (EdDSA, typ cf-contact-access+jwt).",
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
+        },
+        "tokenType": {
+          "const": "Bearer"
+        },
+        "authorizationHeader": {
+          "const": "X-CF-Contact-Authorization"
+        },
+        "audience": {
+          "const": "cfmeet.privacy-relay"
+        },
+        "scopes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/ContactScope"
+          }
+        },
+        "expiresAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        }
+      }
+    },
+    "ContactAccessGrantResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grant"
+      ],
+      "properties": {
+        "grant": {
+          "$ref": "#/$defs/ContactAccessGrant"
+        }
+      }
+    },
+    "ContactDelegationClaims": {
+      "description": "Claims of a Contact Vault access token (JWS typ cf-contact-access+jwt, signed with the issuer's DEDICATED contact delegation key — never its service-auth key). The receiver enforces aud = itself, its runtime environment, iat <= nbf < exp, exp - iat <= 300 s, 30 s skew and that every scope is delegable by the issuer. Closed claim set: permissions, request ids or unknown claims are rejected.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ver",
+        "use",
+        "iss",
+        "aud",
+        "runtime_environment",
+        "iat",
+        "nbf",
+        "exp",
+        "jti",
+        "delegated_context",
+        "scopes"
+      ],
+      "properties": {
+        "ver": {
+          "const": 1
+        },
+        "use": {
+          "const": "CONTACT_VAULT_ACCESS"
+        },
+        "iss": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ServiceId"
+        },
+        "aud": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ServiceId"
+        },
+        "runtime_environment": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RuntimeEnvironment"
+        },
+        "iat": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/UnixTime"
+        },
+        "nbf": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/UnixTime"
+        },
+        "exp": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/UnixTime"
+        },
+        "jti": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "delegated_context": {
+          "$ref": "https://schemas.cfmeet.com/platform/service-auth/delegated-platform-context/v1.schema.json"
+        },
+        "scopes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/ContactScope"
+          }
+        }
+      }
+    },
+    "ContactDelegationTrustBundle": {
+      "description": "Receiver-authoritative Contact Vault delegation trust (CONTACT_DELEGATION_TRUST_BUNDLE_FILE of Privacy Relay). Keys listed here may never also be trusted for service tokens.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bundle_version",
+        "token_use",
+        "audience",
+        "runtime_environment",
+        "trusted_issuers"
+      ],
+      "properties": {
+        "bundle_version": {
+          "const": 1
+        },
+        "token_use": {
+          "const": "CONTACT_VAULT_ACCESS"
+        },
+        "audience": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ServiceId"
+        },
+        "runtime_environment": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RuntimeEnvironment"
+        },
+        "trusted_issuers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "issuer",
+              "keys",
+              "scopes"
+            ],
+            "properties": {
+              "issuer": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ServiceId"
+              },
+              "keys": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 4,
+                "items": {
+                  "$ref": "https://schemas.cfmeet.com/platform/service-auth/trust-bundle/v1.schema.json#/$defs/PublicKey"
+                }
+              },
+              "scopes": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 3,
+                "uniqueItems": true,
+                "items": {
+                  "$ref": "#/$defs/ContactScope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

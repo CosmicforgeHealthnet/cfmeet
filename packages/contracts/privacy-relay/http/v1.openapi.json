@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Privacy Relay API",
-    "version": "1.0.0",
-    "description": "The CF Meet platform Privacy Relay API (Part D sections 26-30): Communication Contexts and Privacy Relay Sessions. One generic model for first-party and external applications alike; it never knows a consumer's business object. Privacy Relay (services/privacy-relay) is the business and data authority; the API is currently served by the authenticated platform ingress (services/calling), which authenticates the customer credential, checks the scope, validates referenced principals and forwards over authenticated internal service calls with a signed delegated platform context — the customer credential is never forwarded. Tenant, application and environment come only from the credential; a resource of another scope is answered exactly like a missing one (404). Every mutation requires expectedVersion where it changes an existing resource and an Idempotency-Key (a replay returns the recorded response with Idempotent-Replayed: true; a different request under the same key is 409 IDEMPOTENCY_CONFLICT). Lifecycle changes are explicit commands; there is no status patch. No telephone number, provider id, carrier, Contact Vault material or credential is ever accepted or returned."
+    "version": "1.1.0",
+    "description": "The CF Meet platform Privacy Relay API (Part D sections 26-36): Communication Contexts, Privacy Relay Sessions and the Contact Vault. One generic model for first-party and external applications alike; it never knows a consumer's business object. Privacy Relay (services/privacy-relay) is the business and data authority; the API is currently served by the authenticated platform ingress (services/calling), which authenticates the customer credential, checks the scope, validates referenced principals and forwards over authenticated internal service calls with a signed delegated platform context — the customer credential is never forwarded. Tenant, application and environment come only from the credential; a resource of another scope is answered exactly like a missing one (404). Every mutation requires expectedVersion where it changes an existing resource and an Idempotency-Key (a replay returns the recorded response with Idempotent-Replayed: true; a different request under the same key is 409 IDEMPOTENCY_CONFLICT). Lifecycle changes are explicit commands; there is no status patch. The Contact Vault routes (x-cfmeet-served-by: cfmeet.privacy-relay) are served by Privacy Relay itself and authenticated by a short-lived Contact Vault access token minted by Calling (POST /v1/privacy-relay/contact-access-grants), so a raw telephone number never transits Calling; they are the ONLY routes that accept a telephone number (telephoneNumber), and no route ever returns one. No provider id, carrier, Contact Vault ciphertext, fingerprint, key or credential is ever accepted or returned."
   },
   "paths": {
     "/v1/privacy-relay/contexts": {
@@ -1091,6 +1091,330 @@
           }
         }
       }
+    },
+    "/v1/privacy-relay/contact-access-grants": {
+      "post": {
+        "operationId": "createContactAccessGrant",
+        "summary": "Mint a Contact Vault access token",
+        "description": "Served by Calling. Authenticates the platform credential and returns a short-lived Contact Vault access token for the requested privacy.contacts.* scopes; the credential must itself hold every requested scope (403 INSUFFICIENT_SCOPE otherwise). The body never contains a telephone number. 503 when Contact Vault delegated access is not configured.",
+        "security": [
+          {
+            "platformCredential": [
+              "privacy.contacts.read",
+              "privacy.contacts.write",
+              "privacy.contacts.verify"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "each requested privacy.contacts.* scope",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/contact-delegation/v1.schema.json#/$defs/ContactAccessGrantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The access token (returned once).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/contact-delegation/v1.schema.json#/$defs/ContactAccessGrantResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/privacy-relay/contacts": {
+      "post": {
+        "operationId": "createContact",
+        "summary": "Protect a telephone number",
+        "description": "The ONLY public entry point of a raw telephone number. Canonicalizes it to E.164 (libphonenumber metadata; malformed, ambiguous, URI or extension input is 422 CONTACT_INVALID), encrypts it with AES-256-GCM bound to the scope and ContactReference, stores only ciphertext and safe metadata, writes the contact access audit and returns the safe contact (UNVERIFIED). Requires privacy.contacts.write. 503 CONTACT_VAULT_DISABLED while the Contact Vault is disabled or not configured. The request body is never logged.",
+        "x-cfmeet-served-by": "cfmeet.privacy-relay",
+        "security": [
+          {
+            "contactDelegation": [
+              "privacy.contacts.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.contacts.write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/contact/v1.schema.json#/$defs/CreateContactRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created (or, within the same application environment, the existing) safe contact.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/contact/v1.schema.json#/$defs/ContactResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/privacy-relay/contacts/{contact_reference}": {
+      "get": {
+        "operationId": "getContact",
+        "summary": "Get a protected contact (masked)",
+        "description": "Requires privacy.contacts.read. Returns only the safe representation; every read is audited.",
+        "x-cfmeet-served-by": "cfmeet.privacy-relay",
+        "security": [
+          {
+            "contactDelegation": [
+              "privacy.contacts.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.contacts.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContactReference"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The safe contact.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/contact/v1.schema.json#/$defs/ContactResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateContact",
+        "summary": "Replace a contact's telephone number",
+        "description": "Requires privacy.contacts.write and expectedVersion (409 CONTACT_VERSION_CONFLICT otherwise). The same ContactReference gets the new canonical value under the active key, version + 1, and verification UNVERIFIED (a changed number is never still verified). The request body is never logged.",
+        "x-cfmeet-served-by": "cfmeet.privacy-relay",
+        "security": [
+          {
+            "contactDelegation": [
+              "privacy.contacts.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.contacts.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContactReference"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/contact/v1.schema.json#/$defs/UpdateContactRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The safe contact.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/contact/v1.schema.json#/$defs/ContactResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/privacy-relay/contacts/{contact_reference}/disable": {
+      "post": {
+        "operationId": "disableContact",
+        "summary": "Disable a protected contact",
+        "description": "Requires privacy.contacts.write and expectedVersion. A disabled contact is never resolved or newly referenced. Restrictive: allowed while the Contact Vault is disabled. Repeating it on a disabled contact returns the contact.",
+        "x-cfmeet-served-by": "cfmeet.privacy-relay",
+        "security": [
+          {
+            "contactDelegation": [
+              "privacy.contacts.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.contacts.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContactReference"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/contact/v1.schema.json#/$defs/DisableContactRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The safe contact.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/contact/v1.schema.json#/$defs/ContactResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1100,6 +1424,12 @@
         "scheme": "bearer",
         "bearerFormat": "cfmk_<sbx|test|live>_<public id>_<secret>",
         "description": "Customer platform API credential (Authorization: Bearer). The roles in an operation's security requirement are the platform scopes the credential must hold (privacy.contexts.read / .write, privacy.sessions.read / .write)."
+      },
+      "contactDelegation": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Contact-Authorization",
+        "description": "Contact Vault access token: \"Bearer <compact JWS>\" (typ cf-contact-access+jwt) from POST /v1/privacy-relay/contact-access-grants, at most 300 s old. The roles are the Contact Vault scopes the token must carry. A customer Authorization header, a service token or a token for another audience / runtime environment is refused (401 CONTACT_DELEGATION_INVALID); a missing scope is 403 CONTACT_SCOPE_DENIED."
       }
     },
     "parameters": {
@@ -1181,6 +1511,15 @@
         "required": false,
         "schema": {
           "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      },
+      "ContactReference": {
+        "name": "contact_reference",
+        "in": "path",
+        "required": true,
+        "description": "ContactReference. A contact of another tenant, application or environment is answered exactly like a missing one (404 CONTACT_NOT_FOUND).",
+        "schema": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContactReference"
         }
       }
     },

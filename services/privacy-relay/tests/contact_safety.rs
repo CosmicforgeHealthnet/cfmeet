@@ -77,7 +77,7 @@ async fn telephone_like_values_never_enter_storage_or_responses() {
         assert!(!transcript.contains(phone), "{phone} echoed in a response");
     }
     assert!(!transcript.contains("cfmk_"));
-    // (The idempotency `request_fingerprint` hashes a request; no contact fingerprint exists.)
+    // No plaintext-shaped column anywhere; Contact Vault material only in the vault tables.
     for column in [
         "phone",
         "msisdn",
@@ -85,14 +85,24 @@ async fn telephone_like_values_never_enter_storage_or_responses() {
         "telephone",
         "sip_uri",
         "destination_number",
-        "ciphertext",
-        "contact_fingerprint",
-        "verification",
+        "plaintext",
+        "raw_number",
     ] {
         assert_eq!(
             h.count(&format!("SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name LIKE '%{column}%'")).await,
             0,
             "no {column} column"
+        );
+    }
+    for (column, tables) in [
+        ("ciphertext", "'protected_contacts'"),
+        ("nonce", "'protected_contacts'"),
+        ("key_version", "'protected_contacts'"),
+    ] {
+        assert_eq!(
+            h.count(&format!("SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name LIKE '%{column}%' AND table_name NOT IN ({tables})")).await,
+            0,
+            "{column} outside the Contact Vault"
         );
     }
     // The database itself refuses a phone-like reference.

@@ -45,6 +45,12 @@ pub mod names {
     pub const PRIVACY_SESSIONS_READ: &str = "privacy.sessions.read";
     /// Create Privacy Relay sessions and change their lifecycle.
     pub const PRIVACY_SESSIONS_WRITE: &str = "privacy.sessions.write";
+    /// Read protected contacts (masked) through the Contact Vault (Part D §31).
+    pub const PRIVACY_CONTACTS_READ: &str = "privacy.contacts.read";
+    /// Create / replace / disable protected contacts through the Contact Vault.
+    pub const PRIVACY_CONTACTS_WRITE: &str = "privacy.contacts.write";
+    /// Assert contact verification state (a trusted integration; §33).
+    pub const PRIVACY_CONTACTS_VERIFY: &str = "privacy.contacts.verify";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -102,6 +108,21 @@ const STANDARD_SCOPES: &[ScopeDefinition] = &[
     ScopeDefinition {
         name: names::PRIVACY_SESSIONS_WRITE,
         description: "Create Privacy Relay sessions and change their lifecycle within the credential's application environment",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::PRIVACY_CONTACTS_READ,
+        description: "Read protected contacts (masked only) through the Privacy Relay Contact Vault",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::PRIVACY_CONTACTS_WRITE,
+        description: "Store, replace and disable protected telephone contacts through the Privacy Relay Contact Vault",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::PRIVACY_CONTACTS_VERIFY,
+        description: "Assert the verification state of protected contacts (trusted verification integrations only)",
         trust: ScopeTrust::Standard,
     },
     ScopeDefinition {

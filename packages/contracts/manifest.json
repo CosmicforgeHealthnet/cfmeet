@@ -159,7 +159,7 @@
     },
     {
       "id": "cfmeet.privacy-relay.http-api",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "openapi",
       "path": "privacy-relay/http/v1.openapi.json",
       "owner": "privacy-relay",
@@ -181,7 +181,7 @@
     },
     {
       "id": "cfmeet.privacy-relay.common",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "privacy-relay/common/v1.schema.json",
       "owner": "privacy-relay",
@@ -244,6 +244,28 @@
       "lifecycle": "beta",
       "authority": "contract-first",
       "description": "Privacy Relay -> Calling active-call enforcement command and result (restrictive only; deduplicated by enforcementEventId)."
+    },
+    {
+      "id": "cfmeet.privacy-relay.contact",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "privacy-relay/contact/v1.schema.json",
+      "owner": "privacy-relay",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Contact Vault bodies (Part D sections 31-33): the raw-input create / update requests (the ONLY bodies with telephoneNumber), disable, and the safe ProtectedContact representation (masked display, country, capabilities, verification) — never a number, ciphertext, nonce, fingerprint or key version."
+    },
+    {
+      "id": "cfmeet.privacy-relay.contact-delegation",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "privacy-relay/contact-delegation/v1.schema.json",
+      "owner": "privacy-relay",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Contact Vault delegated access (Part D section 31): grant request / response (served by Calling, no telephone number), the Contact Vault access token claims (typ cf-contact-access+jwt, dedicated key) and the receiver-authoritative contact delegation trust bundle."
     }
   ]
 }

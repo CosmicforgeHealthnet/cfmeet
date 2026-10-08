@@ -5,7 +5,8 @@ use std::{sync::Arc, time::Duration};
 use anyhow::anyhow;
 use privacy_relay::{
     clock::{SharedClock, SystemClock},
-    config::{FeatureFlag, RelayConfig, ServiceAuthSettings},
+    config::{ContactVaultSettings, FeatureFlag, RelayConfig, ServiceAuthSettings},
+    contact_vault::ContactVault,
     enforcement::HttpCallingEnforcer,
     error::summarize_db_error,
     internal, routes,
@@ -33,6 +34,13 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(2);
         }
     };
+    let vault_settings = match ContactVaultSettings::from_env() {
+        Ok(settings) => settings,
+        Err(err) => {
+            eprintln!("privacy-relay: contact vault configuration error: {err}");
+            std::process::exit(2);
+        }
+    };
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("privacy_relay=info,warn"));
     if config.json_logs {
@@ -51,6 +59,24 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(2);
         }
     };
+    // Contact Vault key material and delegation trust: fail closed BEFORE serving.
+    let vault_material = match vault_settings.load(
+        service_auth.signer().runtime_environment(),
+        service_auth.verifier().policy(),
+        Arc::new(cf_service_auth::SystemClock),
+    ) {
+        Ok(m) => m,
+        Err(err) => {
+            tracing::error!(error = %err, "contact vault configuration error");
+            std::process::exit(2);
+        }
+    };
+    tracing::info!(
+        contact_vault_enabled = vault_settings.enabled,
+        contact_vault_keys_configured = vault_material.keys.is_some(),
+        contact_delegation_configured = vault_material.delegation.is_some(),
+        "contact vault configuration"
+    );
     tracing::info!(
         service = %service_auth.signer().issuer(),
         runtime_environment = %service_auth.signer().runtime_environment(),
@@ -93,7 +119,7 @@ async fn main() -> anyhow::Result<()> {
     );
     let relay = RelayService::new(
         db,
-        clock,
+        clock.clone(),
         feature,
         service_auth.signer().runtime_environment(),
         Arc::new(HttpCallingEnforcer::new(service_auth.client().clone())),
@@ -101,7 +127,19 @@ async fn main() -> anyhow::Result<()> {
     // Expiry and enforcement retry on every instance (SKIP LOCKED makes them safe).
     tokio::spawn(relay.clone().run_workers(config.worker_interval));
 
-    let state = AppState::new(relay, service_auth);
+    let contacts = ContactVault::new(
+        relay.db().clone(),
+        clock.clone(),
+        FeatureFlag::new(vault_settings.enabled),
+        vault_material.keys,
+    );
+    // Key-rotation re-encryption runs on every instance (SKIP LOCKED batches).
+    tokio::spawn(privacy_relay::workers::run_contact_workers(
+        contacts.clone(),
+        config.worker_interval,
+    ));
+    let state =
+        AppState::new(relay, service_auth).with_contact_vault(contacts, vault_material.delegation);
     let app = routes::app(state, internal::routes());
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "privacy relay service listening");

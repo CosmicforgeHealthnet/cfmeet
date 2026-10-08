@@ -109,6 +109,15 @@ pub(crate) enum HeaderProblem {
 /// cf-service+jwt. Any other parameter (`jku`, `jwk`, `x5u`, `x5c`, `crit`, …) is refused
 /// so a token can never select its own key, algorithm or processing rules.
 pub(crate) fn parse_protected_header(segment: &str) -> Result<ProtectedHeader, HeaderProblem> {
+    parse_protected_header_of(segment, TOKEN_TYPE)
+}
+
+/// [`parse_protected_header`] for a token of explicit type `typ` (each token kind has its
+/// own `typ`, so a token of one kind is never accepted as another).
+pub(crate) fn parse_protected_header_of(
+    segment: &str,
+    typ: &str,
+) -> Result<ProtectedHeader, HeaderProblem> {
     let bytes = URL_SAFE_NO_PAD
         .decode(segment)
         .map_err(|_| HeaderProblem::Malformed)?;
@@ -125,7 +134,7 @@ pub(crate) fn parse_protected_header(segment: &str) -> Result<ProtectedHeader, H
         _ => return Err(HeaderProblem::Algorithm),
     }
     match object.get("typ").and_then(Value::as_str) {
-        Some(TOKEN_TYPE) => {}
+        Some(t) if t == typ => {}
         _ => return Err(HeaderProblem::TokenType),
     }
     let kid = object

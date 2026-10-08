@@ -16,8 +16,15 @@
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | 100–30000 (default 5000) |
 //! | `CALLING_INTERNAL_BASE_URL` | no | Calling's internal API (active-call enforcement) |
 //!
+//! | `CONTACT_VAULT_ENABLED` | no | Contact Vault kill switch (default `false`) |
+//! | `CONTACT_VAULT_KEYRING_FILE` | with the vault | AES-256-GCM encryption keyring (secret file) |
+//! | `CONTACT_FINGERPRINT_KEYRING_FILE` | with the vault | HMAC fingerprint keyring (separate secret file) |
+//! | `CONTACT_DELEGATION_TRUST_BUNDLE_FILE` | with the vault | which issuers' Contact Vault access tokens are accepted |
+//!
 //! Without `CALLING_INTERNAL_BASE_URL` enforcement jobs stay durably PENDING (authority is
-//! still revoked locally; nothing is falsely reported as applied).
+//! still revoked locally; nothing is falsely reported as applied). With
+//! `CONTACT_VAULT_ENABLED=true` and any Contact Vault file missing or invalid the service
+//! refuses to start (no plaintext fallback, no generated key).
 
 use std::{
     net::SocketAddr,
@@ -385,5 +392,120 @@ mod tests {
         let mut inline = base.to_vec();
         inline.push(("CF_SERVICE_AUTH_PRIVATE_KEY", "-----BEGIN PRIVATE KEY-----"));
         assert!(ServiceAuthSettings::from_lookup(&lookup(&inline)).is_err());
+    }
+}
+
+/// Contact Vault configuration (§31–§33).
+#[derive(Debug, Clone, Default)]
+pub struct ContactVaultSettings {
+    pub enabled: bool,
+    pub keyring_file: Option<PathBuf>,
+    pub fingerprint_keyring_file: Option<PathBuf>,
+    pub delegation_trust_file: Option<PathBuf>,
+}
+
+/// Loaded Contact Vault material.
+pub struct ContactVaultMaterial {
+    pub keys: Option<crate::contact_vault::VaultKeys>,
+    pub delegation: Option<cf_service_auth::ContactDelegationVerifier>,
+}
+
+impl ContactVaultSettings {
+    pub fn from_env() -> Result<Self, ConfigError> {
+        Self::from_lookup(&|k: &str| std::env::var(k).ok())
+    }
+
+    pub fn from_lookup(get: &impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
+        let value = |k: &str| {
+            get(k)
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        };
+        let enabled = match value("CONTACT_VAULT_ENABLED").as_deref() {
+            None | Some("false") => false,
+            Some("true") => true,
+            Some(_) => return Err(invalid("CONTACT_VAULT_ENABLED", "must be true or false")),
+        };
+        let settings = Self {
+            enabled,
+            keyring_file: value("CONTACT_VAULT_KEYRING_FILE").map(PathBuf::from),
+            fingerprint_keyring_file: value("CONTACT_FINGERPRINT_KEYRING_FILE").map(PathBuf::from),
+            delegation_trust_file: value("CONTACT_DELEGATION_TRUST_BUNDLE_FILE").map(PathBuf::from),
+        };
+        if settings.enabled {
+            for (var, v) in [
+                ("CONTACT_VAULT_KEYRING_FILE", &settings.keyring_file),
+                (
+                    "CONTACT_FINGERPRINT_KEYRING_FILE",
+                    &settings.fingerprint_keyring_file,
+                ),
+                (
+                    "CONTACT_DELEGATION_TRUST_BUNDLE_FILE",
+                    &settings.delegation_trust_file,
+                ),
+            ] {
+                if v.is_none() {
+                    return Err(ConfigError::Missing { var });
+                }
+            }
+        }
+        if settings.keyring_file.is_some() != settings.fingerprint_keyring_file.is_some() {
+            return Err(invalid(
+                "CONTACT_FINGERPRINT_KEYRING_FILE",
+                "the encryption and fingerprint keyrings are configured together",
+            ));
+        }
+        Ok(settings)
+    }
+
+    /// Loads and cross-checks the keyrings and the delegation trust. Any failure is fatal.
+    /// A key trusted for service tokens may never also be trusted for Contact Vault tokens.
+    pub fn load(
+        &self,
+        runtime_environment: RuntimeEnvironment,
+        service_trust: &TrustPolicy,
+        clock: SharedClock,
+    ) -> Result<ContactVaultMaterial, ConfigError> {
+        use crate::contact_vault::{
+            keyring::{FileKeyring, KeyPurpose},
+            VaultKeys,
+        };
+        let keys = match (&self.keyring_file, &self.fingerprint_keyring_file) {
+            (Some(e), Some(f)) => {
+                let encryption = FileKeyring::from_file(e, KeyPurpose::Encryption)
+                    .map_err(|err| invalid("CONTACT_VAULT_KEYRING_FILE", err.to_string()))?;
+                let fingerprint = FileKeyring::from_file(f, KeyPurpose::Fingerprint)
+                    .map_err(|err| invalid("CONTACT_FINGERPRINT_KEYRING_FILE", err.to_string()))?;
+                Some(
+                    VaultKeys::new(Arc::new(encryption), Arc::new(fingerprint)).map_err(|err| {
+                        invalid("CONTACT_FINGERPRINT_KEYRING_FILE", err.to_string())
+                    })?,
+                )
+            }
+            _ => None,
+        };
+        let delegation = match &self.delegation_trust_file {
+            None => None,
+            Some(path) => {
+                let trust = cf_service_auth::ContactDelegationTrust::from_file(
+                    path,
+                    &privacy_relay_service_id(),
+                    runtime_environment,
+                )
+                .map_err(|err| invalid("CONTACT_DELEGATION_TRUST_BUNDLE_FILE", err.to_string()))?;
+                let service_keys: std::collections::BTreeSet<&str> =
+                    service_trust.public_keys().collect();
+                if trust.public_keys().any(|k| service_keys.contains(k)) {
+                    return Err(invalid(
+                        "CONTACT_DELEGATION_TRUST_BUNDLE_FILE",
+                        "a key trusted for service tokens may not be trusted for Contact Vault tokens",
+                    ));
+                }
+                Some(cf_service_auth::ContactDelegationVerifier::new(
+                    trust, clock,
+                ))
+            }
+        };
+        Ok(ContactVaultMaterial { keys, delegation })
     }
 }

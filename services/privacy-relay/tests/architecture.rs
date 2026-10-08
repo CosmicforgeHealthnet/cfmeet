@@ -153,14 +153,9 @@ fn later_sections_are_not_prebuilt() {
             .join("\n")
             .to_lowercase();
         for forbidden in [
-            "protected_contacts",
-            "contact_vault",
             "relay_number_inventory",
             "relay_number_assignments",
             "number_cooldown",
-            "ciphertext",
-            "kms",
-            "e164",
             "msisdn",
             "pstn",
             "sip_uri",
@@ -172,9 +167,65 @@ fn later_sections_are_not_prebuilt() {
             "plivo",
             "phone_number",
         ] {
+            // The Contact Vault's raw input member is `telephone_number`; it exists there only.
+            if forbidden == "phone_number" && file.contains("src/contact_vault/") {
+                continue;
+            }
             assert!(!lower.contains(forbidden), "{file}: `{forbidden}`");
         }
     }
+}
+
+/// The Contact Vault is an isolated code boundary: the only plaintext accessor
+/// (`expose_e164`), the phone-number parser and the AES-GCM primitive are used inside
+/// `src/contact_vault/` only, and no other module touches `protected_contacts`.
+#[test]
+fn the_contact_vault_is_an_isolated_code_boundary() {
+    let mut seen_parser = false;
+    for (file, code) in production_sources() {
+        if file.contains("migration/src/") {
+            continue; // the schema itself
+        }
+        let inside = file.contains("src/contact_vault/");
+        for (needle, allowed) in [
+            (
+                "expose_e164",
+                &[
+                    "normalization.rs",
+                    "crypto.rs",
+                    "fingerprint.rs",
+                    "resolution.rs",
+                ][..],
+            ),
+            ("phonenumber::", &["normalization.rs"][..]),
+            ("aes_gcm", &["crypto.rs", "keyring.rs"][..]),
+            (
+                "protected_contacts",
+                &[
+                    "repository.rs",
+                    "service.rs",
+                    "fingerprint.rs",
+                    "verification.rs",
+                    "resolution.rs",
+                    "inbound.rs",
+                ][..],
+            ),
+        ] {
+            if code.contains(needle) {
+                assert!(
+                    inside && allowed.iter().any(|a| file.ends_with(a)),
+                    "{file} uses `{needle}` outside the Contact Vault boundary"
+                );
+                seen_parser |= needle == "phonenumber::";
+            }
+        }
+        // No raw value is ever logged or formatted from a request body.
+        assert!(
+            !code.contains("telephone_number = %") && !code.contains("telephone_number = ?"),
+            "{file}"
+        );
+    }
+    assert!(seen_parser, "the guard sees the parser");
 }
 
 #[test]

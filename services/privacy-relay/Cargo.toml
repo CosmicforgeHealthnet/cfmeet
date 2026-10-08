@@ -36,6 +36,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"]
 sha2 = "0.10"
 hex = "0.4"
 async-trait = "0.1"
+# Contact Vault (§31–§33): authenticated encryption, keyed fingerprints, E.164.
+aes-gcm = "0.10"
+hmac = "0.12"
+zeroize = { version = "1.8", features = ["zeroize_derive"] }
+base64 = "0.22"
+# Mature libphonenumber port: international number parsing is never hand-written.
+phonenumber = "0.3"
 
 [dev-dependencies]
 jsonschema = { version = "0.58", default-features = false }
@@ -44,5 +51,4 @@ http-body-util = "0.1"
 # Forging tokens with self-declared claims (negative tests only).
 jsonwebtoken = { version = "11", default-features = false, features = ["rust_crypto"] }
 ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
-base64 = "0.22"
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }

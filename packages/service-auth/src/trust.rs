@@ -167,6 +167,8 @@ impl IssuerGrant {
 pub(crate) struct TrustedKey {
     pub issuer: ServiceId,
     pub key: DecodingKey,
+    /// Public key (base64url `x`), for cross-checking key separation between token kinds.
+    pub x: String,
 }
 
 /// A fully validated trust bundle.
@@ -287,6 +289,7 @@ impl TrustPolicy {
                     TrustedKey {
                         issuer: issuer.clone(),
                         key: decoding,
+                        x: key.x.clone(),
                     },
                 );
                 key_ids.push(kid);
@@ -371,6 +374,12 @@ impl TrustPolicy {
 
     pub fn grant_for(&self, issuer: &ServiceId) -> Option<&IssuerGrant> {
         self.grants.get(issuer)
+    }
+
+    /// Public keys (base64url Ed25519 `x`) of every trusted issuer. Used to refuse a key
+    /// trusted for service tokens being trusted for another token kind as well.
+    pub fn public_keys(&self) -> impl Iterator<Item = &str> {
+        self.keys.values().map(|k| k.x.as_str())
     }
 
     pub(crate) fn key(&self, kid: &KeyId) -> Option<&TrustedKey> {

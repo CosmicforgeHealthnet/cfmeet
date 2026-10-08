@@ -238,6 +238,12 @@ impl ServiceTokenSigner {
         self.key.kid()
     }
 
+    /// Public key of this signer (published in receivers' trust bundles; also used to
+    /// refuse reusing the same key for another credential kind).
+    pub fn public_jwk(&self) -> crate::keys::PublicJwk {
+        self.key.public_jwk()
+    }
+
     pub fn ttl(&self) -> TokenTtl {
         self.ttl
     }

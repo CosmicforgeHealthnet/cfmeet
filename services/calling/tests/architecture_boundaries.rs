@@ -330,7 +330,12 @@ const FOREIGN_DOMAIN_TABLES: &[&str] = &[
     "privacy_relay_enforcement_jobs",
     "relay_sessions",
     "protected_contacts",
+    "contact_fingerprints",
+    "contact_access_audit",
+    "contact_verification_events",
+    "contact_resolution_grants",
     "relay_number_inventory",
+    "relay_number_assignments",
     "contact_vault",
     "provider_call_bindings",
     "provider_events",
@@ -528,6 +533,36 @@ fn media_identities_are_only_server_generated() {
             );
         }
     }
+}
+
+/// Part D §31: Calling is never a raw-number processing service. It mints Contact Vault
+/// access tokens but has no telephone-number field, parser, vault key or vault table.
+#[test]
+fn calling_never_handles_raw_contact_values() {
+    for (file, code) in production_sources() {
+        let lower = code.to_lowercase();
+        // (Refusing phone-shaped principal references, `looks_like_telephone_number`, is
+        // the opposite of handling a number and is allowed.)
+        for forbidden in [
+            "telephone_number:",
+            "\"telephonenumber\"",
+            "phonenumber::",
+            "contact_vault_keyring",
+            "contact_fingerprint_keyring",
+            "aes_gcm",
+            "resolve-for-execution",
+            "resolve_for_execution",
+        ] {
+            assert!(!lower.contains(forbidden), "{file}: `{forbidden}`");
+        }
+    }
+    let manifest = std::fs::read_to_string(manifest_dir().join("Cargo.toml")).unwrap();
+    for dep in ["phonenumber", "aes-gcm"] {
+        assert!(!manifest.contains(dep), "Calling depends on `{dep}`");
+    }
+    // The grant request body is closed: it can carry scopes and nothing else.
+    let contacts = production_code_of(&manifest_dir().join("src/privacy_relay/contacts.rs"));
+    assert!(contacts.contains("deny_unknown_fields"));
 }
 
 #[test]

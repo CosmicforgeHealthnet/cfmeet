@@ -1,0 +1,24 @@
+{
+  "bundle_version": 1,
+  "token_use": "CONTACT_VAULT_ACCESS",
+  "audience": "cfmeet.privacy-relay",
+  "runtime_environment": "staging",
+  "trusted_issuers": [
+    {
+      "issuer": "cfmeet.calling",
+      "keys": [
+        {
+          "kid": "calling-contact-staging-1",
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "x": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"
+        }
+      ],
+      "scopes": [
+        "privacy.contacts.read",
+        "privacy.contacts.write",
+        "privacy.contacts.verify"
+      ]
+    }
+  ]
+}

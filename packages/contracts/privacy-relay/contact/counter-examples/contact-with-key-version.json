@@ -1,0 +1,16 @@
+{
+  "contactReference": "5a7c2e10-3b4d-4f6e-8a9b-0c1d2e3f4a5b",
+  "maskedDisplay": "+39••••••5678",
+  "country": "IT",
+  "capabilities": {
+    "voice": "UNKNOWN"
+  },
+  "verificationState": "UNVERIFIED",
+  "verificationExpiresAt": null,
+  "status": "ACTIVE",
+  "version": 1,
+  "createdAt": "2031-03-01T10:00:00.000Z",
+  "updatedAt": "2031-03-01T10:00:00.000Z",
+  "disabledAt": null,
+  "encryptionKeyVersion": "ck-2031-01"
+}

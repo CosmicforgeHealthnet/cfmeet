@@ -367,3 +367,133 @@ async fn real_responses_events_and_commands_validate() {
         assert_valid(&command_v, &d.payload, "enforcement command");
     }
 }
+
+/// The Contact Vault routes Privacy Relay serves itself are exactly the public paths
+/// marked `x-cfmeet-served-by: cfmeet.privacy-relay`, and their real responses validate.
+#[tokio::test]
+async fn contact_vault_routes_and_responses_equal_the_contract() {
+    let code = std::fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/contact_vault/http.rs"),
+    )
+    .unwrap();
+    let mut registered = BTreeSet::new();
+    for (i, _) in code.match_indices(".route(") {
+        let literal = code[i + ".route(".len()..]
+            .trim_start()
+            .strip_prefix('"')
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        let templated: Vec<String> = literal
+            .split('/')
+            .map(|s| {
+                s.strip_prefix(':')
+                    .map(|n| format!("{{{n}}}"))
+                    .unwrap_or_else(|| s.to_string())
+            })
+            .collect();
+        registered.insert(templated.join("/"));
+    }
+    let http = read("privacy-relay/http/v1.openapi.json");
+    let mut served_here = BTreeSet::new();
+    for (path, item) in http["paths"].as_object().unwrap() {
+        for (method, op) in item.as_object().unwrap() {
+            if op["x-cfmeet-served-by"] == "cfmeet.privacy-relay" {
+                served_here.insert(path.clone());
+                assert!(
+                    op["security"][0]["contactDelegation"].is_array(),
+                    "{method} {path}"
+                );
+                assert_eq!(
+                    op["x-cfmeet-required-scope"], op["security"][0]["contactDelegation"][0],
+                    "{method} {path}"
+                );
+            } else {
+                assert!(
+                    op["security"][0]["contactDelegation"].is_null(),
+                    "{method} {path}"
+                );
+            }
+        }
+    }
+    assert_eq!(registered, served_here);
+    // `telephoneNumber` exists only in the Contact Vault raw-input bodies.
+    for c in read("manifest.json")["contracts"].as_array().unwrap() {
+        let path = c["path"].as_str().unwrap();
+        let text = std::fs::read_to_string(contracts().join(path)).unwrap();
+        if path != "privacy-relay/contact/v1.schema.json" && !path.ends_with("openapi.json") {
+            assert!(!text.contains("\"telephoneNumber\""), "{path}");
+        }
+    }
+
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = Consumer::new(Kind::Production);
+    let result_v = validator("privacy-relay/contact/v1.schema.json#/$defs/ContactResult");
+    let create_v = validator("privacy-relay/contact/v1.schema.json#/$defs/CreateContactRequest");
+    let update_v = validator("privacy-relay/contact/v1.schema.json#/$defs/UpdateContactRequest");
+    let error_v = validator("privacy-relay/common/v1.schema.json#/$defs/ErrorEnvelope");
+    let token = h.writer(&c);
+    let body = json!({ "telephoneNumber": "+39 02 1234 5678" });
+    assert_valid(&create_v, &body, "create request");
+    let created = h
+        .contact_call(
+            axum::http::Method::POST,
+            "/v1/privacy-relay/contacts",
+            Some(&token),
+            Some(body),
+        )
+        .await;
+    assert_valid(&result_v, &created.json, "create result");
+    let id = created.json["contact"]["contactReference"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let update = json!({ "expectedVersion": 1, "telephoneNumber": "+44 20 7946 0958" });
+    assert_valid(&update_v, &update, "update request");
+    let updated = h
+        .contact_call(
+            axum::http::Method::PATCH,
+            &format!("/v1/privacy-relay/contacts/{id}"),
+            Some(&token),
+            Some(update),
+        )
+        .await;
+    assert_valid(&result_v, &updated.json, "update result");
+    let disabled = h
+        .contact_call(
+            axum::http::Method::POST,
+            &format!("/v1/privacy-relay/contacts/{id}/disable"),
+            Some(&token),
+            Some(json!({ "expectedVersion": 2 })),
+        )
+        .await;
+    assert_valid(&result_v, &disabled.json, "disable result");
+    for r in [
+        h.contact_call(
+            axum::http::Method::POST,
+            "/v1/privacy-relay/contacts",
+            None,
+            Some(json!({})),
+        )
+        .await,
+        h.contact_call(
+            axum::http::Method::GET,
+            &format!("/v1/privacy-relay/contacts/{}", uuid::Uuid::new_v4()),
+            Some(&token),
+            None,
+        )
+        .await,
+        h.contact_call(
+            axum::http::Method::POST,
+            "/v1/privacy-relay/contacts",
+            Some(&token),
+            Some(json!({ "telephoneNumber": "+1 123 456 7890" })),
+        )
+        .await,
+    ] {
+        assert_valid(&error_v, &r.json, "error envelope");
+    }
+}

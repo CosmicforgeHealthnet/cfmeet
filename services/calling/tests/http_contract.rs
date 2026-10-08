@@ -238,11 +238,19 @@ fn contract_paths_equal_the_registered_routes() {
         registered, documented,
         "Calling routes and its OpenAPI contract disagree"
     );
+    // Paths Privacy Relay serves ITSELF (the Contact Vault raw-number routes) are not
+    // routes of this ingress.
     let privacy: BTreeSet<String> = read(PRIVACY_RELAY_HTTP)["paths"]
         .as_object()
         .unwrap()
-        .keys()
-        .cloned()
+        .iter()
+        .filter(|(_, item)| {
+            item.as_object()
+                .unwrap()
+                .values()
+                .all(|op| op["x-cfmeet-served-by"] != "cfmeet.privacy-relay")
+        })
+        .map(|(path, _)| path.clone())
         .collect();
     assert_eq!(
         ingress, privacy,
@@ -576,6 +584,24 @@ fn every_operation_declares_its_authentication() {
     // The Privacy Relay API served by this ingress: platform credential, privacy scopes.
     for (path, item) in read(PRIVACY_RELAY_HTTP)["paths"].as_object().unwrap() {
         for (method, op) in item.as_object().unwrap() {
+            if op["x-cfmeet-served-by"] == "cfmeet.privacy-relay" {
+                // Contact Vault routes: a Contact Vault access token, never a platform credential.
+                assert!(
+                    op["security"][0]["platformCredential"].is_null(),
+                    "{method} {path}"
+                );
+                assert!(op["security"][0]["contactDelegation"][0]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("privacy.contacts."));
+                continue;
+            }
+            if path == "/v1/privacy-relay/contact-access-grants" {
+                let scopes = op["security"][0]["platformCredential"].as_array().unwrap();
+                assert_eq!(scopes.len(), 3, "each requested privacy.contacts.* scope");
+                assert!(op["responses"]["401"].is_object());
+                continue;
+            }
             let scope = op["security"][0]["platformCredential"][0].as_str().unwrap();
             let family = if path.starts_with("/v1/privacy-relay/sessions")
                 || (path.ends_with("/sessions") && method == "post")

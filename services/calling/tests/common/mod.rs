@@ -461,6 +461,7 @@ pub fn test_runtime(
         app_config: AppCallingConfig::default(),
         call_config: CallServiceConfig::default(),
         privacy_relay: Arc::new(calling::privacy_relay::UnconfiguredPrivacyRelay),
+        contact_delegation: None,
     }
 }
 
@@ -492,6 +493,9 @@ pub const STANDARD_TEST_SCOPES: &[&str] = &[
     names::PRIVACY_CONTEXTS_WRITE,
     names::PRIVACY_SESSIONS_READ,
     names::PRIVACY_SESSIONS_WRITE,
+    names::PRIVACY_CONTACTS_READ,
+    names::PRIVACY_CONTACTS_WRITE,
+    names::PRIVACY_CONTACTS_VERIFY,
 ];
 
 impl Harness {

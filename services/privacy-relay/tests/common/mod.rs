@@ -23,11 +23,19 @@ use cf_service_auth::{
     RuntimeEnvironment, ServiceId, ServiceSigningKey, ServiceTokenSigner, ServiceTokenVerifier,
     TokenTtl, TrustPolicy,
 };
+use cf_service_auth::{
+    contact_delegation::CONTACT_AUTHORIZATION, ContactDelegationSigner, ContactDelegationTrust,
+    ContactDelegationVerifier, ContactScope,
+};
 use chrono::{DateTime, Duration, Utc};
 use http_body_util::BodyExt;
 use privacy_relay::{
     clock::ManualClock,
     config::{FeatureFlag, ServiceAuthRuntime},
+    contact_vault::{
+        keyring::{generate_keyring_json, FileKeyring, KeyPurpose, KeyVersion},
+        ContactVault, VaultKeys,
+    },
     enforcement::{CallingEnforcer, DeliveryFailure, EnforcementAck, EnforcementDelivery},
     internal, routes,
     service::RelayService,
@@ -289,6 +297,11 @@ pub fn trust_bundle_json(
 
 pub struct Identities {
     pub runtime: ServiceAuthRuntime,
+    /// Calling's DEDICATED contact delegation signer (not its service key).
+    pub contact_signer: Arc<ContactDelegationSigner>,
+    pub contact_jwk: cf_service_auth::PublicJwk,
+    /// PKCS#8 PEM of the contact delegation key (tests that mint with another clock).
+    pub contact_pem: String,
     pub relay: Arc<ServiceTokenSigner>,
     pub relay_jwk: cf_service_auth::PublicJwk,
     pub calling: Arc<ServiceTokenSigner>,
@@ -346,7 +359,22 @@ pub fn identities(calling_permissions: &[&str]) -> Identities {
     let calling_copy =
         ServiceSigningKey::from_pkcs8_pem(KeyId::parse("calling-test-1").unwrap(), &calling_pem)
             .unwrap();
+    let contact_key = ServiceSigningKey::generate(KeyId::parse("calling-contact-test-1").unwrap());
+    let contact_jwk = contact_key.public_jwk();
+    let contact_pem = contact_key.to_pkcs8_pem().to_string();
     Identities {
+        contact_pem,
+        contact_signer: Arc::new(
+            ContactDelegationSigner::new(
+                ServiceId::calling(),
+                env,
+                contact_key,
+                120,
+                clock.clone(),
+            )
+            .unwrap(),
+        ),
+        contact_jwk,
         runtime: ServiceAuthRuntime::new(signer.clone(), verifier, client).unwrap(),
         relay: signer,
         relay_jwk,
@@ -373,6 +401,60 @@ pub fn identities(calling_permissions: &[&str]) -> Identities {
             clock,
         )),
     }
+}
+
+impl Identities {
+    /// Privacy Relay's contact delegation trust: Calling's contact key, every contact scope.
+    pub fn contact_verifier(&self) -> ContactDelegationVerifier {
+        let trust = ContactDelegationTrust::from_json(
+            &contact_trust_json(
+                std::slice::from_ref(&self.contact_jwk),
+                &[
+                    "privacy.contacts.read",
+                    "privacy.contacts.write",
+                    "privacy.contacts.verify",
+                ],
+            ),
+            &ServiceId::privacy_relay(),
+            RuntimeEnvironment::Test,
+        )
+        .unwrap();
+        ContactDelegationVerifier::new(trust, Arc::new(cf_service_auth::SystemClock))
+    }
+}
+
+pub fn contact_trust_json(keys: &[cf_service_auth::PublicJwk], scopes: &[&str]) -> String {
+    json!({
+        "bundle_version": 1,
+        "token_use": "CONTACT_VAULT_ACCESS",
+        "audience": "cfmeet.privacy-relay",
+        "runtime_environment": "test",
+        "trusted_issuers": [{ "issuer": "cfmeet.calling", "keys": keys, "scopes": scopes }],
+    })
+    .to_string()
+}
+
+/// Fresh random encryption + fingerprint keyrings (test-only; never written to disk).
+pub fn test_vault_keys(encryption_version: &str, fingerprint_version: &str) -> VaultKeys {
+    let ev = KeyVersion::parse(encryption_version).unwrap();
+    let fv = KeyVersion::parse(fingerprint_version).unwrap();
+    VaultKeys::new(
+        Arc::new(
+            FileKeyring::from_json(
+                &generate_keyring_json(KeyPurpose::Encryption, &ev),
+                KeyPurpose::Encryption,
+            )
+            .unwrap(),
+        ),
+        Arc::new(
+            FileKeyring::from_json(
+                &generate_keyring_json(KeyPurpose::Fingerprint, &fv),
+                KeyPurpose::Fingerprint,
+            )
+            .unwrap(),
+        ),
+    )
+    .unwrap()
 }
 
 /// A consumer application environment (scope asserted through the delegated context).
@@ -424,6 +506,12 @@ pub struct Harness {
     pub db: Arc<TestDb>,
     pub clock: ManualClock,
     pub feature: FeatureFlag,
+    /// CONTACT_VAULT_ENABLED.
+    pub contact_feature: FeatureFlag,
+    pub contacts: ContactVault,
+    pub vault_keys: VaultKeys,
+    /// Calling's contact delegation signer (its own key, wall clock).
+    pub contact_signer: Arc<ContactDelegationSigner>,
     pub calling: Arc<FakeCalling>,
     pub relay: RelayService,
     pub state: AppState,
@@ -472,16 +560,49 @@ impl Harness {
             RuntimeEnvironment::Test,
             calling.clone(),
         );
-        let state = AppState::new(relay.clone(), ids.runtime.clone());
+        let contact_feature = FeatureFlag::new(true);
+        let vault_keys = test_vault_keys("ck-test-1", "fk-test-1");
+        let contacts = ContactVault::new(
+            db.conn.clone(),
+            Arc::new(clock.clone()),
+            contact_feature.clone(),
+            Some(vault_keys.clone()),
+        );
+        let state = AppState::new(relay.clone(), ids.runtime.clone())
+            .with_contact_vault(contacts.clone(), Some(ids.contact_verifier()));
         Self {
             db,
             clock,
             feature,
+            contact_feature,
+            contacts,
+            vault_keys,
+            contact_signer: ids.contact_signer.clone(),
             calling,
             relay,
             state,
             ids,
         }
+    }
+
+    /// Re-deploys the Contact Vault with `keys` (key rotation steps).
+    pub fn set_vault_keys(&mut self, keys: VaultKeys) {
+        self.contacts = self.vault_with(Some(keys.clone()));
+        self.vault_keys = keys;
+        self.state = self
+            .state
+            .clone()
+            .with_contact_vault(self.contacts.clone(), Some(self.ids.contact_verifier()));
+    }
+
+    /// Another Contact Vault instance over the same database / clock / flag.
+    pub fn vault_with(&self, keys: Option<VaultKeys>) -> ContactVault {
+        ContactVault::new(
+            self.db.conn.clone(),
+            Arc::new(self.clock.clone()),
+            self.contact_feature.clone(),
+            keys,
+        )
     }
 
     /// A second instance over the same database and clock (another worker).
@@ -590,6 +711,55 @@ impl Harness {
             json!({ "idempotencyKey": key, "request": request }),
         )
         .await
+    }
+
+    // --- Contact Vault helpers -------------------------------------------------
+
+    /// A Contact Vault access token for `consumer` (Calling's contact delegation key).
+    pub fn contact_token(&self, consumer: &Consumer, scopes: &[ContactScope]) -> String {
+        self.contact_signer
+            .sign(&ServiceId::privacy_relay(), &consumer.delegated(), scopes)
+            .unwrap()
+            .expose_for_delivery()
+            .to_string()
+    }
+
+    pub fn writer(&self, consumer: &Consumer) -> String {
+        self.contact_token(consumer, &[ContactScope::Read, ContactScope::Write])
+    }
+
+    /// A contact route request with `X-CF-Contact-Authorization: Bearer <token>`.
+    pub async fn contact_call(
+        &self,
+        method: Method,
+        path: &str,
+        token: Option<&str>,
+        body: Option<Value>,
+    ) -> Response {
+        let mut builder = Request::builder().method(method).uri(path);
+        if let Some(t) = token {
+            builder = builder.header(CONTACT_AUTHORIZATION, format!("Bearer {t}"));
+        }
+        self.raw(builder, body).await
+    }
+
+    /// Protects `number` for `consumer` and returns the safe contact.
+    pub async fn create_contact(&self, consumer: &Consumer, number: &str) -> Value {
+        let token = self.writer(consumer);
+        let r = self
+            .contact_call(
+                Method::POST,
+                "/v1/privacy-relay/contacts",
+                Some(&token),
+                Some(json!({ "telephoneNumber": number })),
+            )
+            .await;
+        assert!(
+            r.status == StatusCode::CREATED || r.status == StatusCode::OK,
+            "{}",
+            r.text
+        );
+        r.json["contact"].clone()
     }
 
     // --- domain helpers ------------------------------------------------------
@@ -767,6 +937,42 @@ pub async fn dump_database(conn: &DatabaseConnection) -> String {
         }
     }
     out
+}
+
+/// Every row of one table, as text.
+pub async fn dump_table(conn: &DatabaseConnection, table: &str) -> String {
+    let mut out = String::new();
+    for row in conn
+        .query_all(Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            format!("SELECT t::text FROM {table} t"),
+        ))
+        .await
+        .unwrap()
+    {
+        out.push_str(&row.try_get_by_index::<String>(0).unwrap());
+        out.push('\n');
+    }
+    out
+}
+
+/// Rows of `sql`, in select order; every column must be text (cast with `::text`).
+pub async fn rows(conn: &DatabaseConnection, sql: &str) -> Vec<Vec<String>> {
+    conn.query_all(Statement::from_string(
+        sea_orm::DbBackend::Postgres,
+        sql.to_string(),
+    ))
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|r| {
+        let mut out = Vec::new();
+        while let Ok(v) = r.try_get_by_index::<Option<String>>(out.len()) {
+            out.push(v.unwrap_or_default());
+        }
+        out
+    })
+    .collect()
 }
 
 pub fn principals(n: usize) -> Vec<Uuid> {

@@ -41,6 +41,8 @@ pub struct CallingRuntime {
     /// Privacy Relay authority (unconfigured: protected calls and the ingress fail closed;
     /// ordinary application calling never depends on it).
     pub privacy_relay: Arc<dyn PrivacyRelayAuthority>,
+    /// Contact Vault access-token minting (§31; none: contact access grants are 503).
+    pub contact_delegation: Option<Arc<cf_service_auth::ContactDelegationSigner>>,
 }
 
 #[derive(Clone)]
@@ -65,6 +67,8 @@ pub struct AppState {
     pub service_auth: ServiceAuthRuntime,
     /// Privacy Relay (protected-call authority and the public ingress target).
     pub privacy_relay: Arc<dyn PrivacyRelayAuthority>,
+    /// Contact Vault access-token minting (§31).
+    pub contact_delegation: Option<Arc<cf_service_auth::ContactDelegationSigner>>,
 }
 
 impl AppState {
@@ -125,6 +129,7 @@ impl AppState {
             media_gateway,
             service_auth,
             privacy_relay: runtime.privacy_relay,
+            contact_delegation: runtime.contact_delegation,
             clock,
             db,
         }

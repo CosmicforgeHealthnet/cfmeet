@@ -140,6 +140,27 @@ async fn main() -> anyhow::Result<()> {
         "privacy relay authority configured"
     );
 
+    // Contact Vault delegated access (§31): a dedicated key, never the service-auth key.
+    let contact_delegation =
+        match calling::privacy_relay::contacts::ContactDelegationSettings::from_lookup(&lookup)
+            .and_then(|s| {
+                s.load(
+                    service_auth.signer().runtime_environment(),
+                    &service_auth.signer().public_jwk(),
+                    Arc::new(cf_service_auth::SystemClock),
+                )
+            }) {
+            Ok(signer) => signer.map(Arc::new),
+            Err(err) => {
+                tracing::error!(error = %err, "contact delegation configuration error");
+                std::process::exit(2);
+            }
+        };
+    tracing::info!(
+        contact_delegation_configured = contact_delegation.is_some(),
+        "contact vault delegated access configured"
+    );
+
     let clock: SharedClock = Arc::new(SystemClock);
     let state = AppState::new(
         db,
@@ -158,6 +179,7 @@ async fn main() -> anyhow::Result<()> {
             app_config,
             call_config: CallServiceConfig::default(),
             privacy_relay,
+            contact_delegation,
         },
     );
 

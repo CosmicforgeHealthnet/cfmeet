@@ -125,6 +125,12 @@ pub fn routes() -> Router<AppState> {
             "/v1/privacy-relay/sessions/:relay_session_id/revoke",
             post(revoke_session),
         )
+        // Contact Vault delegated access (§31): Calling mints the short-lived token; the
+        // raw number itself goes straight to Privacy Relay, never through this ingress.
+        .route(
+            "/v1/privacy-relay/contact-access-grants",
+            post(super::contacts::create_contact_access_grant),
+        )
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
 }
 

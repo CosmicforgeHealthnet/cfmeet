@@ -11,6 +11,7 @@ const TABLES: &[&str] = &[
     "communication_context_directions",
     "communication_context_participants",
     "communication_contexts",
+    "contact_access_audit",
     "privacy_relay_commands",
     "privacy_relay_enforcement_jobs",
     "privacy_relay_outbox",
@@ -19,6 +20,7 @@ const TABLES: &[&str] = &[
     "privacy_relay_session_directions",
     "privacy_relay_session_participants",
     "privacy_relay_sessions",
+    "protected_contacts",
     "relay_audit_events",
     "relay_authorization_decisions",
 ];
@@ -48,7 +50,7 @@ async fn up_down_up_creates_exactly_the_privacy_relay_tables() {
             "SELECT count(*) FROM privacy_relay_seaql_migrations"
         )
         .await,
-        5
+        6
     );
     Migrator::down(&db.conn, None).await.unwrap();
     assert_eq!(tables(&db.conn).await, ["privacy_relay_seaql_migrations"]);
@@ -60,8 +62,6 @@ async fn up_down_up_creates_exactly_the_privacy_relay_tables() {
     Migrator::up(&db.conn, None).await.unwrap();
     assert_eq!(tables(&db.conn).await, TABLES);
     for forbidden in [
-        "protected_contacts",
-        "contact_vault",
         "relay_number_inventory",
         "relay_number_assignments",
         "calls",

@@ -16,6 +16,7 @@
 //! Calling never imports Privacy Relay source and never touches its database: it stores
 //! only the opaque references and decision evidence it was given.
 
+pub mod contacts;
 pub mod enforcement;
 pub mod http;
 

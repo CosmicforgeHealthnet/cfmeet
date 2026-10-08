@@ -44,6 +44,19 @@ pub enum ErrorCode {
     InternalError,
     InternalAuthenticationFailed,
     InternalPermissionDenied,
+    ContactNotFound,
+    ContactVersionConflict,
+    ContactInvalid,
+    ContactAlreadyExists,
+    ContactDisabled,
+    ContactBlocked,
+    ContactNotVerified,
+    ContactVerificationExpired,
+    ContactDelegationInvalid,
+    ContactScopeDenied,
+    ContactResolutionDenied,
+    ContactResolutionGrantExpired,
+    ContactVaultDisabled,
 }
 
 impl ErrorCode {
@@ -72,6 +85,19 @@ impl ErrorCode {
         ErrorCode::InternalError,
         ErrorCode::InternalAuthenticationFailed,
         ErrorCode::InternalPermissionDenied,
+        ErrorCode::ContactNotFound,
+        ErrorCode::ContactVersionConflict,
+        ErrorCode::ContactInvalid,
+        ErrorCode::ContactAlreadyExists,
+        ErrorCode::ContactDisabled,
+        ErrorCode::ContactBlocked,
+        ErrorCode::ContactNotVerified,
+        ErrorCode::ContactVerificationExpired,
+        ErrorCode::ContactDelegationInvalid,
+        ErrorCode::ContactScopeDenied,
+        ErrorCode::ContactResolutionDenied,
+        ErrorCode::ContactResolutionGrantExpired,
+        ErrorCode::ContactVaultDisabled,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -100,6 +126,19 @@ impl ErrorCode {
             ErrorCode::InternalError => "INTERNAL_ERROR",
             ErrorCode::InternalAuthenticationFailed => "INTERNAL_AUTHENTICATION_FAILED",
             ErrorCode::InternalPermissionDenied => "INTERNAL_PERMISSION_DENIED",
+            ErrorCode::ContactNotFound => "CONTACT_NOT_FOUND",
+            ErrorCode::ContactVersionConflict => "CONTACT_VERSION_CONFLICT",
+            ErrorCode::ContactInvalid => "CONTACT_INVALID",
+            ErrorCode::ContactAlreadyExists => "CONTACT_ALREADY_EXISTS",
+            ErrorCode::ContactDisabled => "CONTACT_DISABLED",
+            ErrorCode::ContactBlocked => "CONTACT_BLOCKED",
+            ErrorCode::ContactNotVerified => "CONTACT_NOT_VERIFIED",
+            ErrorCode::ContactVerificationExpired => "CONTACT_VERIFICATION_EXPIRED",
+            ErrorCode::ContactDelegationInvalid => "CONTACT_DELEGATION_INVALID",
+            ErrorCode::ContactScopeDenied => "CONTACT_SCOPE_DENIED",
+            ErrorCode::ContactResolutionDenied => "CONTACT_RESOLUTION_DENIED",
+            ErrorCode::ContactResolutionGrantExpired => "CONTACT_RESOLUTION_GRANT_EXPIRED",
+            ErrorCode::ContactVaultDisabled => "CONTACT_VAULT_DISABLED",
         }
     }
 
@@ -134,6 +173,19 @@ impl ErrorCode {
             ErrorCode::InternalError => StatusCode::INTERNAL_SERVER_ERROR,
             ErrorCode::InternalAuthenticationFailed => StatusCode::UNAUTHORIZED,
             ErrorCode::InternalPermissionDenied => StatusCode::FORBIDDEN,
+            ErrorCode::ContactNotFound => StatusCode::NOT_FOUND,
+            ErrorCode::ContactVersionConflict => StatusCode::CONFLICT,
+            ErrorCode::ContactInvalid => StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::ContactAlreadyExists => StatusCode::CONFLICT,
+            ErrorCode::ContactDisabled => StatusCode::CONFLICT,
+            ErrorCode::ContactBlocked => StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::ContactNotVerified => StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::ContactVerificationExpired => StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::ContactDelegationInvalid => StatusCode::UNAUTHORIZED,
+            ErrorCode::ContactScopeDenied => StatusCode::FORBIDDEN,
+            ErrorCode::ContactResolutionDenied => StatusCode::FORBIDDEN,
+            ErrorCode::ContactResolutionGrantExpired => StatusCode::FORBIDDEN,
+            ErrorCode::ContactVaultDisabled => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
 
@@ -188,6 +240,19 @@ impl ErrorCode {
             ErrorCode::InternalPermissionDenied => {
                 "The calling service is not permitted to perform this operation."
             }
+            ErrorCode::ContactNotFound => "The contact was not found.",
+            ErrorCode::ContactVersionConflict => "The contact has changed since expectedVersion; fetch it and retry.",
+            ErrorCode::ContactInvalid => "The telephone number is not a valid, protectable telephone number.",
+            ErrorCode::ContactAlreadyExists => "Another contact of this application environment already protects this telephone number.",
+            ErrorCode::ContactDisabled => "The contact is disabled.",
+            ErrorCode::ContactBlocked => "The contact is blocked or invalid and cannot be used.",
+            ErrorCode::ContactNotVerified => "The contact is not verified.",
+            ErrorCode::ContactVerificationExpired => "The contact's verification has expired.",
+            ErrorCode::ContactDelegationInvalid => "A valid Contact Vault access token is required.",
+            ErrorCode::ContactScopeDenied => "The Contact Vault access token does not grant this operation.",
+            ErrorCode::ContactResolutionDenied => "Contact resolution is not authorized for this execution.",
+            ErrorCode::ContactResolutionGrantExpired => "The contact resolution grant has expired.",
+            ErrorCode::ContactVaultDisabled => "The Contact Vault is currently disabled.",
         }
     }
 }
@@ -200,6 +265,9 @@ pub enum RelayError {
     /// A domain refusal with its stable code (default message).
     #[error("refused: {}", .0.as_str())]
     Refused(ErrorCode),
+    /// A refusal with a fixed, safe message more specific than the code's default.
+    #[error("refused: {}", .0.as_str())]
+    Coded(ErrorCode, &'static str),
     /// Database failure (summary is operator-facing, never returned).
     #[error("database error: {summary}")]
     Database { summary: String, connectivity: bool },
@@ -211,7 +279,7 @@ impl RelayError {
     pub fn code(&self) -> ErrorCode {
         match self {
             RelayError::Validation(_) => ErrorCode::ValidationError,
-            RelayError::Refused(code) => *code,
+            RelayError::Refused(code) | RelayError::Coded(code, _) => *code,
             RelayError::Database { connectivity, .. } => {
                 if *connectivity {
                     ErrorCode::ServiceUnavailable
@@ -224,7 +292,7 @@ impl RelayError {
 
     fn message(&self) -> &'static str {
         match self {
-            RelayError::Validation(message) => message,
+            RelayError::Validation(message) | RelayError::Coded(_, message) => message,
             other => other.code().message(),
         }
     }

@@ -9,9 +9,9 @@
 //!
 //! It owns contexts, context participants / channels / directions, relay sessions and
 //! their authorization snapshots, authorization decisions, immutable audit evidence, the
-//! transactional outbox, command idempotency and durable active-call enforcement jobs.
-//! It does NOT own calls, call sessions, endpoints, RTC rooms, meetings, telephony legs,
-//! protected contacts (Contact Vault, §31+) or relay-number inventory (§34+).
+//! transactional outbox, command idempotency, durable active-call enforcement jobs and
+//! the Contact Vault (protected contacts, their access audit; §31+). It does NOT own
+//! calls, call sessions, endpoints, RTC rooms, meetings or telephony legs.
 //!
 //! It shares no source and no database with any other service: Calling reaches it over
 //! authenticated internal HTTP (`packages/service-auth`), and it reaches Calling's
@@ -21,6 +21,7 @@ pub mod audit;
 pub mod clock;
 pub mod commands;
 pub mod config;
+pub mod contact_vault;
 pub mod context;
 pub(crate) mod db;
 pub mod enforcement;

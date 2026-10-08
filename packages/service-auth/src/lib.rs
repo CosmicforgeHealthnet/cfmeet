@@ -26,6 +26,7 @@
 
 pub mod claims;
 pub mod clock;
+pub mod contact_delegation;
 pub mod context;
 pub mod delegated;
 pub mod headers;
@@ -41,6 +42,10 @@ pub mod verifier;
 pub mod client;
 
 pub use clock::{Clock, ManualClock, SharedClock, SystemClock};
+pub use contact_delegation::{
+    ContactAccess, ContactAccessToken, ContactDelegationFailure, ContactDelegationSigner,
+    ContactDelegationTrust, ContactDelegationVerifier, ContactScope,
+};
 pub use context::{InternalServiceContext, PermissionDenied};
 pub use delegated::{ApplicationEnvironmentKind, DelegatedPlatformContext, DelegatedPrincipalKind};
 pub use identity::{services, RuntimeEnvironment, ServiceId};

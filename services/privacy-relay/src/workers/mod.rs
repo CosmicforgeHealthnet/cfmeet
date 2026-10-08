@@ -248,3 +248,16 @@ impl RelayService {
         }
     }
 }
+
+/// Contact Vault maintenance on every instance: key-rotation re-encryption in bounded
+/// `SKIP LOCKED` batches (a no-op when every contact is under the active key).
+pub async fn run_contact_workers(vault: crate::contact_vault::ContactVault, interval: Duration) {
+    let mut ticker = tokio::time::interval(interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        ticker.tick().await;
+        if let Err(error) = vault.run_sweep().await {
+            tracing::warn!(%error, "contact vault worker sweep failed; will retry");
+        }
+    }
+}

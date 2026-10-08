@@ -178,11 +178,16 @@ def camel_to_snake(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
 
+# Logical components that live INSIDE a service's trust boundary (Part D: the Contact
+# Vault is part of Privacy Relay), so `CONTACT_VAULT_DATABASE_URL` is Privacy Relay's.
+COMPONENT_ALIASES = {"privacy-relay": {"contact_vault"}}
+
+
 def aliases(service: str) -> set[str]:
     """Lower-case snake aliases a service is referred to by: meeting-service ->
-    {meeting_service, meeting}."""
+    {meeting_service, meeting}; privacy-relay -> {privacy_relay, contact_vault}."""
     s = snake(service)
-    out = {s}
+    out = {s} | COMPONENT_ALIASES.get(service, set())
     if s.endswith("_service") and len(s) > len("_service"):
         out.add(s[: -len("_service")])
     return out
