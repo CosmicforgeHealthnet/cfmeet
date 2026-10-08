@@ -29,13 +29,13 @@ export default function DashboardTabs() {
             onClick={() => router.push(tab.href)}
             className={cn(
               "py-3 sm:py-4 text-xs sm:text-sm font-medium relative rounded-none whitespace-nowrap",
-              isActive ? "text-[#029CD4]" : "text-gray-400"
+              isActive ? "text-primary" : "text-muted-foreground"
             )}
           >
             {tab.label}
 
             {isActive && (
-              <span className="absolute left-0 bottom-0 h-[2px] w-full bg-[#029CD4]" />
+              <span className="absolute left-0 bottom-0 h-[2px] w-full bg-primary" />
             )}
           </Button>
         );

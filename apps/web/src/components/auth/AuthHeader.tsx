@@ -17,10 +17,10 @@ const AuthHeader = ({
       {showBackButton && <GoBack text="Go Back" />}
 
       <div className="text-center">
-        <h1 className="text-xl sm:text-2xl font-bold text-black tracking-tight cursor-pointer">
+        <h1 className="text-xl sm:text-2xl font-bold text-foreground tracking-tight cursor-pointer">
           {title}
         </h1>
-        <p className="text-black mt-1 sm:mt-2 text-sm sm:text-base font-medium">{subtitle}</p>
+        <p className="text-foreground mt-1 sm:mt-2 text-sm sm:text-base font-medium">{subtitle}</p>
       </div>
     </div>
   );

@@ -3,6 +3,16 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * CF Meet Brand Colors
+ * Cyan: #00C6FF
+ * Electric Blue: #006BFF
+ * Deep Blue: #2563EB
+ * Violet: #A855F7
+ * White: #FFFFFF
+ * Deep Navy: #0F172A
+ */
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -51,71 +61,124 @@ body {
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+
+  /* CF Meet Brand - Light Theme */
+  --background: #FFFFFF;
+  --foreground: #0F172A;
+
+  --card: #FFFFFF;
+  --card-foreground: #0F172A;
+
+  --popover: #FFFFFF;
+  --popover-foreground: #0F172A;
+
+  /* Primary uses Electric Blue */
+  --primary: #006BFF;
+  --primary-foreground: #FFFFFF;
+
+  --secondary: #F1F5F9;
+  --secondary-foreground: #0F172A;
+
+  --muted: #F1F5F9;
+  --muted-foreground: #64748B;
+
+  /* Accent uses Cyan */
+  --accent: #00C6FF;
+  --accent-foreground: #0F172A;
+
+  --destructive: #EF4444;
+  --destructive-foreground: #FFFFFF;
+
+  --success: #22C55E;
+  --success-foreground: #FFFFFF;
+
+  --warning: #F59E0B;
+  --warning-foreground: #0F172A;
+
+  --border: #E2E8F0;
+  --input: #E2E8F0;
+  --ring: #006BFF;
+
+  /* Chart colors using brand palette */
+  --chart-1: #00C6FF;
+  --chart-2: #006BFF;
+  --chart-3: #2563EB;
+  --chart-4: #A855F7;
+  --chart-5: #0F172A;
+
+  /* Sidebar */
+  --sidebar: #FAFBFC;
+  --sidebar-foreground: #0F172A;
+  --sidebar-primary: #006BFF;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #F1F5F9;
+  --sidebar-accent-foreground: #006BFF;
+  --sidebar-border: #E2E8F0;
+  --sidebar-ring: #006BFF;
+
+  /* Brand gradient colors */
+  --brand-cyan: #00C6FF;
+  --brand-electric-blue: #006BFF;
+  --brand-deep-blue: #2563EB;
+  --brand-violet: #A855F7;
+  --brand-white: #FFFFFF;
+  --brand-navy: #0F172A;
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* CF Meet Brand - Dark Theme */
+  --background: #0F172A;
+  --foreground: #F8FAFC;
+
+  --card: #1E293B;
+  --card-foreground: #F8FAFC;
+
+  --popover: #1E293B;
+  --popover-foreground: #F8FAFC;
+
+  /* Primary uses Electric Blue */
+  --primary: #006BFF;
+  --primary-foreground: #FFFFFF;
+
+  --secondary: #334155;
+  --secondary-foreground: #F8FAFC;
+
+  --muted: #334155;
+  --muted-foreground: #94A3B8;
+
+  /* Accent uses Cyan */
+  --accent: #00C6FF;
+  --accent-foreground: #0F172A;
+
+  --destructive: #EF4444;
+  --destructive-foreground: #FFFFFF;
+
+  --success: #22C55E;
+  --success-foreground: #0F172A;
+
+  --warning: #F59E0B;
+  --warning-foreground: #0F172A;
+
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.15);
+  --ring: #00C6FF;
+
+  /* Chart colors using brand palette */
+  --chart-1: #00C6FF;
+  --chart-2: #006BFF;
+  --chart-3: #2563EB;
+  --chart-4: #A855F7;
+  --chart-5: #F8FAFC;
+
+  /* Sidebar */
+  --sidebar: #1E293B;
+  --sidebar-foreground: #F8FAFC;
+  --sidebar-primary: #00C6FF;
+  --sidebar-primary-foreground: #0F172A;
+  --sidebar-accent: #334155;
+  --sidebar-accent-foreground: #00C6FF;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #00C6FF;
 }
 
 @layer base {
@@ -125,6 +188,26 @@ body {
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* CF Meet Brand Gradient Utilities */
+.bg-brand-gradient {
+  background: linear-gradient(135deg, #00C6FF 0%, #006BFF 33%, #2563EB 66%, #A855F7 100%);
+}
+
+.bg-brand-gradient-horizontal {
+  background: linear-gradient(90deg, #00C6FF 0%, #006BFF 33%, #2563EB 66%, #A855F7 100%);
+}
+
+.text-brand-gradient {
+  background: linear-gradient(135deg, #00C6FF 0%, #006BFF 33%, #2563EB 66%, #A855F7 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.border-brand-gradient {
+  border-image: linear-gradient(135deg, #00C6FF 0%, #006BFF 33%, #2563EB 66%, #A855F7 100%) 1;
 }
 
 /* LiveKit Grid Layout Overrides */

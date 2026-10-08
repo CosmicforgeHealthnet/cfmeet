@@ -24,8 +24,8 @@ export default function DashboardLayout({
 
   if (isLoading) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-white">
-        <Spinner size="lg" className="text-[#029CD4]" />
+      <div className="flex h-screen w-full items-center justify-center bg-background">
+        <Spinner size="lg" className="text-primary" />
       </div>
     );
   }
@@ -36,13 +36,13 @@ export default function DashboardLayout({
   }
 
   return (
-    <div className="flex h-screen bg-white overflow-hidden">
+    <div className="flex h-screen bg-background overflow-hidden">
       {/* Desktop sidebar */}
       <div className="hidden md:block">
         <AppSidebar />
       </div>
 
-      <main className="flex-1 bg-white overflow-y-auto">{children}</main>
+      <main className="flex-1 bg-background overflow-y-auto">{children}</main>
 
       {/* Mobile slide-in sidebar */}
       <MobileSidebar />

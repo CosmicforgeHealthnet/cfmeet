@@ -41,7 +41,7 @@ export default function SettingsContent() {
           className={cn(
             "flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
             activeTab === "profile"
-              ? "border-[#029CD4] text-[#029CD4]"
+              ? "border-primary text-primary"
               : "border-transparent text-gray-400 hover:text-gray-600",
           )}
         >
@@ -53,7 +53,7 @@ export default function SettingsContent() {
           className={cn(
             "flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
             activeTab === "security"
-              ? "border-[#029CD4] text-[#029CD4]"
+              ? "border-primary text-primary"
               : "border-transparent text-gray-400 hover:text-gray-600",
           )}
         >
@@ -65,7 +65,7 @@ export default function SettingsContent() {
           className={cn(
             "flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
             activeTab === "api-keys"
-              ? "border-[#029CD4] text-[#029CD4]"
+              ? "border-primary text-primary"
               : "border-transparent text-gray-400 hover:text-gray-600",
           )}
         >
@@ -77,7 +77,7 @@ export default function SettingsContent() {
           className={cn(
             "flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
             activeTab === "webhooks"
-              ? "border-[#029CD4] text-[#029CD4]"
+              ? "border-primary text-primary"
               : "border-transparent text-gray-400 hover:text-gray-600",
           )}
         >
@@ -196,10 +196,10 @@ function ProfileSettings() {
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       {/* Profile Section */}
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-6">
+      <div className="bg-card p-6 rounded-2xl shadow-sm border border-border space-y-6">
         <div>
           <h2 className="text-lg font-semibold mb-1">Profile Information</h2>
-          <p className="text-sm text-gray-500">Update your account details.</p>
+          <p className="text-sm text-muted-foreground">Update your account details.</p>
         </div>
 
         {error && (
@@ -221,9 +221,9 @@ function ProfileSettings() {
               id="email"
               value={profile?.email || ""}
               disabled
-              className="bg-gray-50 text-gray-500 border-gray-200"
+              className="bg-muted text-muted-foreground border-border"
             />
-            <p className="text-xs text-gray-400">Email cannot be changed.</p>
+            <p className="text-xs text-muted-foreground">Email cannot be changed.</p>
           </div>
 
           <div className="space-y-2">
@@ -232,21 +232,21 @@ function ProfileSettings() {
               id="username"
               value={newUsername}
               onChange={(e) => setNewUsername(e.target.value)}
-              className="border-gray-200 focus:border-primary/50"
+              className="border-border focus:border-primary/50"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Role</Label>
-              <div className="px-3 py-2 bg-gray-50 rounded-md text-sm text-gray-700 capitalize border border-gray-100">
+              <div className="px-3 py-2 bg-muted rounded-md text-sm text-foreground capitalize border border-border">
                 {profile?.role}
               </div>
             </div>
 
             <div className="space-y-2">
               <Label>Status</Label>
-              <div className="px-3 py-2 bg-gray-50 rounded-md text-sm text-gray-700 capitalize border border-gray-100">
+              <div className="px-3 py-2 bg-muted rounded-md text-sm text-foreground capitalize border border-border">
                 {profile?.status}
               </div>
             </div>
@@ -275,10 +275,10 @@ function ProfileSettings() {
           </p>
         </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-white rounded-xl border border-red-100 gap-4 sm:gap-0">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-card rounded-xl border border-red-100 gap-4 sm:gap-0">
           <div className="space-y-1">
-            <p className="font-medium text-gray-900">Deactivate Account</p>
-            <p className="text-sm text-gray-500">
+            <p className="font-medium text-foreground">Deactivate Account</p>
+            <p className="text-sm text-muted-foreground">
               This will immediately invalidate all your sessions and prevent you
               from logging in.
             </p>
