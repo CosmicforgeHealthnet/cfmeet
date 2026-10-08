@@ -290,6 +290,19 @@ async fn a_failed_second_leg_releases_the_first() {
         .controls()
         .iter()
         .any(|(leg, action, _)| *leg == ta && *action == LegControl::Terminate));
+    // Every command sent follows Telephony's command contract.
+    for (_, _, control) in x.telephony.controls() {
+        common::contracts::check(
+            "telephony/commands/v1.schema.json#/$defs/ControlCommand",
+            &control,
+        );
+    }
+    for (_, originate) in x.telephony.originates() {
+        common::contracts::check(
+            "telephony/commands/v1.schema.json#/$defs/OriginateCommand",
+            &originate,
+        );
+    }
 }
 
 #[tokio::test]

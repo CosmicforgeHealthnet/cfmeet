@@ -1,0 +1,24 @@
+{
+  "capability": "VOICE_OUTBOUND",
+  "country": "NG",
+  "observedAt": "2026-10-08T22:15:10.103565Z",
+  "routes": [
+    {
+      "capacityAvailable": {
+        "evidence": "KNOWN",
+        "value": true
+      },
+      "costCurrency": "NGN",
+      "estimatedLegCostMinor": {
+        "evidence": "KNOWN",
+        "value": 100
+      },
+      "health": "HEALTHY",
+      "maxCallSeconds": 3600,
+      "qualityPermille": {
+        "evidence": "UNKNOWN"
+      },
+      "routeRef": "ng-a"
+    }
+  ]
+}

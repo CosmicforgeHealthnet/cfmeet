@@ -1,0 +1,861 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet Telephony internal API",
+    "version": "1.0.0",
+    "description": "Internal HTTP surface of services/telephony (Part E §165–§172): GET /health and the provider callback ingress (public, provider-authenticated before parsing, 16 KiB limit) and the service-authenticated /internal/v1 API used by Calling only. Every /internal/v1 path — including unknown ones — requires a valid service token; customer credentials, cfmk_ keys and Authorization headers are refused. Telephony -> Calling delivery is the durable outbox (cfmeet.telephony.event to Calling's POST /internal/v1/telephony/events). Metrics are served on a separate listener, never here."
+  },
+  "components": {
+    "securitySchemes": {
+      "cfServiceAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Service-Authorization",
+        "description": "Bearer <service token> (cfmeet.platform.internal-http). Permissions come only from Telephony's trust bundle."
+      }
+    },
+    "parameters": {
+      "CfRequestId": {
+        "name": "X-CF-Request-Id",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RequestId"
+        }
+      },
+      "CfCorrelationId": {
+        "name": "X-CF-Correlation-Id",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/CorrelationId"
+        }
+      }
+    },
+    "schemas": {
+      "HealthStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "service"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "ok",
+              "unavailable"
+            ]
+          },
+          "service": {
+            "const": "telephony"
+          }
+        }
+      },
+      "CallbackAck": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 64
+          }
+        }
+      },
+      "Readiness": {
+        "description": "Counts and normalized states only (no provider names, no credentials).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "database",
+          "telephonyEnabled",
+          "publicOutboundEnabled",
+          "publicInboundEnabled",
+          "callbackRelayEnabled",
+          "sipEdge",
+          "interconnects"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "ready",
+              "not_ready"
+            ]
+          },
+          "database": {
+            "enum": [
+              "ok",
+              "unavailable"
+            ]
+          },
+          "telephonyEnabled": {
+            "type": "boolean"
+          },
+          "publicOutboundEnabled": {
+            "type": "boolean"
+          },
+          "publicInboundEnabled": {
+            "type": "boolean"
+          },
+          "callbackRelayEnabled": {
+            "type": "boolean"
+          },
+          "sipEdge": {
+            "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/RouteHealth"
+          },
+          "interconnects": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "configured",
+              "available"
+            ],
+            "properties": {
+              "configured": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "available": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Telephony error envelope.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/Error"
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "cfServiceAuth": []
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "security": [],
+        "description": "Liveness and database reachability.",
+        "responses": {
+          "200": {
+            "description": "Healthy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unreachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/provider-callbacks/{provider_id}": {
+      "post": {
+        "operationId": "providerCallback",
+        "security": [],
+        "description": "Provider event callback. Authenticated by the adapter (signature / token / peer) BEFORE parsing; bodies over 16 KiB are refused unread; a strict parser; dedupe by (provider, provider event id). The body is provider-specific (adapter-internal, not a CF Meet contract).",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,32}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recorded (applied, duplicate, stale, late or quarantined).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallbackAck"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/provider-callbacks/{provider_id}/{token}": {
+      "post": {
+        "operationId": "providerCallbackWithToken",
+        "security": [],
+        "description": "Provider callback for adapters that authenticate with a path token (compared in constant time).",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,32}$"
+            }
+          },
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 256
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallbackAck"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/legs/originate": {
+      "post": {
+        "operationId": "originateLeg",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "description": "Durable ORIGINATE (permission telephony-leg.originate). One provider effect per idempotency key; refused while another execution of the CallLeg, or of the same party of the Call, is live or UNKNOWN (409 EXECUTION_IN_PROGRESS).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/OriginateCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replay.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/LegAccepted"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted for execution.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/LegAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/legs/{leg_id}": {
+      "get": {
+        "operationId": "getLeg",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "leg_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "description": "Leg view (permission telephony-status.read).",
+        "responses": {
+          "200": {
+            "description": "The leg.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/LegRead"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/legs/{leg_id}/terminate": {
+      "post": {
+        "operationId": "terminateLeg",
+        "description": "Idempotent termination (an unresolved one is reconciled until the provider confirms). Permission telephony-leg.control.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "leg_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/ControlCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replay of an identical earlier command.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/LegAccepted"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted (durable before any provider action).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/LegAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/legs/{leg_id}/hold": {
+      "post": {
+        "operationId": "holdLeg",
+        "description": "Hold (media anchored at the edge). Permission telephony-leg.control.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "leg_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/ControlCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replay of an identical earlier command.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/LegAccepted"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted (durable before any provider action).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/LegAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/legs/{leg_id}/resume": {
+      "post": {
+        "operationId": "resumeLeg",
+        "description": "Resume. Permission telephony-leg.control.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "leg_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/ControlCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replay of an identical earlier command.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/LegAccepted"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted (durable before any provider action).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/LegAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/bridges": {
+      "post": {
+        "operationId": "createBridge",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "description": "Create a bridge (permission telephony-bridge.manage).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/BridgeCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replay.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/BridgeAccepted"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/BridgeAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/bridges/{bridge_id}": {
+      "get": {
+        "operationId": "getBridge",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "bridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "description": "Bridge view (permission telephony-status.read).",
+        "responses": {
+          "200": {
+            "description": "The bridge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/BridgeAccepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "endBridge",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "bridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "description": "End a bridge (idempotent; permission telephony-bridge.manage).",
+        "responses": {
+          "202": {
+            "description": "Ending.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/BridgeAccepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/routes/availability": {
+      "get": {
+        "operationId": "routeAvailability",
+        "description": "Normalized route availability (permission telephony-status.read).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/CountryCode"
+            }
+          },
+          {
+            "name": "capability",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "VOICE_OUTBOUND",
+                "VOICE_INBOUND"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Availability.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/routes/v1.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/readiness": {
+      "get": {
+        "operationId": "readiness",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "description": "Readiness (permission telephony-status.read).",
+        "responses": {
+          "200": {
+            "description": "Readiness.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "1",
+  "commandId": "4734e376-6d3a-46f0-a16f-f593fc170cfc",
+  "idempotencyKey": "terminate:14f8f793-46c7-4276-b3ec-e02001abc447",
+  "correlationId": "corr_d96c26107130fa15e514d80284ba8030",
+  "reason": "CALL_ENDED"
+}

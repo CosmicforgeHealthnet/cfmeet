@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "EXECUTION_IN_PROGRESS",
+    "message": "Another execution of this call leg is still in progress or unresolved.",
+    "requestId": "req_464a227ba42bf5e71581795c8c10ac45"
+  }
+}

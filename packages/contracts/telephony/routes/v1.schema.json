@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/telephony/routes/v1.schema.json",
+  "title": "CF Meet Telephony route availability v1",
+  "description": "GET /internal/v1/routes/availability?country=&capability= (Part E §142–§150): the normalized, provider-neutral availability the Routing Engine ranks. A route is an opaque reference; health, capacity, cost estimate and quality are evidence (KNOWN with a value, or UNKNOWN — never invented). No provider name, carrier, trunk or number.",
+  "$ref": "#/$defs/Availability",
+  "$defs": {
+    "Availability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "country",
+        "capability",
+        "observedAt",
+        "routes"
+      ],
+      "properties": {
+        "country": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/CountryCode"
+        },
+        "capability": {
+          "enum": [
+            "VOICE_OUTBOUND",
+            "VOICE_INBOUND"
+          ]
+        },
+        "observedAt": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "routes": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/RouteCandidate"
+          }
+        }
+      }
+    },
+    "RouteCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "routeRef",
+        "health",
+        "capacityAvailable",
+        "estimatedLegCostMinor",
+        "qualityPermille"
+      ],
+      "properties": {
+        "routeRef": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "health": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/RouteHealth"
+        },
+        "capacityAvailable": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "evidence",
+                "value"
+              ],
+              "properties": {
+                "evidence": {
+                  "const": "KNOWN"
+                },
+                "value": {
+                  "type": "boolean"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "evidence"
+              ],
+              "properties": {
+                "evidence": {
+                  "const": "UNKNOWN"
+                }
+              }
+            }
+          ]
+        },
+        "estimatedLegCostMinor": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "evidence",
+                "value"
+              ],
+              "properties": {
+                "evidence": {
+                  "const": "KNOWN"
+                },
+                "value": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "evidence"
+              ],
+              "properties": {
+                "evidence": {
+                  "const": "UNKNOWN"
+                }
+              }
+            }
+          ]
+        },
+        "qualityPermille": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "evidence",
+                "value"
+              ],
+              "properties": {
+                "evidence": {
+                  "const": "KNOWN"
+                },
+                "value": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "evidence"
+              ],
+              "properties": {
+                "evidence": {
+                  "const": "UNKNOWN"
+                }
+              }
+            }
+          ]
+        },
+        "costCurrency": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/CurrencyCode"
+        },
+        "maxCallSeconds": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 86400
+        }
+      }
+    }
+  }
+}

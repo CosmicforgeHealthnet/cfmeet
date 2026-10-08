@@ -201,7 +201,10 @@ fn contract_paths_equal_the_registered_routes() {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/routes.rs"),
             )
             .unwrap();
-            assert!(!routes.contains("metrics"), "metrics must not be served by the API router");
+            assert!(
+                !routes.contains("metrics"),
+                "metrics must not be served by the API router"
+            );
             continue;
         }
         let is_ingress = path.ends_with("src/privacy_relay/http.rs");

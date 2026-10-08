@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1",
+  "commandId": "5e1d2c3b-4a59-4687-9a0b-1c2d3e4f5a6b",
+  "idempotencyKey": "bridge:b73ecb2e-4de8-4415-9faf-41165fc82474:1",
+  "correlationId": "corr_d96c26107130fa15e514d80284ba8030",
+  "callId": "b73ecb2e-4de8-4415-9faf-41165fc82474",
+  "kind": "PUBLIC_LEGS",
+  "telephonyLegIds": [
+    "6a96714c-7e1e-4681-92ad-ed036023bbe8",
+    "983d1540-daa0-42a2-92b1-80f7884c360c"
+  ]
+}

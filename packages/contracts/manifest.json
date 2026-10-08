@@ -343,6 +343,50 @@
       "lifecycle": "beta",
       "authority": "contract-first",
       "description": "Phone-to-app inbound offer from Telephony to Calling and Calling's answer (canonical Call / CallLeg). References only: never the called relay number or the caller's number."
+    },
+    {
+      "id": "cfmeet.telephony.command",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "telephony/commands/v1.schema.json",
+      "owner": "telephony",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Calling -> Telephony commands (ORIGINATE, TERMINATE / HOLD / RESUME, BRIDGE) and their answers (leg / bridge views, the error envelope). Versioned; commandId, idempotencyKey, correlationId, Call / CallLeg / attempt / route ids, authorization evidence, spend reservation and expected generation. No caller identity, number, provider, carrier or SIP field."
+    },
+    {
+      "id": "cfmeet.telephony.routes",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "telephony/routes/v1.schema.json",
+      "owner": "telephony",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Normalized route availability for Calling's Routing Engine: opaque route references with health and KNOWN / UNKNOWN evidence of capacity, cost estimate and quality. Provider-neutral."
+    },
+    {
+      "id": "cfmeet.telephony.usage",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "telephony/usage/v1.schema.json",
+      "owner": "telephony",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Telephony's restricted provider-level usage record (one per leg; duration, billable seconds, provider cost only when known, conservative estimate otherwise, idempotency key). The fact delivered to Calling is cfmeet.telephony.event LegUsage."
+    },
+    {
+      "id": "cfmeet.telephony.internal-http-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "telephony/internal/v1.openapi.json",
+      "owner": "telephony",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "HTTP surface of services/telephony: health and the provider callback ingress (provider-authenticated before parsing, 16 KiB limit, dedupe), and the service-authenticated /internal/v1 API for Calling (legs originate / get / terminate / hold / resume, bridges create / get / end, route availability, readiness). Metrics live on a separate listener."
     }
   ]
 }

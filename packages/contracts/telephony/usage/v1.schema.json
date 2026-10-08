@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/telephony/usage/v1.schema.json",
+  "title": "CF Meet Telephony usage v1",
+  "description": "Provider-level usage of one Telephony leg (Part E §155–§157). The UsageRecord is Telephony's internal, restricted record (exactly one per leg, idempotency key, finalization status; the route reference is internal); the usage FACT delivered to Calling is cfmeet.telephony.event LegUsage. Provider cost is KNOWN only when the provider reported it; otherwise only a conservative estimate exists and costKnown is false. No provider commercial terms, no number.",
+  "$ref": "#/$defs/UsageRecord",
+  "$defs": {
+    "UsageRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "telephonyLegId",
+        "callId",
+        "callLegId",
+        "connectedDurationMs",
+        "billableSeconds",
+        "costKnown",
+        "finalizationStatus",
+        "idempotencyKey",
+        "finalizedAt"
+      ],
+      "properties": {
+        "telephonyLegId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callLegId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "routeRef": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+          "description": "Internal route reference (restricted)."
+        },
+        "destinationCountry": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/CountryCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "connectedDurationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "billableSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "providerCostMinor": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "estimatedCostMinor": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "currency": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/CurrencyCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "costKnown": {
+          "type": "boolean"
+        },
+        "finalizationStatus": {
+          "const": "FINAL",
+          "description": "Exactly one final usage record per leg (a second finalizer changes nothing)."
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "pattern": "^usage-[0-9a-f-]{36}$"
+        },
+        "finalizedAt": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/Timestamp"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "costKnown": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "providerCostMinor"
+            ],
+            "properties": {
+              "providerCostMinor": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "costKnown": {
+                "const": false
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "providerCostMinor": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -325,6 +325,27 @@ async fn an_app_user_calls_a_protected_phone_and_hangs_up() {
     .await;
     assert_eq!(settled, 1234);
 
+    // Every command Calling sent follows Telephony's command contract.
+    for (_, originate) in x.telephony.originates() {
+        common::contracts::check(
+            "telephony/commands/v1.schema.json#/$defs/OriginateCommand",
+            &originate,
+        );
+    }
+    for bridge in x.telephony.bridges() {
+        common::contracts::check(
+            "telephony/commands/v1.schema.json#/$defs/BridgeCommand",
+            &bridge,
+        );
+    }
+    let controls = x.telephony.controls();
+    for (_, _, control) in &controls {
+        common::contracts::check(
+            "telephony/commands/v1.schema.json#/$defs/ControlCommand",
+            control,
+        );
+    }
+
     // Calling's database holds no telephone number of the contact or the relay.
     let dump = common::dump_database(x.w.h().conn()).await;
     for needle in ["+234", "2348", "grant-secret"] {

@@ -1,0 +1,599 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json",
+  "title": "CF Meet Telephony commands v1",
+  "description": "Calling -> Telephony commands (Part E §165–§168) and their answers. Every command is versioned and carries commandId, idempotencyKey (one provider effect per key), correlationId and, for ORIGINATE, the Call / CallLeg / attempt / route ids, authorization evidence and the expected generation. Bodies refuse unknown members: no caller identity, telephone number, provider, carrier or SIP field can be sent.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/OriginateCommand"
+    },
+    {
+      "$ref": "#/$defs/ControlCommand"
+    },
+    {
+      "$ref": "#/$defs/BridgeCommand"
+    },
+    {
+      "$ref": "#/$defs/LegAccepted"
+    },
+    {
+      "$ref": "#/$defs/BridgeAccepted"
+    },
+    {
+      "$ref": "#/$defs/LegRead"
+    },
+    {
+      "$ref": "#/$defs/Error"
+    }
+  ],
+  "$defs": {
+    "OriginateCommand": {
+      "description": "POST /internal/v1/legs/originate. No caller identity (selected server-side), no number, no provider.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "commandId",
+        "idempotencyKey",
+        "correlationId",
+        "expectedGeneration",
+        "call",
+        "scope",
+        "authorization",
+        "destination",
+        "spend",
+        "media"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "1"
+        },
+        "commandId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "correlationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/CorrelationId"
+        },
+        "expectedGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "call": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "callId",
+            "callLegId",
+            "attemptId",
+            "routeId",
+            "routeClass",
+            "routePolicyVersion"
+          ],
+          "properties": {
+            "callId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "callLegId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "attemptId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "routeId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "routeClass": {
+              "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/PublicRouteClass"
+            },
+            "routePolicyVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            }
+          }
+        },
+        "scope": {
+          "description": "Must equal the signed delegated platform context.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tenantId",
+            "applicationId",
+            "environmentId"
+          ],
+          "properties": {
+            "tenantId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "applicationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "environmentId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        },
+        "authorization": {
+          "description": "Authorization evidence (Calling + Privacy Relay). Telephony verifies shape, scope and freshness; it never decides.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "callAuthorizationId",
+            "callPolicyVersion",
+            "privacyDecisionId",
+            "contextId",
+            "contextVersion",
+            "relaySessionId",
+            "relaySessionVersion",
+            "decidedAt",
+            "validUntil"
+          ],
+          "properties": {
+            "callAuthorizationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "callPolicyVersion": {
+              "const": "PRIVACY_RELAY_V1"
+            },
+            "privacyDecisionId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "contextId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "contextVersion": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "relaySessionId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "relaySessionVersion": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "decidedAt": {
+              "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/Timestamp"
+            },
+            "validUntil": {
+              "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/Timestamp"
+            }
+          }
+        },
+        "destination": {
+          "description": "The protected destination: an opaque ContactReference and a grant — never a number.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "contactReference",
+            "grantId",
+            "grantSecret",
+            "grantExpiresAt",
+            "country"
+          ],
+          "properties": {
+            "contactReference": {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContactReference"
+            },
+            "grantId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "grantSecret": {
+              "description": "Single-use Contact Resolution Grant secret (fresh per submission; never stored by Calling).",
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 256
+            },
+            "grantExpiresAt": {
+              "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/Timestamp"
+            },
+            "country": {
+              "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/CountryCode"
+            }
+          }
+        },
+        "spend": {
+          "description": "Calling's durable spend reservation.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reservationId",
+            "reservedAmountMinor",
+            "currency",
+            "maxDurationSeconds"
+          ],
+          "properties": {
+            "reservationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "reservedAmountMinor": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "currency": {
+              "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/CurrencyCode"
+            },
+            "maxDurationSeconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400
+            }
+          }
+        },
+        "media": {
+          "enum": [
+            "NONE",
+            "APPLICATION"
+          ]
+        },
+        "candidateRoutes": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+          },
+          "description": "Ordered opaque route references from the Routing Engine (Telephony narrows them)."
+        }
+      }
+    },
+    "ControlCommand": {
+      "description": "POST /internal/v1/legs/{id}/terminate | hold | resume.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "commandId",
+        "idempotencyKey",
+        "correlationId"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "1"
+        },
+        "commandId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "correlationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/CorrelationId"
+        },
+        "reason": {
+          "enum": [
+            "CALL_ENDED",
+            "CANCELLED",
+            "POLICY",
+            "DURATION_LIMIT",
+            "ORPHAN"
+          ]
+        }
+      }
+    },
+    "BridgeCommand": {
+      "description": "POST /internal/v1/bridges.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "commandId",
+        "idempotencyKey",
+        "correlationId",
+        "callId",
+        "kind",
+        "telephonyLegIds"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "1"
+        },
+        "commandId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "correlationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/CorrelationId"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/BridgeKind"
+        },
+        "telephonyLegIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        }
+      }
+    },
+    "LegView": {
+      "description": "A Telephony leg as Calling sees it: CF Meet ids, normalized status and timestamps. Never a provider, route identity, SIP data or number.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "telephonyLegId",
+        "callId",
+        "callLegId",
+        "direction",
+        "routeClass",
+        "status",
+        "generation",
+        "version",
+        "createdAt"
+      ],
+      "properties": {
+        "telephonyLegId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callLegId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "attemptId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "direction": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/LegDirection"
+        },
+        "routeClass": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/PublicRouteClass"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/TelephonyLegStatus"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "destinationCountry": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/CountryCode"
+        },
+        "commandStatus": {
+          "enum": [
+            "PENDING",
+            "CLAIMED",
+            "RUNNING",
+            "SUCCEEDED",
+            "FAILED",
+            "UNKNOWN_OUTCOME",
+            "RECONCILING",
+            "DEAD_LETTER"
+          ]
+        },
+        "endReason": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/EndReason"
+        },
+        "failureCategory": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/FailureCategory"
+        },
+        "createdAt": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "originatingAt": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "ringingAt": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "answeredAt": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "connectedAt": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "endedAt": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/Timestamp"
+        }
+      }
+    },
+    "BridgeView": {
+      "description": "A Telephony bridge (Calling's view).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bridgeId",
+        "callId",
+        "kind",
+        "status",
+        "version",
+        "members"
+      ],
+      "properties": {
+        "bridgeId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/BridgeKind"
+        },
+        "status": {
+          "enum": [
+            "PENDING",
+            "ACTIVE",
+            "ENDED",
+            "FAILED"
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "mediaJoinCode": {
+          "description": "APPLICATION_MEDIA only: the single-use code the application media side presents at the edge.",
+          "type": "string",
+          "pattern": "^cfmj[0-9a-f]{32}$"
+        },
+        "members": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "memberKind",
+              "status"
+            ],
+            "properties": {
+              "memberKind": {
+                "enum": [
+                  "PUBLIC_LEG",
+                  "APPLICATION_MEDIA"
+                ]
+              },
+              "telephonyLegId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "status": {
+                "enum": [
+                  "EXPECTED",
+                  "JOINED",
+                  "LEFT"
+                ]
+              }
+            }
+          }
+        },
+        "establishedAt": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "endedAt": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "endReason": {
+          "type": "string",
+          "pattern": "^[A-Z_]{1,48}$"
+        }
+      }
+    },
+    "LegAccepted": {
+      "description": "202 (accepted for execution) or 200 with replayed=true (an identical earlier command).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "leg"
+      ],
+      "properties": {
+        "commandId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "leg": {
+          "$ref": "#/$defs/LegView"
+        },
+        "replayed": {
+          "const": true
+        }
+      }
+    },
+    "BridgeAccepted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bridge"
+      ],
+      "properties": {
+        "bridge": {
+          "$ref": "#/$defs/BridgeView"
+        }
+      }
+    },
+    "LegRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "leg"
+      ],
+      "properties": {
+        "leg": {
+          "$ref": "#/$defs/LegView"
+        }
+      }
+    },
+    "Error": {
+      "description": "Telephony error envelope: a bounded code and a fixed message. Never a provider message, SIP response or number.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message",
+            "requestId"
+          ],
+          "properties": {
+            "code": {
+              "enum": [
+                "VALIDATION_ERROR",
+                "NOT_FOUND",
+                "METHOD_NOT_ALLOWED",
+                "PAYLOAD_TOO_LARGE",
+                "INTERNAL_AUTHENTICATION_FAILED",
+                "INTERNAL_PERMISSION_DENIED",
+                "IDEMPOTENCY_CONFLICT",
+                "AUTHORIZATION_PROOF_INVALID",
+                "AUTHORIZATION_PROOF_EXPIRED",
+                "SPEND_RESERVATION_REQUIRED",
+                "STALE_GENERATION",
+                "EXECUTION_IN_PROGRESS",
+                "TELEPHONY_DISABLED",
+                "PUBLIC_OUTBOUND_DISABLED",
+                "PUBLIC_INBOUND_DISABLED",
+                "CALLBACK_RELAY_DISABLED",
+                "ROUTE_UNAVAILABLE",
+                "CAPACITY_EXHAUSTED",
+                "LEG_NOT_FOUND",
+                "LEG_NOT_ACTIVE",
+                "BRIDGE_NOT_FOUND",
+                "BRIDGE_CONFLICT",
+                "PROVIDER_EVENT_REJECTED",
+                "SERVICE_UNAVAILABLE",
+                "INTERNAL_ERROR"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "requestId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RequestId"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -11,6 +11,7 @@
 
 pub mod app;
 pub mod calls;
+pub mod contracts;
 pub mod fake_media;
 pub mod privacy;
 pub mod provider_contract;

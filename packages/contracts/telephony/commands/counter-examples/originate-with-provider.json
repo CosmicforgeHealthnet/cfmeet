@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "1",
+  "commandId": "0c7a7d0e-5d33-4a11-9a8e-2f3b6e1d4c01",
+  "idempotencyKey": "originate:14f8f793-46c7-4276-b3ec-e02001abc447:d6cb434f-e678-44f6-bc5f-f4aa7252a13d",
+  "correlationId": "corr_d96c26107130fa15e514d80284ba8030",
+  "expectedGeneration": 1,
+  "call": {
+    "callId": "b73ecb2e-4de8-4415-9faf-41165fc82474",
+    "callLegId": "14f8f793-46c7-4276-b3ec-e02001abc447",
+    "attemptId": "d6cb434f-e678-44f6-bc5f-f4aa7252a13d",
+    "routeId": "920ac98a-050d-40e5-ba4d-cf317913c0ce",
+    "routeClass": "APP_TO_PSTN",
+    "routePolicyVersion": "ROUTING_POLICY_V1.r1"
+  },
+  "scope": {
+    "tenantId": "073eeab7-267a-418a-9439-d93f83710de8",
+    "applicationId": "2c016dbe-9d03-4a9c-ada1-e0f51315f74e",
+    "environmentId": "042f3b97-f453-4990-8418-fb576160fbf5"
+  },
+  "authorization": {
+    "callAuthorizationId": "a74d027d-f671-44c5-8315-92c556148e24",
+    "callPolicyVersion": "PRIVACY_RELAY_V1",
+    "privacyDecisionId": "b708853f-f3f6-4fe9-a6b8-fce5e298692a",
+    "contextId": "f99fe2a1-9483-41fa-8f66-51187a0780c8",
+    "contextVersion": 1,
+    "relaySessionId": "ef87482a-6577-4dbb-bf8b-56dc111921f1",
+    "relaySessionVersion": 1,
+    "decidedAt": "2026-10-08T12:00:00Z",
+    "validUntil": "2026-10-08T12:02:00Z"
+  },
+  "destination": {
+    "contactReference": "194f1d6c-5356-4c00-9e33-8a5628aefdb9",
+    "grantId": "50dbb127-1607-404c-8650-1fa46baa659c",
+    "grantSecret": "cfgr_9a1f0c3e2b4d6a8f0e1c3b5d7f9a2c4e6b8d0f1a",
+    "grantExpiresAt": "2026-10-08T12:02:00Z",
+    "country": "NG"
+  },
+  "spend": {
+    "reservationId": "9129ce66-5037-4f81-9a54-6a67f5571127",
+    "reservedAmountMinor": 500,
+    "currency": "NGN",
+    "maxDurationSeconds": 3600
+  },
+  "media": "APPLICATION",
+  "candidateRoutes": [
+    "ng-a",
+    "ng-b"
+  ],
+  "provider": "acme-carrier"
+}
