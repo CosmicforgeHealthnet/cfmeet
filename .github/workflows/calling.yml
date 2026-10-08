@@ -177,11 +177,12 @@ jobs:
           cargo run -q --locked -p calling-migration -- up
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'platform\_%'")" = "11"
-          # Call domain (Part C §15–§25, Part D §26–§30 evidence): calls + 20 call_* tables
-          # + the outbox.
+          # Call domain (Part C §15–§25, Part D §26–§30 evidence, Part E §37–§51 routing,
+          # public-network parties / bridges / telephony commands and events, spend): calls
+          # + 28 call_* tables + the outbox.
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' \
-             AND (tablename = 'calls' OR tablename LIKE 'call\_%' OR tablename = 'calling_outbox_events')")" = "22"
+             AND (tablename = 'calls' OR tablename LIKE 'call\_%' OR tablename = 'calling_outbox_events')")" = "30"
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
             "SELECT count(*) FROM calling_seaql_migrations")" = "19"
 

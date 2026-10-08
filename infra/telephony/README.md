@@ -77,7 +77,10 @@ passwords are refused), `TELEPHONY_ARI_APP` (default `cfmeet-telephony`),
 ## Local simulation and certification
 
 No Docker is needed: install `asterisk` and `sip-tester` (SIPp) from the Ubuntu 24.04
-archive and run
+archive. SIPp plays the RTP and RFC 4733 pcaps through a raw socket, so as a non-root user
+grant it that one capability (`sudo setcap cap_net_raw+ep "$(command -v sipp)"`); without
+it the SIP signalling succeeds but no media flows and the certification fails with that
+diagnosis. Then run
 
 ```
 cd services/telephony && TEST_DATABASE_URL=postgres://... cargo test --test sip_certification -- --nocapture

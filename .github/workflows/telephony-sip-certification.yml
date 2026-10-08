@@ -72,6 +72,10 @@ jobs:
           sudo systemctl stop asterisk 2>/dev/null || true
           sudo systemctl disable asterisk 2>/dev/null || true
           sudo pkill -x asterisk || true
+          # SIPp plays the RTP / RFC 4733 pcaps through a raw socket and the runner user is
+          # not root: grant only that capability to the simulator binary.
+          sudo setcap cap_net_raw+ep "$(command -v sipp)"
+          getcap "$(command -v sipp)" | grep -q cap_net_raw
           asterisk -V
           sipp -v | head -n 3 || true
 

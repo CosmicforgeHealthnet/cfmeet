@@ -459,7 +459,7 @@ mod tests {
         wrong.push(("CF_SERVICE_ID", "cfmeet.calling"));
         assert!(ServiceAuthSettings::from_lookup(&lookup(&wrong)).is_err());
         let mut inline = base.to_vec();
-        inline.push(("CF_SERVICE_AUTH_PRIVATE_KEY", "-----BEGIN PRIVATE KEY-----"));
+        inline.push(("CF_SERVICE_AUTH_PRIVATE_KEY", "inline-key-material"));
         assert!(ServiceAuthSettings::from_lookup(&lookup(&inline)).is_err());
     }
 }

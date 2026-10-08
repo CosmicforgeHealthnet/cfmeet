@@ -203,6 +203,13 @@ impl Sipp {
         }
         out
     }
+
+    /// SIPp plays RTP from pcap files through a raw socket, which needs CAP_NET_RAW. Without
+    /// it the scenario's SIP still succeeds but no media is ever sent.
+    fn rtp_denied(&self) -> bool {
+        std::fs::read_to_string(self.log_dir.join("stderr.log"))
+            .is_ok_and(|t| t.contains("Can't create raw"))
+    }
 }
 
 impl Drop for Sipp {
@@ -454,7 +461,13 @@ async fn real_sip_media_edge_certification() {
         }
         assert!(
             Instant::now() < deadline,
-            "no RTP media evidence on the public leg"
+            "no RTP media evidence on the public leg{}",
+            if carrier.rtp_denied() || app_media.rtp_denied() {
+                ": SIPp cannot play RTP without CAP_NET_RAW \
+                 (sudo setcap cap_net_raw+ep \"$(command -v sipp)\")"
+            } else {
+                ""
+            }
         );
         tokio::time::sleep(Duration::from_millis(250)).await;
     };

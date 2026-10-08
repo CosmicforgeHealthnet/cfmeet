@@ -90,7 +90,7 @@ make telephony-migrate      # apply migrations (services/telephony/.env)
 make telephony              # run the service
 make telephony-test         # all tests (TEST_DATABASE_URL; no Docker)
 make telephony-lint         # fmt + clippy
-make telephony-sip-cert     # real SIP edge certification (apt install asterisk sip-tester)
+make telephony-sip-cert     # real SIP edge certification (apt install asterisk sip-tester; SIPp needs CAP_NET_RAW)
 make telephony-integration  # Calling <-> Telephony <-> Privacy Relay against real binaries
 ```
 

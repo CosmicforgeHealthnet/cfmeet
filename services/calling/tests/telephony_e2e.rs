@@ -911,8 +911,19 @@ async fn app_to_phone_across_calling_privacy_relay_and_telephony() {
     assert_eq!(s.w.state(call).await.0, CallState::Ringing);
     // …and Calling catches up when it is back.
     s.calling_down(false);
-    s.wait_call(call, CallState::Answered, Duration::from_secs(20))
-        .await;
+    // ANSWERED is transient in this stack (the bridge below fails at once), so wait for
+    // Calling's durable record of the answer, not for a state a poll can miss.
+    Stack::until(
+        s.w.h().conn(),
+        &format!(
+            "SELECT CASE WHEN answered_at IS NOT NULL THEN 'answered' ELSE \
+             current_state::text || '/' || coalesce(terminal_reason::text, '-') || '/' || \
+             coalesce(failure_category::text, '-') END FROM calls WHERE id = '{call}'"
+        ),
+        "answered",
+        Duration::from_secs(20),
+    )
+    .await;
 
     // Calling then asks for the application-media bridge; there is no SIP edge in this
     // stack, so the bridge fails at Telephony — safely: the Call fails, the paid provider
@@ -934,6 +945,16 @@ async fn app_to_phone_across_calling_privacy_relay_and_telephony() {
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+    // …as a media failure after a real answer, not a routing or provider failure.
+    assert_eq!(
+        Stack::text(
+            s.w.h().conn(),
+            &format!("SELECT failure_category::text FROM calls WHERE id = '{call}'")
+        )
+        .await
+        .as_deref(),
+        Some("MEDIA")
+    );
     Stack::until(
         &t,
         &format!("SELECT CASE WHEN status IN ('ENDED', 'FAILED') THEN 'terminal' ELSE status END FROM telephony_legs WHERE id = '{leg}'"),
