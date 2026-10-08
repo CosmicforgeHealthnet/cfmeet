@@ -588,6 +588,14 @@ impl TelephonyService {
             // Best effort: an edge that already lost the bridge is fine.
             let _ = self.edge.destroy_bridge(r).await;
         }
+        // The application-media attachment exists only for this bridge: end it too.
+        for m in self.members(&txn, bridge_id).await? {
+            if m.member_kind == "APPLICATION_MEDIA" && m.status == "JOINED" {
+                if let Some(channel) = &m.edge_channel_ref {
+                    let _ = self.edge.hangup(channel).await;
+                }
+            }
+        }
         let failed = reason == "FAILED" || (bridge.status == "PENDING" && reason != "UNBRIDGED");
         db::exec(
             &txn,

@@ -16,3 +16,6 @@ Short, numbered records of significant architectural decisions.
 | [0010](0010-communication-context-and-privacy-relay-session-architecture.md) | Communication Context and Privacy Relay Session architecture; protected calls and active-call enforcement (Part D §26–§30) | Accepted |
 | [0011](0011-contact-vault-cryptography-and-resolution.md) | Contact Vault cryptography, scoped keyed equality, verification trust model, Contact Resolution Grants and Telephony-only resolution (Part D §31–§33) | Accepted |
 | [0012](0012-temporary-relay-number-assignment-and-cooldown.md) | Temporary relay-number inventory, deterministic assignment, cooldown and inbound mapping (Part D §34–§35) | Accepted |
+| [0013](0013-routing-engine-and-route-plans.md) | Routing Engine, route classes, fail-closed policy and immutable Route Plans (Part E §37–§38) | Accepted |
+| [0014](0014-telephony-service-core.md) | Telephony service core: legs, durable commands, transmit fence, provider-neutral events (Part E §39–§40) | Accepted |
+| [0015](0015-sip-media-edge-stack-and-network-topology.md) | SIP / media edge stack (Asterisk 20 + ARI) and network topology (Part E §41) | Accepted |

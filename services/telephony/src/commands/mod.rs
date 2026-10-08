@@ -251,25 +251,27 @@ impl TelephonyService {
         };
         if let Err(e) = insert.await {
             drop(txn);
-            if is_unique_violation(&e, "uq_telephony_legs_one_live_execution") {
+            let unique = [
+                "uq_telephony_legs_one_live_execution",
+                "uq_telephony_legs_attempt",
+                "uq_telephony_commands_idempotency",
+                "telephony_commands_pkey",
+            ]
+            .iter()
+            .any(|c| is_unique_violation(&e, c));
+            if unique {
+                // A concurrent identical request may have won the race: answer its
+                // result; otherwise report the specific conflict.
                 if let Some(existing) =
                     find_by_key(&self.db, &requester.service, &command.idempotency_key).await?
                 {
                     return self.replay(&existing, &digest).await;
                 }
-                return Err(TelephonyError::Refused(ErrorCode::ExecutionInProgress));
-            }
-            if is_unique_violation(&e, "uq_telephony_legs_attempt") {
-                return Err(TelephonyError::Refused(ErrorCode::StaleGeneration));
-            }
-            if is_unique_violation(&e, "uq_telephony_commands_idempotency")
-                || is_unique_violation(&e, "telephony_commands_pkey")
-            {
-                // A concurrent identical request won the race: answer its result.
-                if let Some(existing) =
-                    find_by_key(&self.db, &requester.service, &command.idempotency_key).await?
-                {
-                    return self.replay(&existing, &digest).await;
+                if is_unique_violation(&e, "uq_telephony_legs_one_live_execution") {
+                    return Err(TelephonyError::Refused(ErrorCode::ExecutionInProgress));
+                }
+                if is_unique_violation(&e, "uq_telephony_legs_attempt") {
+                    return Err(TelephonyError::Refused(ErrorCode::StaleGeneration));
                 }
                 return Err(TelephonyError::Refused(ErrorCode::IdempotencyConflict));
             }

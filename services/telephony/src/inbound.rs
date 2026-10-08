@@ -93,7 +93,7 @@ impl TelephonyService {
             }
             Err(rejection) => {
                 tracing::info!(reason = rejection.as_str(), "inbound public call rejected");
-                let _ = self.edge.hangup(&event.channel).await;
+                let _ = self.edge.reject(&event.channel).await;
                 Ok(())
             }
         }

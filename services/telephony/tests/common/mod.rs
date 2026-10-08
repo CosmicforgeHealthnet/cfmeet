@@ -584,6 +584,20 @@ impl Harness {
     }
 
     pub async fn with(calling_permissions: &[&str], flags: TelecomFlags) -> Option<Self> {
+        Self::build(calling_permissions, flags, None).await
+    }
+
+    /// With a real SIP / media edge: the interconnects are SIP trunks on that edge
+    /// (`sip-a` -> route ng-a -> peer-ng-a, `sip-b` -> ng-b -> peer-ng-b).
+    pub async fn with_edge(edge: Arc<dyn telephony::sip::SipMediaEdge>) -> Option<Self> {
+        Self::build(CALLING_PERMISSIONS, all_on(), Some(edge)).await
+    }
+
+    pub async fn build(
+        calling_permissions: &[&str],
+        flags: TelecomFlags,
+        edge: Option<Arc<dyn telephony::sip::SipMediaEdge>>,
+    ) -> Option<Self> {
         let db = Arc::new(TestDb::new().await?);
         let clock = ManualClock::new(Utc::now());
         let provider_a = DeterministicProvider::new("dp-a", CALLBACK_SECRET);
@@ -591,15 +605,47 @@ impl Harness {
         let privacy = Arc::new(FakePrivacyRelay::new());
         let calling = Arc::new(FakeCalling::new());
         let ids = identities(calling_permissions);
-        let svc = TelephonyService::new(db.conn.clone(), Arc::new(clock.clone()), flags.clone())
-            .with_providers(
+        let registry = match &edge {
+            None => ProviderRegistry::new()
+                .with(Arc::new(provider_a.clone()))
+                .with(Arc::new(provider_b.clone())),
+            Some(edge) => {
+                let caps = vec![
+                    telephony::domain::ProviderCapability::OutboundVoice,
+                    telephony::domain::ProviderCapability::InboundVoice,
+                    telephony::domain::ProviderCapability::SipTrunk,
+                    telephony::domain::ProviderCapability::StatusQuery,
+                    telephony::domain::ProviderCapability::Events,
+                    telephony::domain::ProviderCapability::Dtmf,
+                    telephony::domain::ProviderCapability::CallerIdSelection,
+                ];
                 ProviderRegistry::new()
-                    .with(Arc::new(provider_a.clone()))
-                    .with(Arc::new(provider_b.clone())),
-            )
-            .with_privacy_relay(privacy.clone())
-            .with_calling(calling.clone())
-            .with_settings(fast_settings());
+                    .with(Arc::new(
+                        telephony::providers::sip_trunk::SipTrunkProvider::new(
+                            "sip-a",
+                            caps.clone(),
+                            edge.clone(),
+                        ),
+                    ))
+                    .with(Arc::new(
+                        telephony::providers::sip_trunk::SipTrunkProvider::new(
+                            "sip-b",
+                            caps,
+                            edge.clone(),
+                        ),
+                    ))
+            }
+        };
+        let mut svc =
+            TelephonyService::new(db.conn.clone(), Arc::new(clock.clone()), flags.clone())
+                .with_providers(registry)
+                .with_privacy_relay(privacy.clone())
+                .with_calling(calling.clone())
+                .with_settings(fast_settings());
+        if let Some(edge) = &edge {
+            svc = svc.with_edge(edge.clone());
+        }
+        let sip = edge.is_some();
         let app = routes::app(
             AppState::new(svc.clone(), ids.runtime.clone()),
             internal::routes(),
@@ -617,18 +663,23 @@ impl Harness {
             app,
             consumer: Consumer::new(),
         };
-        h.seed().await;
+        h.seed(sip).await;
         Some(h)
     }
 
     /// Two NG providers / routes (a: priority 10, b: priority 20) and the relay number
     /// bound to both.
-    pub async fn seed(&self) {
+    pub async fn seed(&self, sip: bool) {
         let now = self.clock_now();
-        for (provider, route, priority) in [("dp-a", "ng-a", 10), ("dp-b", "ng-b", 20)] {
+        let (adapter, a, b) = if sip {
+            ("SIP_TRUNK", "sip-a", "sip-b")
+        } else {
+            ("DETERMINISTIC_TEST", "dp-a", "dp-b")
+        };
+        for (provider, route, priority) in [(a, "ng-a", 10), (b, "ng-b", 20)] {
             self.sql(&format!(
                 "INSERT INTO telecom_providers (id, adapter, capabilities, status, credential_ref, max_concurrent_legs, created_at, updated_at, health) \
-                 VALUES ('{provider}', 'DETERMINISTIC_TEST', ARRAY['OUTBOUND_VOICE','INBOUND_VOICE','STATUS_QUERY','EVENTS','HEALTH','CAPACITY'], \
+                 VALUES ('{provider}', '{adapter}', ARRAY['OUTBOUND_VOICE','INBOUND_VOICE','STATUS_QUERY','EVENTS','HEALTH','CAPACITY'], \
                  'ENABLED', 'dp-secret', 100, '{now}', '{now}', 'HEALTHY')"
             ))
             .await;

@@ -35,9 +35,14 @@ impl TelephonyService {
         loop {
             match rx.recv().await {
                 Ok(event) => {
-                    if let Err(e) = self.handle_edge_event(event).await {
-                        tracing::warn!(error = %e, "edge event handling failed");
-                    }
+                    // Each event is handled on its own task: a slow inbound offer never
+                    // delays other channels' progress.
+                    let this = self.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = this.handle_edge_event(event).await {
+                            tracing::warn!(error = %e, "edge event handling failed");
+                        }
+                    });
                 }
                 Err(RecvError::Lagged(n)) => {
                     // Missed events are recovered by reconciliation (read-back).
@@ -57,7 +62,7 @@ impl TelephonyService {
             EdgeEventKind::Inbound(inbound) => {
                 if let Some(code) = &inbound.media_join_code {
                     if !self.application_media_joined(code, &event.channel).await? {
-                        let _ = self.edge.hangup(&event.channel).await;
+                        let _ = self.edge.reject(&event.channel).await;
                     }
                     return Ok(());
                 }
@@ -92,6 +97,10 @@ impl TelephonyService {
                 let Some(normalized) = normalized else {
                     return Ok(());
                 };
+                // Application-media attachments are bridge members, not provider calls.
+                if event.application_media {
+                    return Ok(());
+                }
                 // The interconnect that owns this channel (by binding).
                 let owner: Option<Owner> = db::one(
                     &self.db,
@@ -105,7 +114,11 @@ impl TelephonyService {
                 .await?;
                 let provider_id = match owner {
                     Some(o) => o.provider_id,
-                    // Not ours: quarantine under the edge's own provider identity.
+                    // The end of a dialog Telephony never bound (e.g. an inbound dialog it
+                    // rejected) is not a provider object to reconcile.
+                    None if matches!(kind, EdgeEventKind::Hangup { .. }) => return Ok(()),
+                    // Progress of an unknown channel: quarantine under the edge's own
+                    // interconnect identity (orphans are also found by reconciliation).
                     None => match self.providers.ids().next() {
                         Some(id) => id.clone(),
                         None => return Ok(()),

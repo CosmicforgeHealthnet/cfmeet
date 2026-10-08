@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!-- Simulated carrier (UAS): the destination is busy (486). Certification only. -->
+<scenario name="carrier busy">
+  <recv request="INVITE" />
+  <send><![CDATA[
+SIP/2.0 486 Busy Here
+[last_Via:]
+[last_From:]
+[last_To:];tag=[pid]SIPpTag02[call_number]
+[last_Call-ID:]
+[last_CSeq:]
+Content-Length: 0
+
+]]></send>
+  <recv request="ACK" />
+  <timewait milliseconds="300" />
+</scenario>

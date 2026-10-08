@@ -113,6 +113,9 @@ pub struct EdgeEvent {
     /// Stable, unique event id (dedupe key at the edge provider).
     pub event_id: String,
     pub channel: ChannelRef,
+    /// The channel is an application-media attachment (internal media peer), not a
+    /// public-network call.
+    pub application_media: bool,
     pub correlation_key: Option<String>,
     pub kind: EdgeEventKind,
     pub at: DateTime<Utc>,
@@ -150,8 +153,13 @@ pub trait SipMediaEdge: Send + Sync {
     /// Answers an inbound dialog.
     async fn answer(&self, channel: &ChannelRef) -> EdgeResult<()>;
 
-    /// Hangs a channel up (reject an inbound dialog, terminate a leg).
+    /// Hangs a channel up (terminate a leg).
     async fn hangup(&self, channel: &ChannelRef) -> EdgeResult<()>;
+
+    /// Rejects an unanswered inbound dialog (SIP 403 class; reveals nothing).
+    async fn reject(&self, channel: &ChannelRef) -> EdgeResult<()> {
+        self.hangup(channel).await
+    }
 
     async fn create_bridge(&self, name: &str) -> EdgeResult<String>;
 
@@ -182,6 +190,11 @@ pub trait SipMediaEdge: Send + Sync {
 
     /// All live channels (reconciliation).
     async fn list(&self) -> EdgeResult<Vec<ChannelSummary>>;
+
+    /// Media evidence of a channel: (RTP packets received, RTP packets sent).
+    async fn media_stats(&self, _channel: &ChannelRef) -> Option<(u64, u64)> {
+        None
+    }
 
     /// The edge event stream.
     fn subscribe(&self) -> broadcast::Receiver<EdgeEvent>;
