@@ -89,9 +89,11 @@ async fn the_same_number_in_one_scope_is_one_contact_and_independent_across_scop
         scalar(h.conn(), &format!("SELECT count(*) FROM contact_access_audit WHERE contact_reference = '{first}' AND operation = 'CREATE' AND reason_code = 'DEDUPLICATED'")).await,
         4
     );
-    // Another tenant, another application, another environment: independent contacts and
-    // unrelated fingerprints — and the same 201 a never-seen number gets.
-    let tenant_b = consumer();
+    // Another tenant, another application, another environment — each differing ALONE
+    // (every scope component is inside the MAC): independent contacts and unrelated
+    // fingerprints — and the same 201 a never-seen number gets.
+    let mut tenant_b = a.clone();
+    tenant_b.tenant_id = Uuid::new_v4();
     let mut app_b = a.clone();
     app_b.application_id = Uuid::new_v4();
     let env_b = a.sibling_environment();

@@ -660,3 +660,78 @@ async fn resolution_permission_is_receiver_authoritative_and_telephony_only() {
     assert_eq!(r.code(), "INTERNAL_PERMISSION_DENIED");
     let _ = g;
 }
+
+#[tokio::test]
+async fn a_contact_blocked_or_expired_after_its_grant_is_never_resolved() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = consumer();
+    let telephony = h.ids.telephony.clone();
+    // BLOCKED after the grant was issued.
+    let s = setup(&h, &c, true).await;
+    let decision = authorize_public(&h, &c, &s).await;
+    let (call, leg) = (Uuid::new_v4(), Uuid::new_v4());
+    let g = grant(
+        &h,
+        &c,
+        &s,
+        decision["decisionId"].as_str().unwrap(),
+        call,
+        leg,
+    )
+    .await
+    .json["grant"]
+        .clone();
+    h.verify_contact(&c, &s.contact, "BLOCKED", None).await;
+    let r = resolve_as(&h, &telephony, &c, &s.contact, &g, Uuid::new_v4()).await;
+    assert_eq!(r.code(), "CONTACT_BLOCKED", "{}", r.text);
+    assert!(!r.text.contains(E164));
+    // Verification EXPIRED (read time) between the grant and its use.
+    let h = Harness::new().await.unwrap();
+    let telephony = h.ids.telephony.clone();
+    let principal = Uuid::new_v4();
+    let contact = h.create_contact(&c, NUMBER).await["contactReference"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    h.verify_contact(&c, &contact, "VERIFIED", Some(iso(at(1))))
+        .await;
+    let mut req = common::context_request(&[principal], "BIDIRECTIONAL", &[]);
+    req["participants"] = json!([{ "principalId": principal }, { "contactReferenceId": contact }]);
+    req["allowedRelayStrategies"] = json!(["PUBLIC_RELAY_ALLOWED"]);
+    let ctx = h.create_context(&c, req).await;
+    let session = h
+        .create_session(
+            &c,
+            ctx["contextId"].as_str().unwrap(),
+            json!({ "relayStrategy": "PUBLIC_RELAY_ALLOWED" }),
+        )
+        .await;
+    let s = Setup {
+        contact,
+        context: ctx["contextId"].as_str().unwrap().to_string(),
+        session: session["relaySessionId"].as_str().unwrap().to_string(),
+        principal,
+    };
+    let decision = authorize_public(&h, &c, &s).await;
+    let g = grant(
+        &h,
+        &c,
+        &s,
+        decision["decisionId"].as_str().unwrap(),
+        call,
+        leg,
+    )
+    .await
+    .json["grant"]
+        .clone();
+    h.clock.set(at(1) + Duration::seconds(5));
+    let r = resolve_as(&h, &telephony, &c, &s.contact, &g, Uuid::new_v4()).await;
+    assert_eq!(r.code(), "CONTACT_VERIFICATION_EXPIRED", "{}", r.text);
+    assert!(!r.text.contains(E164));
+    assert_eq!(
+        scalar(h.conn(), &format!("SELECT count(*) FROM contact_access_audit WHERE operation = 'RESOLVE_FOR_EXECUTION' AND outcome = 'DENIED' AND contact_reference = '{}'", s.contact)).await,
+        1
+    );
+}

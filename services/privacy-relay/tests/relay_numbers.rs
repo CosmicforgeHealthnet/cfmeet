@@ -166,6 +166,29 @@ async fn one_remaining_number_goes_to_exactly_one_session_and_replays_are_idempo
         err.is_err(),
         "a second holder must be refused by the database"
     );
+    // ...and the one-holder index alone refuses it, even with every trigger bypassed
+    // and a distinct generation (no other layer can mask a missing index).
+    let insert = format!(
+        "INSERT INTO relay_number_assignments (id, relay_number_id, tenant_id, application_id, environment_id, context_id, \
+           relay_session_id, assignment_generation, country_iso2, capabilities, status, assigned_at, expires_at, \
+           requested_by_service, request_id, correlation_id, created_at, updated_at) \
+         SELECT gen_random_uuid(), '{n}', tenant_id, application_id, environment_id, context_id, id, 7, 'GB', \
+           ARRAY['VOICE_INBOUND'], 'ACTIVE', '{t}', '{t2}', 'cfmeet.calling', 'req_{z}', 'corr_{z}', '{t}', '{t}' \
+         FROM privacy_relay_sessions WHERE id = '{other}'",
+        t = iso(at(1)),
+        t2 = iso(at(2)),
+        z = "0".repeat(32),
+    );
+    let raw = common::exec(
+        h.conn(),
+        &format!("DO $$ BEGIN SET LOCAL session_replication_role = replica; {insert}; END $$"),
+    )
+    .await
+    .expect_err("two ACTIVE holders of one number");
+    assert!(
+        raw.to_string().contains("uq_relay_assignments_holder"),
+        "{raw}"
+    );
 }
 
 #[tokio::test]

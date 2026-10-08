@@ -370,6 +370,19 @@ async fn a_delayed_callback_never_reaches_the_next_session() {
     );
     h.clock.set(at(6));
     not_active(&resolve(&h, at(5), json!({})).await, "during cooldown");
+    // Workers run during the cooldown: the number is still not lent to anyone, so a
+    // delayed event can reach no session at all.
+    h.relay.run_sweep().await.unwrap();
+    let waiting = mapping(&h, &c, CONTACT_B, 300, false).await;
+    assert_eq!(
+        h.assign_relay_number(&c, &waiting.session).await.code(),
+        "RELAY_NUMBER_UNAVAILABLE",
+        "the cooldown is never bypassed"
+    );
+    not_active(
+        &resolve(&h, at(6), json!({})).await,
+        "during cooldown, after a sweep",
+    );
     // After the cooldown N goes to session B (another context and contact): generation 2.
     h.clock.set(at(70));
     h.relay.run_sweep().await.unwrap();
