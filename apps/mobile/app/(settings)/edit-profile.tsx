@@ -9,11 +9,13 @@ import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/shared/loading";
 import { useToast } from "@/components/ui/toast";
 import { useUser, useUpdateUser } from "@/features/user/hooks/use-user";
+import { useColors } from "@/hooks/useColors";
 
 export default function EditProfileScreen() {
   const { data: user, isLoading, isError } = useUser();
   const updateUser = useUpdateUser();
   const { toast, success } = useToast();
+  const colors = useColors();
 
   const [username, setUsername] = useState("");
   const [isInitialized, setIsInitialized] = useState(false);
@@ -63,7 +65,7 @@ export default function EditProfileScreen() {
   if (isError || !user) {
     return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-background dark:bg-background-dark items-center justify-center px-6">
-        <Ionicons name="alert-circle-outline" size={48} color="#dc2626" style={{ opacity: 0.5 }} />
+        <Ionicons name="alert-circle-outline" size={48} color={colors.destructive} style={{ opacity: 0.5 }} />
         <Text className="mt-4 text-base font-bold text-foreground dark:text-foreground-dark">
           Failed to load profile
         </Text>
@@ -79,7 +81,7 @@ export default function EditProfileScreen() {
       {/* Header */}
       <View className="flex-row items-center px-4 py-3 border-b border-border dark:border-border-dark">
         <Pressable onPress={() => router.back()} className="flex-row items-center gap-2">
-          <Ionicons name="arrow-back" size={24} color="#029CD4" />
+          <Ionicons name="arrow-back" size={24} color={colors.primary} />
           <Text className="text-sm font-bold text-primary dark:text-primary-dark">Back</Text>
         </Pressable>
       </View>

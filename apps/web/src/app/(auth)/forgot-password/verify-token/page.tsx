@@ -67,8 +67,8 @@ export default function VerifyTokenPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen flex items-center justify-center bg-gray-50">
-          <div className="text-gray-500">Loading...</div>
+        <div className="min-h-screen flex items-center justify-center bg-muted">
+          <div className="text-muted-foreground">Loading...</div>
         </div>
       }
     >

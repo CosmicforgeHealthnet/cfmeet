@@ -67,7 +67,7 @@ export default function ApiKeysContent() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold mb-1">API Keys</h2>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted-foreground">
             Manage your API keys for third-party integrations.
           </p>
         </div>
@@ -101,13 +101,13 @@ export default function ApiKeysContent() {
               </p>
 
               <div className="flex items-center gap-2">
-                <code className="flex-1 bg-white border border-green-200 px-3 py-2 rounded-lg text-sm font-mono text-gray-800 break-all">
+                <code className="flex-1 bg-card border border-green-200 px-3 py-2 rounded-lg text-sm font-mono text-foreground break-all">
                   {newKey.api_key}
                 </code>
                 <Button
                   size="sm"
                   variant="outline"
-                  className="bg-white border-green-200 text-green-700 hover:bg-green-50"
+                  className="bg-card border-green-200 text-green-700 hover:bg-green-50"
                   onClick={() => copyToClipboard(newKey.api_key)}
                 >
                   {copied ? (
@@ -136,26 +136,26 @@ export default function ApiKeysContent() {
       {/* Keys List */}
       <div className="space-y-4">
         {keys.length === 0 ? (
-          <div className="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-200">
-            <Key className="w-8 h-8 mx-auto text-gray-300 mb-3" />
-            <p className="text-gray-500 font-medium">No API keys found</p>
-            <p className="text-gray-400 text-sm">Create one to get started</p>
+          <div className="text-center py-12 bg-muted rounded-xl border border-dashed border-border">
+            <Key className="w-8 h-8 mx-auto text-muted-foreground mb-3" />
+            <p className="text-muted-foreground font-medium">No API keys found</p>
+            <p className="text-muted-foreground text-sm">Create one to get started</p>
           </div>
         ) : (
           keys.map((key) => (
             <div
               key={key.id}
               className={cn(
-                "bg-white rounded-xl border p-4 transition-all hover:shadow-sm",
+                "bg-card rounded-xl border p-4 transition-all hover:shadow-sm",
                 key.status === "revoked"
-                  ? "border-gray-100 opacity-60 bg-gray-50"
-                  : "border-gray-200",
+                  ? "border-border opacity-60 bg-muted"
+                  : "border-border",
               )}
             >
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm font-medium text-gray-900">
+                    <span className="font-mono text-sm font-medium text-foreground">
                       {key.api_key_masked}
                     </span>
                     <span
@@ -163,13 +163,13 @@ export default function ApiKeysContent() {
                         "px-2 py-0.5 rounded-full text-xs font-medium capitalize",
                         key.status === "active"
                           ? "bg-green-100 text-green-700"
-                          : "bg-gray-100 text-gray-600",
+                          : "bg-muted text-muted-foreground",
                       )}
                     >
                       {key.status}
                     </span>
                   </div>
-                  <div className="flex items-center gap-4 text-xs text-gray-500">
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
                     <span>
                       Created{" "}
                       {new Date(key.created_at).toLocaleDateString("en-US", {
@@ -192,8 +192,8 @@ export default function ApiKeysContent() {
 
                 <div className="flex items-center gap-6">
                   <div className="text-right hidden sm:block">
-                    <p className="text-xs text-gray-500 mb-0.5">Usage</p>
-                    <p className="text-sm font-medium text-gray-900">
+                    <p className="text-xs text-muted-foreground mb-0.5">Usage</p>
+                    <p className="text-sm font-medium text-foreground">
                       {key.used_count} / {key.usage_limit}
                     </p>
                   </div>

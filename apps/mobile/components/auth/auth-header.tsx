@@ -2,6 +2,7 @@ import { View, Pressable } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Text } from "@/components/ui/text";
+import { useColors } from "@/hooks/useColors";
 
 interface AuthHeaderProps {
   title: string;
@@ -15,6 +16,7 @@ export function AuthHeader({
   showBackButton = true,
 }: AuthHeaderProps) {
   const router = useRouter();
+  const colors = useColors();
 
   return (
     <View className="w-full mb-4">
@@ -23,7 +25,7 @@ export function AuthHeader({
           onPress={() => router.back()}
           className="flex-row items-center mb-3"
         >
-          <Ionicons name="chevron-back" size={20} color="#006BFF" />
+          <Ionicons name="chevron-back" size={20} color={colors.primary} />
           <Text className="text-primary text-sm">Go Back</Text>
         </Pressable>
       )}

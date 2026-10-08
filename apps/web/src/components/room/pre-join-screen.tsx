@@ -235,7 +235,7 @@ export default function PreJoinScreen({ roomId, onJoin }: PreJoinScreenProps) {
 
   if (isLoadingMeeting) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-50">
+      <div className="flex items-center justify-center h-screen bg-muted">
         <Spinner label="Loading meeting info..." />
       </div>
     );
@@ -246,10 +246,10 @@ export default function PreJoinScreen({ roomId, onJoin }: PreJoinScreenProps) {
       <div className="flex flex-col items-center gap-8 w-full max-w-lg px-6">
         {/* Title */}
         <div className="text-center space-y-1">
-          <h1 className="text-2xl font-bold text-[#343434]">Ready to join?</h1>
-          <p className="text-sm text-[#00000080]">
+          <h1 className="text-2xl font-bold text-foreground">Ready to join?</h1>
+          <p className="text-sm text-muted-foreground">
             {meetingInfo?.data?.title || "Meeting"} -{" "}
-            <span className="font-medium text-[#029CD4]">{roomId}</span>
+            <span className="font-medium text-primary">{roomId}</span>
           </p>
           <div className="flex items-center justify-center gap-2 mt-2">
             {meetingInfo?.data?.is_private && (
@@ -264,7 +264,7 @@ export default function PreJoinScreen({ roomId, onJoin }: PreJoinScreenProps) {
                     ? "bg-green-100 text-green-700"
                     : meetingInfo.data.status === "scheduled"
                       ? "bg-blue-100 text-blue-700"
-                      : "bg-gray-100 text-gray-700"
+                      : "bg-muted text-foreground"
                 }`}
               >
                 {meetingInfo.data.status}
@@ -274,7 +274,7 @@ export default function PreJoinScreen({ roomId, onJoin }: PreJoinScreenProps) {
         </div>
 
         {/* Camera Preview */}
-        <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-[#1a1a2e] shadow-lg">
+        <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-card dark:bg-background shadow-lg">
           {isCameraOn ? (
             <video
               ref={videoRef}
@@ -287,7 +287,7 @@ export default function PreJoinScreen({ roomId, onJoin }: PreJoinScreenProps) {
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center gap-3">
               <Avatar className="h-24 w-24 border-4 border-white/10">
-                <AvatarFallback className="text-3xl font-bold bg-[#E6F5FA] text-[#029CD4]">
+                <AvatarFallback className="text-3xl font-bold bg-primary/10 text-primary">
                   {(displayName || "Guest").slice(0, 2).toUpperCase()}
                 </AvatarFallback>
               </Avatar>
@@ -368,10 +368,10 @@ export default function PreJoinScreen({ roomId, onJoin }: PreJoinScreenProps) {
           <div className="flex flex-col items-center gap-3">
             <div className="flex items-center gap-2">
               <span className="relative flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#029CD4] opacity-75" />
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-[#029CD4]" />
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-primary" />
               </span>
-              <span className="text-sm font-medium text-[#343434]">
+              <span className="text-sm font-medium text-foreground">
                 Waiting for the host to let you in...
               </span>
             </div>
@@ -399,8 +399,8 @@ export default function PreJoinScreen({ roomId, onJoin }: PreJoinScreenProps) {
 
               return (
                 <div className="flex flex-col items-center gap-2 w-full max-w-xs">
-                  <p className="text-sm text-center text-[#00000080]">
-                    Meeting starts in <span className="font-semibold text-[#029CD4]">{timeDisplay}</span>
+                  <p className="text-sm text-center text-muted-foreground">
+                    Meeting starts in <span className="font-semibold text-primary">{timeDisplay}</span>
                   </p>
                   <Button size="lg" className="w-full" disabled>
                     Meeting Not Started
@@ -457,15 +457,15 @@ function ToggleButton({
       <div
         className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
           isOn
-            ? "bg-[#029CD4] text-white shadow-md"
-            : "bg-gray-200 text-gray-500"
+            ? "bg-primary text-white shadow-md"
+            : "bg-muted text-muted-foreground"
         } group-hover:scale-105`}
       >
         {isOn ? iconOn : iconOff}
       </div>
       <span
         className={`text-xs font-medium ${
-          isOn ? "text-[#029CD4]" : "text-gray-400"
+          isOn ? "text-primary" : "text-muted-foreground"
         }`}
       >
         {label}

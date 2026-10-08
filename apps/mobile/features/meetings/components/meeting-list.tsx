@@ -8,6 +8,7 @@ import { Loading } from "@/components/shared/loading";
 import { MeetingCard } from "./meeting-card";
 import { DeleteMeetingModal } from "./delete-meeting-modal";
 import { useMeetings } from "../hooks/use-meetings";
+import { useColors } from "@/hooks/useColors";
 import type { Meeting, MeetingStatus } from "../types";
 
 type StatusFilter = MeetingStatus | "all";
@@ -24,6 +25,7 @@ export function MeetingList() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const colors = useColors();
 
   const { data, isLoading, isError, refetch, isRefetching } = useMeetings(page, 10);
 
@@ -61,7 +63,7 @@ export function MeetingList() {
   if (isError) {
     return (
       <View className="flex-1 items-center justify-center px-6">
-        <Ionicons name="alert-circle-outline" size={48} color="#dc2626" style={{ opacity: 0.5 }} />
+        <Ionicons name="alert-circle-outline" size={48} color={colors.destructive} style={{ opacity: 0.5 }} />
         <Text className="mt-4 text-base font-bold text-foreground dark:text-foreground-dark">
           Failed to load meetings
         </Text>
@@ -122,7 +124,7 @@ export function MeetingList() {
         contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor="#029CD4" />
+          <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.primary} />
         }
         ListHeaderComponent={
           <View className="flex-row items-center justify-between mb-4">
@@ -133,7 +135,7 @@ export function MeetingList() {
         }
         ListEmptyComponent={
           <View className="items-center py-12">
-            <Ionicons name="calendar-outline" size={48} color="#029CD4" style={{ opacity: 0.5 }} />
+            <Ionicons name="calendar-outline" size={48} color={colors.primary} style={{ opacity: 0.5 }} />
             <Text className="mt-4 text-base font-bold text-foreground dark:text-foreground-dark">
               No meetings found
             </Text>
@@ -152,7 +154,7 @@ export function MeetingList() {
                 disabled={page <= 1}
                 className={`p-2 rounded-lg ${page <= 1 ? "opacity-30" : "bg-secondary dark:bg-secondary-dark"}`}
               >
-                <Ionicons name="chevron-back" size={20} color="#029CD4" />
+                <Ionicons name="chevron-back" size={20} color={colors.primary} />
               </Pressable>
               <Text className="text-sm text-muted-foreground dark:text-muted-foreground-dark">
                 Page {page} of {totalPages}
@@ -162,7 +164,7 @@ export function MeetingList() {
                 disabled={page >= totalPages}
                 className={`p-2 rounded-lg ${page >= totalPages ? "opacity-30" : "bg-secondary dark:bg-secondary-dark"}`}
               >
-                <Ionicons name="chevron-forward" size={20} color="#029CD4" />
+                <Ionicons name="chevron-forward" size={20} color={colors.primary} />
               </Pressable>
             </View>
           ) : null

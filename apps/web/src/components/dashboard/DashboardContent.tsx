@@ -88,7 +88,7 @@ export default function DashboardContent() {
           className={`flex flex-col items-center gap-2 sm:gap-3 ${isCreatingInstant ? "cursor-wait" : "cursor-pointer"}`}
           onClick={handleInstantMeeting}
         >
-          <div className="w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-2xl bg-[#029CD4] flex items-center justify-center shadow-lg">
+          <div className="w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-2xl bg-primary flex items-center justify-center shadow-lg">
             {isCreatingInstant ? (
               <Loader2 className="w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 text-white animate-spin" />
             ) : (
@@ -104,8 +104,8 @@ export default function DashboardContent() {
           className="flex flex-col items-center gap-2 sm:gap-3 cursor-pointer"
           onClick={() => router.push("/dashboard/schedule")}
         >
-          <div className="w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-2xl bg-[#FAFAFB] flex items-center justify-center shadow">
-            <Calendar className="w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 text-[#029CD4]" />
+          <div className="w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-2xl bg-sidebar flex items-center justify-center shadow">
+            <Calendar className="w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 text-primary" />
           </div>
           <span className="font-semibold text-sm sm:text-base md:text-lg">
             Schedule
@@ -117,7 +117,7 @@ export default function DashboardContent() {
       <div className="flex justify-center mt-6 sm:mt-8 md:mt-10 px-2">
         <JoinMeetingInput
           className="max-w-[280px] sm:max-w-[340px] md:max-w-[384px] gap-2 sm:gap-3"
-          inputClassName="h-10 sm:h-11 border-[#029CD4] focus:ring-[#029CD44D]"
+          inputClassName="h-10 sm:h-11 border-[var(--primary)] focus:ring-[var(--primary)4D]"
           buttonClassName="h-10 sm:h-11 px-5 sm:px-8"
         />
       </div>
@@ -133,16 +133,16 @@ export default function DashboardContent() {
             <Spinner />
           </div>
         ) : meetings.length === 0 ? (
-          <p className="text-sm text-[#00000080]">No meetings yet.</p>
+          <p className="text-sm text-muted-foreground">No meetings yet.</p>
         ) : (
           <div className="flex items-start gap-3 sm:gap-4">
             {/* STATIC ACCENT BAR */}
             <div
-              className="w-[36px] sm:w-[45px] h-[100px] sm:h-[118px] bg-[#029CD44D] rounded-sm flex items-center justify-center shrink-0 cursor-pointer"
+              className="w-[36px] sm:w-[45px] h-[100px] sm:h-[118px] bg-[var(--primary)4D] rounded-sm flex items-center justify-center shrink-0 cursor-pointer"
               onClick={() => router.push("/dashboard/schedule")}
             >
               <div className="w-6 h-6 flex items-center justify-center">
-                <Plus className="w-4 h-4 text-[#029CD4]" />
+                <Plus className="w-4 h-4 text-primary" />
               </div>
             </div>
 
@@ -173,36 +173,36 @@ function MeetingCard({ meeting }: { meeting: Meeting }) {
   };
 
   return (
-    <div className="w-[200px] sm:w-[230px] md:w-[258px] h-[115px] sm:h-[125px] md:h-[135px] bg-white rounded-[10px] p-3 sm:p-4 shadow-sm border border-gray-50 shrink-0 flex flex-col justify-between">
+    <div className="w-[200px] sm:w-[230px] md:w-[258px] h-[115px] sm:h-[125px] md:h-[135px] bg-card rounded-[10px] p-3 sm:p-4 shadow-sm border border-border shrink-0 flex flex-col justify-between">
       <div className="flex justify-between items-start">
-        <h4 className="text-[#029CD4] font-semibold text-[13px] sm:text-[15px] md:text-[16px] leading-none truncate pr-2">
+        <h4 className="text-primary font-semibold text-[13px] sm:text-[15px] md:text-[16px] leading-none truncate pr-2">
           {meeting.title}
         </h4>
         <button
           onClick={handleCopy}
-          className="p-1 hover:bg-gray-100 rounded transition-colors shrink-0"
+          className="p-1 hover:bg-muted rounded transition-colors shrink-0"
           title="Copy meeting link"
         >
           {copied ? (
             <Check className="w-4 h-4 text-green-500" />
           ) : (
-            <Copy className="w-4 h-4 text-[#00000080]" />
+            <Copy className="w-4 h-4 text-muted-foreground" />
           )}
         </button>
       </div>
 
       <div className="space-y-1">
-        <p className="text-[#00000080] font-normal text-[11px] sm:text-[12px] leading-none">
+        <p className="text-muted-foreground font-normal text-[11px] sm:text-[12px] leading-none">
           {formatDateForDisplay(meeting.start_time)}
         </p>
-        <p className="text-[#00000080] font-normal text-[11px] sm:text-[12px] leading-none">
+        <p className="text-muted-foreground font-normal text-[11px] sm:text-[12px] leading-none">
           {formatTimeForDisplay(meeting.start_time)}
         </p>
       </div>
 
       <div className="flex justify-between items-end">
         <div className="flex flex-col gap-1.5">
-          <span className="text-[#00000080] font-normal text-[11px] sm:text-[12px] leading-none">
+          <span className="text-muted-foreground font-normal text-[11px] sm:text-[12px] leading-none">
             {meeting.meeting_identifier}
           </span>
           <span
@@ -211,7 +211,7 @@ function MeetingCard({ meeting }: { meeting: Meeting }) {
                 ? "bg-green-100 text-green-700"
                 : meeting.status === "scheduled"
                   ? "bg-blue-100 text-blue-700"
-                  : "bg-gray-100 text-gray-600"
+                  : "bg-muted text-muted-foreground"
             }`}
           >
             {meeting.status}

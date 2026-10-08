@@ -12,6 +12,7 @@ import { useToast } from "@/components/ui/toast";
 import { usePublicMeeting } from "@/features/meetings/hooks/use-meetings";
 import { useJoinMeeting } from "@/features/meetings/hooks/use-join-meeting";
 import { useAuthStore } from "@/store/auth.store";
+import { useColors } from "@/hooks/useColors";
 
 interface PreJoinScreenProps {
   meetingIdentifier: string;
@@ -28,6 +29,7 @@ export function PreJoinScreen({ meetingIdentifier }: PreJoinScreenProps) {
   const { user, isAuthenticated } = useAuthStore();
   const { data: meeting, isLoading, isError } = usePublicMeeting(meetingIdentifier);
   const joinMeeting = useJoinMeeting();
+  const colors = useColors();
 
   useEffect(() => {
     if (user?.username) {
@@ -81,7 +83,7 @@ export function PreJoinScreen({ meetingIdentifier }: PreJoinScreenProps) {
   if (isError || !meeting) {
     return (
       <Screen className="items-center justify-center px-6">
-        <Ionicons name="alert-circle-outline" size={64} color="#029CD4" style={{ opacity: 0.5 }} />
+        <Ionicons name="alert-circle-outline" size={64} color={colors.primary} style={{ opacity: 0.5 }} />
         <Text className="mt-4 text-xl font-bold text-foreground dark:text-foreground-dark">Meeting Not Found</Text>
         <Text className="mt-2 text-center text-muted-foreground dark:text-muted-foreground-dark">
           The meeting you're looking for doesn't exist or has ended.
@@ -93,7 +95,7 @@ export function PreJoinScreen({ meetingIdentifier }: PreJoinScreenProps) {
   if (meeting.status === "ended") {
     return (
       <Screen className="items-center justify-center px-6">
-        <Ionicons name="checkmark-circle-outline" size={64} color="#029CD4" style={{ opacity: 0.5 }} />
+        <Ionicons name="checkmark-circle-outline" size={64} color={colors.primary} style={{ opacity: 0.5 }} />
         <Text className="mt-4 text-xl font-bold text-foreground dark:text-foreground-dark">Meeting Ended</Text>
         <Text className="mt-2 text-center text-muted-foreground dark:text-muted-foreground-dark">
           This meeting has already ended.

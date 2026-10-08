@@ -176,7 +176,7 @@ export function VerifyForm() {
             </Text>
           ) : (
             <Pressable onPress={handleResend} disabled={resendVerification.isPending}>
-              <Text className="text-sm font-bold text-[#029CD4]">Resend!</Text>
+              <Text className="text-sm font-bold text-primary dark:text-primary-dark">Resend!</Text>
             </Pressable>
           )}
         </View>
@@ -194,7 +194,7 @@ export function VerifyForm() {
         {/* Return to Login */}
         <Link href="/login" asChild>
           <Pressable className="mt-3">
-            <Text className="text-sm text-[#029CD4]">Return to Log In Page</Text>
+            <Text className="text-sm text-primary dark:text-primary-dark">Return to Log In Page</Text>
           </Pressable>
         </Link>
         </AuthCard>

@@ -16,9 +16,9 @@ const Navbar = () => {
         <Image
           src="/CFMeet.png"
           alt="CF Meet Logo"
-          width={140}
-          height={32}
-          className="w-[120px] sm:w-[180px] h-auto"
+          width={100}
+          height={24}
+          className="w-[80px] sm:w-[100px] h-auto"
           priority
         />
       </div>

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { useTheme } from "@/providers/theme-provider";
 import { useAuthStore } from "@/store/auth.store";
 import { useLogout } from "@/features/auth/hooks/use-logout";
+import { useColors } from "@/hooks/useColors";
 
 type IoniconsName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -21,7 +22,10 @@ interface SettingsItemProps {
   color?: string;
 }
 
-function SettingsItem({ icon, label, value, onPress, color = "#029CD4" }: SettingsItemProps) {
+function SettingsItem({ icon, label, value, onPress, color }: SettingsItemProps) {
+  const colors = useColors();
+  const iconColor = color ?? colors.primary;
+
   return (
     <Pressable
       onPress={onPress}
@@ -29,13 +33,13 @@ function SettingsItem({ icon, label, value, onPress, color = "#029CD4" }: Settin
     >
       <View className="flex-row items-center gap-3">
         <View className="w-8 h-8 rounded-lg bg-accent dark:bg-accent-dark items-center justify-center">
-          <Ionicons name={icon} size={18} color={color} />
+          <Ionicons name={icon} size={18} color={iconColor} />
         </View>
         <Text className="text-foreground dark:text-foreground-dark font-semibold">{label}</Text>
       </View>
       <View className="flex-row items-center gap-2">
         {value && <Text className="text-muted-foreground dark:text-muted-foreground-dark">{value}</Text>}
-        <Ionicons name="chevron-forward" size={18} color="#737373" />
+        <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
       </View>
     </Pressable>
   );
@@ -49,13 +53,15 @@ interface LogoutModalProps {
 }
 
 function LogoutModal({ visible, onClose, onConfirm, isLoading }: LogoutModalProps) {
+  const colors = useColors();
+
   return (
     <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
       <Pressable className="flex-1 bg-black/40 items-center justify-center" onPress={onClose}>
         <Pressable className="bg-card dark:bg-card-dark rounded-2xl w-[90%] max-w-sm p-6">
           <View className="items-center mb-4">
             <View className="w-12 h-12 rounded-full bg-destructive/10 dark:bg-destructive-dark/10 items-center justify-center">
-              <Ionicons name="log-out-outline" size={24} color="#dc2626" />
+              <Ionicons name="log-out-outline" size={24} color={colors.destructive} />
             </View>
           </View>
 
@@ -90,6 +96,7 @@ export default function SettingsScreen() {
   const { theme, setTheme } = useTheme();
   const logout = useLogout();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const colors = useColors();
 
   const handleThemeChange = () => {
     const themes: Array<"system" | "light" | "dark"> = ["system", "light", "dark"];
@@ -186,11 +193,11 @@ export default function SettingsScreen() {
             >
               <View className="flex-row items-center gap-3">
                 <View className="w-8 h-8 rounded-lg bg-destructive/20 dark:bg-destructive-dark/20 items-center justify-center">
-                  <Ionicons name="log-out-outline" size={18} color="#dc2626" />
+                  <Ionicons name="log-out-outline" size={18} color={colors.destructive} />
                 </View>
                 <Text className="text-destructive dark:text-destructive-dark font-semibold">Sign Out</Text>
               </View>
-              <Ionicons name="chevron-forward" size={18} color="#dc2626" />
+              <Ionicons name="chevron-forward" size={18} color={colors.destructive} />
             </Pressable>
           </Card>
         </View>

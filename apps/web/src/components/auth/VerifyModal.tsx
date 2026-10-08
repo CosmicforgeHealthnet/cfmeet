@@ -109,15 +109,15 @@ const VerifyModal = ({
 
   return (
     <div className="relative z-10 flex flex-col items-center w-full max-w-[520px]">
-      <div className="bg-white rounded-2xl sm:rounded-[40px] shadow-2xl w-full max-w-[520px] px-5 py-6 sm:p-8 md:p-12 my-4 sm:my-6 flex flex-col items-center">
+      <div className="bg-card rounded-2xl sm:rounded-[40px] shadow-2xl w-full max-w-[520px] px-5 py-6 sm:p-8 md:p-12 my-4 sm:my-6 flex flex-col items-center">
         {/* Header */}
         <AuthHeader title={title} subtitle="Enter OTP code" />
 
         <div className="text-center mb-2 space-y-1">
-          <p className="text-sm text-gray-400">
+          <p className="text-sm text-muted-foreground">
             We sent you a 6-digit code via your email
           </p>
-          <p className="text-sm font-bold text-gray-900">{displayEmail}</p>
+          <p className="text-sm font-bold text-foreground">{displayEmail}</p>
         </div>
 
         {/* OTP Input Group */}
@@ -139,7 +139,7 @@ const VerifyModal = ({
                 <InputOTPSlot
                   key={index}
                   index={index}
-                  className="w-9 h-8 sm:w-11 sm:h-9 md:w-13 md:h-10 rounded-sm border-none bg-sky-100 text-black text-lg sm:text-xl"
+                  className="w-9 h-8 sm:w-11 sm:h-9 md:w-13 md:h-10 rounded-sm border-none bg-primary/10 text-foreground text-lg sm:text-xl"
                 />
               ))}
             </InputOTPGroup>
@@ -160,11 +160,11 @@ const VerifyModal = ({
           )}
 
           <div>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-muted-foreground">
               Didn&apos;t receive code?{" "}
               <Button
                 type="button"
-                className="text-[#029CD4] font-bold p-1"
+                className="text-primary font-bold p-1"
                 variant="link"
                 onClick={handleResend}
                 disabled={!onResend}

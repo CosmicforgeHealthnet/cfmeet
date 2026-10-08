@@ -4,6 +4,7 @@ import { Text } from "@/components/ui/text";
 import { Avatar } from "@/components/ui/avatar";
 import { useRoom } from "../providers/room-provider";
 import { useParticipants } from "../hooks/use-participants";
+import { useColors } from "@/hooks/useColors";
 import type { Participant } from "@/features/meetings/types";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -48,6 +49,7 @@ export function VideoGrid() {
   const { joinData } = useRoom();
   const meetingId = joinData?.id ?? "";
   const { data } = useParticipants(meetingId);
+  const colors = useColors();
 
   const participants = data?.participants ?? [];
   const count = participants.length;
@@ -71,7 +73,7 @@ export function VideoGrid() {
   if (count === 0) {
     return (
       <View className="flex-1 items-center justify-center">
-        <Ionicons name="people-outline" size={48} color="#029CD4" style={{ opacity: 0.5 }} />
+        <Ionicons name="people-outline" size={48} color={colors.primary} style={{ opacity: 0.5 }} />
         <Text className="mt-4 text-muted-foreground dark:text-muted-foreground-dark">Waiting for participants...</Text>
       </View>
     );

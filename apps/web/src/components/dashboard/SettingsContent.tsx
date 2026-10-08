@@ -30,19 +30,19 @@ export default function SettingsContent() {
     <div className="max-w-4xl mx-auto p-6 space-y-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground text-gray-500">
+        <p className="text-muted-foreground text-muted-foreground">
           Manage your account settings and preferences.
         </p>
       </div>
 
-      <div className="flex border-b border-gray-100 overflow-x-auto">
+      <div className="flex border-b border-border overflow-x-auto">
         <button
           onClick={() => setActiveTab("profile")}
           className={cn(
             "flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
             activeTab === "profile"
               ? "border-primary text-primary"
-              : "border-transparent text-gray-400 hover:text-gray-600",
+              : "border-transparent text-muted-foreground hover:text-muted-foreground",
           )}
         >
           <User className="w-4 h-4" />
@@ -54,7 +54,7 @@ export default function SettingsContent() {
             "flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
             activeTab === "security"
               ? "border-primary text-primary"
-              : "border-transparent text-gray-400 hover:text-gray-600",
+              : "border-transparent text-muted-foreground hover:text-muted-foreground",
           )}
         >
           <Lock className="w-4 h-4" />
@@ -66,7 +66,7 @@ export default function SettingsContent() {
             "flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
             activeTab === "api-keys"
               ? "border-primary text-primary"
-              : "border-transparent text-gray-400 hover:text-gray-600",
+              : "border-transparent text-muted-foreground hover:text-muted-foreground",
           )}
         >
           <Key className="w-4 h-4" />
@@ -78,7 +78,7 @@ export default function SettingsContent() {
             "flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
             activeTab === "webhooks"
               ? "border-primary text-primary"
-              : "border-transparent text-gray-400 hover:text-gray-600",
+              : "border-transparent text-muted-foreground hover:text-muted-foreground",
           )}
         >
           <Webhook className="w-4 h-4" />
@@ -415,10 +415,10 @@ function SecuritySettings() {
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-6">
+      <div className="bg-card p-6 rounded-2xl shadow-sm border border-border space-y-6">
         <div>
           <h2 className="text-lg font-semibold mb-1">Change Password</h2>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted-foreground">
             Update your password to keep your account secure.
           </p>
         </div>
@@ -444,13 +444,13 @@ function SecuritySettings() {
                 type={showCurrentPassword ? "text" : "password"}
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
-                className="border-gray-200 focus:border-primary/50 pr-10"
+                className="border-border focus:border-primary/50 pr-10"
                 placeholder="Enter current password"
               />
               <button
                 type="button"
                 onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-muted-foreground"
               >
                 {showCurrentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
@@ -465,18 +465,18 @@ function SecuritySettings() {
                 type={showNewPassword ? "text" : "password"}
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                className="border-gray-200 focus:border-primary/50 pr-10"
+                className="border-border focus:border-primary/50 pr-10"
                 placeholder="Enter new password"
               />
               <button
                 type="button"
                 onClick={() => setShowNewPassword(!showNewPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-muted-foreground"
               >
                 {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-muted-foreground">
               8+ characters, uppercase, lowercase, number, and special character
             </p>
           </div>
@@ -489,13 +489,13 @@ function SecuritySettings() {
                 type={showConfirmPassword ? "text" : "password"}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="border-gray-200 focus:border-primary/50 pr-10"
+                className="border-border focus:border-primary/50 pr-10"
                 placeholder="Confirm new password"
               />
               <button
                 type="button"
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-muted-foreground"
               >
                 {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>

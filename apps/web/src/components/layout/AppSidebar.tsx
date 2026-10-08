@@ -14,6 +14,7 @@ import {
   ChevronLeft,
 } from "lucide-react";
 import ProfileMenu from "./ProfileMenu";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 const menu = [
   { label: "Dashboard", icon: Home, href: "/dashboard" },
@@ -38,11 +39,11 @@ export default function AppSidebar() {
       {/* Logo */}
       <div className="h-16 flex items-center pl-4 overflow-hidden">
         <Image
-          src="/CFMeet.png"
+          src="/CFLogo.png"
           alt="CF Meet Logo"
-          width={140}
-          height={32}
-          className="w-[120px] min-w-[120px] object-contain object-left"
+          width={40}
+          height={40}
+          className="w-[40px] min-w-[40px] object-contain object-left"
           priority
         />
       </div>
@@ -94,6 +95,7 @@ export default function AppSidebar() {
           expanded ? "px-4" : "px-0 flex flex-col items-center",
         )}
       >
+        <ThemeToggle />
         <ProfileMenu expanded={expanded} />
       </div>
     </aside>

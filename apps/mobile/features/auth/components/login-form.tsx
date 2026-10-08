@@ -104,7 +104,7 @@ export function LoginForm() {
           <View className="items-end">
             <Link href="/forgot-password" asChild>
               <Pressable>
-                <Text className="text-sm text-[#029CD4] font-semibold">
+                <Text className="text-sm text-primary dark:text-primary-dark font-semibold">
                   Forgot Password?
                 </Text>
               </Pressable>
@@ -119,13 +119,13 @@ export function LoginForm() {
             <View
               className={`mr-3 h-5 w-5 items-center justify-center rounded border ${
                 rememberMe
-                  ? "border-[#029CD4] bg-[#029CD4]"
+                  ? "border-primary dark:border-primary-dark bg-primary dark:bg-primary-dark"
                   : "border-input dark:border-input-dark"
               }`}
             >
               {rememberMe && <Text className="text-xs text-white">✓</Text>}
             </View>
-            <Text className="text-sm text-[#029CD4]">Remember Me</Text>
+            <Text className="text-sm text-primary dark:text-primary-dark">Remember Me</Text>
           </Pressable>
 
           {/* Main Log In Button */}
@@ -146,7 +146,7 @@ export function LoginForm() {
           </Text>
           <Link href="/signup" asChild>
             <Pressable>
-              <Text className="text-sm font-semibold text-[#029CD4]">
+              <Text className="text-sm font-semibold text-primary dark:text-primary-dark">
                 Sign Up
               </Text>
             </Pressable>

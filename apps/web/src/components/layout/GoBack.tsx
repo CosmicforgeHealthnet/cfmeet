@@ -9,7 +9,7 @@ const GoBack = ({ text = "Go Back" }: { text?: string }) => {
   return (
     <button
       onClick={() => router.back()}
-      className="flex items-center gap-1 text-[#029CD4] text-xs hover:opacity-80 transition-opacity mb-2 sm:mb-4 cursor-pointer"
+      className="flex items-center gap-1 text-primary text-xs hover:opacity-80 transition-opacity mb-2 sm:mb-4 cursor-pointer"
     >
       <ChevronLeft size={20} className="sm:hidden" />
       <ChevronLeft size={24} className="hidden sm:block" />

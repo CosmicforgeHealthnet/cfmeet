@@ -157,7 +157,7 @@ export function SignupForm() {
               <View
                 className={`mr-3 h-5 w-5 items-center justify-center rounded border ${
                   agreed
-                    ? "border-[#029CD4] bg-[#029CD4]"
+                    ? "border-primary dark:border-primary-dark bg-primary dark:bg-primary-dark"
                     : "border-input dark:border-input-dark"
                 }`}
               >
@@ -165,7 +165,7 @@ export function SignupForm() {
               </View>
               <Text className="text-sm text-muted-foreground dark:text-muted-foreground-dark">
                 I accept the{" "}
-                <Text className="text-[#029CD4] font-semibold">
+                <Text className="text-primary dark:text-primary-dark font-semibold">
                   Terms & Condition
                 </Text>
               </Text>
@@ -195,7 +195,7 @@ export function SignupForm() {
           </Text>
           <Link href="/login" asChild>
             <Pressable>
-              <Text className="text-sm font-semibold text-[#029CD4]">
+              <Text className="text-sm font-semibold text-primary dark:text-primary-dark">
                 Log In
               </Text>
             </Pressable>

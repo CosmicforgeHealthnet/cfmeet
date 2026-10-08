@@ -32,12 +32,12 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="absolute top-2 right-2 p-1.5 rounded bg-gray-700 hover:bg-gray-600 transition-colors"
+      className="absolute top-2 right-2 p-1.5 rounded bg-card hover:bg-muted transition-colors"
     >
       {copied ? (
         <Check className="w-3.5 h-3.5 text-green-400" />
       ) : (
-        <Copy className="w-3.5 h-3.5 text-gray-400" />
+        <Copy className="w-3.5 h-3.5 text-muted-foreground" />
       )}
     </button>
   );
@@ -45,12 +45,12 @@ function CopyButton({ text }: { text: string }) {
 
 function CodeBlock({ code, language = "bash" }: { code: string; language?: string }) {
   return (
-    <div className="relative bg-[#1E1E1E] rounded-lg overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2 bg-[#2D2D2D] border-b border-gray-700">
-        <span className="text-xs text-gray-400 font-mono">{language}</span>
+    <div className="relative bg-card dark:bg-slate-900 rounded-lg overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2 bg-muted dark:bg-slate-800 border-b border-border">
+        <span className="text-xs text-muted-foreground font-mono">{language}</span>
       </div>
       <pre className="p-4 overflow-x-auto">
-        <code className="text-sm font-mono text-gray-300 whitespace-pre">{code}</code>
+        <code className="text-sm font-mono text-muted-foreground whitespace-pre">{code}</code>
       </pre>
       <CopyButton text={code} />
     </div>
@@ -69,19 +69,19 @@ function CollapsibleSection({
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
   return (
-    <div className="border border-gray-200 rounded-xl overflow-hidden">
+    <div className="border border-border rounded-xl overflow-hidden">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+        className="w-full flex items-center justify-between p-4 bg-muted hover:bg-muted transition-colors text-left"
       >
-        <span className="font-medium text-[#343434]">{title}</span>
+        <span className="font-medium text-foreground">{title}</span>
         {isOpen ? (
-          <ChevronDown className="w-5 h-5 text-gray-500" />
+          <ChevronDown className="w-5 h-5 text-muted-foreground" />
         ) : (
-          <ChevronRight className="w-5 h-5 text-gray-500" />
+          <ChevronRight className="w-5 h-5 text-muted-foreground" />
         )}
       </button>
-      {isOpen && <div className="p-4 bg-white space-y-4">{children}</div>}
+      {isOpen && <div className="p-4 bg-card space-y-4">{children}</div>}
     </div>
   );
 }
@@ -91,14 +91,14 @@ export default function DevelopersContent() {
   const [activeTab, setActiveTab] = useState<"overview" | "api" | "webhooks">("overview");
 
   return (
-    <div className="h-full flex flex-col font-inter bg-white/50">
-      <div className="flex items-center justify-between p-6 md:p-8 border-b border-gray-100 bg-white">
+    <div className="h-full flex flex-col font-inter bg-card/50">
+      <div className="flex items-center justify-between p-6 md:p-8 border-b border-border bg-card">
         <div>
-          <h1 className="text-2xl font-bold text-[#343434] flex items-center gap-2">
-            <Code2 className="w-8 h-8 text-[#029CD4]" />
+          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
+            <Code2 className="w-8 h-8 text-primary" />
             Developer Guide
           </h1>
-          <p className="text-[#00000080] mt-1">
+          <p className="text-muted-foreground mt-1">
             Build powerful real-time video applications with CosmicForge RTC
           </p>
         </div>
@@ -113,14 +113,14 @@ export default function DevelopersContent() {
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-gray-100 px-6 md:px-8 bg-white overflow-x-auto">
+      <div className="flex border-b border-border px-6 md:px-8 bg-card overflow-x-auto">
         <button
           onClick={() => setActiveTab("overview")}
           className={cn(
             "flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
             activeTab === "overview"
-              ? "border-[#029CD4] text-[#029CD4]"
-              : "border-transparent text-gray-400 hover:text-gray-600"
+              ? "border-[var(--primary)] text-primary"
+              : "border-transparent text-muted-foreground hover:text-muted-foreground"
           )}
         >
           <Globe className="w-4 h-4" />
@@ -131,8 +131,8 @@ export default function DevelopersContent() {
           className={cn(
             "flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
             activeTab === "api"
-              ? "border-[#029CD4] text-[#029CD4]"
-              : "border-transparent text-gray-400 hover:text-gray-600"
+              ? "border-[var(--primary)] text-primary"
+              : "border-transparent text-muted-foreground hover:text-muted-foreground"
           )}
         >
           <Server className="w-4 h-4" />
@@ -143,8 +143,8 @@ export default function DevelopersContent() {
           className={cn(
             "flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
             activeTab === "webhooks"
-              ? "border-[#029CD4] text-[#029CD4]"
-              : "border-transparent text-gray-400 hover:text-gray-600"
+              ? "border-[var(--primary)] text-primary"
+              : "border-transparent text-muted-foreground hover:text-muted-foreground"
           )}
         >
           <Webhook className="w-4 h-4" />
@@ -169,14 +169,14 @@ function OverviewTab({ router }: { router: ReturnType<typeof useRouter> }) {
       {/* Introduction */}
       <section className="space-y-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-[#E6F5FA] flex items-center justify-center text-[#029CD4]">
+          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
             <Globe className="w-5 h-5" />
           </div>
-          <h2 className="text-xl font-bold text-[#343434]">
+          <h2 className="text-xl font-bold text-foreground">
             What is CosmicForge RTC?
           </h2>
         </div>
-        <div className="pl-[52px] space-y-4 text-gray-600 leading-relaxed">
+        <div className="pl-[52px] space-y-4 text-muted-foreground leading-relaxed">
           <p>
             CosmicForge RTC is a developer-first platform designed to
             simplify the integration of real-time audio and video
@@ -196,46 +196,46 @@ function OverviewTab({ router }: { router: ReturnType<typeof useRouter> }) {
       {/* Core Features */}
       <section className="space-y-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-[#E6F5FA] flex items-center justify-center text-[#029CD4]">
+          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
             <Zap className="w-5 h-5" />
           </div>
-          <h2 className="text-xl font-bold text-[#343434]">
+          <h2 className="text-xl font-bold text-foreground">
             Core Capabilities
           </h2>
         </div>
         <div className="pl-[52px] grid sm:grid-cols-2 gap-4">
-          <div className="p-4 rounded-xl border border-gray-100 bg-white shadow-sm hover:shadow-md transition-shadow">
-            <h3 className="font-semibold text-[#343434] mb-2">
+          <div className="p-4 rounded-xl border border-border bg-card shadow-sm hover:shadow-md transition-shadow">
+            <h3 className="font-semibold text-foreground mb-2">
               Instant Meetings
             </h3>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-muted-foreground">
               Create and join meetings instantly with low-latency signaling
               and high-quality media streams.
             </p>
           </div>
-          <div className="p-4 rounded-xl border border-gray-100 bg-white shadow-sm hover:shadow-md transition-shadow">
-            <h3 className="font-semibold text-[#343434] mb-2">
+          <div className="p-4 rounded-xl border border-border bg-card shadow-sm hover:shadow-md transition-shadow">
+            <h3 className="font-semibold text-foreground mb-2">
               Secure Rooms
             </h3>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-muted-foreground">
               Protect your sessions with private meeting modes and
               role-based access control.
             </p>
           </div>
-          <div className="p-4 rounded-xl border border-gray-100 bg-white shadow-sm hover:shadow-md transition-shadow">
-            <h3 className="font-semibold text-[#343434] mb-2">
+          <div className="p-4 rounded-xl border border-border bg-card shadow-sm hover:shadow-md transition-shadow">
+            <h3 className="font-semibold text-foreground mb-2">
               Real-time Webhooks
             </h3>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-muted-foreground">
               Receive instant notifications for meeting starts, ends, and
               participant join/leave events.
             </p>
           </div>
-          <div className="p-4 rounded-xl border border-gray-100 bg-white shadow-sm hover:shadow-md transition-shadow">
-            <h3 className="font-semibold text-[#343434] mb-2">
+          <div className="p-4 rounded-xl border border-border bg-card shadow-sm hover:shadow-md transition-shadow">
+            <h3 className="font-semibold text-foreground mb-2">
               Developer Friendly
             </h3>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-muted-foreground">
               Simple REST API for management and WebSocket interfaces for
               real-time interaction.
             </p>
@@ -246,25 +246,25 @@ function OverviewTab({ router }: { router: ReturnType<typeof useRouter> }) {
       {/* Quick Start Guide */}
       <section className="space-y-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-[#E6F5FA] flex items-center justify-center text-[#029CD4]">
+          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
             <BookOpen className="w-5 h-5" />
           </div>
-          <h2 className="text-xl font-bold text-[#343434]">
+          <h2 className="text-xl font-bold text-foreground">
             Getting Started
           </h2>
         </div>
 
         <div className="pl-[52px] space-y-6">
           {/* Step 1 */}
-          <div className="relative border-l-2 border-gray-200 pl-6 pb-2">
-            <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-white border-2 border-[#029CD4]" />
-            <h3 className="font-semibold text-[#343434] mb-1">
+          <div className="relative border-l-2 border-border pl-6 pb-2">
+            <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-card border-2 border-[var(--primary)]" />
+            <h3 className="font-semibold text-foreground mb-1">
               1. Generate an API Key
             </h3>
-            <p className="text-gray-600 mb-3">
+            <p className="text-muted-foreground mb-3">
               Navigate to the{" "}
               <span
-                className="font-medium text-[#029CD4] cursor-pointer hover:underline"
+                className="font-medium text-primary cursor-pointer hover:underline"
                 onClick={() => router.push("/dashboard/settings")}
               >
                 Settings Page
@@ -272,18 +272,18 @@ function OverviewTab({ router }: { router: ReturnType<typeof useRouter> }) {
               and create a new API Key. Each key has a limit of 100 requests
               and expires after 20 days.
             </p>
-            <div className="bg-[#1E1E1E] rounded-md p-3 font-mono text-xs text-green-400 overflow-x-auto">
+            <div className="bg-card dark:bg-slate-900 rounded-md p-3 font-mono text-xs text-green-400 overflow-x-auto">
               Api-Key: cf_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
             </div>
           </div>
 
           {/* Step 2 */}
-          <div className="relative border-l-2 border-gray-200 pl-6 pb-2">
-            <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-white border-2 border-[#029CD4]" />
-            <h3 className="font-semibold text-[#343434] mb-1">
+          <div className="relative border-l-2 border-border pl-6 pb-2">
+            <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-card border-2 border-[var(--primary)]" />
+            <h3 className="font-semibold text-foreground mb-1">
               2. Create a Meeting
             </h3>
-            <p className="text-gray-600 mb-3">
+            <p className="text-muted-foreground mb-3">
               Make a POST request to create a new meeting room.
             </p>
             <CodeBlock
@@ -300,12 +300,12 @@ function OverviewTab({ router }: { router: ReturnType<typeof useRouter> }) {
           </div>
 
           {/* Step 3 */}
-          <div className="relative border-l-2 border-gray-200 pl-6 pb-2">
-            <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-white border-2 border-[#029CD4]" />
-            <h3 className="font-semibold text-[#343434] mb-1">
+          <div className="relative border-l-2 border-border pl-6 pb-2">
+            <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-card border-2 border-[var(--primary)]" />
+            <h3 className="font-semibold text-foreground mb-1">
               3. Join the Meeting
             </h3>
-            <p className="text-gray-600 mb-3">
+            <p className="text-muted-foreground mb-3">
               Use the meeting identifier to join participants to the room.
             </p>
             <CodeBlock
@@ -321,15 +321,15 @@ function OverviewTab({ router }: { router: ReturnType<typeof useRouter> }) {
 
           {/* Step 4 */}
           <div className="relative border-l-2 border-transparent pl-6 pb-2">
-            <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-white border-2 border-[#029CD4]" />
-            <h3 className="font-semibold text-[#343434] mb-1">
+            <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-card border-2 border-[var(--primary)]" />
+            <h3 className="font-semibold text-foreground mb-1">
               4. Configure Webhooks (Optional)
             </h3>
-            <p className="text-gray-600">
+            <p className="text-muted-foreground">
               Set up webhooks to receive real-time notifications for meeting
               events. Go to{" "}
               <span
-                className="font-medium text-[#029CD4] cursor-pointer hover:underline"
+                className="font-medium text-primary cursor-pointer hover:underline"
                 onClick={() => router.push("/dashboard/settings")}
               >
                 Settings → Webhooks
@@ -343,26 +343,26 @@ function OverviewTab({ router }: { router: ReturnType<typeof useRouter> }) {
       {/* Integration Model */}
       <section className="space-y-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-[#E6F5FA] flex items-center justify-center text-[#029CD4]">
+          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
             <ShieldCheck className="w-5 h-5" />
           </div>
-          <h2 className="text-xl font-bold text-[#343434]">
+          <h2 className="text-xl font-bold text-foreground">
             Security & Authentication
           </h2>
         </div>
         <div className="pl-[52px] space-y-4">
-          <div className="bg-[#FAFAFB] border border-gray-200 rounded-xl p-6">
-            <h4 className="font-medium text-[#343434] mb-3 flex items-center gap-2">
+          <div className="bg-sidebar border border-border rounded-xl p-6">
+            <h4 className="font-medium text-foreground mb-3 flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-green-500" />
               API Key Authentication
             </h4>
-            <p className="text-sm text-gray-600 leading-relaxed mb-4">
+            <p className="text-sm text-muted-foreground leading-relaxed mb-4">
               All third-party API requests must include your API key in the
-              <code className="mx-1 px-1.5 py-0.5 bg-gray-100 rounded text-xs">Api-Key</code>
+              <code className="mx-1 px-1.5 py-0.5 bg-muted rounded text-xs">Api-Key</code>
               header. Keep your API keys secure and never expose them in
               client-side code.
             </p>
-            <div className="space-y-2 text-sm text-gray-600">
+            <div className="space-y-2 text-sm text-muted-foreground">
               <p><strong>Rate Limit:</strong> 100 requests per API key</p>
               <p><strong>Key Expiration:</strong> 20 days from creation</p>
               <p><strong>Key Format:</strong> cf_live_[64 characters]</p>
@@ -379,16 +379,16 @@ function ApiReferenceTab({ router }: { router: ReturnType<typeof useRouter> }) {
     <>
       <section className="space-y-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-[#E6F5FA] flex items-center justify-center text-[#029CD4]">
+          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
             <Server className="w-5 h-5" />
           </div>
-          <h2 className="text-xl font-bold text-[#343434]">
+          <h2 className="text-xl font-bold text-foreground">
             API Reference
           </h2>
         </div>
-        <p className="pl-[52px] text-gray-600">
+        <p className="pl-[52px] text-muted-foreground">
           All API endpoints use the base URL:{" "}
-          <code className="px-2 py-1 bg-gray-100 rounded text-sm">
+          <code className="px-2 py-1 bg-muted rounded text-sm">
             https://api.cosmicforge.io/api/v1
           </code>
         </p>
@@ -396,7 +396,7 @@ function ApiReferenceTab({ router }: { router: ReturnType<typeof useRouter> }) {
 
       {/* Authentication */}
       <section className="space-y-4">
-        <h3 className="text-lg font-semibold text-[#343434]">Authentication</h3>
+        <h3 className="text-lg font-semibold text-foreground">Authentication</h3>
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
           <p className="text-sm text-amber-800">
             <strong>Important:</strong> Include your API key in the{" "}
@@ -412,60 +412,60 @@ function ApiReferenceTab({ router }: { router: ReturnType<typeof useRouter> }) {
 
       {/* Meetings Endpoints */}
       <section className="space-y-4">
-        <h3 className="text-lg font-semibold text-[#343434]">Meetings</h3>
+        <h3 className="text-lg font-semibold text-foreground">Meetings</h3>
 
         <CollapsibleSection title="POST /api/meetings - Create Meeting" defaultOpen>
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-muted-foreground mb-4">
             Creates a new meeting room that participants can join.
           </p>
 
-          <h4 className="font-medium text-sm text-gray-700 mb-2">Request Body</h4>
+          <h4 className="font-medium text-sm text-foreground mb-2">Request Body</h4>
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
               <thead>
-                <tr className="bg-gray-50">
-                  <th className="text-left p-2 border border-gray-200 font-medium">Field</th>
-                  <th className="text-left p-2 border border-gray-200 font-medium">Type</th>
-                  <th className="text-left p-2 border border-gray-200 font-medium">Required</th>
-                  <th className="text-left p-2 border border-gray-200 font-medium">Description</th>
+                <tr className="bg-muted">
+                  <th className="text-left p-2 border border-border font-medium">Field</th>
+                  <th className="text-left p-2 border border-border font-medium">Type</th>
+                  <th className="text-left p-2 border border-border font-medium">Required</th>
+                  <th className="text-left p-2 border border-border font-medium">Description</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td className="p-2 border border-gray-200"><code>title</code></td>
-                  <td className="p-2 border border-gray-200">string</td>
-                  <td className="p-2 border border-gray-200">Yes</td>
-                  <td className="p-2 border border-gray-200">Meeting title</td>
+                  <td className="p-2 border border-border"><code>title</code></td>
+                  <td className="p-2 border border-border">string</td>
+                  <td className="p-2 border border-border">Yes</td>
+                  <td className="p-2 border border-border">Meeting title</td>
                 </tr>
                 <tr>
-                  <td className="p-2 border border-gray-200"><code>description</code></td>
-                  <td className="p-2 border border-gray-200">string</td>
-                  <td className="p-2 border border-gray-200">No</td>
-                  <td className="p-2 border border-gray-200">Meeting description</td>
+                  <td className="p-2 border border-border"><code>description</code></td>
+                  <td className="p-2 border border-border">string</td>
+                  <td className="p-2 border border-border">No</td>
+                  <td className="p-2 border border-border">Meeting description</td>
                 </tr>
                 <tr>
-                  <td className="p-2 border border-gray-200"><code>is_private</code></td>
-                  <td className="p-2 border border-gray-200">boolean</td>
-                  <td className="p-2 border border-gray-200">No</td>
-                  <td className="p-2 border border-gray-200">If true, requires host approval to join</td>
+                  <td className="p-2 border border-border"><code>is_private</code></td>
+                  <td className="p-2 border border-border">boolean</td>
+                  <td className="p-2 border border-border">No</td>
+                  <td className="p-2 border border-border">If true, requires host approval to join</td>
                 </tr>
                 <tr>
-                  <td className="p-2 border border-gray-200"><code>start_time</code></td>
-                  <td className="p-2 border border-gray-200">string (ISO 8601)</td>
-                  <td className="p-2 border border-gray-200">No</td>
-                  <td className="p-2 border border-gray-200">Scheduled start time</td>
+                  <td className="p-2 border border-border"><code>start_time</code></td>
+                  <td className="p-2 border border-border">string (ISO 8601)</td>
+                  <td className="p-2 border border-border">No</td>
+                  <td className="p-2 border border-border">Scheduled start time</td>
                 </tr>
                 <tr>
-                  <td className="p-2 border border-gray-200"><code>end_time</code></td>
-                  <td className="p-2 border border-gray-200">string (ISO 8601)</td>
-                  <td className="p-2 border border-gray-200">No</td>
-                  <td className="p-2 border border-gray-200">Scheduled end time</td>
+                  <td className="p-2 border border-border"><code>end_time</code></td>
+                  <td className="p-2 border border-border">string (ISO 8601)</td>
+                  <td className="p-2 border border-border">No</td>
+                  <td className="p-2 border border-border">Scheduled end time</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <h4 className="font-medium text-sm text-gray-700 mt-4 mb-2">Example Request</h4>
+          <h4 className="font-medium text-sm text-foreground mt-4 mb-2">Example Request</h4>
           <CodeBlock
             language="bash"
             code={`curl -X POST https://api.cosmicforge.io/api/v1/api/meetings \\
@@ -480,7 +480,7 @@ function ApiReferenceTab({ router }: { router: ReturnType<typeof useRouter> }) {
   }'`}
           />
 
-          <h4 className="font-medium text-sm text-gray-700 mt-4 mb-2">Example Response</h4>
+          <h4 className="font-medium text-sm text-foreground mt-4 mb-2">Example Response</h4>
           <CodeBlock
             language="json"
             code={`{
@@ -503,51 +503,51 @@ function ApiReferenceTab({ router }: { router: ReturnType<typeof useRouter> }) {
         </CollapsibleSection>
 
         <CollapsibleSection title="POST /api/meetings/{id}/join - Join Meeting">
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-muted-foreground mb-4">
             Allows a participant to join an existing meeting.
           </p>
 
-          <h4 className="font-medium text-sm text-gray-700 mb-2">Path Parameters</h4>
+          <h4 className="font-medium text-sm text-foreground mb-2">Path Parameters</h4>
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
               <thead>
-                <tr className="bg-gray-50">
-                  <th className="text-left p-2 border border-gray-200 font-medium">Parameter</th>
-                  <th className="text-left p-2 border border-gray-200 font-medium">Description</th>
+                <tr className="bg-muted">
+                  <th className="text-left p-2 border border-border font-medium">Parameter</th>
+                  <th className="text-left p-2 border border-border font-medium">Description</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td className="p-2 border border-gray-200"><code>id</code></td>
-                  <td className="p-2 border border-gray-200">Meeting ID (UUID) or meeting identifier</td>
+                  <td className="p-2 border border-border"><code>id</code></td>
+                  <td className="p-2 border border-border">Meeting ID (UUID) or meeting identifier</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <h4 className="font-medium text-sm text-gray-700 mt-4 mb-2">Request Body</h4>
+          <h4 className="font-medium text-sm text-foreground mt-4 mb-2">Request Body</h4>
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
               <thead>
-                <tr className="bg-gray-50">
-                  <th className="text-left p-2 border border-gray-200 font-medium">Field</th>
-                  <th className="text-left p-2 border border-gray-200 font-medium">Type</th>
-                  <th className="text-left p-2 border border-gray-200 font-medium">Required</th>
-                  <th className="text-left p-2 border border-gray-200 font-medium">Description</th>
+                <tr className="bg-muted">
+                  <th className="text-left p-2 border border-border font-medium">Field</th>
+                  <th className="text-left p-2 border border-border font-medium">Type</th>
+                  <th className="text-left p-2 border border-border font-medium">Required</th>
+                  <th className="text-left p-2 border border-border font-medium">Description</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td className="p-2 border border-gray-200"><code>participant_name</code></td>
-                  <td className="p-2 border border-gray-200">string</td>
-                  <td className="p-2 border border-gray-200">Yes</td>
-                  <td className="p-2 border border-gray-200">Display name for the participant</td>
+                  <td className="p-2 border border-border"><code>participant_name</code></td>
+                  <td className="p-2 border border-border">string</td>
+                  <td className="p-2 border border-border">Yes</td>
+                  <td className="p-2 border border-border">Display name for the participant</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <h4 className="font-medium text-sm text-gray-700 mt-4 mb-2">Example Request</h4>
+          <h4 className="font-medium text-sm text-foreground mt-4 mb-2">Example Request</h4>
           <CodeBlock
             language="bash"
             code={`curl -X POST https://api.cosmicforge.io/api/v1/api/meetings/abc-defg-hij/join \\
@@ -558,7 +558,7 @@ function ApiReferenceTab({ router }: { router: ReturnType<typeof useRouter> }) {
   }'`}
           />
 
-          <h4 className="font-medium text-sm text-gray-700 mt-4 mb-2">Example Response</h4>
+          <h4 className="font-medium text-sm text-foreground mt-4 mb-2">Example Response</h4>
           <CodeBlock
             language="json"
             code={`{
@@ -576,12 +576,12 @@ function ApiReferenceTab({ router }: { router: ReturnType<typeof useRouter> }) {
 
       {/* API Keys Management */}
       <section className="space-y-4">
-        <h3 className="text-lg font-semibold text-[#343434]">API Keys Management</h3>
-        <p className="text-sm text-gray-600">
+        <h3 className="text-lg font-semibold text-foreground">API Keys Management</h3>
+        <p className="text-sm text-muted-foreground">
           These endpoints require Bearer token authentication (JWT) and are used to manage your API keys.
           Access these via the{" "}
           <span
-            className="font-medium text-[#029CD4] cursor-pointer hover:underline"
+            className="font-medium text-primary cursor-pointer hover:underline"
             onClick={() => router.push("/dashboard/settings")}
           >
             Settings Page
@@ -589,27 +589,27 @@ function ApiReferenceTab({ router }: { router: ReturnType<typeof useRouter> }) {
         </p>
 
         <CollapsibleSection title="POST /api-keys - Create API Key">
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-muted-foreground mb-4">
             Creates a new API key for third-party integrations.
           </p>
 
-          <h4 className="font-medium text-sm text-gray-700 mb-2">Request Body</h4>
+          <h4 className="font-medium text-sm text-foreground mb-2">Request Body</h4>
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
               <thead>
-                <tr className="bg-gray-50">
-                  <th className="text-left p-2 border border-gray-200 font-medium">Field</th>
-                  <th className="text-left p-2 border border-gray-200 font-medium">Type</th>
-                  <th className="text-left p-2 border border-gray-200 font-medium">Required</th>
-                  <th className="text-left p-2 border border-gray-200 font-medium">Description</th>
+                <tr className="bg-muted">
+                  <th className="text-left p-2 border border-border font-medium">Field</th>
+                  <th className="text-left p-2 border border-border font-medium">Type</th>
+                  <th className="text-left p-2 border border-border font-medium">Required</th>
+                  <th className="text-left p-2 border border-border font-medium">Description</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td className="p-2 border border-gray-200"><code>name</code></td>
-                  <td className="p-2 border border-gray-200">string</td>
-                  <td className="p-2 border border-gray-200">Yes</td>
-                  <td className="p-2 border border-gray-200">A descriptive name for the API key</td>
+                  <td className="p-2 border border-border"><code>name</code></td>
+                  <td className="p-2 border border-border">string</td>
+                  <td className="p-2 border border-border">Yes</td>
+                  <td className="p-2 border border-border">A descriptive name for the API key</td>
                 </tr>
               </tbody>
             </table>
@@ -624,13 +624,13 @@ function ApiReferenceTab({ router }: { router: ReturnType<typeof useRouter> }) {
         </CollapsibleSection>
 
         <CollapsibleSection title="GET /api-keys - List API Keys">
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-muted-foreground mb-4">
             Returns all API keys for the authenticated user. The key values are masked for security.
           </p>
         </CollapsibleSection>
 
         <CollapsibleSection title="DELETE /api-keys/{id} - Delete API Key">
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-muted-foreground mb-4">
             Permanently deletes an API key. This action cannot be undone.
           </p>
         </CollapsibleSection>
@@ -638,35 +638,35 @@ function ApiReferenceTab({ router }: { router: ReturnType<typeof useRouter> }) {
 
       {/* Error Responses */}
       <section className="space-y-4">
-        <h3 className="text-lg font-semibold text-[#343434]">Error Responses</h3>
+        <h3 className="text-lg font-semibold text-foreground">Error Responses</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="bg-gray-50">
-                <th className="text-left p-2 border border-gray-200 font-medium">Status Code</th>
-                <th className="text-left p-2 border border-gray-200 font-medium">Description</th>
+              <tr className="bg-muted">
+                <th className="text-left p-2 border border-border font-medium">Status Code</th>
+                <th className="text-left p-2 border border-border font-medium">Description</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td className="p-2 border border-gray-200"><code>400</code></td>
-                <td className="p-2 border border-gray-200">Bad Request - Invalid request body or parameters</td>
+                <td className="p-2 border border-border"><code>400</code></td>
+                <td className="p-2 border border-border">Bad Request - Invalid request body or parameters</td>
               </tr>
               <tr>
-                <td className="p-2 border border-gray-200"><code>401</code></td>
-                <td className="p-2 border border-gray-200">Unauthorized - Missing or invalid API key</td>
+                <td className="p-2 border border-border"><code>401</code></td>
+                <td className="p-2 border border-border">Unauthorized - Missing or invalid API key</td>
               </tr>
               <tr>
-                <td className="p-2 border border-gray-200"><code>403</code></td>
-                <td className="p-2 border border-gray-200">Forbidden - API key expired or rate limit exceeded</td>
+                <td className="p-2 border border-border"><code>403</code></td>
+                <td className="p-2 border border-border">Forbidden - API key expired or rate limit exceeded</td>
               </tr>
               <tr>
-                <td className="p-2 border border-gray-200"><code>404</code></td>
-                <td className="p-2 border border-gray-200">Not Found - Resource does not exist</td>
+                <td className="p-2 border border-border"><code>404</code></td>
+                <td className="p-2 border border-border">Not Found - Resource does not exist</td>
               </tr>
               <tr>
-                <td className="p-2 border border-gray-200"><code>500</code></td>
-                <td className="p-2 border border-gray-200">Internal Server Error</td>
+                <td className="p-2 border border-border"><code>500</code></td>
+                <td className="p-2 border border-border">Internal Server Error</td>
               </tr>
             </tbody>
           </table>
@@ -692,18 +692,18 @@ function WebhooksTab({ router }: { router: ReturnType<typeof useRouter> }) {
     <>
       <section className="space-y-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-[#E6F5FA] flex items-center justify-center text-[#029CD4]">
+          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
             <Webhook className="w-5 h-5" />
           </div>
-          <h2 className="text-xl font-bold text-[#343434]">
+          <h2 className="text-xl font-bold text-foreground">
             Webhooks
           </h2>
         </div>
-        <p className="pl-[52px] text-gray-600">
+        <p className="pl-[52px] text-muted-foreground">
           Webhooks allow you to receive real-time HTTP notifications when events occur in your meetings.
           Configure webhooks in the{" "}
           <span
-            className="font-medium text-[#029CD4] cursor-pointer hover:underline"
+            className="font-medium text-primary cursor-pointer hover:underline"
             onClick={() => router.push("/dashboard/settings")}
           >
             Settings Page
@@ -713,31 +713,31 @@ function WebhooksTab({ router }: { router: ReturnType<typeof useRouter> }) {
 
       {/* Event Types */}
       <section className="space-y-4">
-        <h3 className="text-lg font-semibold text-[#343434]">Event Types</h3>
+        <h3 className="text-lg font-semibold text-foreground">Event Types</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="bg-gray-50">
-                <th className="text-left p-2 border border-gray-200 font-medium">Event</th>
-                <th className="text-left p-2 border border-gray-200 font-medium">Description</th>
+              <tr className="bg-muted">
+                <th className="text-left p-2 border border-border font-medium">Event</th>
+                <th className="text-left p-2 border border-border font-medium">Description</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td className="p-2 border border-gray-200"><code>meeting_start</code></td>
-                <td className="p-2 border border-gray-200">Triggered when a meeting begins</td>
+                <td className="p-2 border border-border"><code>meeting_start</code></td>
+                <td className="p-2 border border-border">Triggered when a meeting begins</td>
               </tr>
               <tr>
-                <td className="p-2 border border-gray-200"><code>meeting_end</code></td>
-                <td className="p-2 border border-gray-200">Triggered when a meeting ends</td>
+                <td className="p-2 border border-border"><code>meeting_end</code></td>
+                <td className="p-2 border border-border">Triggered when a meeting ends</td>
               </tr>
               <tr>
-                <td className="p-2 border border-gray-200"><code>participant_join</code></td>
-                <td className="p-2 border border-gray-200">Triggered when a participant joins a meeting</td>
+                <td className="p-2 border border-border"><code>participant_join</code></td>
+                <td className="p-2 border border-border">Triggered when a participant joins a meeting</td>
               </tr>
               <tr>
-                <td className="p-2 border border-gray-200"><code>participant_leave</code></td>
-                <td className="p-2 border border-gray-200">Triggered when a participant leaves a meeting</td>
+                <td className="p-2 border border-border"><code>participant_leave</code></td>
+                <td className="p-2 border border-border">Triggered when a participant leaves a meeting</td>
               </tr>
             </tbody>
           </table>
@@ -746,8 +746,8 @@ function WebhooksTab({ router }: { router: ReturnType<typeof useRouter> }) {
 
       {/* Webhook Payload */}
       <section className="space-y-4">
-        <h3 className="text-lg font-semibold text-[#343434]">Webhook Payload</h3>
-        <p className="text-sm text-gray-600">
+        <h3 className="text-lg font-semibold text-foreground">Webhook Payload</h3>
+        <p className="text-sm text-muted-foreground">
           When an event occurs, we send a POST request to your configured endpoint with a JSON payload.
         </p>
 
@@ -818,9 +818,9 @@ function WebhooksTab({ router }: { router: ReturnType<typeof useRouter> }) {
 
       {/* Signature Verification */}
       <section className="space-y-4">
-        <h3 className="text-lg font-semibold text-[#343434]">Signature Verification</h3>
-        <p className="text-sm text-gray-600">
-          All webhook requests include a signature in the <code className="px-1.5 py-0.5 bg-gray-100 rounded">X-Webhook-Signature</code> header.
+        <h3 className="text-lg font-semibold text-foreground">Signature Verification</h3>
+        <p className="text-sm text-muted-foreground">
+          All webhook requests include a signature in the <code className="px-1.5 py-0.5 bg-muted rounded">X-Webhook-Signature</code> header.
           You should verify this signature to ensure the request came from CosmicForge.
         </p>
 
@@ -831,15 +831,15 @@ function WebhooksTab({ router }: { router: ReturnType<typeof useRouter> }) {
           </p>
         </div>
 
-        <h4 className="font-medium text-sm text-gray-700 mt-4 mb-2">How it works</h4>
-        <ol className="list-decimal list-inside text-sm text-gray-600 space-y-2">
+        <h4 className="font-medium text-sm text-foreground mt-4 mb-2">How it works</h4>
+        <ol className="list-decimal list-inside text-sm text-muted-foreground space-y-2">
           <li>When you create a webhook, you receive a unique <strong>secret key</strong></li>
-          <li>Each webhook request includes an <code className="px-1.5 py-0.5 bg-gray-100 rounded">X-Webhook-Signature</code> header</li>
+          <li>Each webhook request includes an <code className="px-1.5 py-0.5 bg-muted rounded">X-Webhook-Signature</code> header</li>
           <li>The signature is an HMAC-SHA256 hash of the request body using your secret key</li>
           <li>Compare the computed hash with the signature header to verify authenticity</li>
         </ol>
 
-        <h4 className="font-medium text-sm text-gray-700 mt-4 mb-2">Node.js Example</h4>
+        <h4 className="font-medium text-sm text-foreground mt-4 mb-2">Node.js Example</h4>
         <CodeBlock
           language="javascript"
           code={`const crypto = require('crypto');
@@ -874,7 +874,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 });`}
         />
 
-        <h4 className="font-medium text-sm text-gray-700 mt-4 mb-2">Python Example</h4>
+        <h4 className="font-medium text-sm text-foreground mt-4 mb-2">Python Example</h4>
         <CodeBlock
           language="python"
           code={`import hmac
@@ -913,39 +913,39 @@ def webhook():
 
       {/* Managing Webhooks */}
       <section className="space-y-4">
-        <h3 className="text-lg font-semibold text-[#343434]">Managing Webhooks</h3>
-        <p className="text-sm text-gray-600">
+        <h3 className="text-lg font-semibold text-foreground">Managing Webhooks</h3>
+        <p className="text-sm text-muted-foreground">
           Use the Settings page to manage your webhooks, or use the API endpoints directly.
         </p>
 
         <CollapsibleSection title="POST /webhooks - Create Webhook">
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-muted-foreground mb-4">
             Creates a new webhook endpoint. Returns the webhook details including the secret key.
           </p>
 
-          <h4 className="font-medium text-sm text-gray-700 mb-2">Request Body</h4>
+          <h4 className="font-medium text-sm text-foreground mb-2">Request Body</h4>
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
               <thead>
-                <tr className="bg-gray-50">
-                  <th className="text-left p-2 border border-gray-200 font-medium">Field</th>
-                  <th className="text-left p-2 border border-gray-200 font-medium">Type</th>
-                  <th className="text-left p-2 border border-gray-200 font-medium">Required</th>
-                  <th className="text-left p-2 border border-gray-200 font-medium">Description</th>
+                <tr className="bg-muted">
+                  <th className="text-left p-2 border border-border font-medium">Field</th>
+                  <th className="text-left p-2 border border-border font-medium">Type</th>
+                  <th className="text-left p-2 border border-border font-medium">Required</th>
+                  <th className="text-left p-2 border border-border font-medium">Description</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td className="p-2 border border-gray-200"><code>endpoint_url</code></td>
-                  <td className="p-2 border border-gray-200">string</td>
-                  <td className="p-2 border border-gray-200">Yes</td>
-                  <td className="p-2 border border-gray-200">Your HTTPS endpoint URL</td>
+                  <td className="p-2 border border-border"><code>endpoint_url</code></td>
+                  <td className="p-2 border border-border">string</td>
+                  <td className="p-2 border border-border">Yes</td>
+                  <td className="p-2 border border-border">Your HTTPS endpoint URL</td>
                 </tr>
                 <tr>
-                  <td className="p-2 border border-gray-200"><code>event_type</code></td>
-                  <td className="p-2 border border-gray-200">string</td>
-                  <td className="p-2 border border-gray-200">Yes</td>
-                  <td className="p-2 border border-gray-200">One of: meeting_start, meeting_end, participant_join, participant_leave</td>
+                  <td className="p-2 border border-border"><code>event_type</code></td>
+                  <td className="p-2 border border-border">string</td>
+                  <td className="p-2 border border-border">Yes</td>
+                  <td className="p-2 border border-border">One of: meeting_start, meeting_end, participant_join, participant_leave</td>
                 </tr>
               </tbody>
             </table>
@@ -960,43 +960,43 @@ def webhook():
         </CollapsibleSection>
 
         <CollapsibleSection title="GET /webhooks - List Webhooks">
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-muted-foreground mb-4">
             Returns all webhooks for the authenticated user. The secret keys are not included in the response.
           </p>
         </CollapsibleSection>
 
         <CollapsibleSection title="PATCH /webhooks/{id} - Update Webhook">
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-muted-foreground mb-4">
             Updates an existing webhook. You can change the endpoint URL or status.
           </p>
 
-          <h4 className="font-medium text-sm text-gray-700 mb-2">Request Body</h4>
+          <h4 className="font-medium text-sm text-foreground mb-2">Request Body</h4>
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
               <thead>
-                <tr className="bg-gray-50">
-                  <th className="text-left p-2 border border-gray-200 font-medium">Field</th>
-                  <th className="text-left p-2 border border-gray-200 font-medium">Type</th>
-                  <th className="text-left p-2 border border-gray-200 font-medium">Description</th>
+                <tr className="bg-muted">
+                  <th className="text-left p-2 border border-border font-medium">Field</th>
+                  <th className="text-left p-2 border border-border font-medium">Type</th>
+                  <th className="text-left p-2 border border-border font-medium">Description</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td className="p-2 border border-gray-200"><code>endpoint_url</code></td>
-                  <td className="p-2 border border-gray-200">string</td>
-                  <td className="p-2 border border-gray-200">New endpoint URL</td>
+                  <td className="p-2 border border-border"><code>endpoint_url</code></td>
+                  <td className="p-2 border border-border">string</td>
+                  <td className="p-2 border border-border">New endpoint URL</td>
                 </tr>
                 <tr>
-                  <td className="p-2 border border-gray-200"><code>status</code></td>
-                  <td className="p-2 border border-gray-200">string</td>
-                  <td className="p-2 border border-gray-200">&quot;active&quot; or &quot;inactive&quot;</td>
+                  <td className="p-2 border border-border"><code>status</code></td>
+                  <td className="p-2 border border-border">string</td>
+                  <td className="p-2 border border-border">&quot;active&quot; or &quot;inactive&quot;</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mt-4">
-            <p className="text-sm text-gray-600">
+          <div className="bg-muted border border-border rounded-lg p-3 mt-4">
+            <p className="text-sm text-muted-foreground">
               <strong>Note:</strong> The event type cannot be changed after creation.
               To change the event type, delete the webhook and create a new one.
             </p>
@@ -1004,7 +1004,7 @@ def webhook():
         </CollapsibleSection>
 
         <CollapsibleSection title="DELETE /webhooks/{id} - Delete Webhook">
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-muted-foreground mb-4">
             Permanently deletes a webhook. You will stop receiving events for this endpoint.
           </p>
         </CollapsibleSection>
@@ -1012,40 +1012,40 @@ def webhook():
 
       {/* Best Practices */}
       <section className="space-y-4">
-        <h3 className="text-lg font-semibold text-[#343434]">Best Practices</h3>
+        <h3 className="text-lg font-semibold text-foreground">Best Practices</h3>
         <div className="space-y-3">
-          <div className="flex gap-3 p-4 bg-gray-50 rounded-xl border border-gray-100">
+          <div className="flex gap-3 p-4 bg-muted rounded-xl border border-border">
             <ShieldCheck className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
             <div>
-              <h4 className="font-medium text-sm text-[#343434]">Always verify signatures</h4>
-              <p className="text-sm text-gray-500">
+              <h4 className="font-medium text-sm text-foreground">Always verify signatures</h4>
+              <p className="text-sm text-muted-foreground">
                 Use the X-Webhook-Signature header to verify that requests originate from CosmicForge.
               </p>
             </div>
           </div>
-          <div className="flex gap-3 p-4 bg-gray-50 rounded-xl border border-gray-100">
+          <div className="flex gap-3 p-4 bg-muted rounded-xl border border-border">
             <Zap className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
             <div>
-              <h4 className="font-medium text-sm text-[#343434]">Respond quickly</h4>
-              <p className="text-sm text-gray-500">
+              <h4 className="font-medium text-sm text-foreground">Respond quickly</h4>
+              <p className="text-sm text-muted-foreground">
                 Return a 200 response within 30 seconds. Process events asynchronously if needed.
               </p>
             </div>
           </div>
-          <div className="flex gap-3 p-4 bg-gray-50 rounded-xl border border-gray-100">
+          <div className="flex gap-3 p-4 bg-muted rounded-xl border border-border">
             <Server className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
             <div>
-              <h4 className="font-medium text-sm text-[#343434]">Handle retries</h4>
-              <p className="text-sm text-gray-500">
+              <h4 className="font-medium text-sm text-foreground">Handle retries</h4>
+              <p className="text-sm text-muted-foreground">
                 Implement idempotency to handle potential duplicate webhook deliveries gracefully.
               </p>
             </div>
           </div>
-          <div className="flex gap-3 p-4 bg-gray-50 rounded-xl border border-gray-100">
+          <div className="flex gap-3 p-4 bg-muted rounded-xl border border-border">
             <Key className="w-5 h-5 text-purple-500 flex-shrink-0 mt-0.5" />
             <div>
-              <h4 className="font-medium text-sm text-[#343434]">Secure your secrets</h4>
-              <p className="text-sm text-gray-500">
+              <h4 className="font-medium text-sm text-foreground">Secure your secrets</h4>
+              <p className="text-sm text-muted-foreground">
                 Store webhook secrets in environment variables, not in code repositories.
               </p>
             </div>

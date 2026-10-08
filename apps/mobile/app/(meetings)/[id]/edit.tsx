@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/shared/loading";
 import { useToast } from "@/components/ui/toast";
 import { useMeeting, useUpdateMeeting } from "@/features/meetings/hooks/use-meetings";
+import { useColors } from "@/hooks/useColors";
 
 const DURATION_OPTIONS = [
   { label: "15 min", value: 15 },
@@ -35,6 +36,7 @@ export default function EditMeetingScreen() {
   const { data: meeting, isLoading, isError } = useMeeting(id);
   const updateMeeting = useUpdateMeeting();
   const { toast, success } = useToast();
+  const colors = useColors();
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -127,7 +129,7 @@ export default function EditMeetingScreen() {
   if (isError || !meeting) {
     return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-background dark:bg-background-dark items-center justify-center px-6">
-        <Ionicons name="alert-circle-outline" size={48} color="#dc2626" style={{ opacity: 0.5 }} />
+        <Ionicons name="alert-circle-outline" size={48} color={colors.destructive} style={{ opacity: 0.5 }} />
         <Text className="mt-4 text-base font-bold text-foreground dark:text-foreground-dark">
           Failed to load meeting
         </Text>
@@ -146,7 +148,7 @@ export default function EditMeetingScreen() {
       {/* Header */}
       <View className="flex-row items-center px-4 py-3 border-b border-border dark:border-border-dark">
         <Pressable onPress={() => router.back()} className="flex-row items-center gap-2">
-          <Ionicons name="arrow-back" size={24} color="#029CD4" />
+          <Ionicons name="arrow-back" size={24} color={colors.primary} />
           <Text className="text-sm font-bold text-primary dark:text-primary-dark">Back</Text>
         </Pressable>
       </View>
@@ -262,7 +264,7 @@ export default function EditMeetingScreen() {
                     : "bg-secondary dark:bg-secondary-dark"
                 }`}
               >
-                <Ionicons name="lock-closed" size={18} color={isPrivate ? "#ffffff" : "#737373"} />
+                <Ionicons name="lock-closed" size={18} color={isPrivate ? "#ffffff" : colors.mutedForeground} />
                 <Text
                   className={`font-bold ${
                     isPrivate
@@ -281,7 +283,7 @@ export default function EditMeetingScreen() {
                     : "bg-secondary dark:bg-secondary-dark"
                 }`}
               >
-                <Ionicons name="globe" size={18} color={!isPrivate ? "#ffffff" : "#737373"} />
+                <Ionicons name="globe" size={18} color={!isPrivate ? "#ffffff" : colors.mutedForeground} />
                 <Text
                   className={`font-bold ${
                     !isPrivate

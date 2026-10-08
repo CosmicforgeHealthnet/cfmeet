@@ -206,10 +206,10 @@ function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen }: RoomContentP
 
   return (
     <>
-      <div className="flex h-screen bg-white overflow-hidden">
+      <div className="flex h-screen bg-card overflow-hidden">
         <div className="flex flex-col flex-1 overflow-hidden">
           {/* Main Video Area */}
-          <main className="flex-1 overflow-hidden transition-all duration-300 ease-in-out relative bg-gray-100">
+          <main className="flex-1 overflow-hidden transition-all duration-300 ease-in-out relative bg-muted">
             <VideoGridContent />
 
             {/* Participant Notifications */}
@@ -247,7 +247,7 @@ function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen }: RoomContentP
 
         {/* Conditional Sidebar */}
         {isSidebarOpen && (
-          <aside className="fixed inset-y-0 right-0 z-50 w-[85%] sm:w-80 bg-white sm:bg-transparent shadow-2xl sm:shadow-none sm:relative sm:z-0 border-l sm:border-none border-gray-200 flex flex-col h-full transition-all duration-300 sm:p-4">
+          <aside className="fixed inset-y-0 right-0 z-50 w-[85%] sm:w-80 bg-card sm:bg-transparent shadow-2xl sm:shadow-none sm:relative sm:z-0 border-l sm:border-none border-border flex flex-col h-full transition-all duration-300 sm:p-4">
             <Sidebar
               meetingId={joinData.meeting_id}
               isHost={joinData.role === "host"}
@@ -436,7 +436,7 @@ function CustomTileContent() {
       ) : (
         <div className={`w-full h-full flex items-center justify-center ${getParticipantColor(participant.identity)}`}>
           <Avatar className="h-24 w-24 border-4 border-white/30 bg-transparent">
-            <AvatarFallback className="text-3xl font-bold bg-white/80 text-gray-700">
+            <AvatarFallback className="text-3xl font-bold bg-card/80 text-foreground">
               {(participant.name || participant.identity || "Guest")
                 .slice(0, 2)
                 .toUpperCase()}

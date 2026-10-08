@@ -8,10 +8,12 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { useChangePassword } from "@/features/auth/hooks/use-change-password";
+import { useColors } from "@/hooks/useColors";
 
 export default function ChangePasswordScreen() {
   const changePassword = useChangePassword();
   const { toast, success } = useToast();
+  const colors = useColors();
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -84,7 +86,7 @@ export default function ChangePasswordScreen() {
       {/* Header */}
       <View className="flex-row items-center px-4 py-3 border-b border-border dark:border-border-dark">
         <Pressable onPress={() => router.back()} className="flex-row items-center gap-2">
-          <Ionicons name="arrow-back" size={24} color="#029CD4" />
+          <Ionicons name="arrow-back" size={24} color={colors.primary} />
           <Text className="text-sm font-bold text-primary dark:text-primary-dark">Back</Text>
         </Pressable>
       </View>
@@ -123,7 +125,7 @@ export default function ChangePasswordScreen() {
                 <Ionicons
                   name={showCurrentPassword ? "eye-off-outline" : "eye-outline"}
                   size={20}
-                  color="#737373"
+                  color={colors.mutedForeground}
                 />
               </Pressable>
             </View>
@@ -149,7 +151,7 @@ export default function ChangePasswordScreen() {
                 <Ionicons
                   name={showNewPassword ? "eye-off-outline" : "eye-outline"}
                   size={20}
-                  color="#737373"
+                  color={colors.mutedForeground}
                 />
               </Pressable>
             </View>
@@ -178,7 +180,7 @@ export default function ChangePasswordScreen() {
                 <Ionicons
                   name={showConfirmPassword ? "eye-off-outline" : "eye-outline"}
                   size={20}
-                  color="#737373"
+                  color={colors.mutedForeground}
                 />
               </Pressable>
             </View>

@@ -43,7 +43,7 @@ export default function MeetingSuccessView({
       {onBack && (
         <button
           onClick={onBack}
-          className="flex items-center gap-2 text-[#343434] hover:text-[#029CD4] transition-colors mb-4"
+          className="flex items-center gap-2 text-foreground hover:text-primary transition-colors mb-4"
         >
           <ArrowLeft className="w-5 h-5" />
           <span className="text-sm font-medium">Back</span>
@@ -55,30 +55,30 @@ export default function MeetingSuccessView({
         <CheckCircle className="w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 text-green-500 mx-auto mb-3 sm:mb-4" />
 
         {/* Title */}
-        <h2 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-bold text-[#343434] mb-1.5 sm:mb-2">
+        <h2 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-bold text-foreground mb-1.5 sm:mb-2">
           {title}
         </h2>
 
         {/* Description */}
-        <p className="text-xs sm:text-sm md:text-base text-[#00000080] mb-4 sm:mb-6 px-4">
+        <p className="text-xs sm:text-sm md:text-base text-muted-foreground mb-4 sm:mb-6 px-4">
           {description}
         </p>
 
         {/* Meeting Details Card */}
-        <div className="bg-[#FAFAFB] rounded-xl p-4 sm:p-5 md:p-6 space-y-3 sm:space-y-4 text-left mb-6 sm:mb-8">
+        <div className="bg-sidebar rounded-xl p-4 sm:p-5 md:p-6 space-y-3 sm:space-y-4 text-left mb-6 sm:mb-8">
           <div>
-            <span className="text-xs sm:text-sm text-[#00000060] uppercase tracking-wide font-medium">
+            <span className="text-xs sm:text-sm text-muted-foreground uppercase tracking-wide font-medium">
               Meeting Code
             </span>
-            <p className="font-mono text-base sm:text-lg md:text-xl font-bold text-[#029CD4] mt-1">
+            <p className="font-mono text-base sm:text-lg md:text-xl font-bold text-primary mt-1">
               {meetingIdentifier}
             </p>
           </div>
           <div className="border-t border-[#E5E5E5] pt-3 sm:pt-4">
-            <span className="text-xs sm:text-sm text-[#00000060] uppercase tracking-wide font-medium">
+            <span className="text-xs sm:text-sm text-muted-foreground uppercase tracking-wide font-medium">
               Join Link
             </span>
-            <p className="text-xs sm:text-sm md:text-base text-[#343434] break-all mt-1 leading-relaxed">
+            <p className="text-xs sm:text-sm md:text-base text-foreground break-all mt-1 leading-relaxed">
               {joinUrl}
             </p>
           </div>

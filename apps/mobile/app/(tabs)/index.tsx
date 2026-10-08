@@ -9,11 +9,13 @@ import { useToast } from "@/components/ui/toast";
 import { JoinMeetingInput } from "@/features/meetings/components/join-meeting-input";
 import { useInstantMeeting, useMeetings } from "@/features/meetings/hooks/use-meetings";
 import { useAuthStore } from "@/store/auth.store";
+import { useColors } from "@/hooks/useColors";
 import type { Meeting } from "@/features/meetings/types";
 import * as Clipboard from "expo-clipboard";
 
 function MeetingHistoryCard({ meeting }: { meeting: Meeting }) {
   const { success } = useToast();
+  const colors = useColors();
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -39,7 +41,7 @@ function MeetingHistoryCard({ meeting }: { meeting: Meeting }) {
           {meeting.title}
         </Text>
         <Pressable onPress={handleCopy} className="p-1">
-          <Ionicons name="copy-outline" size={16} color="#737373" />
+          <Ionicons name="copy-outline" size={16} color={colors.mutedForeground} />
         </Pressable>
       </View>
       <Text className="mt-2 text-sm text-muted-foreground dark:text-muted-foreground-dark">
@@ -60,6 +62,7 @@ export default function HomeScreen() {
   const { data: meetingsData } = useMeetings(1, 5);
   const instantMeeting = useInstantMeeting();
   const { toast } = useToast();
+  const colors = useColors();
 
   const handleNewMeeting = () => {
     instantMeeting.mutate(undefined, {
@@ -116,7 +119,7 @@ export default function HomeScreen() {
             className="items-center"
           >
             <View className="w-20 h-20 rounded-2xl bg-secondary dark:bg-secondary-dark items-center justify-center shadow">
-              <Ionicons name="calendar" size={28} color="#006BFF" />
+              <Ionicons name="calendar" size={28} color={colors.primary} />
             </View>
             <Text className="mt-3 font-bold text-foreground dark:text-foreground-dark">
               Schedule
@@ -139,7 +142,7 @@ export default function HomeScreen() {
               </Text>
               <Pressable onPress={() => router.push("/(tabs)/meetings")} className="flex-row items-center gap-1">
                 <Text className="text-sm font-semibold text-primary dark:text-primary-dark">See all</Text>
-                <Ionicons name="chevron-forward" size={16} color="#006BFF" />
+                <Ionicons name="chevron-forward" size={16} color={colors.primary} />
               </Pressable>
             </View>
             <ScrollView
@@ -152,7 +155,7 @@ export default function HomeScreen() {
                 onPress={() => router.push("/(tabs)/schedule")}
                 className="w-12 h-28 bg-accent dark:bg-accent-dark rounded-lg items-center justify-center mr-3"
               >
-                <Ionicons name="add" size={24} color="#006BFF" />
+                <Ionicons name="add" size={24} color={colors.primary} />
               </Pressable>
               {recentMeetings.map((meeting) => (
                 <MeetingHistoryCard key={meeting.id} meeting={meeting} />
@@ -167,7 +170,7 @@ export default function HomeScreen() {
               Meeting History
             </Text>
             <Card className="items-center py-8">
-              <Ionicons name="calendar-outline" size={48} color="#006BFF" style={{ opacity: 0.5 }} />
+              <Ionicons name="calendar-outline" size={48} color={colors.primary} style={{ opacity: 0.5 }} />
               <Text className="mt-4 text-muted-foreground dark:text-muted-foreground-dark">
                 No meetings yet
               </Text>
@@ -175,7 +178,7 @@ export default function HomeScreen() {
                 onPress={() => router.push("/(tabs)/schedule")}
                 className="mt-4 flex-row items-center gap-2"
               >
-                <Ionicons name="add-circle" size={20} color="#006BFF" />
+                <Ionicons name="add-circle" size={20} color={colors.primary} />
                 <Text className="font-semibold text-primary dark:text-primary-dark">
                   Schedule your first meeting
                 </Text>

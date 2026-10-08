@@ -77,7 +77,7 @@ const PasswordResetModal = ({ email, token }: PasswordResetModalProps) => {
   };
 
   return (
-    <div className="relative z-10 bg-white rounded-[40px] shadow-2xl w-full p-6 md:p-9">
+    <div className="relative z-10 bg-card rounded-[40px] shadow-2xl w-full p-6 md:p-9">
       {/* Header */}
       <AuthHeader title="Password Reset!" subtitle="Create New Password." />
 

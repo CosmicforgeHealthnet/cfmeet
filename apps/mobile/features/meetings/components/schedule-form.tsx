@@ -220,7 +220,7 @@ export function ScheduleForm({ onSuccess }: ScheduleFormProps) {
             }`}
           >
             <View
-              className={`h-5 w-5 rounded-full bg-white transition-all ${
+              className={`h-5 w-5 rounded-full bg-background dark:bg-background-dark transition-all ${
                 isPrivate ? "ml-5" : "ml-0"
               }`}
             />

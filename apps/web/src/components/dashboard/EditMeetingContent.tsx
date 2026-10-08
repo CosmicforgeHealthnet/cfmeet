@@ -115,7 +115,7 @@ function EditMeetingForm({ meeting, meetingId }: EditMeetingFormProps) {
       {/* Back Button */}
       <button
         onClick={() => router.push("/dashboard/meetings")}
-        className="flex items-center gap-2 text-[#343434] hover:text-[#029CD4] transition-colors mb-4"
+        className="flex items-center gap-2 text-foreground hover:text-primary transition-colors mb-4"
       >
         <ArrowLeft className="w-5 h-5" />
         <span className="text-sm font-medium">Back to Meetings</span>
@@ -123,10 +123,10 @@ function EditMeetingForm({ meeting, meetingId }: EditMeetingFormProps) {
 
       {/* Header */}
       <div className="mb-6 sm:mb-8">
-        <h2 className="text-xl sm:text-2xl font-bold text-[#343434]">
+        <h2 className="text-xl sm:text-2xl font-bold text-foreground">
           Edit Meeting
         </h2>
-        <p className="text-sm text-[#00000080] mt-1">
+        <p className="text-sm text-muted-foreground mt-1">
           Update your meeting details
         </p>
       </div>
@@ -135,7 +135,7 @@ function EditMeetingForm({ meeting, meetingId }: EditMeetingFormProps) {
       <form onSubmit={handleSubmit} className="max-w-lg space-y-5">
         {/* Title */}
         <div className="space-y-1.5">
-          <Label htmlFor="title" className="text-sm font-medium text-[#343434]">
+          <Label htmlFor="title" className="text-sm font-medium text-foreground">
             Meeting Title
           </Label>
           <Input
@@ -148,7 +148,7 @@ function EditMeetingForm({ meeting, meetingId }: EditMeetingFormProps) {
 
         {/* Date */}
         <div className="space-y-1.5">
-          <Label htmlFor="date" className="text-sm font-medium text-[#343434]">
+          <Label htmlFor="date" className="text-sm font-medium text-foreground">
             <Calendar className="w-3.5 h-3.5 inline mr-1.5" />
             Date
           </Label>
@@ -165,7 +165,7 @@ function EditMeetingForm({ meeting, meetingId }: EditMeetingFormProps) {
           <div className="space-y-1.5">
             <Label
               htmlFor="startTime"
-              className="text-sm font-medium text-[#343434]"
+              className="text-sm font-medium text-foreground"
             >
               <Clock className="w-3.5 h-3.5 inline mr-1.5" />
               Start Time
@@ -180,7 +180,7 @@ function EditMeetingForm({ meeting, meetingId }: EditMeetingFormProps) {
           <div className="space-y-1.5">
             <Label
               htmlFor="duration"
-              className="text-sm font-medium text-[#343434]"
+              className="text-sm font-medium text-foreground"
             >
               <Clock className="w-3.5 h-3.5 inline mr-1.5" />
               Duration
@@ -189,7 +189,7 @@ function EditMeetingForm({ meeting, meetingId }: EditMeetingFormProps) {
               id="duration"
               value={duration}
               onChange={(e) => setDuration(e.target.value)}
-              className="flex h-9 sm:h-10 w-full rounded-xl border border-[#029CD44D] bg-transparent px-3 sm:px-5 py-2 text-sm sm:text-base font-medium focus:outline-none focus:border-[#029CD4] focus:ring-1 focus:ring-[#029CD4]"
+              className="flex h-9 sm:h-10 w-full rounded-xl border border-[var(--primary)4D] bg-transparent px-3 sm:px-5 py-2 text-sm sm:text-base font-medium focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)]"
             >
               {DURATION_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -202,7 +202,7 @@ function EditMeetingForm({ meeting, meetingId }: EditMeetingFormProps) {
 
         {/* Privacy Toggle */}
         <div className="space-y-1.5">
-          <Label className="text-sm font-medium text-[#343434]">
+          <Label className="text-sm font-medium text-foreground">
             Meeting Type
           </Label>
           <TooltipProvider>
@@ -214,8 +214,8 @@ function EditMeetingForm({ meeting, meetingId }: EditMeetingFormProps) {
                     onClick={() => setIsPrivate(true)}
                     className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
                       isPrivate
-                        ? "bg-[#029CD4] text-white shadow-sm"
-                        : "bg-[#FAFAFB] text-[#00000080] hover:bg-gray-200"
+                        ? "bg-primary text-white shadow-sm"
+                        : "bg-sidebar text-muted-foreground hover:bg-muted"
                     }`}
                   >
                     <Lock className="w-4 h-4" />
@@ -237,8 +237,8 @@ function EditMeetingForm({ meeting, meetingId }: EditMeetingFormProps) {
                     onClick={() => setIsPrivate(false)}
                     className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
                       !isPrivate
-                        ? "bg-[#029CD4] text-white shadow-sm"
-                        : "bg-[#FAFAFB] text-[#00000080] hover:bg-gray-200"
+                        ? "bg-primary text-white shadow-sm"
+                        : "bg-sidebar text-muted-foreground hover:bg-muted"
                     }`}
                   >
                     <Globe className="w-4 h-4" />
@@ -261,10 +261,10 @@ function EditMeetingForm({ meeting, meetingId }: EditMeetingFormProps) {
         <div className="space-y-1.5">
           <Label
             htmlFor="metadata"
-            className="text-sm font-medium text-[#343434]"
+            className="text-sm font-medium text-foreground"
           >
             Description{" "}
-            <span className="text-[#00000040] font-normal">(optional)</span>
+            <span className="text-muted-foreground font-normal">(optional)</span>
           </Label>
           <textarea
             id="metadata"
@@ -272,7 +272,7 @@ function EditMeetingForm({ meeting, meetingId }: EditMeetingFormProps) {
             value={metadata}
             onChange={(e) => setMetadata(e.target.value)}
             rows={3}
-            className="flex w-full rounded-xl border border-[#029CD44D] bg-transparent px-3 sm:px-5 py-2 sm:py-3 text-sm sm:text-base font-medium placeholder:text-[#029CD44D] focus:outline-none focus:border-[#029CD4] focus:ring-1 focus:ring-[#029CD4] resize-none"
+            className="flex w-full rounded-xl border border-[var(--primary)4D] bg-transparent px-3 sm:px-5 py-2 sm:py-3 text-sm sm:text-base font-medium placeholder:text-[var(--primary)4D] focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] resize-none"
           />
         </div>
 
@@ -320,7 +320,7 @@ export default function EditMeetingContent({ meetingId }: { meetingId: string })
       <div className="px-4 py-6 sm:px-6 sm:py-8 md:p-10 font-inter">
         <div className="text-center py-20">
           <p className="text-red-500 font-medium">Failed to load meeting</p>
-          <p className="text-sm text-[#00000080] mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             The meeting may not exist or you don&apos;t have access to it.
           </p>
           <Button

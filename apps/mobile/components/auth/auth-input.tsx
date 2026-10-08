@@ -3,6 +3,7 @@ import { TextInput, TextInputProps, View, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { cn } from "@/lib/utils/cn";
 import { Text } from "@/components/ui/text";
+import { useColors } from "@/hooks/useColors";
 
 interface AuthInputProps extends TextInputProps {
   label: string;
@@ -13,6 +14,7 @@ export const AuthInput = forwardRef<TextInput, AuthInputProps>(
   ({ label, error, secureTextEntry, className, ...props }, ref) => {
     const [showPassword, setShowPassword] = useState(false);
     const isPassword = secureTextEntry !== undefined;
+    const colors = useColors();
 
     return (
       <View className="w-full">
@@ -34,7 +36,7 @@ export const AuthInput = forwardRef<TextInput, AuthInputProps>(
               isPassword && "pr-10",
               className
             )}
-            placeholderTextColor="#737373"
+            placeholderTextColor={colors.mutedForeground}
             secureTextEntry={isPassword && !showPassword}
             {...props}
           />
@@ -46,7 +48,7 @@ export const AuthInput = forwardRef<TextInput, AuthInputProps>(
               <Ionicons
                 name={showPassword ? "eye-off-outline" : "eye-outline"}
                 size={20}
-                color="#029CD4"
+                color={colors.primary}
                 style={{ opacity: 0.7 }}
               />
             </Pressable>

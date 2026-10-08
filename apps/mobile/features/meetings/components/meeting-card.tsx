@@ -5,6 +5,7 @@ import { Text } from "@/components/ui/text";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/components/ui/toast";
+import { useColors } from "@/hooks/useColors";
 import type { Meeting, MeetingStatus } from "../types";
 
 interface MeetingCardProps {
@@ -23,6 +24,7 @@ const statusVariants: Record<MeetingStatus, "success" | "default" | "secondary" 
 
 export function MeetingCard({ meeting, onPress, onEdit, onDelete }: MeetingCardProps) {
   const { success } = useToast();
+  const colors = useColors();
   const isScheduled = meeting.status === "scheduled";
   const canJoin = meeting.status === "scheduled" || meeting.status === "live";
 
@@ -63,19 +65,19 @@ export function MeetingCard({ meeting, onPress, onEdit, onDelete }: MeetingCardP
 
       <View className="flex-row flex-wrap items-center gap-3 mb-3">
         <View className="flex-row items-center gap-1">
-          <Ionicons name="calendar-outline" size={14} color="#737373" />
+          <Ionicons name="calendar-outline" size={14} color={colors.mutedForeground} />
           <Text className="text-sm text-muted-foreground dark:text-muted-foreground-dark">
             {formatDate(meeting.scheduled_at)}
           </Text>
         </View>
         <View className="flex-row items-center gap-1">
-          <Ionicons name="time-outline" size={14} color="#737373" />
+          <Ionicons name="time-outline" size={14} color={colors.mutedForeground} />
           <Text className="text-sm text-muted-foreground dark:text-muted-foreground-dark">
             {formatTime(meeting.scheduled_at)}
           </Text>
         </View>
         <View className="flex-row items-center gap-1">
-          <Ionicons name={meeting.is_private ? "lock-closed-outline" : "globe-outline"} size={14} color="#737373" />
+          <Ionicons name={meeting.is_private ? "lock-closed-outline" : "globe-outline"} size={14} color={colors.mutedForeground} />
           <Text className="text-sm text-muted-foreground dark:text-muted-foreground-dark">
             {meeting.is_private ? "Private" : "Public"}
           </Text>
@@ -89,7 +91,7 @@ export function MeetingCard({ meeting, onPress, onEdit, onDelete }: MeetingCardP
         <Text className="text-sm font-mono text-foreground dark:text-foreground-dark">
           {meeting.meeting_identifier}
         </Text>
-        <Ionicons name="copy-outline" size={16} color="#029CD4" />
+        <Ionicons name="copy-outline" size={16} color={colors.primary} />
       </Pressable>
 
       <View className="flex-row gap-2">
@@ -98,7 +100,7 @@ export function MeetingCard({ meeting, onPress, onEdit, onDelete }: MeetingCardP
             onPress={onEdit}
             className="flex-1 flex-row items-center justify-center gap-1.5 rounded-lg bg-secondary dark:bg-secondary-dark py-2.5"
           >
-            <Ionicons name="pencil-outline" size={16} color="#029CD4" />
+            <Ionicons name="pencil-outline" size={16} color={colors.primary} />
             <Text className="text-sm font-bold text-primary dark:text-primary-dark">Edit</Text>
           </Pressable>
         )}
@@ -107,7 +109,7 @@ export function MeetingCard({ meeting, onPress, onEdit, onDelete }: MeetingCardP
             onPress={onDelete}
             className="flex-1 flex-row items-center justify-center gap-1.5 rounded-lg bg-destructive/10 dark:bg-destructive-dark/10 py-2.5"
           >
-            <Ionicons name="trash-outline" size={16} color="#dc2626" />
+            <Ionicons name="trash-outline" size={16} color={colors.destructive} />
             <Text className="text-sm font-bold text-destructive dark:text-destructive-dark">Delete</Text>
           </Pressable>
         )}

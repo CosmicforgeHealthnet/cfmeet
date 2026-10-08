@@ -6,6 +6,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Home, Video, Calendar, Code2, Settings, Menu, X } from "lucide-react";
 import ProfileMenu from "./ProfileMenu";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 const menu = [
   { label: "Dashboard", icon: Home, href: "/dashboard" },
@@ -56,11 +57,11 @@ export default function MobileSidebar() {
           {/* Top row: Logo + Close button */}
           <div className="h-16 flex items-center justify-between pl-5 pr-4">
             <Image
-              src="/CFMeet.png"
+              src="/CFLogo.png"
               alt="CF Meet Logo"
-              width={140}
-              height={32}
-              className="w-[120px] min-w-[120px] object-contain object-left"
+              width={40}
+              height={40}
+              className="w-[40px] min-w-[40px] object-contain object-left"
               priority
             />
             <button
@@ -104,6 +105,7 @@ export default function MobileSidebar() {
 
           {/* Bottom Section */}
           <div className="pb-8 px-5 space-y-4">
+            <ThemeToggle />
             <ProfileMenu expanded={true} mobile={true} />
           </div>
         </div>

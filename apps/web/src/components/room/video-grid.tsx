@@ -44,7 +44,7 @@ const PARTICIPANTS = [
 
 export default function VideoGrid() {
   return (
-    <div className="h-full w-full max-w-full p-2 sm:p-4 bg-gray-50/30 overflow-y-auto overflow-x-hidden box-border">
+    <div className="h-full w-full max-w-full p-2 sm:p-4 bg-muted/30 overflow-y-auto overflow-x-hidden box-border">
       <div className="grid grid-cols-2 md:grid-cols-5 gap-2 sm:gap-3 w-full max-w-full">
         {[...PARTICIPANTS]
           .sort((a, b) => a.name.localeCompare(b.name))

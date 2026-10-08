@@ -216,7 +216,7 @@ export function ForgotPasswordForm() {
           {/* Back to Login */}
           <Link href="/login" asChild>
             <Pressable className="mt-4">
-              <Text className="text-center text-[#029CD4]">Return to Log In Page</Text>
+              <Text className="text-center text-primary dark:text-primary-dark">Return to Log In Page</Text>
             </Pressable>
           </Link>
           </AuthCard>
@@ -290,7 +290,7 @@ export function ForgotPasswordForm() {
               Didn't receive code?{" "}
             </Text>
             <Pressable onPress={handleResend} disabled={forgotPassword.isPending}>
-              <Text className="text-sm font-bold text-[#029CD4]">Resend!</Text>
+              <Text className="text-sm font-bold text-primary dark:text-primary-dark">Resend!</Text>
             </Pressable>
           </View>
 
@@ -306,7 +306,7 @@ export function ForgotPasswordForm() {
 
           {/* Use different email */}
           <Pressable onPress={() => setStep("email")} className="mt-3">
-            <Text className="text-sm text-[#029CD4]">Use different email</Text>
+            <Text className="text-sm text-primary dark:text-primary-dark">Use different email</Text>
           </Pressable>
           </AuthCard>
         </KeyboardAwareView>
@@ -384,7 +384,7 @@ export function ForgotPasswordForm() {
         {/* Back to Login */}
         <Link href="/login" asChild>
           <Pressable className="mt-4">
-            <Text className="text-center text-[#029CD4]">Return to Log In Page</Text>
+            <Text className="text-center text-primary dark:text-primary-dark">Return to Log In Page</Text>
           </Pressable>
         </Link>
         </AuthCard>

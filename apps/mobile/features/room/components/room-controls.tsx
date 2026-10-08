@@ -5,6 +5,7 @@ import { Text } from "@/components/ui/text";
 import { useRoom } from "../providers/room-provider";
 import { useEndMeeting } from "../hooks/use-media-controls";
 import { useToast } from "@/components/ui/toast";
+import { useColors } from "@/hooks/useColors";
 
 export function RoomControls() {
   const {
@@ -17,6 +18,7 @@ export function RoomControls() {
   } = useRoom();
 
   const { toast } = useToast();
+  const colors = useColors();
   const endMeeting = useEndMeeting(joinData?.id ?? "");
 
   const handleLeave = () => {
@@ -47,7 +49,7 @@ export function RoomControls() {
         <Ionicons
           name={isAudioEnabled ? "mic" : "mic-off"}
           size={22}
-          color={isAudioEnabled ? "#029CD4" : "#ffffff"}
+          color={isAudioEnabled ? colors.primary : "#ffffff"}
         />
       </Pressable>
 
@@ -60,7 +62,7 @@ export function RoomControls() {
         <Ionicons
           name={isVideoEnabled ? "videocam" : "videocam-off"}
           size={22}
-          color={isVideoEnabled ? "#029CD4" : "#ffffff"}
+          color={isVideoEnabled ? colors.primary : "#ffffff"}
         />
       </Pressable>
 
@@ -68,7 +70,7 @@ export function RoomControls() {
         onPress={toggleSidebar}
         className="h-12 w-12 items-center justify-center rounded-full bg-secondary dark:bg-secondary-dark"
       >
-        <Ionicons name="chatbubble-ellipses" size={22} color="#029CD4" />
+        <Ionicons name="chatbubble-ellipses" size={22} color={colors.primary} />
       </Pressable>
 
       {isHost ? (
