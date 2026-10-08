@@ -11,6 +11,11 @@
 //! Relay and grantable only to Telephony. Calling can never be granted plaintext-contact
 //! resolution.
 //!
+//! Communication authority: Calling (the authenticated platform ingress) may be granted
+//! the communication-context / relay-session proxy permissions and `communication.authorize`
+//! by Privacy Relay; Privacy Relay may be granted `communication-authority.enforce` by
+//! Calling, which can only ever terminate protected calls, never grant authority.
+//!
 //! There are no wildcard, `admin`, `all` or `root` permissions.
 
 use std::{collections::BTreeSet, fmt};
@@ -40,6 +45,21 @@ pub enum InternalPermission {
     /// Calling: receive tightly scoped operational callbacks.
     #[serde(rename = "operational-callback.deliver")]
     OperationalCallbackDeliver,
+    /// Privacy Relay: create, update and change the lifecycle of communication contexts
+    /// on behalf of the delegated application (authenticated platform ingress).
+    #[serde(rename = "communication-context.write")]
+    CommunicationContextWrite,
+    /// Privacy Relay: read privacy relay sessions of the delegated application.
+    #[serde(rename = "relay-session.read")]
+    RelaySessionRead,
+    /// Privacy Relay: create privacy relay sessions and change their lifecycle on behalf
+    /// of the delegated application.
+    #[serde(rename = "relay-session.write")]
+    RelaySessionWrite,
+    /// Calling: enforce a restrictive communication-authority change (revocation,
+    /// participant removal, suspension, expiry) on protected calls. Restrictive only.
+    #[serde(rename = "communication-authority.enforce")]
+    CommunicationAuthorityEnforce,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -104,6 +124,38 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: false,
         description: "Deliver tightly scoped operational callbacks to Calling",
     },
+    PermissionDefinition {
+        permission: InternalPermission::CommunicationContextWrite,
+        name: "communication-context.write",
+        receiver: services::PRIVACY_RELAY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Create, update and change the lifecycle of communication contexts for the delegated application",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::RelaySessionRead,
+        name: "relay-session.read",
+        receiver: services::PRIVACY_RELAY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Read privacy relay sessions of the delegated application (opaque references only)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::RelaySessionWrite,
+        name: "relay-session.write",
+        receiver: services::PRIVACY_RELAY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Create privacy relay sessions and change their lifecycle for the delegated application",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CommunicationAuthorityEnforce,
+        name: "communication-authority.enforce",
+        receiver: services::CALLING,
+        grantable_to: &[services::PRIVACY_RELAY],
+        sensitive: false,
+        description: "Enforce a restrictive communication-authority change on protected calls (terminate only)",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -117,6 +169,10 @@ impl InternalPermission {
         InternalPermission::CallLegExecute,
         InternalPermission::CallLegStatusRead,
         InternalPermission::OperationalCallbackDeliver,
+        InternalPermission::CommunicationContextWrite,
+        InternalPermission::RelaySessionRead,
+        InternalPermission::RelaySessionWrite,
+        InternalPermission::CommunicationAuthorityEnforce,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -220,6 +276,27 @@ mod tests {
         for d in REGISTRY.iter().filter(|d| d.sensitive) {
             assert!(!d.grantable_to.contains(&services::CALLING), "{}", d.name);
         }
+    }
+
+    #[test]
+    fn communication_authority_flows_are_least_privilege() {
+        use InternalPermission::*;
+        // Calling -> Privacy Relay: the platform ingress proxy and call authorization.
+        for p in [
+            CommunicationAuthorize,
+            CommunicationContextWrite,
+            RelaySessionRead,
+            RelaySessionWrite,
+        ] {
+            let d = p.definition();
+            assert_eq!(d.receiver, services::PRIVACY_RELAY, "{}", d.name);
+            assert_eq!(d.grantable_to, &[services::CALLING], "{}", d.name);
+        }
+        // Privacy Relay -> Calling: restrictive enforcement only.
+        let d = CommunicationAuthorityEnforce.definition();
+        assert_eq!(d.receiver, services::CALLING);
+        assert_eq!(d.grantable_to, &[services::PRIVACY_RELAY]);
+        assert!(!d.sensitive);
     }
 
     #[test]

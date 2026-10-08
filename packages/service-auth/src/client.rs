@@ -138,13 +138,18 @@ pub enum InternalCallError {
     InvalidResponse { target: ServiceId },
 }
 
-/// Successful (2xx) response.
+/// Response of an internal call (2xx unless obtained through `exchange_json`).
 pub struct InternalResponse {
     target: ServiceId,
     status: u16,
     request_id: RequestId,
+    /// Response headers relayed to callers (bounded allow-list; never auth material).
+    relayed: BTreeMap<&'static str, String>,
     body: Vec<u8>,
 }
+
+/// Response headers an adapter may relay (never authentication material).
+pub const RELAYED_RESPONSE_HEADERS: [&str; 1] = ["idempotent-replayed"];
 
 impl fmt::Debug for InternalResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -165,6 +170,29 @@ impl InternalResponse {
     /// Request id of the hop this response answers.
     pub fn request_id(&self) -> &RequestId {
         &self.request_id
+    }
+
+    /// Stable error code of an error envelope body (`{"error":{"code":…}}`), when present
+    /// and well-formed (upper-case letters and `_`, at most 64 characters).
+    pub fn error_code(&self) -> Option<String> {
+        serde_json::from_slice::<serde_json::Value>(&self.body)
+            .ok()
+            .and_then(|v| {
+                v.pointer("/error/code")
+                    .and_then(|c| c.as_str())
+                    .map(str::to_string)
+            })
+            .filter(|c| c.len() <= 64 && c.bytes().all(|b| b.is_ascii_uppercase() || b == b'_'))
+    }
+
+    /// A relayed response header (see [`RELAYED_RESPONSE_HEADERS`]).
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.relayed.get(name).map(String::as_str)
+    }
+
+    /// The bounded response body.
+    pub fn body(&self) -> &[u8] {
+        &self.body
     }
 
     pub fn json<T: DeserializeOwned>(&self) -> Result<T, InternalCallError> {
@@ -247,7 +275,44 @@ impl InternalServiceClient {
         self.send(request, Method::POST, path, Some(bytes)).await
     }
 
+    /// Like [`post_json`](Self::post_json) but returns every HTTP status as a response
+    /// (bounded body, never followed redirects). For adapters that relay a downstream
+    /// service's own error envelope (e.g. an authenticated platform ingress).
+    pub async fn exchange_json<B: Serialize>(
+        &self,
+        request: &OutboundServiceRequest,
+        method: Method,
+        path: &str,
+        body: Option<&B>,
+    ) -> Result<InternalResponse, InternalCallError> {
+        let bytes = match body {
+            Some(body) => Some(serde_json::to_vec(body).map_err(|_| InternalCallError::Encoding)?),
+            None => None,
+        };
+        self.send_raw(request, method, path, bytes).await
+    }
+
     async fn send(
+        &self,
+        request: &OutboundServiceRequest,
+        method: Method,
+        path: &str,
+        body: Option<Vec<u8>>,
+    ) -> Result<InternalResponse, InternalCallError> {
+        let response = self.send_raw(request, method, path, body).await?;
+        let status = response.status;
+        if !(200..300).contains(&status) {
+            let code = response.error_code();
+            return Err(InternalCallError::Status {
+                target: response.target,
+                status,
+                code,
+            });
+        }
+        Ok(response)
+    }
+
+    async fn send_raw(
         &self,
         request: &OutboundServiceRequest,
         method: Method,
@@ -295,6 +360,13 @@ impl InternalServiceClient {
             }
         })?;
         let status = response.status().as_u16();
+        let relayed = RELAYED_RESPONSE_HEADERS
+            .iter()
+            .filter_map(|name| {
+                let value = response.headers().get(*name)?.to_str().ok()?;
+                (value.len() <= 64).then(|| (*name, value.to_string()))
+            })
+            .collect();
         let mut buffer = Vec::new();
         loop {
             match response.chunk().await {
@@ -309,27 +381,11 @@ impl InternalServiceClient {
                 Err(_) => return Err(InternalCallError::Transport { target }),
             }
         }
-        if !(200..300).contains(&status) {
-            let code = serde_json::from_slice::<serde_json::Value>(&buffer)
-                .ok()
-                .and_then(|v| {
-                    v.pointer("/error/code")
-                        .and_then(|c| c.as_str())
-                        .map(str::to_string)
-                })
-                .filter(|c| {
-                    c.len() <= 64 && c.bytes().all(|b| b.is_ascii_uppercase() || b == b'_')
-                });
-            return Err(InternalCallError::Status {
-                target,
-                status,
-                code,
-            });
-        }
         Ok(InternalResponse {
             target,
             status,
             request_id: signed.request_id().clone(),
+            relayed,
             body: buffer,
         })
     }
