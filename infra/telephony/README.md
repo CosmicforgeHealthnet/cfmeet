@@ -31,6 +31,7 @@ through the Asterisk REST Interface (ARI); business services never see SIP.
 | Internal media peer | `<private-media-ip>:5070/udp` | the RTC media gateway only (`app-media` endpoint identified by its CIDR) |
 | Telephony internal API | `:8092` | service-authenticated (`/internal/v1`), cluster-internal |
 | Provider callbacks | `POST /provider-callbacks/{provider}[/{token}]` on Telephony | provider-authenticated (signature / token), 16 KiB body limit |
+| Metrics | `TELEPHONY_METRICS_ADDRESS` (e.g. `<private-ip>:9464`, `GET /metrics`) | monitoring network only; a separate listener (never the internal API or the callback path); bounded counters / gauges whose labels are normalized vocabulary, never ids or numbers |
 | Database | Telephony's own PostgreSQL | Telephony only |
 
 ## Toll-fraud boundary

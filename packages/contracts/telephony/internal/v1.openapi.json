@@ -404,7 +404,7 @@
     "/internal/v1/legs/{leg_id}/terminate": {
       "post": {
         "operationId": "terminateLeg",
-        "description": "Idempotent termination (an unresolved one is reconciled until the provider confirms). Permission telephony-leg.control.",
+        "description": "Idempotent termination (an unresolved one is reconciled until the provider confirms). Permission telephony-leg.terminate.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -479,7 +479,7 @@
     "/internal/v1/legs/{leg_id}/hold": {
       "post": {
         "operationId": "holdLeg",
-        "description": "Hold (media anchored at the edge). Permission telephony-leg.control.",
+        "description": "Hold (media anchored at the edge). Permission telephony-leg.hold.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -554,7 +554,7 @@
     "/internal/v1/legs/{leg_id}/resume": {
       "post": {
         "operationId": "resumeLeg",
-        "description": "Resume. Permission telephony-leg.control.",
+        "description": "Resume. Permission telephony-leg.resume.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"

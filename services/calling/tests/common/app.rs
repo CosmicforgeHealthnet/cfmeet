@@ -164,6 +164,63 @@ impl AppWorld {
         Some(Self { w })
     }
 
+    /// A world whose Calling deployment reaches Privacy Relay AND Telephony over HTTP
+    /// (the real adapters, signed service tokens), with every telecom switch ON and the
+    /// Production environment live-telecom allowed: the cross-service end to end stack.
+    pub async fn with_service_auth_public_network(
+        service_auth: calling::internal_auth::ServiceAuthRuntime,
+        peers: super::Peers,
+        now: chrono::DateTime<chrono::Utc>,
+        contact_delegation: Option<std::sync::Arc<cf_service_auth::ContactDelegationSigner>>,
+    ) -> Option<Self> {
+        use std::sync::Arc;
+        let db = Arc::new(super::TestDb::new().await?);
+        let media = Arc::new(FakeMediaProvider::default());
+        let bus = Arc::new(calling::signaling::InMemorySignalBus::new());
+        let mut runtime = super::test_runtime(Some(media.clone()), bus.clone());
+        runtime.privacy_relay = Arc::new(calling::privacy_relay::HttpPrivacyRelay::new(
+            service_auth.clone(),
+        ));
+        runtime.public_network = calling::calls::app::public::PublicNetwork {
+            telephony: Arc::new(calling::telephony::HttpTelephony::new(service_auth.clone())),
+            media: None,
+            flags: calling::routing::engine::TelecomFlags {
+                public_outbound: true,
+                public_inbound: true,
+                callback_relay: true,
+            },
+        };
+        let push = Arc::new(super::RecordingPush::default());
+        runtime.push = push.clone();
+        runtime.contact_delegation = contact_delegation;
+        let h = Harness::with_service_auth(
+            db,
+            super::TEST_PEPPER,
+            calling::domain::ManualClock::new(now),
+            media,
+            bus,
+            runtime,
+            push,
+            service_auth,
+            peers,
+        );
+        let consumer = h
+            .consumer("acme", calling::domain::TenantClassification::External)
+            .await;
+        let w = CallWorld::for_consumer(h, consumer, calling::domain::EnvironmentKind::Production)
+            .await;
+        w.h.platform
+            .set_live_telecom_allowed(
+                w.consumer
+                    .env(calling::domain::EnvironmentKind::Production)
+                    .id,
+                true,
+            )
+            .await
+            .unwrap();
+        Some(Self { w })
+    }
+
     /// `POST /v1/calls` of a PROTECTED call under `session`.
     pub async fn create_protected_call(
         &self,

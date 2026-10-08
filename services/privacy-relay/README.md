@@ -31,12 +31,12 @@ policy. No consumer's product model and no product-name branching exist here.
 | §36 Privacy-safe call evidence (composed by **Calling** from its own records; Privacy Relay proves session ownership) | **Implemented (in Calling)** |
 | Feature flags `PRIVACY_RELAY_ENABLED`, `CONTACT_VAULT_ENABLED`, `RELAY_NUMBER_POOL_ENABLED` (all default `false`; restrictive operations always work; disabling the vault or the pool never disables app-only Privacy Relay or ordinary calling) | **Implemented** |
 
-**Not implemented (Part E+ — nothing is faked):** the Telephony service, public-network
-origination or reception, carrier / SIP / provider adapters, callback relay execution,
-phone-to-phone bridging, telecom spend and the permanent Numbering product. CF Meet
-still does **not** place or receive PSTN calls: `executableRoutes` lists APPLICATION
-alone; PUBLIC_RELAY / CALLBACK_RELAY decisions, resolution grants, relay assignments and
-inbound resolutions are authority that the future Telephony service will execute.
+**Executed elsewhere (Part E):** PUBLIC_RELAY / CALLBACK_RELAY decisions, resolution
+grants, relay assignments and inbound resolutions are authority that **Calling** (route,
+spend, canonical Call) and **Telephony** (`services/telephony`, execution) act on;
+Privacy Relay never places, receives or bridges a public call itself, and plaintext
+leaves the vault only to Telephony's `resolve-for-execution`. Real lawful carrier
+certification is pending (ADR 0016). The permanent Numbering product is not implemented.
 
 ## API
 

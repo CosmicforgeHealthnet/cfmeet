@@ -361,6 +361,11 @@ async fn real_sip_media_edge_certification() {
         return;
     }
     if common::admin_url().is_none() {
+        assert!(
+            !required,
+            "TELEPHONY_SIP_CERT_REQUIRED=1 but TEST_DATABASE_URL is not set"
+        );
+        eprintln!("SKIPPED: SIP certification (no TEST_DATABASE_URL)");
         return;
     }
     let _ = tracing_subscriber::fmt()

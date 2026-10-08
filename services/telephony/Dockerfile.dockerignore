@@ -1,0 +1,16 @@
+# Build-context filter for services/telephony/Dockerfile (context: repository root).
+# Everything is excluded except the two directories the image is built from.
+*
+!packages/service-auth
+!services/telephony
+
+# Never send build output, local configuration, key material or edge / trunk configuration.
+**/target
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.log
+**/*.rs.bk
+services/telephony/Dockerfile
+services/telephony/Dockerfile.dockerignore
