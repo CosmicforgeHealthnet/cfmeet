@@ -70,13 +70,12 @@
   ],
   "$defs": {
     "CreateCallRequest": {
-      "description": "Body of POST /v1/calls. The initiator calls from one of its registered ACTIVE endpoints; every target is a principal of the same application environment (resolved inside the credential's scope; an unknown or foreign principal is 404). One target is a one-to-one call, several targets a group call (at most the configured participant limit, 16 by default, including the initiator). The server decides authorization, routing, ringing and media; nothing of that can be sent. Part E: instead of principal targets, ONE protected public-network contact (targetContactReference, an opaque ContactReference issued by Privacy Relay — never a telephone number) under a Privacy Relay Session: an APP_TO_PSTN call executed by Telephony after Privacy Relay (PUBLIC_RELAY), the Routing Engine, the telecom switches and a durable spend reservation all allow it (403 PUBLIC_ROUTE_DENIED / 503 PUBLIC_ROUTE_UNAVAILABLE / 429 TELECOM_SPEND_LIMIT_EXCEEDED otherwise). The caller identity is selected server-side; no request field can set it.",
+      "description": "Body of POST /v1/calls. The initiator calls from one of its registered ACTIVE endpoints; every target is a principal of the same application environment (resolved inside the credential's scope; an unknown or foreign principal is 404). One target is a one-to-one call, several targets a group call (at most the configured participant limit, 16 by default, including the initiator). The server decides authorization, routing, ringing and media; nothing of that can be sent. Part E: instead of principal targets, ONE protected public-network contact (targetContactReference, an opaque ContactReference issued by Privacy Relay — never a telephone number) under a Privacy Relay Session: an APP_TO_PSTN call executed by Telephony after Privacy Relay (PUBLIC_RELAY), the Routing Engine, the telecom switches and a durable spend reservation all allow it (403 PUBLIC_ROUTE_DENIED / 503 PUBLIC_ROUTE_UNAVAILABLE / 429 TELECOM_SPEND_LIMIT_EXCEEDED otherwise). The caller identity is selected server-side; no request field can set it. Part E §47 callback relay: callbackRequested with the requester's own verified protected contact (initiatorContactReference) and the callee's (targetContactReference) under a Privacy Relay Session, without an endpoint: Telephony calls the requester first and the callee only after the first leg answered; both legs are bridged in one Call (two legs, two usage facts).",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "kind",
-        "initiatorPrincipalId",
-        "initiatorEndpointId"
+        "initiatorPrincipalId"
       ],
       "properties": {
         "kind": {
@@ -86,7 +85,16 @@
           "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
         },
         "initiatorEndpointId": {
-          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "The initiator's registered ACTIVE endpoint. Required for application and APP_TO_PSTN calls; absent for a callback relay."
+        },
+        "callbackRequested": {
+          "description": "The requester asks to be called back on its own protected contact and bridged to the callee (Part E §47). A request, not a route: Privacy Relay and the Routing Engine decide whether CALLBACK_RELAY is allowed (403 PUBLIC_ROUTE_DENIED otherwise).",
+          "const": true
+        },
+        "initiatorContactReference": {
+          "description": "The requester's own verified protected contact (callback relay only).",
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContactReference"
         },
         "targetPrincipalIds": {
           "type": "array",
@@ -122,22 +130,79 @@
       "oneOf": [
         {
           "required": [
+            "initiatorEndpointId",
             "targetPrincipalIds"
           ],
           "not": {
-            "required": [
-              "targetContactReference"
+            "anyOf": [
+              {
+                "required": [
+                  "targetContactReference"
+                ]
+              },
+              {
+                "required": [
+                  "callbackRequested"
+                ]
+              },
+              {
+                "required": [
+                  "initiatorContactReference"
+                ]
+              }
             ]
           }
         },
         {
           "required": [
+            "initiatorEndpointId",
             "targetContactReference",
             "privacyRelaySessionId"
           ],
           "not": {
-            "required": [
-              "targetPrincipalIds"
+            "anyOf": [
+              {
+                "required": [
+                  "targetPrincipalIds"
+                ]
+              },
+              {
+                "required": [
+                  "callbackRequested"
+                ]
+              },
+              {
+                "required": [
+                  "initiatorContactReference"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "callbackRequested",
+            "initiatorContactReference",
+            "targetContactReference",
+            "privacyRelaySessionId"
+          ],
+          "properties": {
+            "kind": {
+              "const": "VOICE"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "initiatorEndpointId"
+                ]
+              },
+              {
+                "required": [
+                  "targetPrincipalIds"
+                ]
+              }
             ]
           }
         }

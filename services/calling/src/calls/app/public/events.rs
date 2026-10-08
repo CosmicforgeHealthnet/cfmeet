@@ -159,6 +159,18 @@ fn leg_path(from: LegState, to: LegState) -> Vec<LegState> {
     }
 }
 
+/// The public party role (CALLER / CALLEE) served by a public leg, if any.
+async fn party_role<C: ConnectionTrait>(db: &C, leg_id: Uuid) -> CallResult<Option<String>> {
+    Ok(db
+        .query_one(stmt(
+            "SELECT role FROM call_public_parties WHERE call_leg_id = $1",
+            vec![leg_id.into()],
+        ))
+        .await?
+        .map(|r| r.try_get_by_index::<String>(0))
+        .transpose()?)
+}
+
 impl AppCallService {
     /// Applies one Telephony event (idempotent).
     pub async fn apply_telephony_event(
@@ -398,9 +410,19 @@ impl AppCallService {
                     after.release_legs = true;
                     return Ok(EventDisposition::Applied);
                 }
-                // Only a DIALED (outbound) leg rings / answers the Call; an inbound
-                // caller's leg is answered by the edge when its bridge is built.
-                let drives_call = leg.direction == crate::calls::kinds::LegDirection::Outbound;
+                // Only the dialed CALLEE's leg rings / answers the Call. An inbound caller's
+                // leg is answered by the edge when its bridge is built; a callback relay's
+                // first leg (the requester) answering dials the callee.
+                let role = party_role(txn, leg.id).await?;
+                let drives_call = leg.direction == crate::calls::kinds::LegDirection::Outbound
+                    && role.as_deref() == Some("CALLEE");
+                if leg.direction == crate::calls::kinds::LegDirection::Outbound
+                    && role.as_deref() == Some("CALLER")
+                    && matches!(target, LegState::Answered | LegState::Connected)
+                    && self.originate_callee_in(txn, &call).await?
+                {
+                    after.dispatch = true;
+                }
                 match target {
                     LegState::Ringing
                         if drives_call && call.current_state == CallState::Dialing =>
@@ -520,7 +542,8 @@ impl AppCallService {
                 if call_terminal {
                     return Ok(EventDisposition::IgnoredTerminal);
                 }
-                self.public_leg_terminal_in(txn, call, outcome, after, pending)
+                let caller_leg = party_role(txn, leg.id).await?.as_deref() == Some("CALLER");
+                self.public_leg_terminal_in(txn, call, outcome, caller_leg, after, pending)
                     .await?;
                 Ok(EventDisposition::Applied)
             }
@@ -536,6 +559,7 @@ impl AppCallService {
         txn: &sea_orm::DatabaseTransaction,
         call: &calls::Model,
         outcome: LegOutcome,
+        caller_leg: bool,
         after: &mut After,
         pending: &mut PendingSignals,
     ) -> CallResult<()> {
@@ -544,9 +568,10 @@ impl AppCallService {
         let correlation = cmd.correlation_id().as_str().to_string();
         after.release_legs = true;
         match call.current_state {
-            // The caller of a PSTN_TO_APP Call hung up before anyone answered.
+            // The CALLER (an inbound caller, or a callback requester) hung up before the
+            // callee answered: the Call is cancelled.
             CallState::Dialing | CallState::Ringing | CallState::Routing
-                if call.origin == "PUBLIC_INBOUND" && outcome == LegOutcome::Completed =>
+                if caller_leg && outcome == LegOutcome::Completed =>
             {
                 let call = self
                     .calls
@@ -593,6 +618,35 @@ impl AppCallService {
                     self.call_signal(txn, pending, kind, &call, &correlation, Map::new())
                         .await?;
                 }
+                after.teardown = true;
+            }
+            // Answered but never connected (the media path was never established): the
+            // Call fails with the leg's outcome; nothing was ever bridged.
+            CallState::Answered if call.connected_at.is_none() => {
+                let category = match outcome {
+                    LegOutcome::Failed(c) if !c.is_policy() => c,
+                    _ => FailureCategory::TargetUnavailable,
+                };
+                let call = self
+                    .calls
+                    .transition_in(
+                        txn,
+                        &cmd,
+                        &call,
+                        call.version,
+                        CallAction::Fail { category },
+                    )
+                    .await?
+                    .call;
+                self.call_signal(
+                    txn,
+                    pending,
+                    SignalType::Failed,
+                    &call,
+                    &correlation,
+                    Map::new(),
+                )
+                .await?;
                 after.teardown = true;
             }
             CallState::Answered
@@ -884,6 +938,7 @@ impl AppCallService {
                 &txn,
                 &call,
                 LegOutcome::Failed(category),
+                false,
                 &mut after,
                 &mut pending,
             )

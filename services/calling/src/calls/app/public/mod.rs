@@ -16,6 +16,7 @@
 //! id. UNKNOWN outcomes are never failures and never fail over (§48).
 
 mod bridge;
+mod callback;
 mod dispatch;
 mod events;
 mod inbound;
@@ -29,6 +30,7 @@ use sea_orm::{ConnectionTrait, DbBackend, FromQueryResult, Statement};
 use serde_json::Value;
 use uuid::Uuid;
 
+pub use callback::CreateCallbackRelay;
 pub use events::EventDisposition;
 pub use inbound::InboundOffer;
 pub use outbound::CreatePublicCall;

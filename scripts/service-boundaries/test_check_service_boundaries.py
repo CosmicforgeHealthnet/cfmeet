@@ -315,6 +315,13 @@ class RealRepository(unittest.TestCase):
             "call_privacy_authorizations", "call_privacy_enforcements",
             # Part E sections 37-38: the typed routing policy of the Routing Engine.
             "call_routing_policies",
+            # Part E sections 44-47: Calling's side of public-network calls — the
+            # protected parties, the durable Telephony command outbox, received Telephony
+            # events, public bridges, spend policy / reservations and inbound owners.
+            # Telephony's own tables live in services/telephony.
+            "call_public_parties", "call_telephony_commands", "call_telephony_events",
+            "call_public_bridges", "call_spend_policies", "call_spend_reservations",
+            "call_inbound_owners",
         }
         self.assertTrue(call_domain <= calling)
         self.assertTrue(all(t.startswith("platform_") or t in call_domain for t in calling), calling)

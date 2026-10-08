@@ -129,7 +129,18 @@ pub(crate) fn command_key<T: Serialize>(
 struct CreateCallBody {
     kind: CallKind,
     initiator_principal_id: Uuid,
-    initiator_endpoint_id: Uuid,
+    /// Required for application calls (the initiator's ACTIVE endpoint); absent for a
+    /// callback relay (the initiator is called on its protected contact).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    initiator_endpoint_id: Option<Uuid>,
+    /// The requester asks to be called back on its protected contact and bridged to the
+    /// callee (Part E §47). A request, not a route: Privacy Relay and the Routing Engine
+    /// still decide whether CALLBACK_RELAY is allowed.
+    #[serde(default)]
+    callback_requested: bool,
+    /// The requester's own verified protected contact (callback relay only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    initiator_contact_reference: Option<Uuid>,
     #[serde(default)]
     target_principal_ids: Vec<Uuid>,
     /// A protected telephone contact (opaque ContactReference — never a number): the
@@ -164,6 +175,47 @@ async fn create_call(
         .map(DisplayName::parse)
         .transpose()
         .map_err(|_| CallingError::Validation("initiatorDisplayName is invalid."))?;
+    if body.callback_requested {
+        let (true, None, Some(initiator_contact), Some(target_contact), Some(session)) = (
+            body.target_principal_ids.is_empty(),
+            body.initiator_endpoint_id,
+            body.initiator_contact_reference,
+            body.target_contact_reference,
+            body.privacy_relay_session_id,
+        ) else {
+            return Err(CallingError::Validation(
+                "callbackRequested requires initiatorContactReference, targetContactReference and privacyRelaySessionId, and no endpoint or principal targets.",
+            ));
+        };
+        if body.kind != CallKind::Voice {
+            return Err(CallingError::Validation(
+                "a callback relay is a VOICE call.",
+            ));
+        }
+        let created = state
+            .app
+            .create_callback_relay(
+                &ctx,
+                crate::calls::app::public::CreateCallbackRelay {
+                    initiator: PrincipalId::from_uuid(body.initiator_principal_id),
+                    initiator_contact,
+                    target_contact,
+                    privacy_relay_session: session,
+                    key,
+                },
+            )
+            .await?;
+        let status = StatusCode::from_u16(created.status).unwrap_or(StatusCode::CREATED);
+        return Ok(respond(status, created.body, created.replayed));
+    }
+    if body.initiator_contact_reference.is_some() {
+        return Err(CallingError::Validation(
+            "initiatorContactReference is only valid with callbackRequested.",
+        ));
+    }
+    let initiator_endpoint = body
+        .initiator_endpoint_id
+        .ok_or(CallingError::Validation("initiatorEndpointId is required."))?;
     if let Some(contact) = body.target_contact_reference {
         let (true, Some(session)) = (
             body.target_principal_ids.is_empty(),
@@ -180,7 +232,7 @@ async fn create_call(
                 crate::calls::app::public::CreatePublicCall {
                     kind: body.kind,
                     initiator: PrincipalId::from_uuid(body.initiator_principal_id),
-                    initiator_endpoint: CallEndpointId::from_uuid(body.initiator_endpoint_id),
+                    initiator_endpoint: CallEndpointId::from_uuid(initiator_endpoint),
                     target_contact: contact,
                     initiator_display_name: display,
                     privacy_relay_session: session,
@@ -198,7 +250,7 @@ async fn create_call(
             CreateAppCall {
                 kind: body.kind,
                 initiator: PrincipalId::from_uuid(body.initiator_principal_id),
-                initiator_endpoint: CallEndpointId::from_uuid(body.initiator_endpoint_id),
+                initiator_endpoint: CallEndpointId::from_uuid(initiator_endpoint),
                 targets: body
                     .target_principal_ids
                     .iter()
