@@ -496,6 +496,7 @@ pub const STANDARD_TEST_SCOPES: &[&str] = &[
     names::PRIVACY_CONTACTS_READ,
     names::PRIVACY_CONTACTS_WRITE,
     names::PRIVACY_CONTACTS_VERIFY,
+    names::PRIVACY_EVIDENCE_READ,
 ];
 
 impl Harness {

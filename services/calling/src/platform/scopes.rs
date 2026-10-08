@@ -51,6 +51,8 @@ pub mod names {
     pub const PRIVACY_CONTACTS_WRITE: &str = "privacy.contacts.write";
     /// Assert contact verification state (a trusted integration; §33).
     pub const PRIVACY_CONTACTS_VERIFY: &str = "privacy.contacts.verify";
+    /// Read privacy-safe call evidence of Privacy Relay sessions (Part D §36).
+    pub const PRIVACY_EVIDENCE_READ: &str = "privacy.evidence.read";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -123,6 +125,11 @@ const STANDARD_SCOPES: &[ScopeDefinition] = &[
     ScopeDefinition {
         name: names::PRIVACY_CONTACTS_VERIFY,
         description: "Assert the verification state of protected contacts (trusted verification integrations only)",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::PRIVACY_EVIDENCE_READ,
+        description: "Read privacy-safe call evidence (timing, outcome, duration; never a telephone number) of Privacy Relay sessions within the credential's application environment",
         trust: ScopeTrust::Standard,
     },
     ScopeDefinition {

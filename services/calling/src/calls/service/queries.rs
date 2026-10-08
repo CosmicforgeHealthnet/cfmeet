@@ -75,6 +75,8 @@ pub struct ListCallsQuery {
     pub created_after: Option<DateTime<Utc>>,
     pub created_before: Option<DateTime<Utc>>,
     pub initiator_principal_id: Option<PrincipalId>,
+    /// Only the protected Calls of this Privacy Relay Session (privacy-safe evidence).
+    pub privacy_relay_ref: Option<uuid::Uuid>,
 }
 
 impl ListCallsQuery {
@@ -231,6 +233,9 @@ impl CallService {
         }
         if let Some(initiator) = query.initiator_principal_id {
             select = select.filter(calls::Column::InitiatorPrincipalId.eq(initiator.as_uuid()));
+        }
+        if let Some(session) = query.privacy_relay_ref {
+            select = select.filter(calls::Column::PrivacyRelayRef.eq(session));
         }
         if let Some(cursor) = &query.cursor {
             // (created_at, id) < (cursor.created_at, cursor.id)

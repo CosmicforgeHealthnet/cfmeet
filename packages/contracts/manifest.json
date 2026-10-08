@@ -159,7 +159,7 @@
     },
     {
       "id": "cfmeet.privacy-relay.http-api",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "openapi",
       "path": "privacy-relay/http/v1.openapi.json",
       "owner": "privacy-relay",
@@ -299,6 +299,17 @@
       "lifecycle": "beta",
       "authority": "contract-first",
       "description": "Inbound relay resolution (relay-number.resolve-inbound) and inbound caller protection (protected-contact.protect-inbound), Telephony only: safe mapping references and a ContactReference, never a destination or relay number in a response."
+    },
+    {
+      "id": "cfmeet.privacy-relay.evidence",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "privacy-relay/evidence/v1.schema.json",
+      "owner": "privacy-relay",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Privacy-safe call evidence of a Privacy Relay Session (served by Calling, privacy.evidence.read): canonical timing, normalized outcomes, authoritative connected duration, attempts and decision ids; never a number, provider identifier or credential."
     }
   ]
 }

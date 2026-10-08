@@ -70,7 +70,7 @@ const CALL_TABLES: &[&str] = &[
     "calls",
 ];
 
-const MIGRATIONS: usize = 15;
+const MIGRATIONS: usize = 16;
 const PART_B_MIGRATIONS: u32 = 4;
 
 #[tokio::test]

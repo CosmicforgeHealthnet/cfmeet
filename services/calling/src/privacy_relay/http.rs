@@ -90,6 +90,10 @@ pub fn routes() -> Router<AppState> {
             get(context_evidence),
         )
         .route(
+            "/v1/privacy-relay/sessions/:relay_session_id/evidence",
+            get(super::evidence::session_evidence),
+        )
+        .route(
             "/v1/privacy-relay/contexts/:context_id/suspend",
             post(suspend_context),
         )

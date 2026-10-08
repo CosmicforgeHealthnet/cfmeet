@@ -603,6 +603,13 @@ fn every_operation_declares_its_authentication() {
                 continue;
             }
             let scope = op["security"][0]["platformCredential"][0].as_str().unwrap();
+            // Privacy-safe call evidence has its own read scope (§36).
+            if path.ends_with("/sessions/{relay_session_id}/evidence") {
+                assert_eq!(scope, "privacy.evidence.read", "{method} {path}");
+                assert_eq!(op["x-cfmeet-required-scope"], scope, "{method} {path}");
+                assert!(op["responses"]["401"].is_object(), "{method} {path}");
+                continue;
+            }
             let family = if path.starts_with("/v1/privacy-relay/sessions")
                 || (path.ends_with("/sessions") && method == "post")
             {

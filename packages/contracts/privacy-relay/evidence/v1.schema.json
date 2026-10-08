@@ -1,0 +1,385 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/privacy-relay/evidence/v1.schema.json",
+  "title": "CF Meet Privacy-Safe Call Evidence v1",
+  "description": "Privacy-safe call evidence of a Privacy Relay Session (Part D section 36), composed by Calling from its own Call records after Privacy Relay proves the session belongs to the caller.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/PrivacyRelayEvidence"
+    }
+  ],
+  "$defs": {
+    "EvidenceAttempt": {
+      "description": "One attempt: timing and normalized outcome only (no provider, route secret or destination).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attemptNumber",
+        "startedAt",
+        "finishedAt",
+        "outcome",
+        "unknownOutcome",
+        "failureCategory"
+      ],
+      "properties": {
+        "attemptNumber": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "startedAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "finishedAt": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "SUCCEEDED",
+            "FAILED",
+            "UNKNOWN",
+            "ABANDONED"
+          ]
+        },
+        "unknownOutcome": {
+          "type": "boolean"
+        },
+        "failureCategory": {
+          "oneOf": [
+            {
+              "description": "CF Meet normalized failure category (never a vendor status).",
+              "type": "string",
+              "enum": [
+                "POLICY",
+                "TARGET_UNAVAILABLE",
+                "ROUTING",
+                "TIMEOUT",
+                "MEDIA",
+                "NETWORK",
+                "EXECUTION",
+                "INTERNAL",
+                "UNKNOWN"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "EvidenceParticipant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "participantId",
+        "principalId",
+        "role",
+        "connectedDurationMs"
+      ],
+      "properties": {
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "INITIATOR",
+            "RECIPIENT"
+          ]
+        },
+        "connectedDurationMs": {
+          "description": "Union of the participant's session connection intervals.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "EvidenceDecision": {
+      "description": "A Privacy Relay authorization the Call relied on (ids and versions only).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decisionId",
+        "purpose",
+        "contextVersion",
+        "relaySessionVersion",
+        "decidedAt"
+      ],
+      "properties": {
+        "decisionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "purpose": {
+          "type": "string",
+          "enum": [
+            "CALL_CREATE",
+            "CALL_TRANSFER"
+          ]
+        },
+        "contextVersion": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+        },
+        "relaySessionVersion": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+        },
+        "decidedAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        }
+      }
+    },
+    "CallEvidence": {
+      "description": "Privacy-safe support / dispute evidence of one protected Call, from Calling's own records. Never a telephone number (raw or masked), Contact Vault material, provider / carrier identifier, provider payload, SIP dialog or credential.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "callId",
+        "contextId",
+        "relaySessionId",
+        "kind",
+        "state",
+        "terminalReason",
+        "failureCategory",
+        "requestedAt",
+        "firstAttemptAt",
+        "ringingAt",
+        "answeredAt",
+        "connectedAt",
+        "endedAt",
+        "connectedDurationMs",
+        "durationsAsOf",
+        "routeClass",
+        "attemptCount",
+        "attempts",
+        "participants",
+        "privacyDecisions"
+      ],
+      "properties": {
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "contextId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "relaySessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "VOICE",
+            "VIDEO"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,31}$"
+        },
+        "terminalReason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "CLEANUP_CONFIRMED",
+                "PARTICIPATION_ENDED",
+                "RECONCILIATION_TIMEOUT",
+                "DECLINED",
+                "BUSY",
+                "NO_ANSWER",
+                "FAILED",
+                "CANCELLED"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "failureCategory": {
+          "oneOf": [
+            {
+              "description": "CF Meet normalized failure category (never a vendor status).",
+              "type": "string",
+              "enum": [
+                "POLICY",
+                "TARGET_UNAVAILABLE",
+                "ROUTING",
+                "TIMEOUT",
+                "MEDIA",
+                "NETWORK",
+                "EXECUTION",
+                "INTERNAL",
+                "UNKNOWN"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requestedAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "firstAttemptAt": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ringingAt": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "answeredAt": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "connectedAt": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endedAt": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "connectedDurationMs": {
+          "oneOf": [
+            {
+              "description": "Calling's authoritative connected time (first CONNECTED to the end, or durationsAsOf); null when never connected. Never requestedAt -> endedAt.",
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "durationsAsOf": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "routeClass": {
+          "oneOf": [
+            {
+              "description": "Provider-independent route class.",
+              "type": "string",
+              "enum": [
+                "APPLICATION",
+                "PUBLIC_NETWORK",
+                "MIXED",
+                "PRIVATE_NETWORK"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attemptCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceAttempt"
+          }
+        },
+        "participants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceParticipant"
+          }
+        },
+        "privacyDecisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceDecision"
+          }
+        }
+      }
+    },
+    "PrivacyRelayEvidence": {
+      "description": "GET /v1/privacy-relay/sessions/{relay_session_id}/evidence: the protected Calls of one Relay Session (newest first, keyset pages of at most 100).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relaySessionId",
+        "contextId",
+        "calls",
+        "nextCursor"
+      ],
+      "properties": {
+        "relaySessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "contextId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "calls": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/CallEvidence"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^c1[0-9a-f]{48}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

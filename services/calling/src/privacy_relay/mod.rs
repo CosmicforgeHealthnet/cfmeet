@@ -18,6 +18,7 @@
 
 pub mod contacts;
 pub mod enforcement;
+pub mod evidence;
 pub mod http;
 
 use std::fmt;

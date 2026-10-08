@@ -63,11 +63,11 @@ impl CallCursor {
     }
 }
 
-fn ts(at: DateTime<Utc>) -> String {
+pub(crate) fn ts(at: DateTime<Utc>) -> String {
     at.to_rfc3339_opts(SecondsFormat::Micros, true)
 }
 
-fn ts_opt(at: Option<DateTime<Utc>>) -> Option<String> {
+pub(crate) fn ts_opt(at: Option<DateTime<Utc>>) -> Option<String> {
     at.map(ts)
 }
 

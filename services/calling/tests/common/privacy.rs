@@ -29,6 +29,10 @@ pub struct FakePrivacyRelay {
     pub context_version: Mutex<i64>,
     pub session_version: Mutex<i64>,
     pub requests: Mutex<Vec<(DelegatedPlatformContext, CorrelationId, CallAuthorization)>>,
+    /// Relay Sessions that exist, and the tenant that owns each (proxy GET answers).
+    pub sessions: Mutex<Vec<(Uuid, Uuid)>>,
+    /// Paths Calling forwarded through `proxy`.
+    pub proxied: Mutex<Vec<String>>,
 }
 
 impl FakePrivacyRelay {
@@ -40,7 +44,14 @@ impl FakePrivacyRelay {
             context_version: Mutex::new(1),
             session_version: Mutex::new(1),
             requests: Mutex::new(Vec::new()),
+            sessions: Mutex::new(Vec::new()),
+            proxied: Mutex::new(Vec::new()),
         }
+    }
+
+    /// `session` exists and belongs to `tenant`.
+    pub fn own_session(&self, session: Uuid, tenant: Uuid) {
+        self.sessions.lock().unwrap().push((session, tenant));
     }
 
     pub fn set_mode(&self, mode: Mode) {
@@ -109,7 +120,42 @@ impl PrivacyRelayAuthority for FakePrivacyRelay {
         })
     }
 
-    async fn proxy(&self, _: ProxyRequest) -> Result<ProxyResponse, PrivacyRelayError> {
-        Err(PrivacyRelayError::Unavailable)
+    /// Answers `GET /internal/v1/sessions/{id}` in the delegated tenant's scope (a
+    /// foreign or unknown session is 404); everything else is unavailable.
+    async fn proxy(&self, request: ProxyRequest) -> Result<ProxyResponse, PrivacyRelayError> {
+        self.proxied.lock().unwrap().push(request.path.clone());
+        if *self.mode.lock().unwrap() == Mode::Unavailable {
+            return Err(PrivacyRelayError::Unavailable);
+        }
+        let Some(id) = request
+            .path
+            .strip_prefix("/internal/v1/sessions/")
+            .and_then(|s| Uuid::parse_str(s).ok())
+        else {
+            return Err(PrivacyRelayError::Unavailable);
+        };
+        let owned = self
+            .sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(s, t)| *s == id && *t == request.delegated.tenant_id());
+        Ok(if owned {
+            ProxyResponse {
+                status: 200,
+                body: serde_json::json!({
+                    "relaySessionId": id,
+                    "contextId": self.context_id,
+                    "status": "ACTIVE",
+                }),
+                replayed: false,
+            }
+        } else {
+            ProxyResponse {
+                status: 404,
+                body: serde_json::json!({ "error": { "code": "SESSION_NOT_FOUND", "message": "x" } }),
+                replayed: false,
+            }
+        })
     }
 }
