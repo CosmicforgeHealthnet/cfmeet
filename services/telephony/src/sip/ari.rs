@@ -148,6 +148,11 @@ impl AriSettings {
 struct History {
     order: VecDeque<String>,
     ended: HashMap<String, (EndReason, DateTime<Utc>)>,
+    /// When the event stream last (re)connected; `None` while disconnected.
+    connected_since: Option<DateTime<Utc>>,
+    /// The latest end time evicted from the bounded history: absence is provable only
+    /// for requests sent after it.
+    evicted_through: Option<DateTime<Utc>>,
 }
 
 const HISTORY_LIMIT: usize = 10_000;
@@ -162,10 +167,22 @@ impl History {
             self.order.push_back(channel.to_string());
             while self.order.len() > HISTORY_LIMIT {
                 if let Some(old) = self.order.pop_front() {
-                    self.ended.remove(&old);
+                    if let Some((_, ended_at)) = self.ended.remove(&old) {
+                        self.evicted_through = self.evicted_through.max(Some(ended_at));
+                    }
                 }
             }
         }
+    }
+
+    /// Since when every channel end is in this history (see
+    /// [`SipMediaEdge::history_complete_since`]).
+    fn complete_since(&self) -> Option<DateTime<Utc>> {
+        let since = self.connected_since?;
+        Some(match self.evicted_through {
+            Some(evicted) => since.max(evicted),
+            None => since,
+        })
     }
 }
 
@@ -252,6 +269,9 @@ impl AriEdge {
                 match tokio_tungstenite::connect_async(request).await {
                     Ok((mut stream, _)) => {
                         connected.store(true, std::sync::atomic::Ordering::SeqCst);
+                        if let Ok(mut h) = history.lock() {
+                            h.connected_since = Some(now());
+                        }
                         backoff = Duration::from_millis(250);
                         tracing::info!("SIP / media edge event stream connected");
                         while let Some(message) = stream.next().await {
@@ -277,6 +297,9 @@ impl AriEdge {
                             }
                         }
                         connected.store(false, std::sync::atomic::Ordering::SeqCst);
+                        if let Ok(mut h) = history.lock() {
+                            h.connected_since = None;
+                        }
                         tracing::warn!("SIP / media edge event stream disconnected; reconnecting");
                     }
                     Err(_) => {
@@ -692,6 +715,10 @@ impl SipMediaEdge for AriEdge {
         }
     }
 
+    fn history_complete_since(&self) -> Option<DateTime<Utc>> {
+        self.history.lock().ok().and_then(|h| h.complete_since())
+    }
+
     async fn list(&self) -> EdgeResult<Vec<ChannelSummary>> {
         let (_, value) = self.call(Method::GET, "/channels", &[], None).await?;
         Ok(value
@@ -804,5 +831,25 @@ mod tests {
         assert!(AriSettings::validate_url("http://203.0.113.9:8088", E::Production).is_err());
         assert!(AriSettings::validate_url("http://edge.example.com:8088", E::Production).is_err());
         assert!(AriSettings::validate_url("http://edge.example.com:8088", E::Local).is_ok());
+    }
+
+    #[test]
+    fn absence_is_provable_only_inside_the_observed_window() {
+        let t = |s: i64| DateTime::<Utc>::from_timestamp(1_790_000_000 + s, 0).unwrap();
+        let mut h = History::default();
+        assert_eq!(h.complete_since(), None, "never connected: no proof");
+        h.connected_since = Some(t(0));
+        assert_eq!(h.complete_since(), Some(t(0)));
+        for n in 0..=HISTORY_LIMIT {
+            h.record(
+                &format!("cfm-{n:016x}"),
+                EndReason::Completed,
+                t(10 + n as i64),
+            );
+        }
+        // The oldest end (t(10)) was evicted: proof now starts after it.
+        assert_eq!(h.complete_since(), Some(t(10)));
+        h.connected_since = None;
+        assert_eq!(h.complete_since(), None, "disconnected: no proof");
     }
 }

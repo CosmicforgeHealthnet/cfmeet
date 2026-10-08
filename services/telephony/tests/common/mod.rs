@@ -9,6 +9,8 @@
 //! bundle. The interconnect is the deterministic test adapter (never a carrier).
 #![allow(dead_code)]
 
+pub mod edge;
+
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex as StdMutex},

@@ -149,6 +149,9 @@ pub enum QueryOutcome {
 pub struct QueryKey {
     pub provider_call_ref: Option<String>,
     pub correlation_key: String,
+    /// When the request was (possibly) transmitted. An adapter may answer `Absent` only
+    /// when its evidence provably covers this instant; otherwise it answers `Unknown`.
+    pub transmitted_at: Option<DateTime<Utc>>,
 }
 
 /// Provider capacity as reported / configured.

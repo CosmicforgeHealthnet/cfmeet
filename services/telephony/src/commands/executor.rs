@@ -832,6 +832,9 @@ impl TelephonyService {
                 .query_call(&QueryKey {
                     provider_call_ref: None,
                     correlation_key: correlation.clone(),
+                    // Not known here: an adapter that cannot prove absence answers
+                    // Unknown and reconciliation (which has `sent_at`) decides.
+                    transmitted_at: None,
                 })
                 .await
             {

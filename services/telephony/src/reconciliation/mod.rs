@@ -38,6 +38,7 @@ struct BindingRow {
     provider_id: String,
     provider_call_ref: Option<String>,
     correlation_key: String,
+    sent_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl TelephonyService {
@@ -113,7 +114,7 @@ impl TelephonyService {
     async fn latest_binding(&self, leg: &LegRow) -> TelephonyResult<Option<BindingRow>> {
         db::one(
             &self.db,
-            "SELECT id, provider_id, provider_call_ref, correlation_key FROM provider_call_bindings \
+            "SELECT id, provider_id, provider_call_ref, correlation_key, sent_at FROM provider_call_bindings \
              WHERE telephony_leg_id = $1 AND status <> 'PREPARED' ORDER BY created_at DESC LIMIT 1",
             vec![leg.id.into()],
         )
@@ -172,6 +173,7 @@ impl TelephonyService {
             .query_call(&QueryKey {
                 provider_call_ref: binding.provider_call_ref.clone(),
                 correlation_key: binding.correlation_key.clone(),
+                transmitted_at: binding.sent_at,
             })
             .await;
         match status {

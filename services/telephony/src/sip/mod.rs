@@ -191,6 +191,13 @@ pub trait SipMediaEdge: Send + Sync {
     /// All live channels (reconciliation).
     async fn list(&self) -> EdgeResult<Vec<ChannelSummary>>;
 
+    /// Since when this process has observed EVERY channel end on the edge (its event
+    /// stream continuously connected). `find_by_correlation` returning `None` proves "never
+    /// created" only for requests transmitted after this instant; `None` = no such proof.
+    fn history_complete_since(&self) -> Option<DateTime<Utc>> {
+        None
+    }
+
     /// Media evidence of a channel: (RTP packets received, RTP packets sent).
     async fn media_stats(&self, _channel: &ChannelRef) -> Option<(u64, u64)> {
         None

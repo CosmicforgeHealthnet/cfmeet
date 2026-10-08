@@ -16,7 +16,7 @@ use super::{
     UnknownReason,
 };
 use crate::{
-    domain::{EndReason, FailureCategory, Health, ProviderCapability},
+    domain::{EndReason, FailureCategory, Health, LegStatus, ProviderCapability},
     sip::{ChannelState, EdgeError, EdgeOriginate, SipMediaEdge},
 };
 
@@ -139,15 +139,28 @@ impl TelecomInterconnectProvider for SipTrunkProvider {
             };
         }
         match self.edge.find_by_correlation(&key.correlation_key).await {
+            // A channel the edge saw end (its end history).
+            Ok(Some(summary)) if summary.status.is_terminal() => QueryOutcome::Ended {
+                provider_call_ref: summary.channel,
+                reason: if summary.status == LegStatus::Ended {
+                    EndReason::Completed
+                } else {
+                    EndReason::Failed
+                },
+            },
             Ok(Some(summary)) => QueryOutcome::Active {
                 provider_call_ref: summary.channel,
                 status: summary.status,
             },
-            // The edge lists every live channel it created; no channel carries this
-            // correlation key, so none exists now. Whether one existed and ended is not
-            // knowable from the edge alone: report Absent only because a channel the edge
-            // never created cannot have produced a paid call.
-            Ok(None) => QueryOutcome::Absent,
+            // No live channel and no recorded end for this key. That proves "never
+            // created" only if the edge's end history covers the transmission instant
+            // (event stream connected throughout); otherwise a channel may have existed
+            // and ended unobserved (e.g. across a restart), so the answer is Unknown —
+            // never Absent, which would permit a second origination.
+            Ok(None) => match (self.edge.history_complete_since(), key.transmitted_at) {
+                (Some(since), Some(sent)) if since < sent => QueryOutcome::Absent,
+                _ => QueryOutcome::Unknown,
+            },
             Err(_) => QueryOutcome::Unknown,
         }
     }
