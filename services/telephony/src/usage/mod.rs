@@ -121,6 +121,10 @@ impl TelephonyService {
         )
         .await?;
         if inserted == 1 {
+            crate::metrics::inc(
+                "telephony_usage_finalized_total",
+                &[("cost_known", if cost_known { "true" } else { "false" })],
+            );
             outbox::emit_leg_fact(
                 &txn,
                 &leg,

@@ -177,6 +177,14 @@ impl TelephonyService {
         category: FailureCategory,
         code: &'static str,
     ) -> TelephonyResult<Executed> {
+        crate::metrics::inc(
+            "telephony_originations_total",
+            &[
+                ("outcome", "NOT_SENT"),
+                ("category", category.as_str()),
+                ("code", code),
+            ],
+        );
         let now = self.now();
         let txn = self.db.begin().await?;
         if let Some(leg_id) = command.telephony_leg_id {
@@ -664,6 +672,22 @@ impl TelephonyService {
             }
         };
         txn.commit().await?;
+        match outcome {
+            OriginateOutcome::Accepted { .. } => {
+                crate::metrics::inc("telephony_originations_total", &[("outcome", "ACCEPTED")])
+            }
+            OriginateOutcome::DefiniteFailure { category, .. } => crate::metrics::inc(
+                "telephony_originations_total",
+                &[
+                    ("outcome", "DEFINITE_FAILURE"),
+                    ("category", category.as_str()),
+                ],
+            ),
+            OriginateOutcome::UnknownOutcome { reason } => crate::metrics::inc(
+                "telephony_originations_total",
+                &[("outcome", "UNKNOWN"), ("reason", reason.as_str())],
+            ),
+        }
         tracing::info!(
             command_id = %command.id,
             telephony_leg_id = %leg_id,

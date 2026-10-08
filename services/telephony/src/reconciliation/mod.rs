@@ -48,10 +48,14 @@ impl TelephonyService {
         &self,
         db_: &C,
         leg: &LegRow,
-        case_code: &str,
-        observed: &str,
-        action: &str,
+        case_code: &'static str,
+        observed: &'static str,
+        action: &'static str,
     ) -> TelephonyResult<()> {
+        crate::metrics::inc(
+            "telephony_reconciliation_runs_total",
+            &[("case", case_code), ("action", action)],
+        );
         db::exec(
             db_,
             "INSERT INTO telephony_reconciliation_runs (id, telephony_leg_id, case_code, observed, action, worker_id, decided_at) \
@@ -437,9 +441,9 @@ impl TelephonyService {
         &self,
         leg: &LegRow,
         change: Change,
-        case_code: &str,
-        observed: &str,
-        action: &str,
+        case_code: &'static str,
+        observed: &'static str,
+        action: &'static str,
     ) -> TelephonyResult<()> {
         let txn = self.db.begin().await?;
         let locked = legs::lock(&txn, leg.id).await?;

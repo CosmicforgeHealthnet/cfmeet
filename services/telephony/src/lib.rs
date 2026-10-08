@@ -11,6 +11,7 @@
 //! credential and never touches another service's database. Raw telephone numbers exist
 //! only in memory inside the execution boundary; provider identifiers never leave it.
 
+pub mod abuse;
 pub mod bridges;
 pub mod clock;
 pub mod commands;
@@ -24,6 +25,7 @@ pub mod inbound;
 pub mod incidents;
 pub mod internal;
 pub mod legs;
+pub mod metrics;
 pub mod middleware;
 pub mod ports;
 pub mod providers;

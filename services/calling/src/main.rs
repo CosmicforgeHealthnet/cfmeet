@@ -235,6 +235,22 @@ async fn main() -> anyhow::Result<()> {
     // the Privacy Relay ingress) and the internal API (Privacy Relay enforcement), which
     // like every /internal/v1/* path requires service authentication.
     let app = routes::app(state, routes::public_api(), routes::internal_api());
+    // Optional separate metrics listener (never the customer API).
+    if let Some(address) = std::env::var("CALLING_METRICS_ADDRESS")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+    {
+        let address: std::net::SocketAddr = address
+            .parse()
+            .map_err(|_| anyhow::anyhow!("CALLING_METRICS_ADDRESS must be host:port"))?;
+        let listener = tokio::net::TcpListener::bind(address).await?;
+        tracing::info!(%address, "calling metrics listening");
+        tokio::spawn(async move {
+            if let Err(e) = axum::serve(listener, calling::metrics::router()).await {
+                tracing::warn!(error = %e, "metrics listener stopped");
+            }
+        });
+    }
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "calling service listening");
     axum::serve(listener, app)

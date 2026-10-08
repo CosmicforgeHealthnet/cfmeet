@@ -47,7 +47,7 @@ use crate::{
         },
         RoutingClass,
     },
-    telephony::spend::{self, SpendScope},
+    telephony::spend,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -493,12 +493,7 @@ impl AppCallService {
         .await?;
         if let Err(denial) = spend::reserve_in(
             &txn,
-            SpendScope {
-                tenant_id: call.tenant_id,
-                application_id: call.application_id,
-                environment_id: call.environment_id,
-            },
-            call.id,
+            &call,
             public_leg.id,
             Some(offer.caller_contact_reference),
             now,
@@ -926,17 +921,12 @@ impl AppCallService {
             )
             .await?;
         }
-        let spend_scope = SpendScope {
-            tenant_id: call.tenant_id,
-            application_id: call.application_id,
-            environment_id: call.environment_id,
-        };
         let mut reservation_b = None;
         for (leg, contact) in [
             (leg_a.id, offer.caller_contact_reference),
             (leg_b.id, callee_contact),
         ] {
-            match spend::reserve_in(&txn, spend_scope, call.id, leg, Some(contact), now).await? {
+            match spend::reserve_in(&txn, &call, leg, Some(contact), now).await? {
                 Ok(r) => {
                     if leg == leg_b.id {
                         reservation_b = Some(r);

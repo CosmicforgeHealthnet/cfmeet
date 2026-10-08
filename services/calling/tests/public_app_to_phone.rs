@@ -63,6 +63,9 @@ fn spend_policy() -> SpendPolicy {
         max_concurrent_legs: 5,
         max_originations_per_minute: 20,
         max_per_party_per_hour: 10,
+        max_per_principal_per_hour: None,
+        max_per_service_account_per_hour: None,
+        max_per_context_per_hour: None,
         enabled: true,
     }
 }

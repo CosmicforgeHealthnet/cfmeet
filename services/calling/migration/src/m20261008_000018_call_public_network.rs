@@ -244,6 +244,11 @@ CREATE TABLE call_spend_policies (
     max_concurrent_legs          INTEGER     NOT NULL,
     max_originations_per_minute  INTEGER     NOT NULL,
     max_per_party_per_hour     INTEGER     NOT NULL,
+    -- Optional velocity per requesting principal / service account / communication
+    -- context (NULL: not enforced for that dimension).
+    max_per_principal_per_hour       INTEGER,
+    max_per_service_account_per_hour INTEGER,
+    max_per_context_per_hour         INTEGER,
     enabled                      BOOLEAN     NOT NULL,
     revision                     INTEGER     NOT NULL,
     created_at                   TIMESTAMPTZ NOT NULL,
@@ -257,6 +262,10 @@ CREATE TABLE call_spend_policies (
         leg_allowance_minor > 0 AND daily_limit_minor >= leg_allowance_minor
         AND monthly_limit_minor >= daily_limit_minor),
     CONSTRAINT ck_call_spend_policies_seconds CHECK (max_leg_seconds BETWEEN 30 AND 86400),
+    CONSTRAINT ck_call_spend_policies_subject_rates CHECK (
+        (max_per_principal_per_hour IS NULL OR max_per_principal_per_hour >= 1)
+        AND (max_per_service_account_per_hour IS NULL OR max_per_service_account_per_hour >= 1)
+        AND (max_per_context_per_hour IS NULL OR max_per_context_per_hour >= 1)),
     CONSTRAINT ck_call_spend_policies_rates CHECK (
         max_concurrent_legs BETWEEN 1 AND 100000 AND max_originations_per_minute BETWEEN 1 AND 100000
         AND max_per_party_per_hour BETWEEN 1 AND 1000),
@@ -276,6 +285,11 @@ CREATE TABLE call_spend_reservations (
     call_id              UUID        NOT NULL,
     call_leg_id          UUID        NOT NULL,
     contact_reference    UUID,
+    -- Who the paid leg is spent for (velocity and Part B credential caps).
+    principal_id         UUID        NOT NULL,
+    service_account_id   UUID        NOT NULL,
+    credential_id        UUID        NOT NULL,
+    context_ref          UUID,
     amount_minor         BIGINT      NOT NULL,
     currency             CHAR(3)     NOT NULL,
     max_duration_seconds INTEGER     NOT NULL,
@@ -304,11 +318,18 @@ CREATE INDEX idx_call_spend_reservations_env ON call_spend_reservations (environ
 CREATE INDEX idx_call_spend_reservations_open ON call_spend_reservations (environment_id)
     WHERE status = 'RESERVED';
 CREATE INDEX idx_call_spend_reservations_contact ON call_spend_reservations (contact_reference, created_at);
+CREATE INDEX idx_call_spend_reservations_application ON call_spend_reservations (application_id, created_at);
+CREATE INDEX idx_call_spend_reservations_credential ON call_spend_reservations (credential_id, created_at);
+CREATE INDEX idx_call_spend_reservations_principal ON call_spend_reservations (principal_id, created_at);
+CREATE INDEX idx_call_spend_reservations_service_account ON call_spend_reservations (service_account_id, created_at);
+CREATE INDEX idx_call_spend_reservations_context ON call_spend_reservations (context_ref, created_at)
+    WHERE context_ref IS NOT NULL;
 CREATE TRIGGER trg_call_spend_reservations_immutable
     BEFORE UPDATE ON call_spend_reservations
     FOR EACH ROW EXECUTE FUNCTION platform_forbid_column_change(
         'id', 'tenant_id', 'application_id', 'environment_id', 'call_id', 'call_leg_id',
-        'contact_reference', 'amount_minor', 'currency', 'max_duration_seconds', 'created_at');
+        'contact_reference', 'principal_id', 'service_account_id', 'credential_id', 'context_ref',
+        'amount_minor', 'currency', 'max_duration_seconds', 'created_at');
 CREATE TRIGGER trg_call_spend_reservations_set_once
     BEFORE UPDATE ON call_spend_reservations
     FOR EACH ROW EXECUTE FUNCTION platform_forbid_reassignment(

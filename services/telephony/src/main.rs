@@ -127,7 +127,20 @@ async fn main() -> anyhow::Result<()> {
     // Commands, outbox, reconciliation, usage, health: every instance (SKIP LOCKED).
     tokio::spawn(telephony.clone().run_workers(config.worker_interval));
 
-    let app = routes::app(AppState::new(telephony, service_auth), internal::routes());
+    let app = routes::app(
+        AppState::new(telephony.clone(), service_auth),
+        internal::routes(),
+    );
+    if let Some(address) = config.metrics_address {
+        let metrics = ::telephony::metrics::router(telephony.clone());
+        let listener = tokio::net::TcpListener::bind(address).await?;
+        tracing::info!(address = %address, "telephony metrics listening");
+        tokio::spawn(async move {
+            if let Err(e) = axum::serve(listener, metrics).await {
+                tracing::warn!(error = %e, "metrics listener stopped");
+            }
+        });
+    }
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "telephony listening");
     axum::serve(listener, app)

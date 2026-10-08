@@ -194,6 +194,16 @@ fn contract_paths_equal_the_registered_routes() {
     for file in files {
         let code = std::fs::read_to_string(&file).unwrap();
         let path = file.to_string_lossy().replace('\\', "/");
+        // The metrics listener is a separate operational surface (own address, bounded
+        // counters), never part of the service router or its contract.
+        if path.ends_with("src/metrics.rs") {
+            let routes = std::fs::read_to_string(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/routes.rs"),
+            )
+            .unwrap();
+            assert!(!routes.contains("metrics"), "metrics must not be served by the API router");
+            continue;
+        }
         let is_ingress = path.ends_with("src/privacy_relay/http.rs");
         // Internal routers are nested under /internal/v1 by routes::app.
         let prefix = if path.ends_with("src/privacy_relay/enforcement.rs")

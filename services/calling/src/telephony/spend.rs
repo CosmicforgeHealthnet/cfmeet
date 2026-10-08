@@ -6,10 +6,17 @@
 //! serialized there, so there is no check-then-spend race. Each check counts what is
 //! already reserved or settled:
 //!
-//! * daily and monthly limits (UTC): RESERVED allowances + SETTLED actual costs;
+//! * daily and monthly limits (UTC): RESERVED allowances + SETTLED actual costs — for
+//!   the environment, and (Part B foundations, when configured) for the whole
+//!   application (`platform_application_limits`) and for the API credential that created
+//!   the Call (`platform_credential_limits`);
 //! * concurrency: RESERVED reservations (open paid legs);
-//! * velocity: reservations created in the last minute (environment) and in the last
-//!   hour for the same protected contact.
+//! * velocity: reservations created in the last minute (environment), and in the last
+//!   hour for the same protected contact, and — when configured — the same requesting
+//!   principal, service account or communication context.
+//!
+//! Lock order (deadlock-free, every reservation takes the same order): the
+//! application's limits row, the credential's limits row, then the environment policy.
 //!
 //! The reserved amount is the policy-defined allowance per leg (the provider's actual
 //! cost is known only later); Telephony's USAGE_FINALIZED settles it with the reported
@@ -30,6 +37,13 @@ pub enum SpendDenial {
     Concurrency,
     Velocity,
     ContactVelocity,
+    ApplicationDailyLimit,
+    ApplicationMonthlyLimit,
+    CredentialDailyLimit,
+    CredentialMonthlyLimit,
+    PrincipalVelocity,
+    ServiceAccountVelocity,
+    ContextVelocity,
 }
 
 impl SpendDenial {
@@ -42,6 +56,13 @@ impl SpendDenial {
             SpendDenial::Concurrency => "CONCURRENT_PUBLIC_LEG_LIMIT",
             SpendDenial::Velocity => "ORIGINATION_VELOCITY_LIMIT",
             SpendDenial::ContactVelocity => "CONTACT_VELOCITY_LIMIT",
+            SpendDenial::ApplicationDailyLimit => "APPLICATION_DAILY_SPEND_LIMIT",
+            SpendDenial::ApplicationMonthlyLimit => "APPLICATION_MONTHLY_SPEND_LIMIT",
+            SpendDenial::CredentialDailyLimit => "CREDENTIAL_DAILY_SPEND_LIMIT",
+            SpendDenial::CredentialMonthlyLimit => "CREDENTIAL_MONTHLY_SPEND_LIMIT",
+            SpendDenial::PrincipalVelocity => "PRINCIPAL_VELOCITY_LIMIT",
+            SpendDenial::ServiceAccountVelocity => "SERVICE_ACCOUNT_VELOCITY_LIMIT",
+            SpendDenial::ContextVelocity => "CONTEXT_VELOCITY_LIMIT",
         }
     }
 }
@@ -57,6 +78,9 @@ pub struct SpendPolicy {
     pub max_concurrent_legs: i32,
     pub max_originations_per_minute: i32,
     pub max_per_party_per_hour: i32,
+    pub max_per_principal_per_hour: Option<i32>,
+    pub max_per_service_account_per_hour: Option<i32>,
+    pub max_per_context_per_hour: Option<i32>,
     pub enabled: bool,
 }
 
@@ -102,7 +126,8 @@ fn month_start(now: DateTime<Utc>) -> DateTime<Utc> {
 }
 
 const POLICY_COLUMNS: &str = "currency, leg_allowance_minor, max_leg_seconds, daily_limit_minor, \
-    monthly_limit_minor, max_concurrent_legs, max_originations_per_minute, max_per_party_per_hour, enabled";
+    monthly_limit_minor, max_concurrent_legs, max_originations_per_minute, max_per_party_per_hour, \
+    max_per_principal_per_hour, max_per_service_account_per_hour, max_per_context_per_hour, enabled";
 
 async fn totals<C: ConnectionTrait>(
     db: &C,
@@ -167,21 +192,120 @@ pub async fn headroom<C: ConnectionTrait>(
     ))
 }
 
-/// Reserves one leg's allowance inside `txn` (which must also record the leg). Locks the
-/// environment policy row first: concurrent reservations of one environment serialize.
+/// A Part B spend cap row (application or credential), locked while reserving.
+#[derive(Debug, FromQueryResult)]
+struct Cap {
+    telecom_spend_daily_limit_minor: Option<i64>,
+    telecom_spend_monthly_limit_minor: Option<i64>,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct Spent {
+    day: i64,
+    month: i64,
+}
+
+/// Day / month spend of the reservations matching `filter` (`column = $1`).
+async fn spent<C: ConnectionTrait>(
+    db: &C,
+    column: &str,
+    subject: Uuid,
+    now: DateTime<Utc>,
+) -> Result<Spent, DbErr> {
+    let row = Spent::find_by_statement(stmt(
+        &format!(
+            "SELECT \
+               COALESCE(SUM(CASE WHEN status = 'RESERVED' THEN amount_minor WHEN status = 'SETTLED' THEN settled_minor ELSE 0 END) \
+                 FILTER (WHERE created_at >= $2), 0)::bigint AS day, \
+               COALESCE(SUM(CASE WHEN status = 'RESERVED' THEN amount_minor WHEN status = 'SETTLED' THEN settled_minor ELSE 0 END), 0)::bigint AS month \
+             FROM call_spend_reservations WHERE {column} = $1 AND created_at >= $3"
+        ),
+        vec![subject.into(), day_start(now).into(), month_start(now).into()],
+    ))
+    .one(db)
+    .await?;
+    Ok(row.unwrap_or(Spent { day: 0, month: 0 }))
+}
+
+async fn recent<C: ConnectionTrait>(
+    db: &C,
+    environment_id: Uuid,
+    column: &str,
+    subject: Uuid,
+    since: DateTime<Utc>,
+) -> Result<i64, DbErr> {
+    let row = db
+        .query_one(stmt(
+            &format!(
+                "SELECT count(*) FROM call_spend_reservations \
+                 WHERE environment_id = $1 AND {column} = $2 AND created_at > $3"
+            ),
+            vec![environment_id.into(), subject.into(), since.into()],
+        ))
+        .await?;
+    row.map(|r| r.try_get_by_index(0))
+        .transpose()
+        .map(|v| v.unwrap_or(0))
+}
+
+/// Reserves one leg's allowance inside `txn` (which must also record the leg), for the
+/// Call `call` (its environment, application, creating credential / service account,
+/// requesting principal and communication context) and the protected `contact_reference`.
 pub async fn reserve_in<C: ConnectionTrait>(
     txn: &C,
-    scope: SpendScope,
-    call_id: Uuid,
+    call: &crate::models::calls::Model,
     call_leg_id: Uuid,
     contact_reference: Option<Uuid>,
     now: DateTime<Utc>,
 ) -> Result<Result<Reservation, SpendDenial>, DbErr> {
+    let result = reserve_checked(txn, call, call_leg_id, contact_reference, now).await?;
+    match &result {
+        Ok(_) => crate::metrics::inc("calling_telecom_spend_reservations_total", &[]),
+        Err(denial) => {
+            crate::metrics::inc(
+                "calling_telecom_spend_blocks_total",
+                &[("reason", denial.as_str())],
+            );
+            // Abuse hook (§162): the same destination dialed again and again.
+            if *denial == SpendDenial::ContactVelocity {
+                crate::metrics::inc(
+                    "calling_abuse_signals_total",
+                    &[("kind", "SAME_DESTINATION_VELOCITY")],
+                );
+            }
+        }
+    }
+    Ok(result)
+}
+
+async fn reserve_checked<C: ConnectionTrait>(
+    txn: &C,
+    call: &crate::models::calls::Model,
+    call_leg_id: Uuid,
+    contact_reference: Option<Uuid>,
+    now: DateTime<Utc>,
+) -> Result<Result<Reservation, SpendDenial>, DbErr> {
+    // 1. Part B caps (locked first, in a fixed order): application, then credential.
+    let app_cap = Cap::find_by_statement(stmt(
+        "SELECT telecom_spend_daily_limit_minor, telecom_spend_monthly_limit_minor \
+         FROM platform_application_limits WHERE application_id = $1 FOR UPDATE",
+        vec![call.application_id.into()],
+    ))
+    .one(txn)
+    .await?;
+    let credential_cap = Cap::find_by_statement(stmt(
+        "SELECT telecom_spend_daily_limit_minor, telecom_spend_monthly_limit_minor \
+         FROM platform_credential_limits WHERE credential_id = $1 FOR UPDATE",
+        vec![call.created_by_credential_id.into()],
+    ))
+    .one(txn)
+    .await?;
+    // 2. The environment policy (serializes every reservation of the environment).
     let p = SpendPolicy::find_by_statement(stmt(
         &format!(
             "SELECT {POLICY_COLUMNS} FROM call_spend_policies WHERE environment_id = $1 FOR UPDATE"
         ),
-        vec![scope.environment_id.into()],
+        vec![call.environment_id.into()],
     ))
     .one(txn)
     .await?;
@@ -191,12 +315,49 @@ pub async fn reserve_in<C: ConnectionTrait>(
     if !p.enabled {
         return Ok(Err(SpendDenial::Disabled));
     }
-    let t = totals(txn, scope.environment_id, now).await?;
-    if t.day + p.leg_allowance_minor > p.daily_limit_minor {
+    let allowance = p.leg_allowance_minor;
+    let t = totals(txn, call.environment_id, now).await?;
+    if t.day + allowance > p.daily_limit_minor {
         return Ok(Err(SpendDenial::DailyLimit));
     }
-    if t.month + p.leg_allowance_minor > p.monthly_limit_minor {
+    if t.month + allowance > p.monthly_limit_minor {
         return Ok(Err(SpendDenial::MonthlyLimit));
+    }
+    for (cap, column, subject, day_denial, month_denial) in [
+        (
+            &app_cap,
+            "application_id",
+            call.application_id,
+            SpendDenial::ApplicationDailyLimit,
+            SpendDenial::ApplicationMonthlyLimit,
+        ),
+        (
+            &credential_cap,
+            "credential_id",
+            call.created_by_credential_id,
+            SpendDenial::CredentialDailyLimit,
+            SpendDenial::CredentialMonthlyLimit,
+        ),
+    ] {
+        let Some(cap) = cap else { continue };
+        if cap.telecom_spend_daily_limit_minor.is_none()
+            && cap.telecom_spend_monthly_limit_minor.is_none()
+        {
+            continue;
+        }
+        let used = spent(txn, column, subject, now).await?;
+        if cap
+            .telecom_spend_daily_limit_minor
+            .is_some_and(|l| used.day + allowance > l)
+        {
+            return Ok(Err(day_denial));
+        }
+        if cap
+            .telecom_spend_monthly_limit_minor
+            .is_some_and(|l| used.month + allowance > l)
+        {
+            return Ok(Err(month_denial));
+        }
     }
     if t.open >= i64::from(p.max_concurrent_legs) {
         return Ok(Err(SpendDenial::Concurrency));
@@ -204,47 +365,69 @@ pub async fn reserve_in<C: ConnectionTrait>(
     if t.minute >= i64::from(p.max_originations_per_minute) {
         return Ok(Err(SpendDenial::Velocity));
     }
+    let hour = now - Duration::hours(1);
     if let Some(contact) = contact_reference {
-        let row = txn
-            .query_one(stmt(
-                "SELECT count(*) FROM call_spend_reservations \
-                 WHERE environment_id = $1 AND contact_reference = $2 AND created_at > $3",
-                vec![
-                    scope.environment_id.into(),
-                    contact.into(),
-                    (now - Duration::hours(1)).into(),
-                ],
-            ))
-            .await?;
-        let recent: i64 = row.map(|r| r.try_get_by_index(0)).transpose()?.unwrap_or(0);
-        if recent >= i64::from(p.max_per_party_per_hour) {
+        if recent(txn, call.environment_id, "contact_reference", contact, hour).await?
+            >= i64::from(p.max_per_party_per_hour)
+        {
             return Ok(Err(SpendDenial::ContactVelocity));
+        }
+    }
+    for (limit, column, subject, denial) in [
+        (
+            p.max_per_principal_per_hour,
+            "principal_id",
+            Some(call.initiator_principal_id),
+            SpendDenial::PrincipalVelocity,
+        ),
+        (
+            p.max_per_service_account_per_hour,
+            "service_account_id",
+            Some(call.created_by_service_account_id),
+            SpendDenial::ServiceAccountVelocity,
+        ),
+        (
+            p.max_per_context_per_hour,
+            "context_ref",
+            call.communication_context_ref,
+            SpendDenial::ContextVelocity,
+        ),
+    ] {
+        if let (Some(limit), Some(subject)) = (limit, subject) {
+            if recent(txn, call.environment_id, column, subject, hour).await? >= i64::from(limit) {
+                return Ok(Err(denial));
+            }
         }
     }
     let id = Uuid::new_v4();
     txn.execute(stmt(
         "INSERT INTO call_spend_reservations (id, tenant_id, application_id, environment_id, call_id, \
-           call_leg_id, contact_reference, amount_minor, currency, max_duration_seconds, status, created_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'RESERVED', $11)",
+           call_leg_id, contact_reference, principal_id, service_account_id, credential_id, context_ref, \
+           amount_minor, currency, max_duration_seconds, status, created_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'RESERVED', $15)",
         vec![
             id.into(),
-            scope.tenant_id.into(),
-            scope.application_id.into(),
-            scope.environment_id.into(),
-            call_id.into(),
+            call.tenant_id.into(),
+            call.application_id.into(),
+            call.environment_id.into(),
+            call.id.into(),
             call_leg_id.into(),
             contact_reference.into(),
-            p.leg_allowance_minor.into(),
+            call.initiator_principal_id.into(),
+            call.created_by_service_account_id.into(),
+            call.created_by_credential_id.into(),
+            call.communication_context_ref.into(),
+            allowance.into(),
             p.currency.clone().into(),
             p.max_leg_seconds.into(),
             now.into(),
         ],
     ))
     .await?;
-    tracing::info!(reservation_id = %id, call_id = %call_id, call_leg_id = %call_leg_id, amount_minor = p.leg_allowance_minor, "telecom spend reserved");
+    tracing::info!(reservation_id = %id, call_id = %call.id, call_leg_id = %call_leg_id, amount_minor = allowance, "telecom spend reserved");
     Ok(Ok(Reservation {
         id,
-        amount_minor: p.leg_allowance_minor,
+        amount_minor: allowance,
         currency: p.currency,
         max_duration_seconds: p.max_leg_seconds,
     }))
@@ -330,14 +513,18 @@ pub async fn store_policy<C: ConnectionTrait>(
         .query_one(stmt(
             "INSERT INTO call_spend_policies (tenant_id, application_id, environment_id, currency, \
                leg_allowance_minor, max_leg_seconds, daily_limit_minor, monthly_limit_minor, max_concurrent_legs, \
-               max_originations_per_minute, max_per_party_per_hour, enabled, revision, created_at, updated_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, $13, $13) \
+               max_originations_per_minute, max_per_party_per_hour, max_per_principal_per_hour, \
+               max_per_service_account_per_hour, max_per_context_per_hour, enabled, revision, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $14, $15, $16, $12, 1, $13, $13) \
              ON CONFLICT (environment_id) DO UPDATE SET currency = EXCLUDED.currency, \
                leg_allowance_minor = EXCLUDED.leg_allowance_minor, max_leg_seconds = EXCLUDED.max_leg_seconds, \
                daily_limit_minor = EXCLUDED.daily_limit_minor, monthly_limit_minor = EXCLUDED.monthly_limit_minor, \
                max_concurrent_legs = EXCLUDED.max_concurrent_legs, \
                max_originations_per_minute = EXCLUDED.max_originations_per_minute, \
-               max_per_party_per_hour = EXCLUDED.max_per_party_per_hour, enabled = EXCLUDED.enabled, \
+               max_per_party_per_hour = EXCLUDED.max_per_party_per_hour, \
+               max_per_principal_per_hour = EXCLUDED.max_per_principal_per_hour, \
+               max_per_service_account_per_hour = EXCLUDED.max_per_service_account_per_hour, \
+               max_per_context_per_hour = EXCLUDED.max_per_context_per_hour, enabled = EXCLUDED.enabled, \
                revision = call_spend_policies.revision + 1, \
                updated_at = GREATEST(EXCLUDED.updated_at, call_spend_policies.updated_at) \
              RETURNING revision",
@@ -355,6 +542,9 @@ pub async fn store_policy<C: ConnectionTrait>(
                 p.max_per_party_per_hour.into(),
                 p.enabled.into(),
                 now.into(),
+                p.max_per_principal_per_hour.into(),
+                p.max_per_service_account_per_hour.into(),
+                p.max_per_context_per_hour.into(),
             ],
         ))
         .await?;

@@ -40,7 +40,7 @@ use crate::{
     },
     telephony::{
         events::{TelephonyEvent, TelephonyEventType},
-        spend::{self, SpendScope},
+        spend,
     },
 };
 
@@ -222,12 +222,7 @@ impl AppCallService {
         spend::release_in(&sp, failed_id, now).await?;
         let reservation = match spend::reserve_in(
             &sp,
-            SpendScope {
-                tenant_id: call.tenant_id,
-                application_id: call.application_id,
-                environment_id: call.environment_id,
-            },
-            call.id,
+            call,
             leg.id,
             Some(party.contact_reference),
             now,
@@ -284,6 +279,7 @@ impl AppCallService {
         )
         .await?;
         sp.commit().await?;
+        crate::metrics::inc("calling_public_failovers_total", &[]);
         tracing::info!(
             call_id = %call.id,
             failed_leg_id = %failed_id,

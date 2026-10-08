@@ -37,7 +37,7 @@ use crate::{
         },
         RoutingClass,
     },
-    telephony::spend::{self, SpendScope},
+    telephony::spend,
 };
 
 /// `POST /v1/calls` with `route: CALLBACK_RELAY`.
@@ -359,17 +359,12 @@ impl AppCallService {
         }
         // Both legs' allowance is reserved now: the second leg is never refused for
         // spend after the requester already answered.
-        let spend_scope = SpendScope {
-            tenant_id: call.tenant_id,
-            application_id: call.application_id,
-            environment_id: call.environment_id,
-        };
         let mut reservation_a = None;
         for (leg, contact) in [
             (leg_a.id, request.initiator_contact),
             (leg_b.id, request.target_contact),
         ] {
-            match spend::reserve_in(&txn, spend_scope, call.id, leg, Some(contact), now).await? {
+            match spend::reserve_in(&txn, &call, leg, Some(contact), now).await? {
                 Ok(r) => {
                     if leg == leg_a.id {
                         reservation_a = Some(r);

@@ -314,6 +314,20 @@ pub async fn transition_in<C: ConnectionTrait>(
     let Some(updated) = updated else {
         return Err(TelephonyError::Refused(ErrorCode::LegNotActive));
     };
+    crate::metrics::inc(
+        "telephony_leg_transitions_total",
+        &[("status", change.target.as_str())],
+    );
+    if matches!(change.target, LegStatus::Answered | LegStatus::Connected)
+        && leg.answered_at.is_none()
+    {
+        if let Some(started) = leg.originating_at {
+            crate::metrics::observe_ms(
+                "telephony_setup_latency_ms",
+                (at - started).num_milliseconds(),
+            );
+        }
+    }
     if change.silent {
         return Ok(Some(updated));
     }

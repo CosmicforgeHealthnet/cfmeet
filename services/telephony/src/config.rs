@@ -117,6 +117,8 @@ pub struct TelephonyConfig {
     database_url: String,
     pub database_max_connections: u32,
     pub bind_address: SocketAddr,
+    /// Optional separate listener for `GET /metrics` (`TELEPHONY_METRICS_ADDRESS`).
+    pub metrics_address: Option<SocketAddr>,
     pub telephony_enabled: bool,
     pub public_outbound_enabled: bool,
     pub public_inbound_enabled: bool,
@@ -172,6 +174,10 @@ impl TelephonyConfig {
             .unwrap_or_else(|| "127.0.0.1:8092".to_string())
             .parse::<SocketAddr>()
             .map_err(|_| invalid("TELEPHONY_BIND_ADDRESS", "must be host:port"))?;
+        let metrics_address = value("TELEPHONY_METRICS_ADDRESS")
+            .map(|v| v.parse::<SocketAddr>())
+            .transpose()
+            .map_err(|_| invalid("TELEPHONY_METRICS_ADDRESS", "must be host:port"))?;
         let worker_interval = match value("TELEPHONY_WORKER_INTERVAL_MS") {
             None => Duration::from_millis(500),
             Some(v) => v
@@ -195,6 +201,7 @@ impl TelephonyConfig {
             database_url,
             database_max_connections,
             bind_address,
+            metrics_address,
             telephony_enabled: flag(get, "TELEPHONY_ENABLED")?,
             public_outbound_enabled: flag(get, "PUBLIC_OUTBOUND_CALLING_ENABLED")?,
             public_inbound_enabled: flag(get, "PUBLIC_INBOUND_CALLING_ENABLED")?,

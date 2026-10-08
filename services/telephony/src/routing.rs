@@ -193,6 +193,17 @@ impl TelephonyService {
             )
             .await?;
             if opened.is_some_and(|o| o.circuit_state == "OPEN") {
+                crate::metrics::inc(
+                    "telephony_circuit_opened_total",
+                    &[(
+                        "scope",
+                        if table == "telecom_routes" {
+                            "ROUTE"
+                        } else {
+                            "PROVIDER"
+                        },
+                    )],
+                );
                 let mut incident = Incident::new(
                     "PROVIDER_CIRCUIT_OPENED",
                     Severity::High,

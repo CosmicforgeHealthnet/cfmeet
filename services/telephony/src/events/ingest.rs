@@ -170,6 +170,10 @@ impl TelephonyService {
         provider_id: &str,
         rejection: EventRejection,
     ) -> TelephonyResult<()> {
+        crate::metrics::inc(
+            "telephony_provider_event_auth_failures_total",
+            &[("reason", rejection.as_str())],
+        );
         let hits = self
             .count_window("CALLBACK_AUTH_FAILURE", provider_id)
             .await?;
@@ -283,6 +287,10 @@ impl TelephonyService {
             drop(txn);
             if is_unique_violation(&e, "uq_provider_events_provider_event") {
                 // Replay of an already-recorded event: nothing changes.
+                crate::metrics::inc(
+                    "telephony_provider_events_total",
+                    &[("disposition", Disposition::Duplicate.as_str())],
+                );
                 return Ok(Disposition::Duplicate);
             }
             return Err(e);
@@ -339,6 +347,10 @@ impl TelephonyService {
             disposition = disposition.as_str(),
             telephony_leg_id = ?leg.as_ref().map(|l| l.id),
             "provider event"
+        );
+        crate::metrics::inc(
+            "telephony_provider_events_total",
+            &[("disposition", disposition.as_str())],
         );
         Ok(disposition)
     }

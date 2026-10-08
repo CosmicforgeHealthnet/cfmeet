@@ -1,0 +1,412 @@
+//! Paid-action safety on Calling's side (Part E §153–§163): durable, serialized spend
+//! reservations (no check-then-spend race), the Part B application / credential caps
+//! made real, and velocity per destination, principal, service account and context.
+
+mod common;
+
+use std::{sync::Arc, time::Duration};
+
+use axum::http::StatusCode;
+use calling::{
+    domain::EnvironmentKind,
+    models::calls,
+    routing::{
+        policy::{CountryDecision, DestinationPolicy, RoutingPolicy},
+        RoutingClass,
+    },
+    telephony::spend::{self, SpendDenial, SpendPolicy, SpendScope},
+};
+use common::{
+    app::{AppWorld, Device},
+    privacy::FakePrivacyRelay,
+    scalar_i64,
+    telephony::FakeTelephony,
+};
+use sea_orm::{ConnectionTrait, EntityTrait, TransactionTrait};
+use serde_json::json;
+use uuid::Uuid;
+
+struct World {
+    w: AppWorld,
+    privacy: Arc<FakePrivacyRelay>,
+    caller: Device,
+    session: Uuid,
+}
+
+fn policy() -> SpendPolicy {
+    SpendPolicy {
+        currency: "NGN".into(),
+        leg_allowance_minor: 1_000,
+        max_leg_seconds: 600,
+        daily_limit_minor: 1_000_000,
+        monthly_limit_minor: 10_000_000,
+        max_concurrent_legs: 100,
+        max_originations_per_minute: 1_000,
+        max_per_party_per_hour: 100,
+        max_per_principal_per_hour: None,
+        max_per_service_account_per_hour: None,
+        max_per_context_per_hour: None,
+        enabled: true,
+    }
+}
+
+async fn world() -> Option<World> {
+    let privacy = Arc::new(FakePrivacyRelay::new(Vec::new()));
+    let telephony = Arc::new(FakeTelephony::healthy());
+    let w = AppWorld::with_public_network(privacy.clone(), telephony, None).await?;
+    privacy.allow(w.w.initiator.id().as_uuid());
+    let scope = w.w.scope();
+    let env = w.w.consumer.env(EnvironmentKind::Production).id.as_uuid();
+    calling::routing::store::store_policy(
+        w.h().conn(),
+        scope.tenant_id().as_uuid(),
+        scope.application_id().as_uuid(),
+        env,
+        &RoutingPolicy {
+            allowed_route_classes: vec![RoutingClass::AppRtc, RoutingClass::AppToPstn],
+            public_calling_enabled: true,
+            destinations: DestinationPolicy {
+                allow: vec!["NG".into()],
+                deny: vec![],
+                default: CountryDecision::Deny,
+            },
+            ..RoutingPolicy::default()
+        },
+        chrono::Utc::now(),
+    )
+    .await
+    .unwrap();
+    let caller = w.device(&w.w.initiator, "caller-main").await;
+    let x = World {
+        w,
+        privacy,
+        caller,
+        session: Uuid::new_v4(),
+    };
+    x.set(policy()).await;
+    Some(x)
+}
+
+impl World {
+    fn scope(&self) -> SpendScope {
+        let scope = self.w.w.scope();
+        SpendScope {
+            tenant_id: scope.tenant_id().as_uuid(),
+            application_id: scope.application_id().as_uuid(),
+            environment_id: scope.environment_id().as_uuid(),
+        }
+    }
+
+    async fn set(&self, p: SpendPolicy) {
+        spend::store_policy(self.w.h().conn(), self.scope(), &p, chrono::Utc::now())
+            .await
+            .unwrap();
+    }
+
+    /// A public call (its own reservation included) — returns the Call row.
+    async fn call(&self, key: &str) -> calls::Model {
+        let contact = self.privacy.add_contact("NG");
+        let r = self
+            .w
+            .post_with(
+                "/v1/calls",
+                json!({
+                    "kind": "VOICE",
+                    "initiatorPrincipalId": self.w.w.initiator.id(),
+                    "initiatorEndpointId": self.caller.endpoint,
+                    "targetContactReference": contact,
+                    "privacyRelaySessionId": self.session,
+                }),
+                &[("idempotency-key", key)],
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        let id: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+        calls::Entity::find_by_id(id)
+            .one(self.w.h().conn())
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    /// `n` more public legs on `call` (to reserve for).
+    async fn legs(&self, call: &calls::Model, n: usize) -> Vec<Uuid> {
+        let mut out = Vec::new();
+        for _ in 0..n {
+            let id = Uuid::new_v4();
+            self.w
+                .h()
+                .conn()
+                .execute(sea_orm::Statement::from_sql_and_values(
+                    sea_orm::DbBackend::Postgres,
+                    "INSERT INTO call_legs (id, call_id, tenant_id, application_id, environment_id, direction, \
+                       leg_kind, state, created_at, updated_at) \
+                     VALUES ($1, $2, $3, $4, $5, 'OUTBOUND', 'PUBLIC_NETWORK', 'CREATED', now(), now())",
+                    vec![
+                        id.into(),
+                        call.id.into(),
+                        call.tenant_id.into(),
+                        call.application_id.into(),
+                        call.environment_id.into(),
+                    ],
+                ))
+                .await
+                .unwrap();
+            out.push(id);
+        }
+        out
+    }
+
+    async fn reserve(&self, call: &calls::Model, leg: Uuid) -> Result<(), SpendDenial> {
+        let txn = self.w.h().conn().begin().await.unwrap();
+        let r = spend::reserve_in(&txn, call, leg, Some(Uuid::new_v4()), chrono::Utc::now())
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+        r.map(|_| ())
+    }
+}
+
+#[tokio::test]
+async fn concurrent_reservations_never_exceed_the_limit() {
+    let Some(x) = world().await else { return };
+    let call = x.call("race").await; // one open reservation already
+    x.set(SpendPolicy {
+        max_concurrent_legs: 4,
+        ..policy()
+    })
+    .await;
+    let legs = x.legs(&call, 12).await;
+    // Every reservation holds its transaction open for a while before committing: any
+    // check-then-spend gap would let all of them see the same "3 left" and overshoot.
+    let tasks = legs.into_iter().map(|leg| {
+        let conn = x.w.h().conn().clone();
+        let call = call.clone();
+        tokio::spawn(async move {
+            let txn = conn.begin().await.unwrap();
+            let r = spend::reserve_in(&txn, &call, leg, Some(Uuid::new_v4()), chrono::Utc::now())
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            txn.commit().await.unwrap();
+            r
+        })
+    });
+    let handles: Vec<_> = tasks.collect();
+    let mut results = Vec::new();
+    for h in handles {
+        results.push(h.await.unwrap());
+    }
+    let granted = results.iter().filter(|r| r.is_ok()).count();
+    assert_eq!(granted, 3, "{results:?}");
+    assert!(results
+        .iter()
+        .filter_map(|r| r.as_ref().err())
+        .all(|d| *d == SpendDenial::Concurrency));
+    // Bounded metrics: the blocks are counted by reason; no identifier is a label.
+    assert!(
+        calling::metrics::counter(
+            "calling_telecom_spend_blocks_total",
+            &[("reason", "CONCURRENT_PUBLIC_LEG_LIMIT")]
+        ) >= 9
+    );
+    let text = calling::metrics::render();
+    assert!(
+        text.contains("calling_public_originations_total{route_class=\"APP_TO_PSTN\"}"),
+        "{text}"
+    );
+    for id in [call.id, call.initiator_principal_id, call.environment_id] {
+        assert!(!text.contains(&id.to_string()), "an id leaked into metrics");
+    }
+    assert_eq!(
+        scalar_i64(
+            x.w.h().conn(),
+            &format!(
+                "SELECT count(*) FROM call_spend_reservations WHERE environment_id = '{}' AND status = 'RESERVED'",
+                call.environment_id
+            )
+        )
+        .await,
+        4
+    );
+}
+
+#[tokio::test]
+async fn part_b_application_and_credential_caps_are_enforced() {
+    let Some(x) = world().await else { return };
+    let call = x.call("caps").await; // 1_000 used
+    let conn = x.w.h().conn();
+    // Application cap (all environments of the application): 3_000 a day.
+    conn.execute(sea_orm::Statement::from_sql_and_values(
+        sea_orm::DbBackend::Postgres,
+        "INSERT INTO platform_application_limits (application_id, tenant_id, telecom_spend_daily_limit_minor) \
+         VALUES ($1, $2, 3000) ON CONFLICT (application_id) \
+         DO UPDATE SET telecom_spend_daily_limit_minor = 3000",
+        vec![call.application_id.into(), call.tenant_id.into()],
+    ))
+    .await
+    .unwrap();
+    let legs = x.legs(&call, 4).await;
+    assert_eq!(x.reserve(&call, legs[0]).await, Ok(()));
+    assert_eq!(x.reserve(&call, legs[1]).await, Ok(()));
+    assert_eq!(
+        x.reserve(&call, legs[2]).await,
+        Err(SpendDenial::ApplicationDailyLimit)
+    );
+    // Credential cap (the API credential that created the Call): monthly 2_000.
+    conn.execute_unprepared(&format!(
+        "UPDATE platform_application_limits SET telecom_spend_daily_limit_minor = NULL WHERE application_id = '{}'",
+        call.application_id
+    ))
+    .await
+    .unwrap();
+    conn.execute(sea_orm::Statement::from_sql_and_values(
+        sea_orm::DbBackend::Postgres,
+        "INSERT INTO platform_credential_limits (credential_id, tenant_id, application_id, telecom_spend_monthly_limit_minor) \
+         VALUES ($1, $2, $3, 2000) ON CONFLICT (credential_id) \
+         DO UPDATE SET telecom_spend_monthly_limit_minor = 2000",
+        vec![
+            call.created_by_credential_id.into(),
+            call.tenant_id.into(),
+            call.application_id.into(),
+        ],
+    ))
+    .await
+    .unwrap();
+    assert_eq!(
+        x.reserve(&call, legs[3]).await,
+        Err(SpendDenial::CredentialMonthlyLimit)
+    );
+    // The refusal reaches the API as TELECOM_SPEND_LIMIT_EXCEEDED, nothing is dialed.
+    let contact = x.privacy.add_contact("NG");
+    let r =
+        x.w.post_with(
+            "/v1/calls",
+            json!({
+                "kind": "VOICE",
+                "initiatorPrincipalId": x.w.w.initiator.id(),
+                "initiatorEndpointId": x.caller.endpoint,
+                "targetContactReference": contact,
+                "privacyRelaySessionId": x.session,
+            }),
+            &[("idempotency-key", "caps-api")],
+        )
+        .await;
+    assert_eq!(
+        (r.status, r.json["error"]["code"].as_str()),
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            Some("TELECOM_SPEND_LIMIT_EXCEEDED")
+        ),
+        "{}",
+        r.text
+    );
+}
+
+#[tokio::test]
+async fn velocity_per_principal_service_account_and_destination() {
+    let Some(x) = world().await else { return };
+    let call = x.call("vel").await; // 1 reservation by this principal / service account
+    let legs = x.legs(&call, 6).await;
+    // Per principal.
+    x.set(SpendPolicy {
+        max_per_principal_per_hour: Some(2),
+        ..policy()
+    })
+    .await;
+    assert_eq!(x.reserve(&call, legs[0]).await, Ok(()));
+    assert_eq!(
+        x.reserve(&call, legs[1]).await,
+        Err(SpendDenial::PrincipalVelocity)
+    );
+    // Per service account.
+    x.set(SpendPolicy {
+        max_per_service_account_per_hour: Some(2),
+        ..policy()
+    })
+    .await;
+    assert_eq!(
+        x.reserve(&call, legs[1]).await,
+        Err(SpendDenial::ServiceAccountVelocity)
+    );
+    // Per destination (same protected contact).
+    x.set(SpendPolicy {
+        max_per_party_per_hour: 1,
+        ..policy()
+    })
+    .await;
+    let contact = Uuid::new_v4();
+    let txn = x.w.h().conn().begin().await.unwrap();
+    assert!(
+        spend::reserve_in(&txn, &call, legs[2], Some(contact), chrono::Utc::now())
+            .await
+            .unwrap()
+            .is_ok()
+    );
+    assert_eq!(
+        spend::reserve_in(&txn, &call, legs[3], Some(contact), chrono::Utc::now())
+            .await
+            .unwrap(),
+        Err(SpendDenial::ContactVelocity)
+    );
+    txn.commit().await.unwrap();
+    // Disabled policy: nothing.
+    x.set(SpendPolicy {
+        enabled: false,
+        ..policy()
+    })
+    .await;
+    assert_eq!(x.reserve(&call, legs[4]).await, Err(SpendDenial::Disabled));
+}
+
+#[tokio::test]
+async fn estimated_cost_is_reserved_and_actual_cost_settled_without_pretending() {
+    let Some(x) = world().await else { return };
+    let call = x.call("settle").await;
+    let legs = x.legs(&call, 2).await;
+    for leg in &legs {
+        assert_eq!(x.reserve(&call, *leg).await, Ok(()));
+    }
+    let conn = x.w.h().conn();
+    let txn = conn.begin().await.unwrap();
+    // Known provider cost; unknown cost keeps the conservative estimate, flagged.
+    assert!(
+        spend::settle_in(&txn, legs[0], 240, true, 31, chrono::Utc::now())
+            .await
+            .unwrap()
+    );
+    assert!(
+        spend::settle_in(&txn, legs[1], 1_000, false, 60, chrono::Utc::now())
+            .await
+            .unwrap()
+    );
+    // Settling twice is a no-op.
+    assert!(
+        !spend::settle_in(&txn, legs[0], 999, true, 99, chrono::Utc::now())
+            .await
+            .unwrap()
+    );
+    txn.commit().await.unwrap();
+    assert_eq!(
+        scalar_i64(
+            conn,
+            &format!(
+                "SELECT settled_minor FROM call_spend_reservations WHERE call_leg_id = '{}' AND cost_known",
+                legs[0]
+            )
+        )
+        .await,
+        240
+    );
+    assert_eq!(
+        scalar_i64(
+            conn,
+            &format!(
+                "SELECT count(*) FROM call_spend_reservations WHERE call_leg_id = '{}' AND NOT cost_known",
+                legs[1]
+            )
+        )
+        .await,
+        1
+    );
+}

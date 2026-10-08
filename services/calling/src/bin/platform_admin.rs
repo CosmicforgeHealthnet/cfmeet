@@ -111,6 +111,15 @@ enum SpendPolicyCmd {
         max_originations_per_minute: i32,
         #[arg(long, default_value_t = 10)]
         max_per_party_per_hour: i32,
+        /// Optional: paid legs per requesting principal per hour.
+        #[arg(long)]
+        max_per_principal_per_hour: Option<i32>,
+        /// Optional: paid legs per service account per hour.
+        #[arg(long)]
+        max_per_service_account_per_hour: Option<i32>,
+        /// Optional: paid legs per communication context per hour.
+        #[arg(long)]
+        max_per_context_per_hour: Option<i32>,
         /// Store the policy disabled (every paid leg refused).
         #[arg(long)]
         disabled: bool,
@@ -897,6 +906,9 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                     max_concurrent_legs,
                     max_originations_per_minute,
                     max_per_party_per_hour,
+                    max_per_principal_per_hour,
+                    max_per_service_account_per_hour,
+                    max_per_context_per_hour,
                     disabled,
                 } => {
                     let env = admin.environment(&environment).await?;
@@ -915,6 +927,9 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                         max_concurrent_legs,
                         max_originations_per_minute,
                         max_per_party_per_hour,
+                        max_per_principal_per_hour,
+                        max_per_service_account_per_hour,
+                        max_per_context_per_hour,
                         enabled: !disabled,
                     };
                     let revision = spend::store_policy(
@@ -952,6 +967,9 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                             "maxConcurrentLegs": p.max_concurrent_legs,
                             "maxOriginationsPerMinute": p.max_originations_per_minute,
                             "maxPerPartyPerHour": p.max_per_party_per_hour,
+                            "maxPerPrincipalPerHour": p.max_per_principal_per_hour,
+                            "maxPerServiceAccountPerHour": p.max_per_service_account_per_hour,
+                            "maxPerContextPerHour": p.max_per_context_per_hour,
                             "enabled": p.enabled,
                         })),
                     }))

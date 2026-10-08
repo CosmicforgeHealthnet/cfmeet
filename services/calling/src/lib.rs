@@ -30,6 +30,7 @@ pub mod endpoints;
 pub mod error;
 pub mod internal_auth;
 pub mod media;
+pub mod metrics;
 pub mod middleware;
 pub mod models;
 pub mod platform;

@@ -597,6 +597,10 @@ impl TelephonyService {
             }
         }
         let failed = reason == "FAILED" || (bridge.status == "PENDING" && reason != "UNBRIDGED");
+        crate::metrics::inc(
+            "telephony_bridges_ended_total",
+            &[("outcome", if failed { "FAILED" } else { "ENDED" })],
+        );
         db::exec(
             &txn,
             "UPDATE telephony_bridges SET status = $2, end_reason = $3, ended_at = $4, updated_at = GREATEST(updated_at, $4), \

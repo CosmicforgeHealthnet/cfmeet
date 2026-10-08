@@ -72,6 +72,8 @@ pub struct TelephonyService {
     pub settings: ExecutionSettings,
     /// When this instance last read back the interconnects' call inventory.
     pub(crate) last_inventory: Arc<std::sync::Mutex<Option<DateTime<Utc>>>>,
+    /// When this instance last ran the abuse-signal scan.
+    pub(crate) last_abuse_scan: Arc<std::sync::Mutex<Option<DateTime<Utc>>>>,
 }
 
 impl TelephonyService {
@@ -87,6 +89,7 @@ impl TelephonyService {
             worker_id: format!("w-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]),
             settings: ExecutionSettings::default(),
             last_inventory: Arc::default(),
+            last_abuse_scan: Arc::default(),
         }
     }
 

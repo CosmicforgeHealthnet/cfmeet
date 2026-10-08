@@ -42,7 +42,7 @@ use crate::{
         },
         RoutingClass,
     },
-    telephony::spend::{self, SpendScope},
+    telephony::spend,
 };
 
 /// `POST /v1/calls` with a protected contact target.
@@ -59,6 +59,10 @@ pub struct CreatePublicCall {
 
 /// A route denial as the stable public error.
 pub(crate) fn denial_error(denial: RouteDenial) -> CallError {
+    crate::metrics::inc(
+        "calling_public_route_denials_total",
+        &[("reason", denial.as_str())],
+    );
     match denial {
         RouteDenial::NotAuthorized => CallError::AuthorizationDenied,
         RouteDenial::LiveTelecomNotAllowed => CallError::LiveTelecomNotAllowed,
@@ -446,12 +450,7 @@ impl AppCallService {
         // Durable spend reservation (serialized on the environment's policy row).
         let reservation = match spend::reserve_in(
             &txn,
-            SpendScope {
-                tenant_id: call.tenant_id,
-                application_id: call.application_id,
-                environment_id: call.environment_id,
-            },
-            call.id,
+            &call,
             public_leg.id,
             Some(request.target_contact),
             now,
@@ -559,6 +558,10 @@ pub(crate) async fn enqueue_originate_in<C: ConnectionTrait>(
         .min(now + Duration::seconds(PAID_PLAN_VALIDITY_SECONDS));
     let key = format!("originate:{}:{}", spec.call_leg_id, spec.attempt_id);
     let call = spec.call;
+    crate::metrics::inc(
+        "calling_public_originations_total",
+        &[("route_class", spec.route_class)],
+    );
     let payload = json!({
         "schemaVersion": "1",
         "commandId": Uuid::new_v4(),

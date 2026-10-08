@@ -162,6 +162,10 @@ impl TelephonyService {
         {
             return self.replay(&existing, &digest).await;
         }
+        crate::metrics::inc(
+            "telephony_origination_requests_total",
+            &[("route_class", command.call.route_class.as_str())],
+        );
         self.require_flags(command.call.route_class)?;
         let txn = self.db.begin().await?;
         let prior: Option<(i32, Option<Uuid>)> = db::one::<GenerationRow, _>(
@@ -194,6 +198,10 @@ impl TelephonyService {
             {
                 return self.replay(&existing, &digest).await;
             }
+            crate::metrics::inc(
+                "telephony_origination_refusals_total",
+                &[("code", "EXECUTION_IN_PROGRESS")],
+            );
             return Err(TelephonyError::Refused(ErrorCode::ExecutionInProgress));
         }
         if let Some((max_generation, live)) = prior {
@@ -205,6 +213,10 @@ impl TelephonyService {
                 {
                     return self.replay(&existing, &digest).await;
                 }
+                crate::metrics::inc(
+                    "telephony_origination_refusals_total",
+                    &[("code", "EXECUTION_IN_PROGRESS")],
+                );
                 return Err(TelephonyError::Refused(ErrorCode::ExecutionInProgress));
             }
             if command.expected_generation <= max_generation {
@@ -294,6 +306,10 @@ impl TelephonyService {
                 if is_unique_violation(&e, "uq_telephony_legs_one_live_execution")
                     || is_unique_violation(&e, "uq_telephony_legs_one_live_per_party")
                 {
+                    crate::metrics::inc(
+                        "telephony_origination_refusals_total",
+                        &[("code", "EXECUTION_IN_PROGRESS")],
+                    );
                     return Err(TelephonyError::Refused(ErrorCode::ExecutionInProgress));
                 }
                 if is_unique_violation(&e, "uq_telephony_legs_attempt") {
