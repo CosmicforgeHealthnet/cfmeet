@@ -20,6 +20,7 @@ pub struct SweepReport {
     pub reconciled: usize,
     pub usage_finalized: usize,
     pub bridges_expired: usize,
+    pub evidence_purged: u64,
 }
 
 impl TelephonyService {
@@ -57,6 +58,7 @@ impl TelephonyService {
         report.reconciled = self.reconcile_once(50).await?;
         report.usage_finalized = self.finalize_usage_once(50).await?;
         report.bridges_expired = self.expire_pending_bridges().await?;
+        report.evidence_purged = self.purge_expired_provider_events(500).await?;
         let (delivered, failed) = self.deliver_outbox_once(100).await?;
         report.delivered = delivered;
         report.delivery_failures = failed;

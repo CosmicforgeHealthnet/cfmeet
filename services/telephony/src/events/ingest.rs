@@ -131,6 +131,18 @@ impl TelephonyService {
         Ok(out)
     }
 
+    /// Deletes provider event evidence past its retention bound (bounded batches).
+    pub async fn purge_expired_provider_events(&self, limit: u64) -> TelephonyResult<u64> {
+        let deleted = db::exec(
+            &self.db,
+            "DELETE FROM provider_events WHERE id IN (SELECT id FROM provider_events WHERE retain_until < $1 \
+             ORDER BY retain_until LIMIT $2 FOR UPDATE SKIP LOCKED)",
+            vec![self.now().into(), (limit.clamp(1, 1000) as i64).into()],
+        )
+        .await?;
+        Ok(deleted)
+    }
+
     async fn count_window(&self, kind: &str, subject: &str) -> TelephonyResult<i64> {
         let now = self.now();
         let window = now
@@ -186,6 +198,20 @@ impl TelephonyService {
         event: ProviderEvent,
     ) -> TelephonyResult<Disposition> {
         let now = self.now();
+        let retention = Duration::from_std(self.settings.provider_event_retention)
+            .unwrap_or(Duration::days(30));
+        // Dedupe records live for the retention window only, so an event older than that
+        // window (minus a margin of a tenth of it) could be a replay whose record was
+        // already purged: it is ignored and never applied. A provider clock far in the
+        // future is refused too (its record would outlive nothing).
+        let margin = retention / 10;
+        if event.occurred_at < now - retention + margin || event.occurred_at > now + margin {
+            tracing::warn!(
+                provider = provider_id,
+                "provider event outside the accepted time window ignored"
+            );
+            return Ok(Disposition::Ignored);
+        }
         let txn = self.db.begin().await?;
         // Match ONLY through Telephony's own binding.
         let binding: Option<BindingMatch> = match (&event.provider_call_ref, &event.correlation_key)
@@ -249,7 +275,7 @@ impl TelephonyService {
                 now.into(),
                 digest(&event).into(),
                 restricted(&event).into(),
-                (now + Duration::from_std(self.settings.provider_event_retention).unwrap_or(Duration::days(30))).into(),
+                (now + retention).into(),
             ],
         )
         .await;
