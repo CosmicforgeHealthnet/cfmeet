@@ -193,6 +193,7 @@ impl RelayService {
 
         validate_external_reference(&req.external_context_reference)?;
         let participants = parse_participant_set(&req.participants, 2)?;
+        require_contacts_in_scope(&txn, scope, participants.iter()).await?;
         let channels = parse_channels(&req.allowed_channels)?;
         let starts_at = req.starts_at.unwrap_or(now);
         validate_validity(starts_at, req.expires_at, req.grace_expires_at)?;
@@ -361,6 +362,13 @@ impl RelayService {
             Some(bodies) => parse_participant_set(bodies, 1)?,
             None => current.keys().copied().collect(),
         };
+        // Newly added ContactReferences must be enabled contacts of this scope.
+        require_contacts_in_scope(
+            &txn,
+            scope,
+            target_subjects.iter().filter(|s| !current.contains_key(s)),
+        )
+        .await?;
         let current_channels = ctx.enabled_channels()?;
         let channels = match &req.allowed_channels {
             Some(c) => parse_channels(c)?,
@@ -1365,6 +1373,24 @@ struct AuditEvidence {
     actor_kind: String,
     data: Value,
     occurred_at: DateTime<Utc>,
+}
+
+/// Every ContactReference participant must be an enabled Contact Vault contact of the
+/// SAME scope (foreign and unknown references are the same CONTACT_NOT_FOUND). The
+/// vault is never asked for the number.
+async fn require_contacts_in_scope<'a, C: sea_orm::ConnectionTrait>(
+    conn: &C,
+    scope: crate::scope::RelayScope,
+    subjects: impl Iterator<Item = &'a SubjectRef>,
+) -> RelayResult<()> {
+    for subject in subjects {
+        if let SubjectRef::Contact(id) = subject {
+            if !crate::contact_vault::repository::lock_enabled_in_scope(conn, scope, *id).await? {
+                return Err(RelayError::Refused(ErrorCode::ContactNotFound));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

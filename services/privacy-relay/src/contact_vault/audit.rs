@@ -75,6 +75,12 @@ impl AccessEntry {
         self
     }
 
+    /// A successful operation with an informational code (e.g. DEDUPLICATED).
+    pub fn noted(mut self, note: &'static str) -> Self {
+        self.reason = Some(note);
+        self
+    }
+
     pub fn denied(mut self, reason: &'static str) -> Self {
         self.outcome = Outcome::Denied;
         self.reason = Some(reason);

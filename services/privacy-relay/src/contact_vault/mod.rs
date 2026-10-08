@@ -20,6 +20,7 @@
 
 pub mod audit;
 pub mod crypto;
+pub mod fingerprint;
 pub mod http;
 pub mod keyring;
 pub mod model;

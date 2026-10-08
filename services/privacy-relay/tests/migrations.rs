@@ -12,6 +12,7 @@ const TABLES: &[&str] = &[
     "communication_context_participants",
     "communication_contexts",
     "contact_access_audit",
+    "contact_fingerprints",
     "privacy_relay_commands",
     "privacy_relay_enforcement_jobs",
     "privacy_relay_outbox",
@@ -50,7 +51,7 @@ async fn up_down_up_creates_exactly_the_privacy_relay_tables() {
             "SELECT count(*) FROM privacy_relay_seaql_migrations"
         )
         .await,
-        6
+        7
     );
     Migrator::down(&db.conn, None).await.unwrap();
     assert_eq!(tables(&db.conn).await, ["privacy_relay_seaql_migrations"]);

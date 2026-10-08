@@ -7,6 +7,8 @@
 //! privacy-relay-admin contact-vault activate-key --purpose P --version V --file FILE
 //! privacy-relay-admin contact-vault rotation-status            (DATABASE_URL, keyrings)
 //! privacy-relay-admin contact-vault reencrypt [--batch N]      (DATABASE_URL, keyrings)
+//! privacy-relay-admin contact-vault backfill-fingerprints [--batch N]
+//! privacy-relay-admin contact-vault prune-fingerprints --version V
 //! ```
 //!
 //! Keyring files are written with mode 0600 and never printed. Rotation never deletes a
@@ -33,7 +35,9 @@ fn usage() -> ExitCode {
          privacy-relay-admin contact-vault add-key --purpose P --version V --file FILE\n  \
          privacy-relay-admin contact-vault activate-key --purpose P --version V --file FILE\n  \
          privacy-relay-admin contact-vault rotation-status\n  \
-         privacy-relay-admin contact-vault reencrypt [--batch N]"
+         privacy-relay-admin contact-vault reencrypt [--batch N]\n  \
+         privacy-relay-admin contact-vault backfill-fingerprints [--batch N]\n  \
+         privacy-relay-admin contact-vault prune-fingerprints --version V"
     );
     ExitCode::from(2)
 }
@@ -185,13 +189,19 @@ async fn main() -> ExitCode {
             }
         }
         "rotation-status" => match vault().await {
-            Ok(v) => match v.key_version_counts().await {
-                Ok(counts) => {
+            Ok(v) => match (
+                v.key_version_counts().await,
+                v.fingerprint_version_counts().await,
+            ) {
+                (Ok(counts), Ok(fingerprints)) => {
                     for (version, n) in counts {
-                        println!("{version}\t{n}");
+                        println!("encryption\t{version}\t{n}");
+                    }
+                    for (version, n) in fingerprints {
+                        println!("fingerprint\t{version}\t{n}");
                     }
                 }
-                Err(e) => {
+                (Err(e), _) | (_, Err(e)) => {
                     eprintln!("privacy-relay-admin: {e}");
                     return ExitCode::from(1);
                 }
@@ -201,6 +211,53 @@ async fn main() -> ExitCode {
                 return ExitCode::from(2);
             }
         },
+        "backfill-fingerprints" => {
+            let batch = f
+                .get("batch")
+                .and_then(|b| b.parse::<u64>().ok())
+                .unwrap_or(500);
+            match vault().await {
+                Ok(v) => loop {
+                    match v.backfill_fingerprints(batch).await {
+                        Ok(r) => {
+                            println!(
+                                "backfilled {}\tfailed {}\tremaining {}",
+                                r.backfilled, r.failed, r.remaining
+                            );
+                            if r.backfilled == 0 {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("privacy-relay-admin: {e}");
+                            return ExitCode::from(1);
+                        }
+                    }
+                },
+                Err(e) => {
+                    eprintln!("privacy-relay-admin: {e}");
+                    return ExitCode::from(2);
+                }
+            }
+        }
+        "prune-fingerprints" => {
+            let Some(version) = f.get("version") else {
+                return usage();
+            };
+            match vault().await {
+                Ok(v) => match v.prune_fingerprint_version(version).await {
+                    Ok(n) => println!("removed {n} fingerprints of {version}"),
+                    Err(e) => {
+                        eprintln!("privacy-relay-admin: {e}");
+                        return ExitCode::from(1);
+                    }
+                },
+                Err(e) => {
+                    eprintln!("privacy-relay-admin: {e}");
+                    return ExitCode::from(2);
+                }
+            }
+        }
         "reencrypt" => {
             let batch = f
                 .get("batch")

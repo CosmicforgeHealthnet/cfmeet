@@ -13,6 +13,7 @@ mod m20261008_000003_privacy_relay_sessions;
 mod m20261008_000004_relay_audit_and_outbox;
 mod m20261008_000005_commands_and_enforcement;
 mod m20261008_000006_contact_vault;
+mod m20261008_000007_contact_fingerprints;
 
 /// Name of the table recording which Privacy Relay migrations have been applied.
 pub const MIGRATION_TABLE: &str = "privacy_relay_seaql_migrations";
@@ -29,6 +30,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261008_000004_relay_audit_and_outbox::Migration),
             Box::new(m20261008_000005_commands_and_enforcement::Migration),
             Box::new(m20261008_000006_contact_vault::Migration),
+            Box::new(m20261008_000007_contact_fingerprints::Migration),
         ]
     }
 

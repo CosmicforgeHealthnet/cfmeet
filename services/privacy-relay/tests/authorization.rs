@@ -220,7 +220,8 @@ async fn routes_channels_and_contact_references_are_not_faked() {
     };
     let c = Consumer::new(Kind::Production);
     let [a, b] = principals(2).try_into().unwrap();
-    let contact = uuid::Uuid::new_v4();
+    // A real Contact Vault contact of this scope (contexts never take unknown references).
+    let contact = h.create_contact(&c, "+39 02 1234 5678").await["contactReference"].clone();
     let mut req = context_request(&[a, b], "BIDIRECTIONAL", &[]);
     req["participants"] =
         json!([{ "principalId": a }, { "principalId": b }, { "contactReferenceId": contact }]);

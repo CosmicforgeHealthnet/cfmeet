@@ -173,3 +173,161 @@ pub async fn key_version_counts<C: ConnectionTrait>(conn: &C) -> RelayResult<Vec
     )
     .await
 }
+
+// ---------------------------------------------------------------------------
+// Equality fingerprints (§32).
+// ---------------------------------------------------------------------------
+
+use super::fingerprint::Fingerprint;
+
+pub async fn insert_fingerprints<C: ConnectionTrait>(
+    conn: &C,
+    scope: RelayScope,
+    contact: Uuid,
+    fingerprints: &[Fingerprint],
+    now: DateTime<Utc>,
+) -> RelayResult<()> {
+    for f in fingerprints {
+        db::exec(
+            conn,
+            "INSERT INTO contact_fingerprints (contact_reference, tenant_id, application_id, environment_id, \
+               fingerprint_key_version, fingerprint, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            vec![
+                contact.into(),
+                scope.tenant_id().into(),
+                scope.application_id().into(),
+                scope.environment_id().into(),
+                f.key_version.as_str().into(),
+                f.value.to_vec().into(),
+                now.into(),
+            ],
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+pub async fn delete_fingerprints<C: ConnectionTrait>(conn: &C, contact: Uuid) -> RelayResult<u64> {
+    db::exec(
+        conn,
+        "DELETE FROM contact_fingerprints WHERE contact_reference = $1",
+        vec![contact.into()],
+    )
+    .await
+}
+
+/// The contact of `scope` holding any of `fingerprints` (exact equality; never a scan or
+/// a decryption of other rows).
+pub async fn find_by_fingerprints<C: ConnectionTrait>(
+    conn: &C,
+    scope: RelayScope,
+    fingerprints: &[Fingerprint],
+) -> RelayResult<Option<Uuid>> {
+    #[derive(sea_orm::FromQueryResult)]
+    struct Hit {
+        contact_reference: Uuid,
+    }
+    for f in fingerprints {
+        let hit: Option<Hit> = db::one(
+            conn,
+            "SELECT contact_reference FROM contact_fingerprints \
+             WHERE tenant_id = $1 AND application_id = $2 AND environment_id = $3 \
+               AND fingerprint_key_version = $4 AND fingerprint = $5",
+            vec![
+                scope.tenant_id().into(),
+                scope.application_id().into(),
+                scope.environment_id().into(),
+                f.key_version.as_str().into(),
+                f.value.to_vec().into(),
+            ],
+        )
+        .await?;
+        if let Some(h) = hit {
+            return Ok(Some(h.contact_reference));
+        }
+    }
+    Ok(None)
+}
+
+/// Up to `limit` enabled contacts without a fingerprint under `version`, locked for
+/// this worker (`SKIP LOCKED`).
+pub async fn lock_missing_fingerprint<C: ConnectionTrait>(
+    conn: &C,
+    version: &str,
+    limit: u64,
+) -> RelayResult<Vec<ContactRow>> {
+    db::all(
+        conn,
+        &format!(
+            "SELECT {CONTACT_COLUMNS} FROM protected_contacts c \
+             WHERE c.disabled_at IS NULL AND NOT EXISTS ( \
+               SELECT 1 FROM contact_fingerprints f WHERE f.contact_reference = c.id AND f.fingerprint_key_version = $1) \
+             ORDER BY c.id LIMIT $2 FOR UPDATE SKIP LOCKED"
+        ),
+        vec![version.into(), (limit as i64).into()],
+    )
+    .await
+}
+
+/// Enabled contacts without a fingerprint under `version`.
+pub async fn missing_fingerprint_count<C: ConnectionTrait>(
+    conn: &C,
+    version: &str,
+) -> RelayResult<i64> {
+    db::scalar_i64(
+        conn,
+        "SELECT count(*)::bigint FROM protected_contacts c WHERE c.disabled_at IS NULL AND NOT EXISTS ( \
+           SELECT 1 FROM contact_fingerprints f WHERE f.contact_reference = c.id AND f.fingerprint_key_version = $1)",
+        vec![version.into()],
+    )
+    .await
+}
+
+/// Fingerprints per key version (rotation evidence).
+pub async fn fingerprint_version_counts<C: ConnectionTrait>(
+    conn: &C,
+) -> RelayResult<Vec<KeyVersionCount>> {
+    db::all(
+        conn,
+        "SELECT fingerprint_key_version AS key_version, count(*)::bigint AS contacts \
+         FROM contact_fingerprints GROUP BY fingerprint_key_version ORDER BY fingerprint_key_version",
+        vec![],
+    )
+    .await
+}
+
+pub async fn delete_fingerprint_version<C: ConnectionTrait>(
+    conn: &C,
+    version: &str,
+) -> RelayResult<u64> {
+    db::exec(
+        conn,
+        "DELETE FROM contact_fingerprints WHERE fingerprint_key_version = $1",
+        vec![version.into()],
+    )
+    .await
+}
+
+/// Whether `id` is an enabled contact of `scope`, share-locked for the rest of the
+/// transaction (a Communication Context may only reference such contacts; a foreign or
+/// unknown ContactReference is the same `false`).
+pub async fn lock_enabled_in_scope<C: ConnectionTrait>(
+    conn: &C,
+    scope: RelayScope,
+    id: Uuid,
+) -> RelayResult<bool> {
+    Ok(db::scalar_i64(
+        conn,
+        "SELECT count(*)::bigint FROM (SELECT 1 FROM protected_contacts \
+           WHERE tenant_id = $1 AND application_id = $2 AND environment_id = $3 AND id = $4 \
+             AND disabled_at IS NULL FOR SHARE) q",
+        vec![
+            scope.tenant_id().into(),
+            scope.application_id().into(),
+            scope.environment_id().into(),
+            id.into(),
+        ],
+    )
+    .await?
+        == 1)
+}

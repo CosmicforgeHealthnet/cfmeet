@@ -35,8 +35,13 @@ async fn valid_contexts_are_created_at_version_one() {
     assert_eq!(explicit["directions"].as_array().unwrap().len(), 1);
     assert_eq!(explicit["allowedChannels"], json!(["MESSAGING", "VOICE"]));
 
-    // ContactReference participants are stored as opaque references only.
-    let contact = uuid::Uuid::new_v4();
+    // ContactReference participants are stored as opaque references only (they must be
+    // enabled Contact Vault contacts of the same scope).
+    let contact: uuid::Uuid = h.create_contact(&c, "+39 02 1234 5678").await["contactReference"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
     let mut req = context_request(&[a], "BIDIRECTIONAL", &[]);
     req["participants"] = json!([{ "principalId": a }, { "contactReferenceId": contact }]);
     let with_contact = h.create_context(&c, req).await;

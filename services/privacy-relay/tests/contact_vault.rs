@@ -176,11 +176,16 @@ async fn a_number_is_canonicalized_encrypted_and_only_ever_returned_masked() {
         !dump.contains(&hex::encode(&key_bytes)),
         "key bytes in the database"
     );
-    // The only binary columns are the ciphertext and its nonce.
-    let bytea = common::rows(h.conn(), "SELECT table_name || '.' || column_name FROM information_schema.columns WHERE table_schema = 'public' AND data_type = 'bytea' ORDER BY 1").await;
+    // The only binary columns are the ciphertext, its nonce and the keyed fingerprint.
+    let bytea = common::rows(
+        h.conn(),
+        "SELECT table_name || '.' || column_name FROM information_schema.columns WHERE table_schema = 'public' AND data_type = 'bytea' ORDER BY 1",
+    )
+    .await;
     assert_eq!(
         bytea,
         vec![
+            vec!["contact_fingerprints.fingerprint".to_string()],
             vec!["protected_contacts.ciphertext".to_string()],
             vec!["protected_contacts.nonce".to_string()]
         ]

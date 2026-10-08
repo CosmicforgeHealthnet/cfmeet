@@ -97,7 +97,14 @@ async fn telephone_like_values_never_enter_storage_or_responses() {
     for (column, tables) in [
         ("ciphertext", "'protected_contacts'"),
         ("nonce", "'protected_contacts'"),
-        ("key_version", "'protected_contacts'"),
+        (
+            "key_version",
+            "'protected_contacts', 'contact_fingerprints'",
+        ),
+        (
+            "fingerprint",
+            "'contact_fingerprints', 'privacy_relay_commands'",
+        ),
     ] {
         assert_eq!(
             h.count(&format!("SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name LIKE '%{column}%' AND table_name NOT IN ({tables})")).await,
