@@ -18,6 +18,7 @@
 mod bridge;
 mod dispatch;
 mod events;
+mod inbound;
 mod outbound;
 
 use std::sync::Arc;
@@ -29,6 +30,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 pub use events::EventDisposition;
+pub use inbound::InboundOffer;
 pub use outbound::CreatePublicCall;
 
 use super::AppCallService;
@@ -162,6 +164,23 @@ pub(crate) async fn parties<C: ConnectionTrait>(
     ))
     .all(db)
     .await?)
+}
+
+/// Whether the Call dials a protected public party (APP_TO_PSTN: no app ringing).
+pub(crate) async fn is_public_outbound<C: ConnectionTrait>(
+    db: &C,
+    call_id: Uuid,
+) -> CallResult<bool> {
+    let row = db
+        .query_one(stmt(
+            "SELECT EXISTS (SELECT 1 FROM call_public_parties WHERE call_id = $1 AND role = 'CALLEE')",
+            vec![call_id.into()],
+        ))
+        .await?;
+    Ok(row
+        .map(|r| r.try_get_by_index::<bool>(0))
+        .transpose()?
+        .unwrap_or(false))
 }
 
 /// Whether the Call has protected public parties (it is executed by Telephony).

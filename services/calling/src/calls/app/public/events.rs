@@ -538,6 +538,36 @@ impl AppCallService {
         let correlation = cmd.correlation_id().as_str().to_string();
         after.release_legs = true;
         match call.current_state {
+            // The caller of a PSTN_TO_APP Call hung up before anyone answered.
+            CallState::Dialing | CallState::Ringing | CallState::Routing
+                if call.origin == "PUBLIC_INBOUND" && outcome == LegOutcome::Completed =>
+            {
+                let call = self
+                    .calls
+                    .transition_in(txn, &cmd, &call, call.version, CallAction::Cancel)
+                    .await?;
+                for invitation in &call.cancelled_invitations {
+                    self.invitation_signal(
+                        txn,
+                        pending,
+                        SignalType::RingCancelled,
+                        &call.call,
+                        invitation,
+                        &correlation,
+                    )
+                    .await?;
+                }
+                self.call_signal(
+                    txn,
+                    pending,
+                    SignalType::Cancelled,
+                    &call.call,
+                    &correlation,
+                    Map::new(),
+                )
+                .await?;
+                after.teardown = true;
+            }
             CallState::Dialing | CallState::Ringing => {
                 let action = match outcome {
                     LegOutcome::Busy => CallAction::MarkBusy,

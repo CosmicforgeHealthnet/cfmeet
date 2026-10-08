@@ -332,6 +332,17 @@
       "lifecycle": "beta",
       "authority": "contract-first",
       "description": "Normalized Telephony events delivered to Calling (leg status, bridge and usage facts) and Calling's disposition answer. CF Meet ids, normalized vocabulary and timestamps only."
+    },
+    {
+      "id": "cfmeet.telephony.inbound-offer",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "telephony/inbound/v1.schema.json",
+      "owner": "telephony",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Phone-to-app inbound offer from Telephony to Calling and Calling's answer (canonical Call / CallLeg). References only: never the called relay number or the caller's number."
     }
   ]
 }

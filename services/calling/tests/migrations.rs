@@ -52,6 +52,7 @@ const CALL_TABLES: &[&str] = &[
     "call_commands",
     "call_endpoints",
     "call_events",
+    "call_inbound_owners",
     "call_invitations",
     "call_legs",
     "call_media_provider_events",
@@ -77,7 +78,7 @@ const CALL_TABLES: &[&str] = &[
     "calls",
 ];
 
-const MIGRATIONS: usize = 18;
+const MIGRATIONS: usize = 19;
 const PART_B_MIGRATIONS: u32 = 4;
 
 #[tokio::test]

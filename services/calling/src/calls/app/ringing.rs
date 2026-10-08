@@ -414,6 +414,10 @@ impl AppCallService {
             answered_elsewhere = losers.len(),
             "invitation accepted"
         );
+        if answered {
+            // A PSTN_TO_APP Call: the answered app side is now bridged to the public leg.
+            self.after_application_answer(call.id).await;
+        }
         Ok(CommandOutcome {
             body,
             replayed: false,

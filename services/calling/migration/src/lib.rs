@@ -25,6 +25,7 @@ mod m20261008_000015_call_privacy_relay_evidence;
 mod m20261008_000016_call_privacy_relay_index;
 mod m20261008_000017_call_route_plans;
 mod m20261008_000018_call_public_network;
+mod m20261008_000019_call_inbound_owners;
 
 /// Name of the table recording which Calling migrations have been applied.
 pub const MIGRATION_TABLE: &str = "calling_seaql_migrations";
@@ -53,6 +54,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261008_000016_call_privacy_relay_index::Migration),
             Box::new(m20261008_000017_call_route_plans::Migration),
             Box::new(m20261008_000018_call_public_network::Migration),
+            Box::new(m20261008_000019_call_inbound_owners::Migration),
         ]
     }
 

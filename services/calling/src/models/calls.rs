@@ -24,6 +24,8 @@ pub struct Model {
     pub version: i64,
     pub communication_context_ref: Option<Uuid>,
     pub privacy_relay_ref: Option<Uuid>,
+    /// APPLICATION or PUBLIC_INBOUND (immutable).
+    pub origin: String,
     pub terminal_reason: Option<TerminalReason>,
     pub failure_category: Option<FailureCategory>,
     pub requested_at: DateTimeUtc,

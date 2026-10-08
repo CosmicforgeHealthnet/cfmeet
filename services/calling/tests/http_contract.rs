@@ -549,10 +549,10 @@ fn every_operation_declares_its_authentication() {
                 .as_str();
             let expected = if path.starts_with("/internal/v1/") {
                 // Internal routes: a service token and a receiver-granted permission.
-                let expected_permission = if path == "/internal/v1/telephony/events" {
-                    "telephony-event.apply"
-                } else {
-                    "communication-authority.enforce"
+                let expected_permission = match path.as_str() {
+                    "/internal/v1/telephony/events" => "telephony-event.apply",
+                    "/internal/v1/telephony/inbound-calls" => "telephony-inbound.offer",
+                    _ => "communication-authority.enforce",
                 };
                 assert_eq!(
                     security[0]["cfServiceAuth"][0], expected_permission,

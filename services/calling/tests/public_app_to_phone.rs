@@ -550,7 +550,7 @@ async fn a_lost_response_is_retried_with_the_same_command_and_never_duplicates()
     x.w.h()
         .conn()
         .execute_unprepared(
-            "UPDATE call_telephony_commands SET next_attempt_at = now() - interval '1 second'",
+            "UPDATE call_telephony_commands SET next_attempt_at = '2000-01-01T00:00:00Z'",
         )
         .await
         .unwrap();

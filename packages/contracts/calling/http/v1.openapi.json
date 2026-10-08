@@ -105,6 +105,60 @@
         }
       }
     },
+    "/internal/v1/telephony/inbound-calls": {
+      "post": {
+        "operationId": "acceptTelephonyInboundCall",
+        "summary": "Inbound public call offer (internal)",
+        "description": "Telephony offers an inbound public call to a relay number (contract cfmeet.telephony.inbound-offer). Requires an internal service token with telephony-inbound.offer (grantable only to cfmeet.telephony). Calling re-checks CURRENT Privacy Relay authority (CALLBACK_RELAY route), the routing policy (PSTN_TO_APP), the environment's configured inbound owner and the spend policy, then creates ONE canonical Call (origin PUBLIC_INBOUND; the caller is a TELEPHONE_ENDPOINT principal referencing only the opaque ContactReference) and rings the authorized application principals. Idempotent per telephonyLegId. Refusals reveal nothing to the caller.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "telephony-inbound.offer"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/telephony/inbound/v1.schema.json#/$defs/InboundOffer"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The canonical Call and public CallLeg (the same for a repeated offer).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/inbound/v1.schema.json#/$defs/InboundAnswer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "operationId": "getHealth",

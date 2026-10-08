@@ -33,6 +33,7 @@ This package is the permanent home for shared, externally visible contracts acro
 | `cfmeet.privacy-relay.event` | 1.0.0 (beta) | JSON Schema 2020-12 | [`privacy-relay/events/v1.schema.json`](privacy-relay/events/v1.schema.json) | contract-first; payload of every Privacy Relay outbox event (inside the event envelope) |
 | `cfmeet.privacy-relay.enforcement-command` | 1.0.0 (beta) | JSON Schema 2020-12 | [`privacy-relay/internal/enforcement/v1.schema.json`](privacy-relay/internal/enforcement/v1.schema.json) | contract-first; Privacy Relay → Calling active-call enforcement command / result (received by Calling) |
 | `cfmeet.telephony.common` | 1.0.0 (beta) | JSON Schema 2020-12 | [`telephony/common/v1.schema.json`](telephony/common/v1.schema.json) | contract-first; provider-neutral public-network vocabulary (leg statuses incl. UNKNOWN, route classes, end reasons, failure categories, event types, bridge kinds, route health) |
+| `cfmeet.telephony.inbound-offer` | 1.0.0 (beta) | JSON Schema 2020-12 | [`telephony/inbound/v1.schema.json`](telephony/inbound/v1.schema.json) | contract-first; phone-to-app offer (Telephony → Calling) and Calling's answer — references only |
 | `cfmeet.telephony.event` | 1.0.0 (beta) | JSON Schema 2020-12 | [`telephony/events/v1.schema.json`](telephony/events/v1.schema.json) | contract-first; normalized Telephony events delivered to Calling (leg status, bridge, usage) and Calling's disposition — CF Meet ids and normalized vocabulary only |
 
 Schemas have `examples/` (must validate) and `counter-examples/` (must be rejected).

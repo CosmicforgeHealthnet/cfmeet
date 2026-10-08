@@ -68,6 +68,28 @@ impl NewCall {
     }
 }
 
+/// Who a Call is created by and recorded against (limits, attribution, commands).
+#[derive(Debug, Clone)]
+pub(crate) struct CallCreator {
+    pub cmd: CallCommandContext,
+    pub service_account_id: crate::domain::ServiceAccountId,
+    pub credential_id: crate::domain::CredentialId,
+    /// `APPLICATION` (Calling API) or `PUBLIC_INBOUND` (offered by Telephony, recorded
+    /// against the environment's configured inbound owner).
+    pub origin: &'static str,
+}
+
+impl CallCreator {
+    pub fn customer(ctx: &PlatformAuthContext) -> Self {
+        Self {
+            cmd: CallCommandContext::customer(ctx),
+            service_account_id: ctx.service_account_id(),
+            credential_id: ctx.credential_id(),
+            origin: "APPLICATION",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CreatedCall {
     pub call: Call,
@@ -130,13 +152,26 @@ impl CallService {
         initiator: &ResolvedPrincipal,
         request: NewCall,
     ) -> CallResult<(calls::Model, call_participants::Model, CallEvent)> {
-        let cmd = CallCommandContext::customer(ctx);
+        self.create_call_as_in(txn, &CallCreator::customer(ctx), initiator, request)
+            .await
+    }
+
+    /// Creates a REQUESTED Call for `creator` (see [`create_requested_call_in`]).
+    pub(crate) async fn create_call_as_in(
+        &self,
+        txn: &DatabaseTransaction,
+        creator: &CallCreator,
+        initiator: &ResolvedPrincipal,
+        request: NewCall,
+    ) -> CallResult<(calls::Model, call_participants::Model, CallEvent)> {
+        let cmd = creator.cmd.clone();
         let scope = cmd.scope();
         // The initiator must have been resolved in the caller's own scope.
         if CallScope::of_principal(initiator) != scope {
             return Err(CallError::NotFound);
         }
-        self.enforce_concurrent_call_limit(txn, ctx).await?;
+        self.enforce_concurrent_call_limit(txn, scope.application_id(), creator.credential_id)
+            .await?;
 
         let at = self.now();
         let call_id = CallId::generate();
@@ -145,8 +180,9 @@ impl CallService {
             tenant_id: Set(scope.tenant_id().as_uuid()),
             application_id: Set(scope.application_id().as_uuid()),
             environment_id: Set(scope.environment_id().as_uuid()),
-            created_by_service_account_id: Set(ctx.service_account_id().as_uuid()),
-            created_by_credential_id: Set(ctx.credential_id().as_uuid()),
+            created_by_service_account_id: Set(creator.service_account_id.as_uuid()),
+            created_by_credential_id: Set(creator.credential_id.as_uuid()),
+            origin: Set(creator.origin.to_string()),
             initiator_principal_id: Set(initiator.id().as_uuid()),
             call_kind: Set(request.kind),
             current_state: Set(CallState::Requested),
@@ -237,18 +273,19 @@ impl CallService {
     async fn enforce_concurrent_call_limit(
         &self,
         txn: &DatabaseTransaction,
-        ctx: &PlatformAuthContext,
+        application_id: crate::domain::ApplicationId,
+        credential_id: crate::domain::CredentialId,
     ) -> CallResult<()> {
         execute(
             txn,
             CREATION_LOCK_SQL,
-            vec![format!("cfmeet.calling.active-calls:{}", ctx.application_id()).into()],
+            vec![format!("cfmeet.calling.active-calls:{}", application_id).into()],
         )
         .await?;
         let (per_credential, application) = concurrent_communication_limits(
             txn,
-            ctx.application_id(),
-            ctx.credential_id(),
+            application_id,
+            credential_id,
             self.limit_defaults,
         )
         .await?;
@@ -258,13 +295,13 @@ impl CallService {
                 "SELECT count(*) FROM calls WHERE created_by_credential_id = $1 \
                  AND current_state NOT IN {TERMINAL_STATES_SQL}"
             ),
-            vec![ctx.credential_id().as_uuid().into()],
+            vec![credential_id.as_uuid().into()],
         )
         .await?;
         if by_credential >= per_credential {
             tracing::info!(
-                credential_id = %ctx.credential_id(),
-                application_id = %ctx.application_id(),
+                credential_id = %credential_id,
+                application_id = %application_id,
                 limit = per_credential,
                 "concurrent call limit reached (credential)"
             );
@@ -280,12 +317,12 @@ impl CallService {
                     "SELECT count(*) FROM calls WHERE application_id = $1 \
                      AND current_state NOT IN {TERMINAL_STATES_SQL}"
                 ),
-                vec![ctx.application_id().as_uuid().into()],
+                vec![application_id.as_uuid().into()],
             )
             .await?;
             if by_application >= limit {
                 tracing::info!(
-                    application_id = %ctx.application_id(),
+                    application_id = %application_id,
                     limit,
                     "concurrent call limit reached (application)"
                 );

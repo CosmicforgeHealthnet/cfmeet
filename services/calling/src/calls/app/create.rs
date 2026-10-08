@@ -726,7 +726,7 @@ impl AppCallService {
         }
         // A public-network Call does not ring application endpoints: Telephony dials
         // its public party (the ORIGINATE is dispatched once the Call is DIALING).
-        if super::public::is_public(&txn, call.id).await? {
+        if super::public::is_public_outbound(&txn, call.id).await? {
             let body = self.create_response(&txn, &call).await?;
             self.calls
                 .complete_call_command_in(

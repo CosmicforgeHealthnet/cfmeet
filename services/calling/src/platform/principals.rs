@@ -349,6 +349,50 @@ impl PrincipalResolver {
         Self { db }
     }
 
+    /// The TELEPHONE_ENDPOINT principal of a protected public party (Part E §45): its
+    /// only reference is the opaque ContactReference Privacy Relay issued — never a
+    /// number. Registered on first use in the scope, then resolved like any principal.
+    pub async fn ensure_public_party_principal(
+        &self,
+        tenant_id: TenantId,
+        application_id: ApplicationId,
+        environment_id: EnvironmentId,
+        contact_reference: Uuid,
+    ) -> Result<ResolvedPrincipal, PrincipalResolutionError> {
+        use sea_orm::{ConnectionTrait, DbBackend, Statement};
+        let unavailable = |e: sea_orm::DbErr| PrincipalResolutionError::Unavailable {
+            summary: summarize_db_error(&e),
+        };
+        let reference = contact_reference.hyphenated().to_string();
+        self.db
+            .execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "INSERT INTO platform_principals (id, tenant_id, application_id, environment_id, kind, \
+                   external_reference, status, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, 'TELEPHONE_ENDPOINT', $5, 'ACTIVE', now(), now()) \
+                 ON CONFLICT (tenant_id, application_id, environment_id, kind, external_reference) DO NOTHING",
+                vec![
+                    PrincipalId::generate().as_uuid().into(),
+                    tenant_id.as_uuid().into(),
+                    application_id.as_uuid().into(),
+                    environment_id.as_uuid().into(),
+                    reference.clone().into(),
+                ],
+            ))
+            .await
+            .map_err(unavailable)?;
+        self.resolve_in(
+            tenant_id,
+            application_id,
+            environment_id,
+            &PrincipalReference::External {
+                kind: PrincipalKind::TelephoneEndpoint,
+                external_reference: reference,
+            },
+        )
+        .await
+    }
+
     pub async fn resolve(
         &self,
         ctx: &PlatformAuthContext,

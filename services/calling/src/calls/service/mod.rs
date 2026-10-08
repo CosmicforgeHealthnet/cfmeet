@@ -35,6 +35,7 @@ use sea_orm::{
 };
 
 pub use commands::{fingerprint, CommandKey, IdempotencyKey, PriorCommand};
+pub(crate) use lifecycle::CallCreator;
 pub use lifecycle::{CreatedCall, NewCall, TransitionOutcome};
 pub(crate) use media::{backoff, NewMediaBinding};
 pub(crate) use participation::{participant_of, session_of};

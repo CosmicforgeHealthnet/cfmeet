@@ -79,6 +79,56 @@ enum Command {
     /// Typed routing policy of an environment (Part E §37–§38).
     #[command(subcommand)]
     RoutingPolicy(RoutingPolicyCmd),
+    /// Telecom spend / velocity policy of an environment (Part E §153–§158). No policy =
+    /// no paid public-network leg.
+    #[command(subcommand)]
+    SpendPolicy(SpendPolicyCmd),
+    /// The credential inbound public calls (phone-to-app) are recorded against (Part E
+    /// §45). No owner = inbound public calls are refused.
+    #[command(subcommand)]
+    InboundOwner(InboundOwnerCmd),
+}
+
+#[derive(Subcommand)]
+enum SpendPolicyCmd {
+    Set {
+        #[command(flatten)]
+        environment: EnvironmentPath,
+        #[arg(long)]
+        currency: String,
+        /// Reserved allowance per paid leg (minor units).
+        #[arg(long)]
+        leg_allowance_minor: i64,
+        #[arg(long, default_value_t = 3600)]
+        max_leg_seconds: i32,
+        #[arg(long)]
+        daily_limit_minor: i64,
+        #[arg(long)]
+        monthly_limit_minor: i64,
+        #[arg(long, default_value_t = 10)]
+        max_concurrent_legs: i32,
+        #[arg(long, default_value_t = 30)]
+        max_originations_per_minute: i32,
+        #[arg(long, default_value_t = 10)]
+        max_per_party_per_hour: i32,
+        /// Store the policy disabled (every paid leg refused).
+        #[arg(long)]
+        disabled: bool,
+    },
+    Show(EnvironmentPath),
+}
+
+#[derive(Subcommand)]
+enum InboundOwnerCmd {
+    Set {
+        #[command(flatten)]
+        environment: EnvironmentPath,
+        #[command(flatten)]
+        credential: CredentialRef,
+        #[arg(long)]
+        disabled: bool,
+    },
+    Show(EnvironmentPath),
 }
 
 #[derive(Subcommand)]
@@ -827,6 +877,150 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                         "policyVersion": effective.version_label(),
                         "policy": effective.policy,
                     }))
+                }
+            }
+        }
+        Command::SpendPolicy(cmd) => {
+            use calling::telephony::spend;
+            let db_error = |_| PlatformError::Database {
+                summary: "spend policy".to_string(),
+                connectivity: false,
+            };
+            match cmd {
+                SpendPolicyCmd::Set {
+                    environment,
+                    currency,
+                    leg_allowance_minor,
+                    max_leg_seconds,
+                    daily_limit_minor,
+                    monthly_limit_minor,
+                    max_concurrent_legs,
+                    max_originations_per_minute,
+                    max_per_party_per_hour,
+                    disabled,
+                } => {
+                    let env = admin.environment(&environment).await?;
+                    let currency = currency.trim().to_ascii_uppercase();
+                    if currency.len() != 3 || !currency.bytes().all(|b| b.is_ascii_uppercase()) {
+                        return Err(PlatformError::Validation(
+                            "currency must be an ISO 4217 code".to_string(),
+                        ));
+                    }
+                    let policy = spend::SpendPolicy {
+                        currency,
+                        leg_allowance_minor,
+                        max_leg_seconds,
+                        daily_limit_minor,
+                        monthly_limit_minor,
+                        max_concurrent_legs,
+                        max_originations_per_minute,
+                        max_per_party_per_hour,
+                        enabled: !disabled,
+                    };
+                    let revision = spend::store_policy(
+                        &admin.db,
+                        spend::SpendScope {
+                            tenant_id: env.tenant_id.as_uuid(),
+                            application_id: env.application_id.as_uuid(),
+                            environment_id: env.id.as_uuid(),
+                        },
+                        &policy,
+                        admin.clock.now(),
+                    )
+                    .await
+                    .map_err(|_| {
+                        PlatformError::Validation(
+                            "the spend policy was refused (limits must be positive and consistent)"
+                                .to_string(),
+                        )
+                    })?;
+                    print(&json!({ "environmentId": env.id, "revision": revision }))
+                }
+                SpendPolicyCmd::Show(environment) => {
+                    let env = admin.environment(&environment).await?;
+                    let p = spend::policy(&admin.db, env.id.as_uuid())
+                        .await
+                        .map_err(db_error)?;
+                    print(&json!({
+                        "environmentId": env.id,
+                        "policy": p.map(|p| json!({
+                            "currency": p.currency,
+                            "legAllowanceMinor": p.leg_allowance_minor,
+                            "maxLegSeconds": p.max_leg_seconds,
+                            "dailyLimitMinor": p.daily_limit_minor,
+                            "monthlyLimitMinor": p.monthly_limit_minor,
+                            "maxConcurrentLegs": p.max_concurrent_legs,
+                            "maxOriginationsPerMinute": p.max_originations_per_minute,
+                            "maxPerPartyPerHour": p.max_per_party_per_hour,
+                            "enabled": p.enabled,
+                        })),
+                    }))
+                }
+            }
+        }
+        Command::InboundOwner(cmd) => {
+            use sea_orm::{ConnectionTrait, DbBackend, Statement};
+            let db_error = |_| PlatformError::Database {
+                summary: "inbound owner".to_string(),
+                connectivity: false,
+            };
+            match cmd {
+                InboundOwnerCmd::Set {
+                    environment,
+                    credential,
+                    disabled,
+                } => {
+                    let env = admin.environment(&environment).await?;
+                    let credential_id = admin.credential_id(&credential).await?;
+                    let row = admin
+                        .db
+                        .query_one(Statement::from_sql_and_values(
+                            DbBackend::Postgres,
+                            "INSERT INTO call_inbound_owners (tenant_id, application_id, environment_id, \
+                               service_account_id, credential_id, enabled, revision, created_at, updated_at) \
+                             SELECT c.tenant_id, c.application_id, c.environment_id, c.service_account_id, c.id, \
+                               $3, 1, $4, $4 FROM platform_api_credentials c \
+                             WHERE c.id = $1 AND c.environment_id = $2 \
+                             ON CONFLICT (environment_id) DO UPDATE SET service_account_id = EXCLUDED.service_account_id, \
+                               credential_id = EXCLUDED.credential_id, enabled = EXCLUDED.enabled, \
+                               revision = call_inbound_owners.revision + 1, \
+                               updated_at = GREATEST(EXCLUDED.updated_at, call_inbound_owners.updated_at) \
+                             RETURNING revision",
+                            vec![
+                                credential_id.as_uuid().into(),
+                                env.id.as_uuid().into(),
+                                (!disabled).into(),
+                                admin.clock.now().into(),
+                            ],
+                        ))
+                        .await
+                        .map_err(db_error)?
+                        .ok_or(PlatformError::NotFound("credential in this environment"))?;
+                    let revision: i32 = row.try_get_by_index(0).map_err(db_error)?;
+                    print(
+                        &json!({ "environmentId": env.id, "credentialId": credential_id, "revision": revision }),
+                    )
+                }
+                InboundOwnerCmd::Show(environment) => {
+                    let env = admin.environment(&environment).await?;
+                    let row = admin
+                        .db
+                        .query_one(Statement::from_sql_and_values(
+                            DbBackend::Postgres,
+                            "SELECT credential_id, enabled, revision FROM call_inbound_owners WHERE environment_id = $1",
+                            vec![env.id.as_uuid().into()],
+                        ))
+                        .await
+                        .map_err(db_error)?;
+                    let owner = match row {
+                        Some(r) => Some(json!({
+                            "credentialId": r.try_get_by_index::<Uuid>(0).map_err(db_error)?,
+                            "enabled": r.try_get_by_index::<bool>(1).map_err(db_error)?,
+                            "revision": r.try_get_by_index::<i32>(2).map_err(db_error)?,
+                        })),
+                        None => None,
+                    };
+                    print(&json!({ "environmentId": env.id, "inboundOwner": owner }))
                 }
             }
         }

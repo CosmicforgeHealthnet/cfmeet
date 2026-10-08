@@ -46,6 +46,11 @@ text_enum!(
     }
 );
 
+impl EndpointClass {
+    /// A party on the public network (a protected contact; never an app endpoint).
+    pub const PUBLIC_NETWORK: EndpointClass = EndpointClass::PublicTelephone;
+}
+
 text_enum!(
     /// Direction of the communication relative to CF Meet.
     RouteDirection {
@@ -438,8 +443,12 @@ fn select_inner(
     // Candidate public routes (paid classes only): healthy first, then degraded, then
     // unknown health; never an unavailable or full route.
     let mut candidates: Vec<&CandidateRoute> = Vec::new();
+    // PSTN_TO_APP has no outbound leg: the call already arrived on its route, so no
+    // candidate route is selected (spend still applies to the inbound leg).
+    let dials_out = !matches!(class, RoutingClass::PstnToApp);
     if paid {
         match &inputs.routes {
+            _ if !dials_out => {}
             Evidence::Unknown => unknown.push("route_health".to_string()),
             Evidence::Known(routes) => {
                 let mut usable: Vec<&CandidateRoute> = routes

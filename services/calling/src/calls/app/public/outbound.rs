@@ -369,33 +369,7 @@ impl AppCallService {
             )
             .await?;
         let route_id = CallRouteId::from_uuid(route.id);
-        // The application side (initiator's RTC media) and the public leg.
-        let app_leg = self
-            .calls
-            .record_leg_in(
-                &txn,
-                &cmd,
-                &call,
-                NewLeg {
-                    route_id: Some(route_id),
-                    participant_id: None,
-                    direction: LegDirection::Outbound,
-                    kind: LegKind::Application,
-                },
-            )
-            .await?;
-        self.calls
-            .record_attempt_in(
-                &txn,
-                &cmd,
-                &call,
-                NewAttempt {
-                    route_id: Some(route_id),
-                    leg_id: Some(CallLegId::from_uuid(app_leg.id)),
-                    previous_attempt_id: None,
-                },
-            )
-            .await?;
+        // The public leg (executed by Telephony), then the application side.
         let public_leg = self
             .calls
             .record_leg_in(
@@ -419,6 +393,34 @@ impl AppCallService {
                 NewAttempt {
                     route_id: Some(route_id),
                     leg_id: Some(CallLegId::from_uuid(public_leg.id)),
+                    previous_attempt_id: None,
+                },
+            )
+            .await?;
+        // The application side (initiator's RTC media): its attempt is the latest, so
+        // media-resource outcomes never touch the public attempt.
+        let app_leg = self
+            .calls
+            .record_leg_in(
+                &txn,
+                &cmd,
+                &call,
+                NewLeg {
+                    route_id: Some(route_id),
+                    participant_id: None,
+                    direction: LegDirection::Outbound,
+                    kind: LegKind::Application,
+                },
+            )
+            .await?;
+        self.calls
+            .record_attempt_in(
+                &txn,
+                &cmd,
+                &call,
+                NewAttempt {
+                    route_id: Some(route_id),
+                    leg_id: Some(CallLegId::from_uuid(app_leg.id)),
                     previous_attempt_id: None,
                 },
             )
