@@ -5,6 +5,7 @@ import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { useDeleteMeeting } from "../hooks/use-meetings";
 import { useToast } from "@/components/ui/toast";
+import { useColors } from "@/hooks/useColors";
 
 interface DeleteMeetingModalProps {
   meetingId: string;
@@ -15,6 +16,7 @@ export function DeleteMeetingModal({ meetingId, onClose }: DeleteMeetingModalPro
   const [error, setError] = useState("");
   const deleteMeeting = useDeleteMeeting();
   const { success } = useToast();
+  const colors = useColors();
 
   const handleDelete = () => {
     setError("");
@@ -35,7 +37,7 @@ export function DeleteMeetingModal({ meetingId, onClose }: DeleteMeetingModalPro
         <Pressable className="bg-card dark:bg-card-dark rounded-2xl w-[90%] max-w-sm p-6">
           <View className="items-center mb-4">
             <View className="w-12 h-12 rounded-full bg-destructive/10 dark:bg-destructive-dark/10 items-center justify-center">
-              <Ionicons name="trash-outline" size={24} color="#dc2626" />
+              <Ionicons name="trash-outline" size={24} color={colors.destructive} />
             </View>
           </View>
 
