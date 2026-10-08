@@ -451,6 +451,65 @@ class RealRepository(unittest.TestCase):
             lambda r: append(r, "services/calling/.env.example", "\nPRIVACY_RELAY_DATABASE_URL=postgres://relay\n"),
         )
 
+    # Part D §31–§36 boundaries.
+    def test_relay_inventory_under_calling(self):
+        self.assertMutationFails(
+            "PRIVACY_RELAY_DOMAIN_ELSEWHERE",
+            lambda r: write(r, "services/calling/migration/src/m20990101_000099_relay_numbers.rs",
+                            'const UP: &str = "CREATE TABLE relay_number_inventory (id UUID PRIMARY KEY)";\n'),
+        )
+
+    def test_calling_querying_relay_assignments(self):
+        self.assertMutationFails(
+            "CROSS_SERVICE_TABLE_ACCESS",
+            lambda r: append(r, "services/calling/src/privacy_relay/mod.rs", '\nconst A: &str = "SELECT relay_number_id FROM relay_number_assignments WHERE id = $1";\n'),
+        )
+
+    def test_contact_vault_source_copied_into_calling(self):
+        self.assertMutationFails(
+            "CONTACT_VAULT_OUTSIDE_OWNER",
+            lambda r: append(r, "services/calling/src/privacy_relay/contacts.rs", "\nmod contact_vault { pub fn expose_e164() {} }\n"),
+        )
+
+    def test_calling_depending_on_contact_crypto(self):
+        self.assertMutationFails(
+            "CONTACT_VAULT_OUTSIDE_OWNER",
+            lambda r: append(r, "services/calling/Cargo.toml", '\n[dev-dependencies]\naes-gcm = "0.10"\n')
+            if "[dev-dependencies]" not in (r / "services/calling/Cargo.toml").read_text()
+            else (r / "services/calling/Cargo.toml").write_text(
+                (r / "services/calling/Cargo.toml").read_text().replace("[dev-dependencies]", '[dev-dependencies]\nphonenumber = "0.3"', 1)),
+        )
+
+    def test_plaintext_phone_field_in_calling(self):
+        self.assertMutationFails(
+            "PLAINTEXT_CONTACT_FIELD",
+            lambda r: append(r, "services/calling/src/privacy_relay/mod.rs", "\npub struct Leak { pub destination_number: String }\n"),
+        )
+
+    def test_permanent_numbering_inside_privacy_relay(self):
+        self.assertMutationFails(
+            "NUMBERING_IN_PRIVACY_RELAY",
+            lambda r: append(r, "services/privacy-relay/src/relay_numbers/mod.rs", "\npub fn start_number_porting() {}\n"),
+        )
+
+    def test_telephony_service_created_early(self):
+        self.assertMutationFails(
+            "FUTURE_SERVICE_IMPLEMENTED",
+            lambda r: write(r, "services/telephony/src/main.rs", "fn main() {}\n"),
+        )
+
+    def test_future_telephony_reading_the_privacy_relay_database(self):
+        self.assertMutationFails(
+            "CROSS_SERVICE_DATABASE_URL",
+            lambda r: write(r, "services/telephony/.env.example", "PRIVACY_RELAY_DATABASE_URL=postgres://relay\n"),
+        )
+
+    def test_numbering_service_created_early(self):
+        self.assertMutationFails(
+            "FUTURE_SERVICE_IMPLEMENTED",
+            lambda r: write(r, "services/numbering/Cargo.toml", '[package]\nname = "numbering"\nversion = "0.1.0"\n'),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

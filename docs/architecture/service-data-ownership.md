@@ -18,10 +18,10 @@ schema or contract exists for them until their implementation phase begins.
 | Service | Status | Owns | Must not |
 |---|---|---|---|
 | **Calling** (`services/calling`) | **Active.** Platform-consumer foundation, Calling core (Part C §15–§19: calls, participants, sessions, routes, legs, attempts, authorizations, events, quality, usage), application calling (§20–§25: endpoints, invitations, answer claims, media permissions, private media bindings, command idempotency, transfers, verified media-provider evidence) and Part D §26–§30 evidence (`call_privacy_authorizations`: the Privacy Relay decisions protected calls relied on; `call_privacy_enforcements`: received enforcement commands, deduplicated) implemented | • Calls<br>• Participants<br>• Sessions<br>• Routes<br>• Authorizations<br>• Call records<br>• Call quality<br>• Call-level usage<br>• Platform-consumer foundation *(implemented)*: tenants, applications, application environments, service accounts, API credentials and their scopes, limit policy, request-rate windows, communication principals | • read/write Privacy Relay private tables directly<br>• read/write Telephony private tables directly<br>• read Meeting Service tables<br>• receive ordinary plaintext protected contacts |
-| **Privacy Relay** (`services/privacy-relay`) | **Active (Part D §26–§30).** Communication Contexts, participant reassignment / revocation, Privacy Relay Sessions, relay authorization decisions, audit + outbox, command idempotency and durable enforcement jobs implemented ([ADR 0010](../decisions/0010-communication-context-and-privacy-relay-session-architecture.md)). **Contact Vault (§31–§33) planned — no contact storage exists.** | • Communication Contexts *(implemented)*<br>• Relay sessions *(implemented)*<br>• Relay authorization *(implemented)*<br>• Protected contact references *(planned)*<br>• Contact Vault metadata *(planned)* | • expose plaintext contacts to ordinary consumers<br>• become a general product/order database<br>• read Calling's principals, calls or credentials (it receives a signed delegated scope and CF Meet ids only)<br>• terminate calls itself (it asks Calling: `communication-authority.enforce`) |
+| **Privacy Relay** (`services/privacy-relay`) | **Active (Part D §26–§36).** Communication Contexts, participant reassignment / revocation, Privacy Relay Sessions, relay authorization decisions, audit + outbox, command idempotency and durable enforcement jobs ([ADR 0010](../decisions/0010-communication-context-and-privacy-relay-session-architecture.md)); the Contact Vault — protected ContactReferences, encrypted contact values, scoped keyed fingerprints, verification, access audit, resolution grants ([ADR 0011](../decisions/0011-contact-vault-cryptography-and-resolution.md)); the temporary relay-number inventory, assignments and inbound mapping ([ADR 0012](../decisions/0012-temporary-relay-number-assignment-and-cooldown.md)) | • Communication Contexts<br>• Relay sessions<br>• Relay authorization<br>• Protected ContactReferences<br>• Contact Vault metadata and ciphertext<br>• Contact verification<br>• Contact access audit<br>• Contact Resolution Grants<br>• Temporary relay-number inventory<br>• Relay-number assignments<br>• Inbound relay resolutions | • expose plaintext contacts to ordinary consumers<br>• become a general product/order database<br>• read Calling's principals, calls or credentials (it receives a signed delegated scope and CF Meet ids only)<br>• terminate calls itself (it asks Calling: `communication-authority.enforce`) |
 | **Telephony** (`services/telephony`) | **Planned — not yet created** | • Call legs<br>• Provider bindings<br>• Carrier events<br>• Telephony routes<br>• SIP/provider operational state | • independently decide whether a business user is authorized to call<br>• bypass Calling / Privacy Relay policy |
 | **Meeting Service** (`services/meeting-service`) | **Current** | • Meeting Spaces<br>• Conference Sessions<br>• Meeting participants<br>• Meeting-specific media control | • act as the universal backend for calls or telephony |
-| **Numbering** (future `services/numbering`) | **Future — not yet created; no code** | • Permanent public-number inventory<br>• Public-number assignment<br>• Public-number lifecycle | • be prematurely implemented as Part III relay-number logic |
+| **Numbering** (future `services/numbering`) | **Future — not yet created; no code** | • Permanent public-number inventory<br>• Public-number assignment<br>• Public-number lifecycle (Privacy Relay's temporary relay pool is NOT this) | • be prematurely implemented as Part III relay-number logic |
 
 Notes on the model:
 
@@ -49,15 +49,29 @@ Notes on the model:
   `privacy_relay_session_participants`, `privacy_relay_session_channels`,
   `privacy_relay_session_directions`, `relay_authorization_decisions`,
   `relay_audit_events`, `privacy_relay_outbox`, `privacy_relay_commands`,
-  `privacy_relay_enforcement_jobs`. None holds a telephone number, e-mail address,
-  SIP URI or other contact value.
+  `privacy_relay_enforcement_jobs`; the Contact Vault's `protected_contacts`,
+  `contact_fingerprints`, `contact_access_audit`, `contact_verification_events`,
+  `contact_resolution_grants`; the relay pool's `relay_number_inventory`,
+  `relay_number_events`, `relay_number_assignments`, `relay_inbound_resolutions`. A
+  private contact value exists only as AES-256-GCM ciphertext in `protected_contacts`
+  (keys outside the database); the only number stored in clear is CF Meet's own
+  platform-owned PUBLIC relay number in `relay_number_inventory`. Privacy Relay database
+  backups therefore contain encrypted contact data and are sensitive (useless without the
+  keyrings, which are never stored with them).
+* **Call evidence stays Calling's.** Privacy-safe call evidence of a Relay Session
+  (`GET /v1/privacy-relay/sessions/{id}/evidence`) is composed by Calling from its own
+  Call records after Privacy Relay proves the session belongs to the caller; Privacy
+  Relay never stores call records.
 * **Routes and telephony routes are separate records.** Calling owns Routes; Telephony
   owns Telephony routes. Neither service reads the other's.
 * **Plaintext contacts.** The only path to a plaintext contact is Privacy Relay's
   `protected-contact.resolve-for-execution`, which the permission registry in
   `packages/service-auth` allows to be granted to Telephony only, for executing a
-  specific authorized call leg. Calling and every other consumer receive protected
-  contact references, never plaintext.
+  specific authorized call leg with a Contact Resolution Grant that Calling requested
+  (`protected-contact.grant-for-execution`; the grant carries no value). Calling and
+  every other consumer receive protected contact references, never plaintext; Calling
+  has no Contact Vault or Privacy Relay database URL. Inbound caller numbers enter the
+  vault directly from Telephony (`protected-contact.protect-inbound`).
 * **Telephony executes, it does not authorize.** Telephony acts on call legs Calling
   asks it to execute (`call-leg.execute` is grantable to Calling only), within the policy
   Calling and Privacy Relay have already applied.

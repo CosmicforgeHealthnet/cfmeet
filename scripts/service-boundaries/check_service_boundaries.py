@@ -20,6 +20,16 @@ crosses another service's boundary:
   CROSS_SERVICE_DB_HELPER         production code of S defines or uses a helper named
                                   for another service's database, e.g.
                                   load_user_from_meeting_db
+  PRIVACY_RELAY_DOMAIN_ELSEWHERE  another service's migrations create a Contact Vault,
+                                  relay-number or inbound-relay table (e.g. a relay-number
+                                  inventory under Calling)
+  CONTACT_VAULT_OUTSIDE_OWNER     Contact Vault code or crates (AES-GCM, phonenumber, the
+                                  plaintext accessor, keyrings) outside Privacy Relay
+  PLAINTEXT_CONTACT_FIELD         a plaintext telephone field in Calling's production code
+  NUMBERING_IN_PRIVACY_RELAY      permanent Numbering concepts (porting, ownership,
+                                  purchase, marketplace) inside Privacy Relay
+  FUTURE_SERVICE_IMPLEMENTED      services/telephony, services/numbering or
+                                  services/contact-vault exists before its phase
 
 Table ownership is derived from each service's own migrations (raw ``CREATE TABLE`` and
 SeaORM ``X::Table`` idents), so it cannot drift from the schema. Known service names are
@@ -182,6 +192,28 @@ def camel_to_snake(name: str) -> str:
 # Vault is part of Privacy Relay), so `CONTACT_VAULT_DATABASE_URL` is Privacy Relay's.
 COMPONENT_ALIASES = {"privacy-relay": {"contact_vault"}}
 
+# Part D §31–§36 boundaries.
+CONTACT_VAULT_OWNER = "privacy-relay"
+CONTACT_VAULT_CRATES = {"aes-gcm", "phonenumber"}
+CONTACT_VAULT_MARKER_RE = re.compile(
+    r"\b(?:aes_gcm|phonenumber|expose_e164|ContactKeyProvider|FileKeyring|VaultKeys|contact_vault)\b"
+)
+PLAINTEXT_FIELD_SERVICES = {"calling"}
+PLAINTEXT_FIELD_RE = re.compile(
+    r"\b(phone_number|telephone_number|msisdn|e164|destination_number|caller_number|private_number|raw_number)\s*:",
+    re.I,
+)
+NUMBERING_RE = re.compile(
+    r"\b[a-z_]*(?:number_porting|port_in|port_out|number_port|permanent_number|number_marketplace|"
+    r"number_ownership|purchase_number|number_purchase)[a-z_]*\b",
+    re.I,
+)
+FUTURE_SERVICES = {"telephony", "numbering", "contact-vault"}
+PRIVACY_RELAY_DOMAIN_PREFIXES = (
+    "protected_contact", "contact_fingerprint", "contact_access", "contact_verification",
+    "contact_resolution", "relay_number", "relay_inbound",
+)
+
 
 def aliases(service: str) -> set[str]:
     """Lower-case snake aliases a service is referred to by: meeting-service ->
@@ -291,6 +323,11 @@ def check_manifest(repo: Repository, manifest: Path, out: list[Violation]):
         out.append(Violation("CARGO_MANIFEST_INVALID", repo.rel(manifest), 1, str(e)))
         return
     text_lines = manifest.read_text(encoding="utf-8").splitlines()
+    if name != CONTACT_VAULT_OWNER:
+        for section in ("dependencies", "dev-dependencies", "build-dependencies"):
+            for crate in CONTACT_VAULT_CRATES & set(data.get(section, {})):
+                line = next((i + 1 for i, l in enumerate(text_lines) if l.strip().startswith(crate)), 1)
+                out.append(Violation("CONTACT_VAULT_OUTSIDE_OWNER", repo.rel(manifest), line, f"`{crate}` is Contact Vault machinery; only services/{CONTACT_VAULT_OWNER} encrypts or parses private numbers"))
     for keypath, value in toml_paths(data):
         target = resolve_glob_free(manifest.parent, value)
         target_kind, target_name = repo.owner(target)
@@ -406,6 +443,16 @@ def check_rust(repo: Repository, path: Path, out: list[Violation]):
                 out.append(Violation("CROSS_SERVICE_DB_HELPER", rel, line_of(identifiers_only, m.start()), f"`{m.group(0)}` accesses the data store of {other}; call its authenticated API or consume its events"))
                 break
 
+    if name != CONTACT_VAULT_OWNER:
+        for m in CONTACT_VAULT_MARKER_RE.finditer(identifiers_only):
+            out.append(Violation("CONTACT_VAULT_OUTSIDE_OWNER", rel, line_of(identifiers_only, m.start()), f"`{m.group(0)}`: Contact Vault code exists only in services/{CONTACT_VAULT_OWNER}"))
+    if name in PLAINTEXT_FIELD_SERVICES:
+        for m in PLAINTEXT_FIELD_RE.finditer(identifiers_only):
+            out.append(Violation("PLAINTEXT_CONTACT_FIELD", rel, line_of(identifiers_only, m.start()), f"`{m.group(1)}`: {name} handles ContactReferences, never telephone numbers"))
+    if name == CONTACT_VAULT_OWNER:
+        for m in NUMBERING_RE.finditer(identifiers_only):
+            out.append(Violation("NUMBERING_IN_PRIVACY_RELAY", rel, line_of(identifiers_only, m.start()), f"`{m.group(0)}`: permanent public-number lifecycle belongs to the future Numbering service"))
+
 
 def is_config(path: Path) -> bool:
     return path.name in CONFIG_NAMES or path.suffix in CONFIG_SUFFIXES or path.name.startswith(".env")
@@ -425,6 +472,13 @@ def check_config(repo: Repository, path: Path, out: list[Violation]):
 def check(root: Path) -> list[Violation]:
     repo = Repository(root)
     out: list[Violation] = []
+    for future in sorted(FUTURE_SERVICES & set(repo.services)):
+        out.append(Violation("FUTURE_SERVICE_IMPLEMENTED", f"services/{future}", 1, f"services/{future} belongs to a later phase and must not exist yet"))
+    for service, tables in sorted(repo.tables.items()):
+        if service == CONTACT_VAULT_OWNER:
+            continue
+        for table in sorted(t for t in tables if t.startswith(PRIVACY_RELAY_DOMAIN_PREFIXES)):
+            out.append(Violation("PRIVACY_RELAY_DOMAIN_ELSEWHERE", f"services/{service}", 1, f"table `{table}` belongs to services/{CONTACT_VAULT_OWNER} (Contact Vault / relay numbers); no other service stores it"))
     for top in ("services", "packages"):
         for path in repo.files(repo.root / top):
             if path.name == "Cargo.toml":

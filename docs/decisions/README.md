@@ -14,3 +14,5 @@ Short, numbered records of significant architectural decisions.
 | [0008](0008-calling-endpoints-ringing-and-answer-arbitration.md) | Endpoints, signaling credentials, ringing and per-participant answer arbitration (Part C §20) | Accepted |
 | [0009](0009-calling-call-control-idempotency-and-transfer.md) | Call control, idempotency, hold semantics and application transfer (Part C §21, §25) | Accepted |
 | [0010](0010-communication-context-and-privacy-relay-session-architecture.md) | Communication Context and Privacy Relay Session architecture; protected calls and active-call enforcement (Part D §26–§30) | Accepted |
+| [0011](0011-contact-vault-cryptography-and-resolution.md) | Contact Vault cryptography, scoped keyed equality, verification trust model, Contact Resolution Grants and Telephony-only resolution (Part D §31–§33) | Accepted |
+| [0012](0012-temporary-relay-number-assignment-and-cooldown.md) | Temporary relay-number inventory, deterministic assignment, cooldown and inbound mapping (Part D §34–§35) | Accepted |
