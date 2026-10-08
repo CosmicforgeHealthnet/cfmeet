@@ -452,6 +452,11 @@ impl RelayService {
         Ok((
             json!({
                 "outcome": "RESOLVED",
+                // The inbound call's owner scope: the relay number itself carries no
+                // tenant, so Telephony learns it only from a RESOLVED mapping.
+                "tenantId": ctx.row.tenant_id,
+                "applicationId": ctx.row.application_id,
+                "environmentId": ctx.row.environment_id,
                 "contextId": ctx.id(),
                 "contextVersion": ctx.row.version,
                 "relaySessionId": session.row.id,

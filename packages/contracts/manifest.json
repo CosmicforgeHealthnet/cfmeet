@@ -214,7 +214,7 @@
     },
     {
       "id": "cfmeet.privacy-relay.authorization",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "privacy-relay/authorization/v1.schema.json",
       "owner": "privacy-relay",
@@ -269,7 +269,7 @@
     },
     {
       "id": "cfmeet.privacy-relay.contact-resolution",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "privacy-relay/contact-resolution/v1.schema.json",
       "owner": "privacy-relay",
@@ -291,7 +291,7 @@
     },
     {
       "id": "cfmeet.privacy-relay.relay-routing",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "privacy-relay/relay-routing/v1.schema.json",
       "owner": "privacy-relay",

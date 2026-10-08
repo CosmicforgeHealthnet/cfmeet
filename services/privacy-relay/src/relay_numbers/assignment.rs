@@ -773,3 +773,40 @@ impl RelayService {
         .await
     }
 }
+
+#[derive(sea_orm::FromQueryResult)]
+struct CallerIdentityRow {
+    assignment_id: Uuid,
+    e164: String,
+}
+
+/// The caller identity of a public-network leg of `session` (Part E §44): the relay
+/// number lent to THAT session — its active, outbound-capable relay identity binding —
+/// as (assignment id, canonical E.164). `None` when the session has none: the leg then
+/// cannot present any caller identity, and Telephony refuses to originate.
+pub(crate) async fn session_caller_identity<C: ConnectionTrait>(
+    conn: &C,
+    scope: crate::scope::RelayScope,
+    session: Uuid,
+    now: DateTime<Utc>,
+) -> RelayResult<Option<(Uuid, String)>> {
+    let row: Option<CallerIdentityRow> = db::one(
+        conn,
+        "SELECT a.id AS assignment_id, i.canonical_public_e164 AS e164 \
+         FROM privacy_relay_sessions s \
+         JOIN relay_number_assignments a ON a.id = s.relay_identity_binding_ref \
+         JOIN relay_number_inventory i ON i.id = a.relay_number_id \
+         WHERE s.id = $1 AND s.tenant_id = $2 AND s.application_id = $3 AND s.environment_id = $4 \
+           AND a.relay_session_id = s.id AND a.status = 'ACTIVE' AND a.expires_at > $5 \
+           AND i.operational_status = 'ASSIGNED' AND 'VOICE_OUTBOUND' = ANY(a.capabilities)",
+        vec![
+            session.into(),
+            scope.tenant_id().into(),
+            scope.application_id().into(),
+            scope.environment_id().into(),
+            now.into(),
+        ],
+    )
+    .await?;
+    Ok(row.map(|r| (r.assignment_id, r.e164)))
+}

@@ -105,12 +105,15 @@
       }
     },
     "InboundResolution": {
-      "description": "The CURRENT safe relay mapping: references, versions and the validity boundary only — never a relay number, destination number or provider identifier. Anything else (unknown, cooldown, released, revoked, expired, stale / mismatched event) is the generic RELAY_MAPPING_NOT_ACTIVE; ambiguity is RELAY_MAPPING_AMBIGUOUS (fail closed, incident).",
+      "description": "The CURRENT safe relay mapping: the owner scope, references, versions and the validity boundary only — never a relay number, destination number or provider identifier. Anything else (unknown, cooldown, released, revoked, expired, stale / mismatched event) is the generic RELAY_MAPPING_NOT_ACTIVE; ambiguity is RELAY_MAPPING_AMBIGUOUS (fail closed, incident).",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "decisionId",
         "outcome",
+        "tenantId",
+        "applicationId",
+        "environmentId",
         "contextId",
         "contextVersion",
         "relaySessionId",
@@ -129,6 +132,15 @@
         },
         "outcome": {
           "const": "RESOLVED"
+        },
+        "tenantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "applicationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
         },
         "contextId": {
           "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"

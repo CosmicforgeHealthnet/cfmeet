@@ -195,6 +195,24 @@
         },
         "expiresAt": {
           "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "callerIdentity": {
+          "description": "The caller identity the leg presents: the relay number lent to the grant's relay session (its active, outbound-capable relay identity binding), selected by Privacy Relay — never by a client. Absent when the session has none; Telephony then refuses to originate. Present ONLY in this Telephony response.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "assignmentId",
+            "e164"
+          ],
+          "properties": {
+            "assignmentId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "e164": {
+              "type": "string",
+              "pattern": "^\\+[1-9][0-9]{1,14}$"
+            }
+          }
         }
       }
     },

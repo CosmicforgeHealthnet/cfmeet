@@ -272,6 +272,20 @@ impl RelayService {
             AuthorizationDecision::Denied
         };
         let id = Uuid::new_v4();
+        // Routing facts of the protected contacts of an AUTHORIZED public-network decision:
+        // country and (effective, read-time) verification — never a number.
+        let contact_facts: Vec<(Uuid, Option<String>)> = if decision
+            == AuthorizationDecision::Authorized
+            && !matches!(req.route, CommunicationRoute::Application)
+        {
+            let ids: Vec<Uuid> = std::iter::once(&source)
+                .chain(targets.iter())
+                .filter_map(SubjectRef::contact)
+                .collect();
+            crate::contact_vault::verification::contact_countries(&txn, scope, &ids).await?
+        } else {
+            Vec::new()
+        };
         let principals: Vec<Uuid> = targets.iter().filter_map(SubjectRef::principal).collect();
         let contacts: Vec<Uuid> = targets.iter().filter_map(SubjectRef::contact).collect();
         db::exec(
@@ -338,6 +352,19 @@ impl RelayService {
         });
         if let Some(until) = evaluation.valid_until {
             body["validUntil"] = json!(ts(until));
+        }
+        if !contact_facts.is_empty() {
+            body["contactFacts"] = contact_facts
+                .iter()
+                .map(|(id, country)| {
+                    json!({
+                        "contactReference": id,
+                        "country": country,
+                        // Authorized over a public route implies effective VERIFIED now.
+                        "verification": "VERIFIED",
+                    })
+                })
+                .collect();
         }
         Ok(body)
     }

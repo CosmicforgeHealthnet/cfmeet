@@ -56,6 +56,34 @@ fn trust_source_ok(s: &str) -> bool {
             .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
 }
 
+#[derive(sea_orm::FromQueryResult)]
+struct CountryRow {
+    id: Uuid,
+    country_iso2: Option<String>,
+}
+
+/// The routing country of protected contacts of `scope` (never a number), by reference.
+pub async fn contact_countries<C: ConnectionTrait>(
+    conn: &C,
+    scope: RelayScope,
+    ids: &[Uuid],
+) -> RelayResult<Vec<(Uuid, Option<String>)>> {
+    let rows: Vec<CountryRow> = db::all(
+        conn,
+        "SELECT id, country_iso2 FROM protected_contacts \
+         WHERE id = ANY($1) AND tenant_id = $2 AND application_id = $3 AND environment_id = $4 \
+         ORDER BY id",
+        vec![
+            ids.to_vec().into(),
+            scope.tenant_id().into(),
+            scope.application_id().into(),
+            scope.environment_id().into(),
+        ],
+    )
+    .await?;
+    Ok(rows.into_iter().map(|r| (r.id, r.country_iso2)).collect())
+}
+
 /// Usability of a contact for an authorization decision (share-locked).
 pub async fn contact_use<C: ConnectionTrait>(
     conn: &C,

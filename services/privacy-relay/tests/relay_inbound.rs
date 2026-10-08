@@ -117,6 +117,11 @@ async fn telephony_alone_resolves_a_called_relay_number_to_safe_references() {
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     let res = &r.json["resolution"];
     assert_eq!(res["outcome"], "RESOLVED");
+    // Part E: the owner scope (the relay number itself carries no tenant).
+    let d = c.delegated();
+    assert_eq!(res["tenantId"], json!(d.tenant_id()));
+    assert_eq!(res["applicationId"], json!(d.application_id()));
+    assert_eq!(res["environmentId"], json!(d.application_environment_id()));
     assert_eq!(
         (res["contextId"].as_str(), res["relaySessionId"].as_str()),
         (Some(m.context.as_str()), Some(m.session.as_str()))

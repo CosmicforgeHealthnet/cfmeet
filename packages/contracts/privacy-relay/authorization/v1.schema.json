@@ -49,7 +49,7 @@
       }
     },
     "AuthorizationDecisionResult": {
-      "description": "A recorded decision evaluated against the CURRENT context AND session (their intersection) at server time. validUntil is present exactly when AUTHORIZED. No contacts, no provider ids.",
+      "description": "A recorded decision evaluated against the CURRENT context AND session (their intersection) at server time. validUntil is present exactly when AUTHORIZED. No contact values, no provider ids. An AUTHORIZED public-network decision (PUBLIC_RELAY / CALLBACK_RELAY) about protected contacts carries contactFacts: their routing country and read-time verification — never a number.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -110,6 +110,39 @@
         },
         "decidedAt": {
           "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "contactFacts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 65,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "contactReference",
+              "country",
+              "verification"
+            ],
+            "properties": {
+              "contactReference": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContactReference"
+              },
+              "country": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[A-Z]{2}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "verification": {
+                "const": "VERIFIED"
+              }
+            }
+          }
         }
       },
       "if": {

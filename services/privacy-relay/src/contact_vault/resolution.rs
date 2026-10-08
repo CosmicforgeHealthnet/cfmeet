@@ -412,6 +412,16 @@ impl ContactVault {
             .ok_or_else(denied)?;
         require_verified(&row, now)?;
         let number = self.open_row(keys, &row)?;
+        // The caller identity this leg presents: the relay number lent to THIS session
+        // (its active relay identity binding, outbound-capable). Selected here, from the
+        // session's own assignment — never by a client, never a customer number.
+        let caller_identity = crate::relay_numbers::assignment::session_caller_identity(
+            &txn,
+            scope,
+            grant.relay_session_ref,
+            now,
+        )
+        .await?;
         if !retry {
             db::exec(
                 &txn,
@@ -444,7 +454,7 @@ impl ContactVault {
         .await?;
         txn.commit().await?;
         tracing::info!(grant_id = %request.grant_id, contact_reference = %contact, call_leg_id = %grant.call_leg_ref, retry, "contact resolved for execution");
-        Ok(json!({
+        let mut body = json!({
             "resolution": {
                 "contactReference": contact,
                 "e164": number.expose_e164(),
@@ -454,7 +464,14 @@ impl ContactVault {
                 "grantId": request.grant_id,
                 "expiresAt": iso(grant.expires_at),
             }
-        }))
+        });
+        if let Some((assignment_id, e164)) = caller_identity {
+            body["resolution"]["callerIdentity"] = json!({
+                "assignmentId": assignment_id,
+                "e164": e164,
+            });
+        }
+        Ok(body)
     }
 
     /// Marks issued grants past their expiry EXPIRED (they are refused at read time
