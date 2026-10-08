@@ -67,6 +67,11 @@ pub fn routes() -> Router<AppState> {
             "/sessions/:session_id/relay-number-assignment/release",
             post(release_relay_assignment),
         )
+        .route("/relay-routing/resolve-inbound", post(resolve_inbound))
+        .route(
+            "/relay-routing/protect-inbound-caller",
+            post(protect_inbound_caller),
+        )
         .route("/communication/authorize", post(authorize))
         .route(
             "/contacts/:contact_reference/resolution-grants",
@@ -441,6 +446,95 @@ async fn release_relay_assignment(
         relay(&state)
             .release_relay_assignment(&cmd, session_id(&id)?)
             .await?,
+        false,
+    ))
+}
+
+/// Telephony's inbound operations: the permission, and NO delegated context (the relay
+/// mapping, not the caller, fixes the tenant / application / environment).
+fn inbound_requester(
+    caller: &InternalCaller,
+    permission: InternalPermission,
+) -> Result<crate::relay_numbers::inbound::InboundRequester, RelayError> {
+    caller.require_permission(permission)?;
+    if caller.context().delegated_platform_context().is_some() {
+        return Err(RelayError::Validation(
+            "Inbound relay operations take no delegated context; the relay mapping is the scope.",
+        ));
+    }
+    Ok(crate::relay_numbers::inbound::InboundRequester {
+        service: caller.context().authenticated_service().clone(),
+        request_id: caller.request_id().clone(),
+        correlation_id: caller.correlation_id().clone(),
+    })
+}
+
+/// Telephony only: the current safe mapping of a called relay number (never a
+/// destination number), or a generic RELAY_MAPPING_NOT_ACTIVE.
+async fn resolve_inbound(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    raw: Result<Json<crate::relay_numbers::inbound::ResolveInboundRequest>, JsonRejection>,
+) -> Result<Response, RelayError> {
+    let requester = inbound_requester(&caller, InternalPermission::RelayNumberResolveInbound)?;
+    let request = body(raw)?;
+    Ok(respond(
+        StatusCode::OK,
+        relay(&state).resolve_inbound(&requester, request).await?,
+        false,
+    ))
+}
+
+/// Telephony only: protect an inbound caller's presented number in the scope of a
+/// RESOLVED inbound resolution; answers its ContactReference and whom it may reach.
+async fn protect_inbound_caller(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    raw: Result<Json<crate::contact_vault::inbound::ProtectInboundRequest>, JsonRejection>,
+) -> Result<Response, RelayError> {
+    let requester = inbound_requester(&caller, InternalPermission::ProtectedContactProtectInbound)?;
+    let request = body(raw)?;
+    let mapped = relay(&state)
+        .inbound_protection_scope(&requester.service, request.inbound_resolution_id)
+        .await?;
+    let actor = crate::contact_vault::ContactActor::service(
+        mapped.scope,
+        requester.service.clone(),
+        None,
+        requester.request_id.clone(),
+        requester.correlation_id.clone(),
+    );
+    let (created, contact) = state
+        .contacts
+        .protect_inbound(
+            &actor,
+            request,
+            Some(&mapped.country),
+            crate::contact_vault::audit::ExecutionRefs {
+                context: Some(mapped.context_id),
+                relay_session: Some(mapped.relay_session_id),
+                ..Default::default()
+            },
+        )
+        .await?;
+    let targets = relay(&state)
+        .inbound_caller_targets(&mapped, contact)
+        .await?;
+    Ok(respond(
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        serde_json::json!({
+            "inboundCaller": {
+                "contactReference": contact,
+                "created": created,
+                "contextId": mapped.context_id,
+                "relaySessionId": mapped.relay_session_id,
+                "allowedTargets": targets,
+            }
+        }),
         false,
     ))
 }

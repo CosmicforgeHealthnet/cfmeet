@@ -45,7 +45,9 @@
       ],
       "permissions": [
         "communication-context.read",
-        "protected-contact.resolve-for-execution"
+        "protected-contact.resolve-for-execution",
+        "relay-number.resolve-inbound",
+        "protected-contact.protect-inbound"
       ]
     }
   ]

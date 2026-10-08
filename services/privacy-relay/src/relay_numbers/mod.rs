@@ -23,6 +23,7 @@
 //!   waits on an inventory row: SKIP LOCKED).
 
 pub mod assignment;
+pub mod inbound;
 pub mod inventory;
 
 use chrono::{DateTime, Utc};

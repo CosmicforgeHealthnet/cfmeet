@@ -1,0 +1,279 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/privacy-relay/relay-routing/v1.schema.json",
+  "title": "CF Meet Inbound Relay Routing v1",
+  "description": "Inbound relay resolution and inbound caller protection for the future Telephony service (Part D section 35). Internal only; no carrier callback, no execution. The called relay identity and the presented caller number appear ONLY in the two request bodies.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ResolveInboundRequest"
+    },
+    {
+      "$ref": "#/$defs/InboundResolutionResult"
+    },
+    {
+      "$ref": "#/$defs/ProtectInboundCallerRequest"
+    },
+    {
+      "$ref": "#/$defs/InboundCallerResult"
+    }
+  ],
+  "$defs": {
+    "ResolveInboundRequest": {
+      "description": "Telephony only (relay-number.resolve-inbound), WITHOUT a delegated context: the relay mapping is the scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "calledRelayIdentity",
+        "providerObservedAt"
+      ],
+      "properties": {
+        "calledRelayIdentity": {
+          "description": "The CALLED relay number: CF Meet's own platform-owned public relay identity (international form). Accepted ONLY here; never logged, evented or returned.",
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 32,
+          "pattern": "^\\+[0-9 ()./-]{2,31}$"
+        },
+        "providerEventReference": {
+          "description": "Opaque provider event reference (never a number, address or URI).",
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ExternalContextReference"
+        },
+        "providerObservedAt": {
+          "description": "When the provider observed the inbound event (at most 15 minutes old, at most 2 minutes ahead).",
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "providerStartedAt": {
+          "description": "When the call originated, where the provider reports it trustworthily; an origin before the current assignment is refused.",
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "assignmentGeneration": {
+          "description": "Assignment correlation where the provider path carries it (must match).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "assignmentId": {
+          "description": "Assignment correlation where the provider path carries it (must match).",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "InboundSource": {
+      "description": "A protected contact of the session that may call in, and whom it may reach (CALLBACK_RELAY, VOICE, evaluated now).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contactReferenceId",
+        "allowedTargets"
+      ],
+      "properties": {
+        "contactReferenceId": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContactReference"
+        },
+        "allowedTargets": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "principalId"
+                ],
+                "properties": {
+                  "principalId": {
+                    "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "contactReferenceId"
+                ],
+                "properties": {
+                  "contactReferenceId": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContactReference"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "InboundResolution": {
+      "description": "The CURRENT safe relay mapping: references, versions and the validity boundary only — never a relay number, destination number or provider identifier. Anything else (unknown, cooldown, released, revoked, expired, stale / mismatched event) is the generic RELAY_MAPPING_NOT_ACTIVE; ambiguity is RELAY_MAPPING_AMBIGUOUS (fail closed, incident).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decisionId",
+        "outcome",
+        "contextId",
+        "contextVersion",
+        "relaySessionId",
+        "relaySessionVersion",
+        "assignmentId",
+        "assignmentGeneration",
+        "strategy",
+        "channel",
+        "route",
+        "inboundSources",
+        "validUntil"
+      ],
+      "properties": {
+        "decisionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "outcome": {
+          "const": "RESOLVED"
+        },
+        "contextId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "contextVersion": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+        },
+        "relaySessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "relaySessionVersion": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+        },
+        "assignmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "assignmentGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "strategy": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/RelayStrategy"
+        },
+        "channel": {
+          "const": "VOICE"
+        },
+        "route": {
+          "const": "CALLBACK_RELAY"
+        },
+        "inboundSources": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/InboundSource"
+          }
+        },
+        "validUntil": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        }
+      }
+    },
+    "InboundResolutionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resolution"
+      ],
+      "properties": {
+        "resolution": {
+          "$ref": "#/$defs/InboundResolution"
+        }
+      }
+    },
+    "ProtectInboundCallerRequest": {
+      "description": "Telephony only (protected-contact.protect-inbound), WITHOUT a delegated context.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inboundResolutionId",
+        "telephoneNumber"
+      ],
+      "properties": {
+        "inboundResolutionId": {
+          "description": "A RESOLVED inbound resolution of the same Telephony service, at most 120 s old, whose assignment is still ACTIVE.",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "telephoneNumber": {
+          "description": "The caller's presented number, handed directly to the Contact Vault (canonicalized, fingerprinted, deduplicated or encrypted in the mapping's scope). Never stored outside the vault, never logged.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        }
+      }
+    },
+    "InboundCaller": {
+      "description": "The inbound caller as a ContactReference (no number).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contactReference",
+        "created",
+        "contextId",
+        "relaySessionId",
+        "allowedTargets"
+      ],
+      "properties": {
+        "contactReference": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContactReference"
+        },
+        "created": {
+          "type": "boolean"
+        },
+        "contextId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "relaySessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "allowedTargets": {
+          "description": "Whom this caller may reach now (empty for an unknown caller).",
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "principalId"
+                ],
+                "properties": {
+                  "principalId": {
+                    "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "contactReferenceId"
+                ],
+                "properties": {
+                  "contactReferenceId": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContactReference"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "InboundCallerResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inboundCaller"
+      ],
+      "properties": {
+        "inboundCaller": {
+          "$ref": "#/$defs/InboundCaller"
+        }
+      }
+    }
+  }
+}

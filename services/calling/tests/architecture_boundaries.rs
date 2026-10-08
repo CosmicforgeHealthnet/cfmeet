@@ -337,6 +337,7 @@ const FOREIGN_DOMAIN_TABLES: &[&str] = &[
     "relay_number_inventory",
     "relay_number_assignments",
     "relay_number_events",
+    "relay_inbound_resolutions",
     "contact_vault",
     "provider_call_bindings",
     "provider_events",

@@ -74,7 +74,9 @@
         "relay-session.write",
         "communication-authority.enforce",
         "protected-contact.grant-for-execution",
-        "relay-number.assign"
+        "relay-number.assign",
+        "relay-number.resolve-inbound",
+        "protected-contact.protect-inbound"
       ]
     }
   }

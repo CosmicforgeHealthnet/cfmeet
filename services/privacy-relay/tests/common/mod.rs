@@ -284,6 +284,8 @@ pub const ALL_CALLING_PERMISSIONS: &[&str] = &[
 pub const TELEPHONY_PERMISSIONS: &[&str] = &[
     "communication-context.read",
     "protected-contact.resolve-for-execution",
+    "relay-number.resolve-inbound",
+    "protected-contact.protect-inbound",
 ];
 
 pub fn trust_bundle_json(
@@ -653,6 +655,14 @@ impl Harness {
             })
             .await
             .unwrap()
+    }
+
+    /// A POST by the Telephony fixture identity WITHOUT a delegated context (inbound
+    /// operations are scoped by the relay mapping).
+    pub async fn telephony(&self, path: &str, body: Value) -> Response {
+        let telephony = self.ids.telephony.clone();
+        self.send_as(&telephony, Method::POST, path, None, Some(body))
+            .await
     }
 
     /// POST /internal/v1/sessions/{id}/relay-number-assignment as Calling.

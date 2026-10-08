@@ -26,6 +26,7 @@ const TABLES: &[&str] = &[
     "protected_contacts",
     "relay_audit_events",
     "relay_authorization_decisions",
+    "relay_inbound_resolutions",
     "relay_number_assignments",
     "relay_number_events",
     "relay_number_inventory",
@@ -56,7 +57,7 @@ async fn up_down_up_creates_exactly_the_privacy_relay_tables() {
             "SELECT count(*) FROM privacy_relay_seaql_migrations"
         )
         .await,
-        10
+        11
     );
     Migrator::down(&db.conn, None).await.unwrap();
     assert_eq!(tables(&db.conn).await, ["privacy_relay_seaql_migrations"]);
@@ -86,6 +87,8 @@ async fn up_down_up_creates_exactly_the_privacy_relay_tables() {
         "privacy_relay_seaql_migrations",
         "relay_number_inventory",
         "relay_number_events",
+        // Unresolved inbound attempts have no scope (a scoped row names all of it).
+        "relay_inbound_resolutions",
     ];
     for table in TABLES.iter().filter(|t| !PLATFORM_OWNED.contains(t)) {
         for column in ["tenant_id", "application_id", "environment_id"] {

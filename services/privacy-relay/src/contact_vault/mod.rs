@@ -22,6 +22,7 @@ pub mod audit;
 pub mod crypto;
 pub mod fingerprint;
 pub mod http;
+pub mod inbound;
 pub mod keyring;
 pub mod model;
 pub mod normalization;

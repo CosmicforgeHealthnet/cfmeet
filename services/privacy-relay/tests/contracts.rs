@@ -418,11 +418,15 @@ async fn contact_vault_routes_and_responses_equal_the_contract() {
         }
     }
     assert_eq!(registered, served_here);
-    // `telephoneNumber` exists only in the Contact Vault raw-input bodies.
+    // `telephoneNumber` exists only in the Contact Vault raw-input bodies (contacts, and
+    // Telephony's inbound caller protection).
     for c in read("manifest.json")["contracts"].as_array().unwrap() {
         let path = c["path"].as_str().unwrap();
         let text = std::fs::read_to_string(contracts().join(path)).unwrap();
-        if path != "privacy-relay/contact/v1.schema.json" && !path.ends_with("openapi.json") {
+        if path != "privacy-relay/contact/v1.schema.json"
+            && path != "privacy-relay/relay-routing/v1.schema.json"
+            && !path.ends_with("openapi.json")
+        {
             assert!(!text.contains("\"telephoneNumber\""), "{path}");
         }
     }
@@ -598,4 +602,87 @@ async fn relay_number_vocabulary_and_responses_equal_the_contract() {
         assert_valid(&envelope_v, &envelope, "envelope");
         assert_valid(&payload_v, &envelope["payload"], "payload");
     }
+}
+
+#[tokio::test]
+async fn inbound_relay_routing_responses_equal_the_contract() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = Consumer::new(Kind::Production);
+    h.add_relay_number("+44 20 7946 0500", "pb-contract").await;
+    let principal = uuid::Uuid::new_v4();
+    let contact = h.create_contact(&c, "+44 20 7946 0123").await["contactReference"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    h.verify_contact(&c, &contact, "VERIFIED", None).await;
+    let mut req = context_request(&[principal], "BIDIRECTIONAL", &[]);
+    req["participants"] = json!([{ "principalId": principal }, { "contactReferenceId": contact }]);
+    req["allowedRelayStrategies"] = json!(["CALLBACK_RELAY_ALLOWED"]);
+    let ctx = h.create_context(&c, req).await;
+    let sid = h
+        .create_session(
+            &c,
+            ctx["contextId"].as_str().unwrap(),
+            json!({ "relayStrategy": "CALLBACK_RELAY_ALLOWED" }),
+        )
+        .await["relaySessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(h.assign_relay_number(&c, &sid).await.status.as_u16(), 201);
+    let request = json!({ "calledRelayIdentity": "+44 20 7946 0500", "providerObservedAt": iso(at(0)), "assignmentGeneration": 1 });
+    assert_valid(
+        &validator("privacy-relay/relay-routing/v1.schema.json#/$defs/ResolveInboundRequest"),
+        &request,
+        "request",
+    );
+    let resolved = h
+        .telephony("/internal/v1/relay-routing/resolve-inbound", request)
+        .await;
+    assert_valid(
+        &validator("privacy-relay/relay-routing/v1.schema.json#/$defs/InboundResolutionResult"),
+        &resolved.json,
+        "resolution",
+    );
+    let protect = json!({
+        "inboundResolutionId": resolved.json["resolution"]["decisionId"],
+        "telephoneNumber": "+44 20 7946 0123",
+    });
+    assert_valid(
+        &validator("privacy-relay/relay-routing/v1.schema.json#/$defs/ProtectInboundCallerRequest"),
+        &protect,
+        "protect request",
+    );
+    let caller_v =
+        validator("privacy-relay/relay-routing/v1.schema.json#/$defs/InboundCallerResult");
+    let known = h
+        .telephony(
+            "/internal/v1/relay-routing/protect-inbound-caller",
+            protect.clone(),
+        )
+        .await;
+    assert_valid(&caller_v, &known.json, "known caller");
+    let mut stranger = protect;
+    stranger["telephoneNumber"] = json!("+44 20 7946 0777");
+    let unknown = h
+        .telephony(
+            "/internal/v1/relay-routing/protect-inbound-caller",
+            stranger,
+        )
+        .await;
+    assert_valid(&caller_v, &unknown.json, "unknown caller");
+    let refused = h
+        .telephony(
+            "/internal/v1/relay-routing/resolve-inbound",
+            json!({ "calledRelayIdentity": "+44 20 7946 0999", "providerObservedAt": iso(at(0)) }),
+        )
+        .await;
+    assert_eq!(refused.code(), "RELAY_MAPPING_NOT_ACTIVE");
+    assert_valid(
+        &validator("privacy-relay/common/v1.schema.json#/$defs/ErrorEnvelope"),
+        &refused.json,
+        "refusal",
+    );
 }

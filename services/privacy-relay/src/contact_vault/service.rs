@@ -141,7 +141,12 @@ impl ContactVault {
         )?;
         drop(request);
         let (created, row) = self
-            .protect(keys, actor, &number, ContactOperation::Create)
+            .protect(
+                keys,
+                actor,
+                &number,
+                AccessEntry::new(ContactOperation::Create, None),
+            )
             .await?;
         let now = self.now();
         Ok((
@@ -158,7 +163,7 @@ impl ContactVault {
         keys: &VaultKeys,
         actor: &ContactActor,
         number: &CanonicalNumber,
-        operation: ContactOperation,
+        entry: AccessEntry,
     ) -> RelayResult<(bool, ContactRow)> {
         let fingerprints = fingerprint::all(keys.fingerprint(), actor.scope, number);
         let now = self.now();
@@ -170,13 +175,9 @@ impl ContactVault {
             let row = repository::find(&txn, actor.scope, existing, false)
                 .await?
                 .ok_or(RelayError::Refused(ErrorCode::InternalError))?;
-            record(
-                &txn,
-                actor,
-                &AccessEntry::new(operation, Some(existing)).noted("DEDUPLICATED"),
-                now,
-            )
-            .await?;
+            let mut entry = entry.noted("DEDUPLICATED");
+            entry.contact_reference = Some(existing);
+            record(&txn, actor, &entry, now).await?;
             txn.commit().await?;
             return Ok((false, row));
         }
@@ -186,7 +187,9 @@ impl ContactVault {
         let meta = metadata(number);
         repository::insert(&txn, actor.scope, id, &sealed, &meta, now).await?;
         repository::insert_fingerprints(&txn, actor.scope, id, &fingerprints, now).await?;
-        record(&txn, actor, &AccessEntry::new(operation, Some(id)), now).await?;
+        let mut entry = entry;
+        entry.contact_reference = Some(id);
+        record(&txn, actor, &entry, now).await?;
         let row = repository::find(&txn, actor.scope, id, false)
             .await?
             .ok_or(RelayError::Refused(ErrorCode::InternalError))?;

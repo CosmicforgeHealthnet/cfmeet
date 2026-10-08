@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Privacy Relay internal API",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "description": "Internal HTTP surface of services/privacy-relay: GET /health (public) and the service-authenticated /internal/v1 API used by the authenticated platform ingress (Calling) and by Calling's protected-call authorization. Every /internal/v1 path — including unknown ones — requires a valid service token; customer credentials are refused. Scope comes only from the signed delegated platform context; bodies refuse unknown members (tenantId, applicationId, environmentId, status, version, authorization results). Commands carry {idempotencyKey, request}."
   },
   "paths": {
@@ -1631,6 +1631,134 @@
             "$ref": "#/components/responses/Error"
           },
           "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/relay-routing/resolve-inbound": {
+      "post": {
+        "operationId": "resolveInboundRelayMapping",
+        "description": "Telephony only, no delegated context: canonicalize the called relay number, require exactly one ACTIVE assignment (more is an incident, never a choice), matching correlation metadata, an event not older than the assignment, and CALLBACK_RELAY authority of the bound session and context now. Every attempt is recorded (relay_inbound_resolutions) without any number.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-number.resolve-inbound"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-number.resolve-inbound",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/relay-routing/v1.schema.json#/$defs/ResolveInboundRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The current safe mapping.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/relay-routing/v1.schema.json#/$defs/InboundResolutionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/relay-routing/protect-inbound-caller": {
+      "post": {
+        "operationId": "protectInboundCaller",
+        "description": "Telephony only, no delegated context: the presented caller number goes straight into the Contact Vault in the scope of a recent RESOLVED inbound resolution; the answer is its ContactReference (201 new, 200 an existing contact of that scope) and whom it may reach now.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "protected-contact.protect-inbound"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "protected-contact.protect-inbound",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/relay-routing/v1.schema.json#/$defs/ProtectInboundCallerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "A new protected contact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/relay-routing/v1.schema.json#/$defs/InboundCallerResult"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "An existing protected contact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/relay-routing/v1.schema.json#/$defs/InboundCallerResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
             "$ref": "#/components/responses/Error"
           }
         }

@@ -219,6 +219,53 @@ async fn no_number_token_or_key_reaches_the_logs() {
     .await;
     let _ = h.relay.list_relay_numbers().await.unwrap();
 
+    // §35: an inbound call to a callback relay number is resolved and its caller's
+    // presented number is protected — neither number reaches a log line.
+    let mut callback = common::context_request(&[principal], "BIDIRECTIONAL", &[]);
+    callback["participants"] =
+        json!([{ "principalId": principal }, { "contactReferenceId": contact }]);
+    callback["allowedRelayStrategies"] = json!(["CALLBACK_RELAY_ALLOWED"]);
+    let callback = h.create_context(&c, callback).await;
+    let callback_session = h
+        .create_session(
+            &c,
+            callback["contextId"].as_str().unwrap(),
+            json!({ "relayStrategy": "CALLBACK_RELAY_ALLOWED" }),
+        )
+        .await["relaySessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    h.add_relay_number("+44 20 7946 0556", "pb-log-canary-2")
+        .await;
+    assert_eq!(
+        h.assign_relay_number(&c, &callback_session).await.status,
+        StatusCode::CREATED
+    );
+    let inbound = h
+        .telephony(
+            "/internal/v1/relay-routing/resolve-inbound",
+            json!({ "calledRelayIdentity": "+44 20 7946 0556", "providerObservedAt": common::iso(h.relay.now()) }),
+        )
+        .await;
+    assert_eq!(inbound.status, StatusCode::OK, "{}", inbound.text);
+    let protected = h
+        .telephony(
+            "/internal/v1/relay-routing/protect-inbound-caller",
+            json!({
+                "inboundResolutionId": inbound.json["resolution"]["decisionId"],
+                "telephoneNumber": "+44 20 7946 0888",
+            }),
+        )
+        .await;
+    assert_eq!(protected.status, StatusCode::CREATED, "{}", protected.text);
+    // The released (cooling down) number: a refused resolution, logged without it.
+    h.telephony(
+        "/internal/v1/relay-routing/resolve-inbound",
+        json!({ "calledRelayIdentity": "+44 20 7946 0555", "providerObservedAt": common::iso(h.relay.now()) }),
+    )
+    .await;
+
     let text = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
     assert!(
         text.contains("contact vault delegation rejected"),
@@ -241,6 +288,8 @@ async fn no_number_token_or_key_reaches_the_logs() {
         g["grantSecret"].as_str().unwrap(),
         "2079460555",
         "pb-log-canary",
+        "2079460556",
+        "2079460888",
     ] {
         assert!(!text.contains(needle), "logs contain {needle}");
     }

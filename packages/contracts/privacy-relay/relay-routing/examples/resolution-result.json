@@ -1,0 +1,26 @@
+{
+  "resolution": {
+    "decisionId": "5d2c9e1a-7b3f-4a6e-9c8d-1e2f3a4b5c6d",
+    "outcome": "RESOLVED",
+    "contextId": "0e3c7a52-6f1b-4a7e-9d5c-2b8f4e1a9c30",
+    "contextVersion": 2,
+    "relaySessionId": "7c1e5f20-8a3d-4b96-b2e7-4d0a6c9f1e23",
+    "relaySessionVersion": 1,
+    "assignmentId": "4b6f0c1e-2d3a-4e5f-8a9b-0c1d2e3f4a5b",
+    "assignmentGeneration": 2,
+    "strategy": "CALLBACK_RELAY_ALLOWED",
+    "channel": "VOICE",
+    "route": "CALLBACK_RELAY",
+    "inboundSources": [
+      {
+        "contactReferenceId": "5a7c2e10-3b4d-4f6e-8a9b-0c1d2e3f4a5b",
+        "allowedTargets": [
+          {
+            "principalId": "3f2a1b0c-9d8e-4f7a-8b6c-5d4e3f2a1b0c"
+          }
+        ]
+      }
+    ],
+    "validUntil": "2031-03-01T11:00:00.000000Z"
+  }
+}

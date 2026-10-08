@@ -1,0 +1,10 @@
+{
+  "inboundCaller": {
+    "contactReference": "5a7c2e10-3b4d-4f6e-8a9b-0c1d2e3f4a5b",
+    "created": true,
+    "contextId": "0e3c7a52-6f1b-4a7e-9d5c-2b8f4e1a9c30",
+    "relaySessionId": "7c1e5f20-8a3d-4b96-b2e7-4d0a6c9f1e23",
+    "allowedTargets": [],
+    "presentedNumber": "+442079460777"
+  }
+}

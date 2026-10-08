@@ -68,6 +68,14 @@ pub enum InternalPermission {
     /// Privacy Relay Session (Part D §34). Reveals no number and no provider binding.
     #[serde(rename = "relay-number.assign")]
     RelayNumberAssign,
+    /// Telephony: resolve the called relay number of an inbound public-network call to
+    /// its current safe relay mapping (Part D §35). Telephony only.
+    #[serde(rename = "relay-number.resolve-inbound")]
+    RelayNumberResolveInbound,
+    /// Telephony: protect an inbound caller's presented number in the scope of a
+    /// resolved relay mapping and get its ContactReference (Part D §35). Telephony only.
+    #[serde(rename = "protected-contact.protect-inbound")]
+    ProtectedContactProtectInbound,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -180,6 +188,22 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: false,
         description: "Request, read and release the temporary relay-number assignment of a Privacy Relay Session (no number, no provider binding)",
     },
+    PermissionDefinition {
+        permission: InternalPermission::RelayNumberResolveInbound,
+        name: "relay-number.resolve-inbound",
+        receiver: services::PRIVACY_RELAY,
+        grantable_to: &[services::TELEPHONY],
+        sensitive: true,
+        description: "Resolve the called relay number of an inbound call to its current safe relay mapping (context / session / assignment references only)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::ProtectedContactProtectInbound,
+        name: "protected-contact.protect-inbound",
+        receiver: services::PRIVACY_RELAY,
+        grantable_to: &[services::TELEPHONY],
+        sensitive: true,
+        description: "Protect an inbound caller's presented number in the scope of a resolved relay mapping (returns a ContactReference only)",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -199,6 +223,8 @@ impl InternalPermission {
         InternalPermission::CommunicationAuthorityEnforce,
         InternalPermission::ProtectedContactGrantForExecution,
         InternalPermission::RelayNumberAssign,
+        InternalPermission::RelayNumberResolveInbound,
+        InternalPermission::ProtectedContactProtectInbound,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -317,6 +343,14 @@ mod tests {
             let d = p.definition();
             assert_eq!(d.receiver, services::PRIVACY_RELAY, "{}", d.name);
             assert_eq!(d.grantable_to, &[services::CALLING], "{}", d.name);
+        }
+        // Inbound relay resolution and inbound caller protection: Telephony only.
+        for p in [RelayNumberResolveInbound, ProtectedContactProtectInbound] {
+            let d = p.definition();
+            assert_eq!(
+                (d.receiver, d.grantable_to, d.sensitive),
+                (services::PRIVACY_RELAY, &[services::TELEPHONY][..], true)
+            );
         }
         // Calling may REQUEST a Contact Resolution Grant but never resolve plaintext.
         let d = ProtectedContactGrantForExecution.definition();

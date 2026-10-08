@@ -289,7 +289,8 @@ fn every_internal_route_checks_a_receiver_permission() {
     let flat: String = code.split_whitespace().collect();
     let checks = flat.matches("authorize_caller(&caller").count()
         + flat.matches("reader(&caller").count()
-        + flat.matches("contact_actor(&caller").count();
+        + flat.matches("contact_actor(&caller").count()
+        + flat.matches("inbound_requester(&caller").count();
     assert!(handlers >= 10, "{handlers}");
     assert_eq!(
         handlers, checks,
