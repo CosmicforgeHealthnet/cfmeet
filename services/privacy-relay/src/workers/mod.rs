@@ -1,4 +1,5 @@
-//! Background workers: final expiry and enforcement retry.
+//! Background workers: final expiry, enforcement retry and relay-number release /
+//! cooldown / drain.
 //!
 //! Workers MATERIALIZE what read-time evaluation already enforces (an expired context
 //! authorizes nothing even if no worker ever ran). They are multi-instance safe: contexts
@@ -36,6 +37,9 @@ pub struct SweepReport {
     pub contexts_expired: usize,
     pub sessions_expired: usize,
     pub enforcement_applied: usize,
+    pub relay_assignments_expired: usize,
+    pub relay_cooldowns_completed: usize,
+    pub relay_drains_completed: usize,
 }
 
 #[derive(Debug, sea_orm::FromQueryResult)]
@@ -44,7 +48,7 @@ struct SessionCandidate {
     context_id: Uuid,
 }
 
-fn system_cmd(row: &ContextRow) -> RelayResult<CommandContext> {
+pub(crate) fn system_cmd(row: &ContextRow) -> RelayResult<CommandContext> {
     let kind = parse_environment_kind(&row.environment_kind)
         .ok_or(RelayError::Refused(ErrorCode::InternalError))?;
     Ok(CommandContext::system(
@@ -202,6 +206,20 @@ impl RelayService {
                 now,
             )
             .await?;
+            self.end_relay_assignment_in(
+                &txn,
+                &crate::relay_numbers::assignment::AssignmentAudit {
+                    cmd: &cmd,
+                    context_id: ctx_row.id,
+                    context_version: ctx_row.version,
+                    context_status,
+                    session_id: session.id,
+                    session_version: version,
+                },
+                crate::vocabulary::RelayAssignmentEndReason::SessionExpired,
+                now,
+            )
+            .await?;
             let job = enforcement::request(
                 &txn,
                 &cmd,
@@ -232,6 +250,10 @@ impl RelayService {
             contexts_expired: self.expire_contexts(100).await?,
             sessions_expired: self.expire_sessions(100).await?,
             enforcement_applied: self.run_enforcement_sweep(50).await?,
+            // Relay numbers: restrictive and maintenance work, never gated by a flag.
+            relay_assignments_expired: self.expire_relay_assignments(100).await?,
+            relay_cooldowns_completed: self.complete_relay_cooldowns(100).await?,
+            relay_drains_completed: self.complete_relay_drains(100).await?,
         })
     }
 

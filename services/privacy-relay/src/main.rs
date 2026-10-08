@@ -125,7 +125,16 @@ async fn main() -> anyhow::Result<()> {
         service_auth.signer().runtime_environment(),
         Arc::new(HttpCallingEnforcer::new(service_auth.client().clone())),
     )
-    .with_contact_feature(contact_feature.clone());
+    .with_contact_feature(contact_feature.clone())
+    .with_relay_number_pool(
+        FeatureFlag::new(config.relay_number_pool_enabled),
+        config.relay_number_cooldown,
+    );
+    tracing::info!(
+        relay_number_pool_enabled = config.relay_number_pool_enabled,
+        relay_number_cooldown_seconds = config.relay_number_cooldown.as_secs(),
+        "relay number pool configuration"
+    );
     // Expiry and enforcement retry on every instance (SKIP LOCKED makes them safe).
     tokio::spawn(relay.clone().run_workers(config.worker_interval));
 

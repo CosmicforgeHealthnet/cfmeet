@@ -89,6 +89,16 @@ pub trait CallingEnforcer: Send + Sync {
     ) -> Result<EnforcementAck, DeliveryFailure>;
 }
 
+/// No Calling endpoint (operator tooling): every delivery stays durably PENDING.
+pub struct UnconfiguredCallingEnforcer;
+
+#[async_trait]
+impl CallingEnforcer for UnconfiguredCallingEnforcer {
+    async fn enforce(&self, _: &EnforcementDelivery) -> Result<EnforcementAck, DeliveryFailure> {
+        Err(DeliveryFailure::NotConfigured)
+    }
+}
+
 /// The authenticated HTTP adapter (service token, delegated context, correlation id).
 pub struct HttpCallingEnforcer {
     client: Arc<InternalServiceClient>,

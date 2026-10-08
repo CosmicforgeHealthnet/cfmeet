@@ -64,6 +64,10 @@ pub enum InternalPermission {
     /// authorized protected call leg (Part D §33). Reveals no contact value.
     #[serde(rename = "protected-contact.grant-for-execution")]
     ProtectedContactGrantForExecution,
+    /// Calling: request, read and release the temporary relay-number assignment of a
+    /// Privacy Relay Session (Part D §34). Reveals no number and no provider binding.
+    #[serde(rename = "relay-number.assign")]
+    RelayNumberAssign,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -168,6 +172,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: false,
         description: "Issue a short-lived Contact Resolution Grant for one authorized protected call leg (no contact value)",
     },
+    PermissionDefinition {
+        permission: InternalPermission::RelayNumberAssign,
+        name: "relay-number.assign",
+        receiver: services::PRIVACY_RELAY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Request, read and release the temporary relay-number assignment of a Privacy Relay Session (no number, no provider binding)",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -186,6 +198,7 @@ impl InternalPermission {
         InternalPermission::RelaySessionWrite,
         InternalPermission::CommunicationAuthorityEnforce,
         InternalPermission::ProtectedContactGrantForExecution,
+        InternalPermission::RelayNumberAssign,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Privacy Relay internal API",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Internal HTTP surface of services/privacy-relay: GET /health (public) and the service-authenticated /internal/v1 API used by the authenticated platform ingress (Calling) and by Calling's protected-call authorization. Every /internal/v1 path — including unknown ones — requires a valid service token; customer credentials are refused. Scope comes only from the signed delegated platform context; bodies refuse unknown members (tenantId, applicationId, environmentId, status, version, authorization results). Commands carry {idempotencyKey, request}."
   },
   "paths": {
@@ -1448,6 +1448,189 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/{session_id}/relay-number-assignment": {
+      "post": {
+        "operationId": "assignRelayNumber",
+        "description": "Lend a temporary relay number to the session (deterministic, SKIP LOCKED selection; idempotent per session). 201 new, 200 the existing assignment (Idempotent-Replayed: true).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-number.assign"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-number.assign",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/relay-number/v1.schema.json#/$defs/AssignRelayNumberRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "New assignment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/relay-number/v1.schema.json#/$defs/RelayNumberAssignmentResult"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "The existing assignment of this session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/relay-number/v1.schema.json#/$defs/RelayNumberAssignmentResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "get": {
+        "operationId": "getRelayNumberAssignment",
+        "description": "The session's assignment in any status (RELAY_ASSIGNMENT_NOT_FOUND when it never had one).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-number.assign"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-number.assign",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The assignment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/relay-number/v1.schema.json#/$defs/RelayNumberAssignmentResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/{session_id}/relay-number-assignment/release": {
+      "post": {
+        "operationId": "releaseRelayNumberAssignment",
+        "description": "Restrictive (never gated by a kill switch) and idempotent: routing authority ends now, the number enters cooldown.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-number.assign"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-number.assign",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The ended assignment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/relay-number/v1.schema.json#/$defs/RelayNumberAssignmentResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
             "$ref": "#/components/responses/Error"
           }
         }

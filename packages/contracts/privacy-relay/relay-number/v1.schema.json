@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/privacy-relay/relay-number/v1.schema.json",
+  "title": "CF Meet Relay Number Assignment v1",
+  "description": "Temporary relay-number assignment of a Privacy Relay Session (Part D section 34). Internal service API only. The relay number itself and its provider binding never appear in any contract.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/AssignRelayNumberRequest"
+    },
+    {
+      "$ref": "#/$defs/RelayNumberAssignmentResult"
+    }
+  ],
+  "$defs": {
+    "AssignRelayNumberRequest": {
+      "description": "Calling (relay-number.assign): lend a temporary relay number to a Privacy Relay Session. Idempotent per session: a replay with the same criteria answers the same assignment (200), different criteria are IDEMPOTENCY_CONFLICT; a session holds at most one relay identity ever. Requires PRIVACY_RELAY_ENABLED and RELAY_NUMBER_POOL_ENABLED, an ACTIVE context and session, a public / callback relay strategy and only enabled, effectively VERIFIED protected contacts.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "country",
+        "capabilities"
+      ],
+      "properties": {
+        "country": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}$"
+        },
+        "region": {
+          "type": "string",
+          "pattern": "^[A-Z0-9][A-Z0-9_-]{0,63}$"
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/RelayNumberCapability"
+          }
+        }
+      }
+    },
+    "RelayNumberAssignment": {
+      "description": "A temporary relay-number assignment. It never carries the relay number, its provider binding or the inventory id.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignmentId",
+        "relaySessionId",
+        "contextId",
+        "status",
+        "assignmentGeneration",
+        "country",
+        "capabilities",
+        "assignedAt",
+        "expiresAt"
+      ],
+      "properties": {
+        "assignmentId": {
+          "description": "The session's relayIdentityBindingRef.",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "relaySessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "contextId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/RelayAssignmentStatus"
+        },
+        "assignmentGeneration": {
+          "description": "Generation of the relay number at assignment (monotonic per number; delayed events of an older generation are stale).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "country": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}$"
+        },
+        "region": {
+          "type": "string",
+          "pattern": "^[A-Z0-9][A-Z0-9_-]{0,63}$"
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/RelayNumberCapability"
+          }
+        },
+        "assignedAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "expiresAt": {
+          "description": "Never after the session's final authority (narrowed with it).",
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "endReason": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/RelayAssignmentEndReason"
+        },
+        "releasedAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "cooldownUntil": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        }
+      }
+    },
+    "RelayNumberAssignmentResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignment"
+      ],
+      "properties": {
+        "assignment": {
+          "$ref": "#/$defs/RelayNumberAssignment"
+        }
+      }
+    }
+  }
+}

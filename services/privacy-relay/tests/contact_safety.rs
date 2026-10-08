@@ -88,8 +88,10 @@ async fn telephone_like_values_never_enter_storage_or_responses() {
         "plaintext",
         "raw_number",
     ] {
+        // The one exception: the temporary relay-number inventory stores CF Meet's own
+        // platform-owned PUBLIC relay numbers (never a private user number).
         assert_eq!(
-            h.count(&format!("SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name LIKE '%{column}%'")).await,
+            h.count(&format!("SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name LIKE '%{column}%' AND NOT (table_name = 'relay_number_inventory' AND column_name = 'canonical_public_e164')")).await,
             0,
             "no {column} column"
         );

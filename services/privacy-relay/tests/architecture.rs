@@ -153,9 +153,6 @@ fn later_sections_are_not_prebuilt() {
             .join("\n")
             .to_lowercase();
         for forbidden in [
-            "relay_number_inventory",
-            "relay_number_assignments",
-            "number_cooldown",
             "msisdn",
             "pstn",
             "sip_uri",
@@ -173,6 +170,63 @@ fn later_sections_are_not_prebuilt() {
             }
             assert!(!lower.contains(forbidden), "{file}: `{forbidden}`");
         }
+    }
+}
+
+/// The temporary relay-number inventory (§34) is its own boundary: only
+/// `src/relay_numbers/` (and the operator CLI through it) touches the inventory and its
+/// ledger; the platform-owned public number is read nowhere else, and the provider
+/// binding is only ever WRITTEN (on add) — no query selects it.
+#[test]
+fn the_relay_number_inventory_is_an_isolated_boundary() {
+    let mut seen = false;
+    for (file, code) in production_sources() {
+        if file.contains("migration/src/") {
+            continue;
+        }
+        let inside = file.contains("src/relay_numbers/");
+        for needle in [
+            "relay_number_inventory",
+            "relay_number_events",
+            "canonical_public_e164",
+        ] {
+            if code.contains(needle) {
+                assert!(
+                    inside,
+                    "{file} uses `{needle}` outside the relay-number boundary"
+                );
+                seen = true;
+            }
+        }
+        if code.contains("provider_binding_ref") {
+            assert!(
+                file.ends_with("src/relay_numbers/inventory.rs")
+                    || file.ends_with("src/relay_numbers/mod.rs")
+                    // The operator input path (it only passes the value to `add`).
+                    || file.ends_with("src/bin/privacy-relay-admin.rs"),
+                "{file} touches the provider binding"
+            );
+        }
+    }
+    assert!(seen, "the guard sees the inventory");
+    let columns = std::fs::read_to_string(root().join("src/relay_numbers/mod.rs")).unwrap();
+    let select = columns
+        .split("INVENTORY_COLUMNS: &str =")
+        .nth(1)
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap();
+    assert!(
+        !select.contains("provider_binding_ref"),
+        "no query selects the provider binding"
+    );
+    // The relay number is never logged or formatted: no tracing field carries it.
+    for (file, code) in production_sources() {
+        assert!(
+            !code.contains("canonical_public_e164 = %") && !code.contains("e164 = %"),
+            "{file}"
+        );
     }
 }
 

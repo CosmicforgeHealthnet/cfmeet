@@ -163,7 +163,10 @@
         "RELAY_SESSION_EXPIRED",
         "ENFORCEMENT_REQUESTED",
         "ENFORCEMENT_APPLIED",
-        "ENFORCEMENT_FAILED"
+        "ENFORCEMENT_FAILED",
+        "RELAY_NUMBER_ASSIGNED",
+        "RELAY_NUMBER_RELEASED",
+        "RELAY_NUMBER_COOLDOWN_STARTED"
       ]
     },
     "ErrorCode": {
@@ -209,7 +212,12 @@
         "CONTACT_SCOPE_DENIED",
         "CONTACT_RESOLUTION_DENIED",
         "CONTACT_RESOLUTION_GRANT_EXPIRED",
-        "CONTACT_VAULT_DISABLED"
+        "CONTACT_VAULT_DISABLED",
+        "RELAY_NUMBER_UNAVAILABLE",
+        "RELAY_ASSIGNMENT_NOT_FOUND",
+        "RELAY_MAPPING_NOT_ACTIVE",
+        "RELAY_MAPPING_AMBIGUOUS",
+        "RELAY_NUMBER_POOL_DISABLED"
       ]
     },
     "Timestamp": {
@@ -414,6 +422,37 @@
       "description": "Bounded masked display of a protected number: \"+\" and the country calling code, six bullets, and at most the last four national digits (fewer for short numbers; at least six national digits always stay hidden).",
       "type": "string",
       "pattern": "^\\+[0-9]{1,3}•{6}[0-9]{0,4}$"
+    },
+    "RelayNumberCapability": {
+      "description": "Provisioned capability of a temporary relay number (voice only; nothing implies SMS, MMS or messaging).",
+      "type": "string",
+      "enum": [
+        "VOICE_INBOUND",
+        "VOICE_OUTBOUND"
+      ]
+    },
+    "RelayAssignmentStatus": {
+      "description": "ACTIVE carries routing authority; COOLDOWN quarantines the number after authority ended; RELEASED / REVOKED / EXPIRED are terminal (never reactivated).",
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "COOLDOWN",
+        "RELEASED",
+        "REVOKED",
+        "EXPIRED"
+      ]
+    },
+    "RelayAssignmentEndReason": {
+      "description": "Why routing authority ended.",
+      "type": "string",
+      "enum": [
+        "RELEASED",
+        "SESSION_REVOKED",
+        "SESSION_COMPLETED",
+        "SESSION_EXPIRED",
+        "ASSIGNMENT_EXPIRED",
+        "NUMBER_DISABLED"
+      ]
     }
   }
 }

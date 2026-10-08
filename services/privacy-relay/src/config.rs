@@ -16,6 +16,8 @@
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | 100–30000 (default 5000) |
 //! | `CALLING_INTERNAL_BASE_URL` | no | Calling's internal API (active-call enforcement) |
 //!
+//! | `RELAY_NUMBER_POOL_ENABLED` | no | temporary relay-number assignment kill switch (default `false`) |
+//! | `RELAY_NUMBER_COOLDOWN_SECONDS` | no | quarantine of a released relay number, 3600–7776000 (default 259200 = 72 h; zero is never accepted) |
 //! | `CONTACT_VAULT_ENABLED` | no | Contact Vault kill switch (default `false`) |
 //! | `CONTACT_VAULT_KEYRING_FILE` | with the vault | AES-256-GCM encryption keyring (secret file) |
 //! | `CONTACT_FINGERPRINT_KEYRING_FILE` | with the vault | HMAC fingerprint keyring (separate secret file) |
@@ -91,7 +93,17 @@ pub struct RelayConfig {
     pub enabled: bool,
     pub worker_interval: Duration,
     pub json_logs: bool,
+    /// `RELAY_NUMBER_POOL_ENABLED`: new relay-number assignments (release / cooldown
+    /// always run).
+    pub relay_number_pool_enabled: bool,
+    /// `RELAY_NUMBER_COOLDOWN_SECONDS`.
+    pub relay_number_cooldown: Duration,
 }
+
+/// Default relay-number cooldown: 72 hours. A released number keeps receiving delayed
+/// callbacks, carrier retries and stale caller-ID call-backs for a while; 72 h covers a
+/// weekend of delayed returns before the number may reach another session.
+pub const DEFAULT_RELAY_NUMBER_COOLDOWN_SECONDS: u64 = 72 * 3600;
 
 impl RelayConfig {
     pub fn database_url(&self) -> &str {
@@ -155,6 +167,30 @@ impl RelayConfig {
             Some("json") => true,
             Some(_) => return Err(invalid("LOG_FORMAT", "must be pretty or json")),
         };
+        let relay_number_pool_enabled = match value("RELAY_NUMBER_POOL_ENABLED").as_deref() {
+            None | Some("false") => false,
+            Some("true") => true,
+            Some(_) => {
+                return Err(invalid(
+                    "RELAY_NUMBER_POOL_ENABLED",
+                    "must be true or false",
+                ))
+            }
+        };
+        let relay_number_cooldown = match value("RELAY_NUMBER_COOLDOWN_SECONDS") {
+            None => Duration::from_secs(DEFAULT_RELAY_NUMBER_COOLDOWN_SECONDS),
+            Some(v) => v
+                .parse::<u64>()
+                .ok()
+                .filter(|s| (3_600..=7_776_000).contains(s))
+                .map(Duration::from_secs)
+                .ok_or_else(|| {
+                    invalid(
+                        "RELAY_NUMBER_COOLDOWN_SECONDS",
+                        "must be an integer between 3600 (1 h) and 7776000 (90 days)",
+                    )
+                })?,
+        };
         Ok(Self {
             database_url,
             database_max_connections,
@@ -162,6 +198,8 @@ impl RelayConfig {
             enabled,
             worker_interval,
             json_logs,
+            relay_number_pool_enabled,
+            relay_number_cooldown,
         })
     }
 }
@@ -364,6 +402,31 @@ mod tests {
         bad.push(("PRIVACY_RELAY_ENABLED", "yes"));
         assert!(RelayConfig::from_lookup(&lookup(&bad)).is_err());
         assert!(RelayConfig::from_lookup(&lookup(&[])).is_err());
+    }
+
+    #[test]
+    fn relay_number_pool_is_off_by_default_with_a_conservative_cooldown() {
+        let base = [("DATABASE_URL", "postgres://u:p@127.0.0.1/db")];
+        let c = RelayConfig::from_lookup(&lookup(&base)).unwrap();
+        assert!(!c.relay_number_pool_enabled);
+        assert_eq!(c.relay_number_cooldown, Duration::from_secs(259_200));
+        let mut on = base.to_vec();
+        on.push(("RELAY_NUMBER_POOL_ENABLED", "true"));
+        on.push(("RELAY_NUMBER_COOLDOWN_SECONDS", "7200"));
+        let c = RelayConfig::from_lookup(&lookup(&on)).unwrap();
+        assert!(c.relay_number_pool_enabled);
+        assert_eq!(c.relay_number_cooldown, Duration::from_secs(7200));
+        for (k, v) in [
+            ("RELAY_NUMBER_POOL_ENABLED", "1"),
+            ("RELAY_NUMBER_COOLDOWN_SECONDS", "0"),
+            ("RELAY_NUMBER_COOLDOWN_SECONDS", "59"),
+            ("RELAY_NUMBER_COOLDOWN_SECONDS", "99999999"),
+            ("RELAY_NUMBER_COOLDOWN_SECONDS", "soon"),
+        ] {
+            let mut bad = base.to_vec();
+            bad.push((k, v));
+            assert!(RelayConfig::from_lookup(&lookup(&bad)).is_err(), "{k}={v}");
+        }
     }
 
     #[test]

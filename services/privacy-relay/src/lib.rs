@@ -10,7 +10,8 @@
 //! It owns contexts, context participants / channels / directions, relay sessions and
 //! their authorization snapshots, authorization decisions, immutable audit evidence, the
 //! transactional outbox, command idempotency, durable active-call enforcement jobs and
-//! the Contact Vault (protected contacts, their access audit; §31+). It does NOT own
+//! the Contact Vault (protected contacts, their access audit; §31+) and the temporary
+//! relay-number pool (§34). It does NOT own
 //! calls, call sessions, endpoints, RTC rooms, meetings or telephony legs.
 //!
 //! It shares no source and no database with any other service: Calling reaches it over
@@ -30,6 +31,7 @@ pub mod internal;
 pub mod middleware;
 pub mod models;
 pub mod relay;
+pub mod relay_numbers;
 pub mod routes;
 pub mod scope;
 pub mod service;

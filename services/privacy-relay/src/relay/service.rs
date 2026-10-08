@@ -468,6 +468,23 @@ impl RelayService {
             now,
         )
         .await?;
+        if target == S::Revoked {
+            // The relay identity stops routing now; the number enters cooldown.
+            self.end_relay_assignment_in(
+                &txn,
+                &crate::relay_numbers::assignment::AssignmentAudit {
+                    cmd,
+                    context_id: ctx.id(),
+                    context_version: ctx.row.version,
+                    context_status: ctx.status()?.as_str(),
+                    session_id,
+                    session_version: version,
+                },
+                crate::vocabulary::RelayAssignmentEndReason::SessionRevoked,
+                now,
+            )
+            .await?;
+        }
         let mut jobs = Vec::new();
         if let Some(reason) = enforce {
             jobs.push(

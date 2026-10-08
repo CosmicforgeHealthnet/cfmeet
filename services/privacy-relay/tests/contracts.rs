@@ -497,3 +497,105 @@ async fn contact_vault_routes_and_responses_equal_the_contract() {
         assert_valid(&error_v, &r.json, "error envelope");
     }
 }
+
+#[tokio::test]
+async fn relay_number_vocabulary_and_responses_equal_the_contract() {
+    assert_eq!(
+        names(RelayNumberCapability::ALL, |v| v.as_str()),
+        common_enum("RelayNumberCapability")
+    );
+    assert_eq!(
+        names(RelayAssignmentStatus::ALL, |v| v.as_str()),
+        common_enum("RelayAssignmentStatus")
+    );
+    assert_eq!(
+        names(RelayAssignmentEndReason::ALL, |v| v.as_str()),
+        common_enum("RelayAssignmentEndReason")
+    );
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = Consumer::new(Kind::Production);
+    h.add_relay_number("+44 20 7946 0500", "pb-contract").await;
+    let principal = uuid::Uuid::new_v4();
+    let contact = h.create_contact(&c, "+44 20 7946 0123").await["contactReference"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    h.verify_contact(&c, &contact, "VERIFIED", None).await;
+    let mut req = context_request(&[principal], "BIDIRECTIONAL", &[]);
+    req["participants"] = json!([{ "principalId": principal }, { "contactReferenceId": contact }]);
+    req["allowedRelayStrategies"] = json!(["PUBLIC_RELAY_ALLOWED"]);
+    let ctx = h.create_context(&c, req).await;
+    let sid = h
+        .create_session(
+            &c,
+            ctx["contextId"].as_str().unwrap(),
+            json!({ "relayStrategy": "PUBLIC_RELAY_ALLOWED" }),
+        )
+        .await["relaySessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let result_v =
+        validator("privacy-relay/relay-number/v1.schema.json#/$defs/RelayNumberAssignmentResult");
+    let request_v =
+        validator("privacy-relay/relay-number/v1.schema.json#/$defs/AssignRelayNumberRequest");
+    let error_v = validator("privacy-relay/common/v1.schema.json#/$defs/ErrorEnvelope");
+    assert_valid(
+        &request_v,
+        &json!({ "country": "GB", "capabilities": ["VOICE_INBOUND", "VOICE_OUTBOUND"] }),
+        "request",
+    );
+    let created = h.assign_relay_number(&c, &sid).await;
+    assert_valid(&result_v, &created.json, "created");
+    let replay = h.assign_relay_number(&c, &sid).await;
+    assert_valid(&result_v, &replay.json, "replay");
+    let session_v = validator("privacy-relay/session/v1.schema.json#/$defs/PrivacyRelaySession");
+    let session = h.get(&format!("/internal/v1/sessions/{sid}"), &c).await;
+    assert_valid(&session_v, &session.json, "bound session");
+    let released = h
+        .post(
+            &format!("/internal/v1/sessions/{sid}/relay-number-assignment/release"),
+            &c,
+            json!({}),
+        )
+        .await;
+    assert_valid(&result_v, &released.json, "released");
+    h.clock.set(at(90));
+    h.relay.run_sweep().await.unwrap();
+    let ended = h
+        .get(
+            &format!("/internal/v1/sessions/{sid}/relay-number-assignment"),
+            &c,
+        )
+        .await;
+    assert_valid(&result_v, &ended.json, "terminal");
+    let missing = h
+        .get(
+            &format!(
+                "/internal/v1/sessions/{}/relay-number-assignment",
+                uuid::Uuid::new_v4()
+            ),
+            &c,
+        )
+        .await;
+    assert_valid(&error_v, &missing.json, "error");
+    // Relay-number outbox events validate (envelope + payload).
+    let envelope_v = validator("platform/events/envelope/v1.schema.json");
+    let payload_v = validator("privacy-relay/events/v1.schema.json");
+    let rows = h
+        .conn()
+        .query_all(Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            "SELECT envelope FROM privacy_relay_outbox WHERE event_type LIKE 'privacy-relay.relay-number.%'",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 3);
+    for row in rows {
+        let envelope: Value = row.try_get_by_index(0).unwrap();
+        assert_valid(&envelope_v, &envelope, "envelope");
+        assert_valid(&payload_v, &envelope["payload"], "payload");
+    }
+}

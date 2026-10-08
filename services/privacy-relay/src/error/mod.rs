@@ -57,6 +57,11 @@ pub enum ErrorCode {
     ContactResolutionDenied,
     ContactResolutionGrantExpired,
     ContactVaultDisabled,
+    RelayNumberUnavailable,
+    RelayAssignmentNotFound,
+    RelayMappingNotActive,
+    RelayMappingAmbiguous,
+    RelayNumberPoolDisabled,
 }
 
 impl ErrorCode {
@@ -98,6 +103,11 @@ impl ErrorCode {
         ErrorCode::ContactResolutionDenied,
         ErrorCode::ContactResolutionGrantExpired,
         ErrorCode::ContactVaultDisabled,
+        ErrorCode::RelayNumberUnavailable,
+        ErrorCode::RelayAssignmentNotFound,
+        ErrorCode::RelayMappingNotActive,
+        ErrorCode::RelayMappingAmbiguous,
+        ErrorCode::RelayNumberPoolDisabled,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -139,6 +149,11 @@ impl ErrorCode {
             ErrorCode::ContactResolutionDenied => "CONTACT_RESOLUTION_DENIED",
             ErrorCode::ContactResolutionGrantExpired => "CONTACT_RESOLUTION_GRANT_EXPIRED",
             ErrorCode::ContactVaultDisabled => "CONTACT_VAULT_DISABLED",
+            ErrorCode::RelayNumberUnavailable => "RELAY_NUMBER_UNAVAILABLE",
+            ErrorCode::RelayAssignmentNotFound => "RELAY_ASSIGNMENT_NOT_FOUND",
+            ErrorCode::RelayMappingNotActive => "RELAY_MAPPING_NOT_ACTIVE",
+            ErrorCode::RelayMappingAmbiguous => "RELAY_MAPPING_AMBIGUOUS",
+            ErrorCode::RelayNumberPoolDisabled => "RELAY_NUMBER_POOL_DISABLED",
         }
     }
 
@@ -186,6 +201,11 @@ impl ErrorCode {
             ErrorCode::ContactResolutionDenied => StatusCode::FORBIDDEN,
             ErrorCode::ContactResolutionGrantExpired => StatusCode::FORBIDDEN,
             ErrorCode::ContactVaultDisabled => StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::RelayNumberUnavailable => StatusCode::CONFLICT,
+            ErrorCode::RelayAssignmentNotFound => StatusCode::NOT_FOUND,
+            ErrorCode::RelayMappingNotActive => StatusCode::CONFLICT,
+            ErrorCode::RelayMappingAmbiguous => StatusCode::CONFLICT,
+            ErrorCode::RelayNumberPoolDisabled => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
 
@@ -253,6 +273,11 @@ impl ErrorCode {
             ErrorCode::ContactResolutionDenied => "Contact resolution is not authorized for this execution.",
             ErrorCode::ContactResolutionGrantExpired => "The contact resolution grant has expired.",
             ErrorCode::ContactVaultDisabled => "The Contact Vault is currently disabled.",
+            ErrorCode::RelayNumberUnavailable => "No eligible relay number is available; retry later.",
+            ErrorCode::RelayAssignmentNotFound => "The relay number assignment was not found.",
+            ErrorCode::RelayMappingNotActive => "The relay mapping is not active.",
+            ErrorCode::RelayMappingAmbiguous => "The relay mapping is ambiguous and was refused.",
+            ErrorCode::RelayNumberPoolDisabled => "The relay number pool is currently disabled.",
         }
     }
 }

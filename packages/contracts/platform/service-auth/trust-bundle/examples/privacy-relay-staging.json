@@ -27,7 +27,8 @@
         "communication-context.write",
         "relay-session.read",
         "relay-session.write",
-        "protected-contact.grant-for-execution"
+        "protected-contact.grant-for-execution",
+        "relay-number.assign"
       ]
     },
     {

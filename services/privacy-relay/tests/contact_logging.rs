@@ -193,6 +193,32 @@ async fn no_number_token_or_key_reaches_the_logs() {
     )
     .await;
 
+    // §34: a relay number is added, lent, released — its digits and its provider binding
+    // never reach a log line.
+    h.add_relay_number("+44 20 7946 0555", "pb-log-canary")
+        .await;
+    let relay_session = h
+        .create_session(
+            &c,
+            ctx["contextId"].as_str().unwrap(),
+            json!({ "relayStrategy": "PUBLIC_RELAY_ALLOWED" }),
+        )
+        .await["relaySessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        h.assign_relay_number(&c, &relay_session).await.status,
+        StatusCode::CREATED
+    );
+    h.post(
+        &format!("/internal/v1/sessions/{relay_session}/relay-number-assignment/release"),
+        &c,
+        json!({}),
+    )
+    .await;
+    let _ = h.relay.list_relay_numbers().await.unwrap();
+
     let text = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
     assert!(
         text.contains("contact vault delegation rejected"),
@@ -213,6 +239,8 @@ async fn no_number_token_or_key_reaches_the_logs() {
         &token,
         &other,
         g["grantSecret"].as_str().unwrap(),
+        "2079460555",
+        "pb-log-canary",
     ] {
         assert!(!text.contains(needle), "logs contain {needle}");
     }

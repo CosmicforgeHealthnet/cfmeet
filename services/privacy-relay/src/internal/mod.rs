@@ -59,6 +59,14 @@ pub fn routes() -> Router<AppState> {
         .route("/sessions/:session_id/suspend", post(suspend_session))
         .route("/sessions/:session_id/resume", post(resume_session))
         .route("/sessions/:session_id/revoke", post(revoke_session))
+        .route(
+            "/sessions/:session_id/relay-number-assignment",
+            post(assign_relay_number).get(get_relay_assignment),
+        )
+        .route(
+            "/sessions/:session_id/relay-number-assignment/release",
+            post(release_relay_assignment),
+        )
         .route("/communication/authorize", post(authorize))
         .route(
             "/contacts/:contact_reference/resolution-grants",
@@ -381,6 +389,57 @@ async fn resolve_for_execution(
         state
             .contacts
             .resolve_for_execution(&actor, id, request)
+            .await?,
+        false,
+    ))
+}
+
+/// Calling: lend a temporary relay number to a session (idempotent per session). The
+/// response carries the assignment id (the session's relay identity binding) — never the
+/// number or its provider binding.
+async fn assign_relay_number(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    Path(id): Path<String>,
+    raw: Result<Json<crate::relay_numbers::assignment::AssignRelayNumberRequest>, JsonRejection>,
+) -> Result<Response, RelayError> {
+    let cmd = authorize_caller(&caller, InternalPermission::RelayNumberAssign)?;
+    let id = session_id(&id)?;
+    let request = body(raw)?;
+    let (status, body) = relay(&state).assign_relay_number(&cmd, id, request).await?;
+    Ok(respond(
+        StatusCode::from_u16(status).unwrap_or(StatusCode::OK),
+        body,
+        status == 200,
+    ))
+}
+
+async fn get_relay_assignment(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    Path(id): Path<String>,
+) -> Result<Response, RelayError> {
+    let cmd = authorize_caller(&caller, InternalPermission::RelayNumberAssign)?;
+    Ok(respond(
+        StatusCode::OK,
+        relay(&state)
+            .get_relay_assignment(&cmd, session_id(&id)?)
+            .await?,
+        false,
+    ))
+}
+
+/// Restrictive: works whatever the kill switches say.
+async fn release_relay_assignment(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    Path(id): Path<String>,
+) -> Result<Response, RelayError> {
+    let cmd = authorize_caller(&caller, InternalPermission::RelayNumberAssign)?;
+    Ok(respond(
+        StatusCode::OK,
+        relay(&state)
+            .release_relay_assignment(&cmd, session_id(&id)?)
             .await?,
         false,
     ))

@@ -9,7 +9,14 @@
 //! privacy-relay-admin contact-vault reencrypt [--batch N]      (DATABASE_URL, keyrings)
 //! privacy-relay-admin contact-vault backfill-fingerprints [--batch N]
 //! privacy-relay-admin contact-vault prune-fingerprints --version V
+//! privacy-relay-admin relay-number add --number +E164 --capabilities VOICE_INBOUND,VOICE_OUTBOUND --binding REF [--region R] [--available true]
+//! privacy-relay-admin relay-number activate|enable|drain|disable --id UUID
+//! privacy-relay-admin relay-number list
 //! ```
+//!
+//! Relay-number commands need DATABASE_URL and CF_RUNTIME_ENVIRONMENT
+//! (RELAY_NUMBER_COOLDOWN_SECONDS applies to a disable that ends an assignment). The
+//! provider binding is an opaque reference (never the number); `list` masks numbers.
 //!
 //! Keyring files are written with mode 0600 and never printed. Rotation never deletes a
 //! key: an operator removes an old version from the file only after `rotation-status`
@@ -19,13 +26,16 @@ use std::{collections::HashMap, io::Write, path::Path, process::ExitCode, sync::
 
 use privacy_relay::{
     clock::SystemClock,
-    config::{ContactVaultSettings, FeatureFlag},
+    config::{ContactVaultSettings, FeatureFlag, RelayConfig},
     contact_vault::{
         keyring::{
             activate_key_version, add_key_version, generate_keyring_json, KeyPurpose, KeyVersion,
         },
         ContactVault,
     },
+    enforcement::UnconfiguredCallingEnforcer,
+    relay_numbers::inventory::NewRelayNumber,
+    service::RelayService,
 };
 use sea_orm::{ConnectOptions, Database};
 
@@ -37,7 +47,10 @@ fn usage() -> ExitCode {
          privacy-relay-admin contact-vault rotation-status\n  \
          privacy-relay-admin contact-vault reencrypt [--batch N]\n  \
          privacy-relay-admin contact-vault backfill-fingerprints [--batch N]\n  \
-         privacy-relay-admin contact-vault prune-fingerprints --version V"
+         privacy-relay-admin contact-vault prune-fingerprints --version V\n  \
+         privacy-relay-admin relay-number add --number +E164 --capabilities C[,C] --binding REF [--region R] [--available true]\n  \
+         privacy-relay-admin relay-number activate|enable|drain|disable --id UUID\n  \
+         privacy-relay-admin relay-number list"
     );
     ExitCode::from(2)
 }
@@ -123,9 +136,102 @@ async fn vault() -> Result<ContactVault, String> {
     ))
 }
 
+async fn relay_service() -> Result<RelayService, String> {
+    dotenvy::dotenv().ok();
+    let config = RelayConfig::from_env().map_err(|e| e.to_string())?;
+    let runtime = cf_service_auth::RuntimeEnvironment::parse(
+        &std::env::var("CF_RUNTIME_ENVIRONMENT")
+            .map_err(|_| "CF_RUNTIME_ENVIRONMENT is required".to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    let mut options = ConnectOptions::new(config.database_url().to_string());
+    options.max_connections(2).sqlx_logging(false);
+    let db = Database::connect(options)
+        .await
+        .map_err(|_| "cannot connect to the database".to_string())?;
+    Ok(RelayService::new(
+        db,
+        Arc::new(SystemClock),
+        FeatureFlag::new(false),
+        runtime,
+        Arc::new(UnconfiguredCallingEnforcer),
+    )
+    .with_relay_number_pool(FeatureFlag::new(false), config.relay_number_cooldown))
+}
+
+async fn relay_number(command: &str, f: &HashMap<String, String>) -> ExitCode {
+    let service = match relay_service().await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("privacy-relay-admin: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let id = || f.get("id").and_then(|v| uuid::Uuid::parse_str(v).ok());
+    let result = match command {
+        "add" => {
+            let (Some(number), Some(caps), Some(binding)) =
+                (f.get("number"), f.get("capabilities"), f.get("binding"))
+            else {
+                return usage();
+            };
+            let caps: Vec<&str> = caps.split(',').map(str::trim).collect();
+            service
+                .add_relay_number(NewRelayNumber {
+                    number,
+                    region: f.get("region").map(String::as_str),
+                    capabilities: &caps,
+                    provider_binding_ref: binding,
+                    available: f.get("available").map(String::as_str) == Some("true"),
+                })
+                .await
+                .map(|id| println!("added {id}"))
+        }
+        "activate" | "enable" | "drain" | "disable" => {
+            let Some(id) = id() else {
+                return usage();
+            };
+            let r = match command {
+                "activate" => service.activate_relay_number(id).await,
+                "enable" => service.enable_relay_number(id).await,
+                "drain" => service.drain_relay_number(id).await,
+                _ => service.disable_relay_number(id).await,
+            };
+            r.map(|_| println!("{command} {id}: done"))
+        }
+        "list" => service.list_relay_numbers().await.map(|rows| {
+            for r in rows {
+                println!(
+                    "{}\t{}\t{}\t{}\t{}\tgeneration {}",
+                    r.id,
+                    r.masked(),
+                    r.country_iso2,
+                    r.capabilities.join(","),
+                    r.operational_status,
+                    r.generation
+                );
+            }
+        }),
+        _ => return usage(),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("privacy-relay-admin: {}", e.code().as_str());
+            ExitCode::from(1)
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.len() >= 2 && args[0] == "relay-number" {
+        let Some(f) = flags(&args[2..]) else {
+            return usage();
+        };
+        return relay_number(&args[1], &f).await;
+    }
     if args.len() < 2 || args[0] != "contact-vault" {
         return usage();
     }

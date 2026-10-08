@@ -37,6 +37,8 @@ pub struct RelayService {
     /// CONTACT_VAULT_ENABLED (shared with the Contact Vault): public-network relay
     /// authority over protected contacts requires it.
     pub(crate) contact_feature: FeatureFlag,
+    /// RELAY_NUMBER_POOL_ENABLED + cooldown (§34).
+    pub(crate) relay_numbers: crate::relay_numbers::RelayNumberPoolSettings,
 }
 
 /// Result of a mutation: HTTP status, body and whether it replays an earlier execution.
@@ -63,12 +65,26 @@ impl RelayService {
             enforcer,
             worker_id: format!("privacy-relay-{}", Uuid::new_v4().simple()),
             contact_feature: FeatureFlag::new(false),
+            relay_numbers: Default::default(),
         }
     }
 
     /// Shares the Contact Vault kill switch with this service.
     pub fn with_contact_feature(mut self, flag: FeatureFlag) -> Self {
         self.contact_feature = flag;
+        self
+    }
+
+    /// The relay-number pool kill switch and cooldown.
+    pub fn with_relay_number_pool(
+        mut self,
+        flag: FeatureFlag,
+        cooldown: std::time::Duration,
+    ) -> Self {
+        self.relay_numbers = crate::relay_numbers::RelayNumberPoolSettings {
+            enabled: flag,
+            cooldown: chrono::Duration::from_std(cooldown).unwrap_or(chrono::Duration::hours(72)),
+        };
         self
     }
 

@@ -267,6 +267,9 @@ impl CallingEnforcer for FakeCalling {
 // Service identities.
 // ---------------------------------------------------------------------------
 
+/// Relay-number cooldown of the test harness (the configured minimum).
+pub const TEST_RELAY_COOLDOWN_SECONDS: u64 = 3600;
+
 pub const ALL_CALLING_PERMISSIONS: &[&str] = &[
     "communication.authorize",
     "communication-context.read",
@@ -274,6 +277,7 @@ pub const ALL_CALLING_PERMISSIONS: &[&str] = &[
     "relay-session.read",
     "relay-session.write",
     "protected-contact.grant-for-execution",
+    "relay-number.assign",
 ];
 
 /// What Telephony (a fixture identity; the service does not exist yet) is granted.
@@ -515,6 +519,8 @@ pub struct Harness {
     pub feature: FeatureFlag,
     /// CONTACT_VAULT_ENABLED.
     pub contact_feature: FeatureFlag,
+    /// RELAY_NUMBER_POOL_ENABLED (on in tests; cooldown [`TEST_RELAY_COOLDOWN_SECONDS`]).
+    pub pool_feature: FeatureFlag,
     pub contacts: ContactVault,
     pub vault_keys: VaultKeys,
     /// Calling's contact delegation signer (its own key, wall clock).
@@ -559,6 +565,7 @@ impl Harness {
     pub fn on(db: Arc<TestDb>, clock: ManualClock, calling_permissions: &[&str]) -> Self {
         let feature = FeatureFlag::new(true);
         let contact_feature = FeatureFlag::new(true);
+        let pool_feature = FeatureFlag::new(true);
         let calling = Arc::new(FakeCalling::default());
         let ids = Arc::new(identities(calling_permissions));
         let relay = RelayService::new(
@@ -568,7 +575,11 @@ impl Harness {
             RuntimeEnvironment::Test,
             calling.clone(),
         )
-        .with_contact_feature(contact_feature.clone());
+        .with_contact_feature(contact_feature.clone())
+        .with_relay_number_pool(
+            pool_feature.clone(),
+            std::time::Duration::from_secs(TEST_RELAY_COOLDOWN_SECONDS),
+        );
         let vault_keys = test_vault_keys("ck-test-1", "fk-test-1");
         let contacts = ContactVault::new(
             db.conn.clone(),
@@ -583,6 +594,7 @@ impl Harness {
             clock,
             feature,
             contact_feature,
+            pool_feature,
             contacts,
             vault_keys,
             contact_signer: ids.contact_signer.clone(),
@@ -623,6 +635,34 @@ impl Harness {
             self.calling.clone(),
         )
         .with_contact_feature(self.contact_feature.clone())
+        .with_relay_number_pool(
+            self.pool_feature.clone(),
+            std::time::Duration::from_secs(TEST_RELAY_COOLDOWN_SECONDS),
+        )
+    }
+
+    /// Adds an AVAILABLE relay number (operator path) and returns its inventory id.
+    pub async fn add_relay_number(&self, number: &str, binding: &str) -> Uuid {
+        self.relay
+            .add_relay_number(privacy_relay::relay_numbers::inventory::NewRelayNumber {
+                number,
+                region: None,
+                capabilities: &["VOICE_INBOUND", "VOICE_OUTBOUND"],
+                provider_binding_ref: binding,
+                available: true,
+            })
+            .await
+            .unwrap()
+    }
+
+    /// POST /internal/v1/sessions/{id}/relay-number-assignment as Calling.
+    pub async fn assign_relay_number(&self, consumer: &Consumer, session: &str) -> Response {
+        self.post(
+            &format!("/internal/v1/sessions/{session}/relay-number-assignment"),
+            consumer,
+            json!({ "country": "GB", "capabilities": ["VOICE_INBOUND", "VOICE_OUTBOUND"] }),
+        )
+        .await
     }
 
     pub fn conn(&self) -> &DatabaseConnection {

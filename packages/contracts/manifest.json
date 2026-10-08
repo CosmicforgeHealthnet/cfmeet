@@ -170,7 +170,7 @@
     },
     {
       "id": "cfmeet.privacy-relay.internal-api",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "openapi",
       "path": "privacy-relay/internal/v1.openapi.json",
       "owner": "privacy-relay",
@@ -181,7 +181,7 @@
     },
     {
       "id": "cfmeet.privacy-relay.common",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "privacy-relay/common/v1.schema.json",
       "owner": "privacy-relay",
@@ -225,7 +225,7 @@
     },
     {
       "id": "cfmeet.privacy-relay.event",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "privacy-relay/events/v1.schema.json",
       "owner": "privacy-relay",
@@ -277,6 +277,17 @@
       "lifecycle": "beta",
       "authority": "contract-first",
       "description": "Contact Resolution Grants (Calling, protected-contact.grant-for-execution; no contact value) and Telephony-only execution resolution (protected-contact.resolve-for-execution): the only internal body that carries a canonical E.164 number."
+    },
+    {
+      "id": "cfmeet.privacy-relay.relay-number",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "privacy-relay/relay-number/v1.schema.json",
+      "owner": "privacy-relay",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Temporary relay-number assignment of a Privacy Relay Session (relay-number.assign): assignment id = relay identity binding, generation, country, capabilities, lifecycle. Never the number, its provider binding or the inventory id."
     }
   ]
 }

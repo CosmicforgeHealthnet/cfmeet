@@ -200,6 +200,9 @@ text_enum!(
         EnforcementRequested = "ENFORCEMENT_REQUESTED",
         EnforcementApplied = "ENFORCEMENT_APPLIED",
         EnforcementFailed = "ENFORCEMENT_FAILED",
+        RelayNumberAssigned = "RELAY_NUMBER_ASSIGNED",
+        RelayNumberReleased = "RELAY_NUMBER_RELEASED",
+        RelayNumberCooldownStarted = "RELAY_NUMBER_COOLDOWN_STARTED",
     }
 );
 
@@ -227,12 +230,76 @@ impl AuditEventType {
             AuditEventType::EnforcementRequested => "privacy-relay.enforcement.requested",
             AuditEventType::EnforcementApplied => "privacy-relay.enforcement.applied",
             AuditEventType::EnforcementFailed => "privacy-relay.enforcement.failed",
+            AuditEventType::RelayNumberAssigned => "privacy-relay.relay-number.assigned",
+            AuditEventType::RelayNumberReleased => "privacy-relay.relay-number.released",
+            AuditEventType::RelayNumberCooldownStarted => {
+                "privacy-relay.relay-number.cooldown-started"
+            }
         }
     }
 
-    /// Whether the event describes a relay session (else the context).
+    /// Whether the event describes a relay session (else the context). A session's
+    /// relay-number assignment events belong to the session aggregate.
     pub fn is_session_event(&self) -> bool {
-        self.as_str().starts_with("RELAY_SESSION_")
+        self.as_str().starts_with("RELAY_SESSION_") || self.as_str().starts_with("RELAY_NUMBER_")
+    }
+}
+
+text_enum!(
+    /// Provisioned capabilities of a temporary relay number (voice only: nothing implies
+    /// SMS / MMS / messaging).
+    RelayNumberCapability {
+        VoiceInbound = "VOICE_INBOUND",
+        VoiceOutbound = "VOICE_OUTBOUND",
+    }
+);
+
+text_enum!(
+    /// Operational status of a temporary relay number (server-controlled transitions).
+    RelayNumberStatus {
+        Reserved = "RESERVED",
+        Available = "AVAILABLE",
+        Assigned = "ASSIGNED",
+        Draining = "DRAINING",
+        Cooldown = "COOLDOWN",
+        Unavailable = "UNAVAILABLE",
+    }
+);
+
+text_enum!(
+    /// Lifecycle of a relay-number assignment: ACTIVE carries routing authority; COOLDOWN
+    /// quarantines the number after authority ended; RELEASED / REVOKED / EXPIRED are
+    /// terminal (never reactivated). Release is atomic, so no separate RELEASING state is
+    /// ever observable.
+    RelayAssignmentStatus {
+        Active = "ACTIVE",
+        Cooldown = "COOLDOWN",
+        Released = "RELEASED",
+        Revoked = "REVOKED",
+        Expired = "EXPIRED",
+    }
+);
+
+text_enum!(
+    /// Why a relay-number assignment's routing authority ended.
+    RelayAssignmentEndReason {
+        Released = "RELEASED",
+        SessionRevoked = "SESSION_REVOKED",
+        SessionCompleted = "SESSION_COMPLETED",
+        SessionExpired = "SESSION_EXPIRED",
+        AssignmentExpired = "ASSIGNMENT_EXPIRED",
+        NumberDisabled = "NUMBER_DISABLED",
+    }
+);
+
+impl RelayAssignmentEndReason {
+    /// Terminal assignment status after the cooldown.
+    pub fn terminal_status(&self) -> RelayAssignmentStatus {
+        match self {
+            Self::Released | Self::SessionCompleted => RelayAssignmentStatus::Released,
+            Self::SessionRevoked | Self::NumberDisabled => RelayAssignmentStatus::Revoked,
+            Self::SessionExpired | Self::AssignmentExpired => RelayAssignmentStatus::Expired,
+        }
     }
 }
 

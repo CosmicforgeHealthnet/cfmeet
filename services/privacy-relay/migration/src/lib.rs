@@ -3,7 +3,8 @@
 //! Independent of every other service: it never creates, alters or references another
 //! service's tables, and records applied migrations in its own
 //! `privacy_relay_seaql_migrations` table. Telephony tables (carrier legs, provider
-//! callbacks) are deliberately absent: they belong to the future Telephony service.
+//! callbacks) are deliberately absent: they belong to the future Telephony service. The
+//! temporary relay-number inventory is relay infrastructure, not a numbering product.
 
 pub use sea_orm_migration::prelude::*;
 
@@ -15,6 +16,8 @@ mod m20261008_000005_commands_and_enforcement;
 mod m20261008_000006_contact_vault;
 mod m20261008_000007_contact_fingerprints;
 mod m20261008_000008_contact_verification_and_resolution;
+mod m20261008_000009_relay_number_inventory;
+mod m20261008_000010_relay_number_assignments;
 
 /// Name of the table recording which Privacy Relay migrations have been applied.
 pub const MIGRATION_TABLE: &str = "privacy_relay_seaql_migrations";
@@ -33,6 +36,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20261008_000006_contact_vault::Migration),
             Box::new(m20261008_000007_contact_fingerprints::Migration),
             Box::new(m20261008_000008_contact_verification_and_resolution::Migration),
+            Box::new(m20261008_000009_relay_number_inventory::Migration),
+            Box::new(m20261008_000010_relay_number_assignments::Migration),
         ]
     }
 

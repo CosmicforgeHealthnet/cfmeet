@@ -26,6 +26,9 @@ const TABLES: &[&str] = &[
     "protected_contacts",
     "relay_audit_events",
     "relay_authorization_decisions",
+    "relay_number_assignments",
+    "relay_number_events",
+    "relay_number_inventory",
 ];
 
 async fn tables(conn: &sea_orm::DatabaseConnection) -> Vec<String> {
@@ -53,7 +56,7 @@ async fn up_down_up_creates_exactly_the_privacy_relay_tables() {
             "SELECT count(*) FROM privacy_relay_seaql_migrations"
         )
         .await,
-        8
+        10
     );
     Migrator::down(&db.conn, None).await.unwrap();
     assert_eq!(tables(&db.conn).await, ["privacy_relay_seaql_migrations"]);
@@ -65,8 +68,8 @@ async fn up_down_up_creates_exactly_the_privacy_relay_tables() {
     Migrator::up(&db.conn, None).await.unwrap();
     assert_eq!(tables(&db.conn).await, TABLES);
     for forbidden in [
-        "relay_number_inventory",
-        "relay_number_assignments",
+        "numbers",
+        "phone_numbers",
         "calls",
         "call_sessions",
         "platform_api_credentials",
@@ -76,11 +79,15 @@ async fn up_down_up_creates_exactly_the_privacy_relay_tables() {
     ] {
         assert!(!TABLES.contains(&forbidden), "{forbidden}");
     }
-    // Every tenant-owned table carries explicit ownership columns.
-    for table in TABLES
-        .iter()
-        .filter(|t| **t != "privacy_relay_seaql_migrations")
-    {
+    // Every tenant-owned table carries explicit ownership columns. The temporary
+    // relay-number inventory and its ledger are PLATFORM-owned (a number belongs to no
+    // tenant; tenants only ever hold an assignment, which is scoped).
+    const PLATFORM_OWNED: &[&str] = &[
+        "privacy_relay_seaql_migrations",
+        "relay_number_inventory",
+        "relay_number_events",
+    ];
+    for table in TABLES.iter().filter(|t| !PLATFORM_OWNED.contains(t)) {
         for column in ["tenant_id", "application_id", "environment_id"] {
             assert_eq!(
                 scalar(&db.conn, &format!("SELECT count(*) FROM information_schema.columns WHERE table_name = '{table}' AND column_name = '{column}'")).await,

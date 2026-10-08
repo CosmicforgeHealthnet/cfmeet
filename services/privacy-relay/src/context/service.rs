@@ -36,12 +36,13 @@ use crate::{
     relay::session::{
         apply_diff, derive_for_context, diff, live_sessions_for_update, SessionAggregate,
     },
+    relay_numbers::assignment::AssignmentAudit,
     scope::{environment_kind_str, CommandContext, RelayScope},
     service::{enforcement_body, CommandOutcome, RelayService},
     vocabulary::{
         AuditEventType, CommandOperation, CommunicationChannel, CommunicationContextStatus,
         DirectionPolicy, EnforcementReason, EnforcementState, PrivacyRelaySessionStatus,
-        RelayStrategy,
+        RelayAssignmentEndReason, RelayStrategy,
     },
 };
 
@@ -727,6 +728,20 @@ impl RelayService {
                     now,
                 )
                 .await?;
+                self.end_relay_assignment_in(
+                    txn,
+                    &AssignmentAudit {
+                        cmd,
+                        context_id: ctx.id(),
+                        context_version: ctx.row.version,
+                        context_status: ctx.status()?.as_str(),
+                        session_id: s.id,
+                        session_version: s.version + 1,
+                    },
+                    RelayAssignmentEndReason::SessionExpired,
+                    now,
+                )
+                .await?;
                 jobs.push(
                     enforcement::request(
                         txn,
@@ -765,6 +780,23 @@ impl RelayService {
                 ],
             )
             .await?;
+            if validity_changed {
+                // A narrowed session narrows its relay identity too.
+                self.contain_relay_assignment_in(
+                    txn,
+                    &AssignmentAudit {
+                        cmd,
+                        context_id: ctx.id(),
+                        context_version: ctx.row.version,
+                        context_status: ctx.status()?.as_str(),
+                        session_id: s.id,
+                        session_version: version,
+                    },
+                    grace_expires_at.unwrap_or(expires_at),
+                    now,
+                )
+                .await?;
+            }
             if changed {
                 let mut evidence = d.evidence();
                 evidence["source_context_version"] = json!(ctx.row.version);
@@ -858,6 +890,37 @@ impl RelayService {
                 now,
             )
             .await?;
+            // A relay identity ends with its session (a completed session keeps it only
+            // while its grace lasts; the assignment never outlives that grace).
+            let reason = match to {
+                PrivacyRelaySessionStatus::Revoked => {
+                    Some(RelayAssignmentEndReason::SessionRevoked)
+                }
+                PrivacyRelaySessionStatus::Expired => {
+                    Some(RelayAssignmentEndReason::SessionExpired)
+                }
+                PrivacyRelaySessionStatus::Completed => row
+                    .grace_expires_at
+                    .is_none_or(|g| g <= now)
+                    .then_some(RelayAssignmentEndReason::SessionCompleted),
+                _ => None,
+            };
+            if let Some(reason) = reason {
+                self.end_relay_assignment_in(
+                    txn,
+                    &AssignmentAudit {
+                        cmd,
+                        context_id: ctx.id(),
+                        context_version: ctx.row.version,
+                        context_status: ctx.status()?.as_str(),
+                        session_id: row.id,
+                        session_version: version,
+                    },
+                    reason,
+                    now,
+                )
+                .await?;
+            }
         }
         Ok(())
     }

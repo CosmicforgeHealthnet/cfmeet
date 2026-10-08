@@ -154,6 +154,51 @@ pub fn normalize(
     parse_screened(raw.expose(), country)
 }
 
+/// A platform-owned PUBLIC relay number (temporary relay inventory, §34), canonicalized
+/// with the same parser. Not a protected contact: the relay number is CF Meet's own public
+/// identity, stored in the inventory (never in Calling, events or contracts).
+pub struct PublicRelayNumber {
+    pub e164: String,
+    pub country_iso2: String,
+    /// Bounded masked display for operator output.
+    pub masked: String,
+}
+
+impl fmt::Debug for PublicRelayNumber {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PublicRelayNumber")
+            .field("masked", &self.masked)
+            .field("country_iso2", &self.country_iso2)
+            .finish()
+    }
+}
+
+/// Canonicalizes an operator-supplied relay number (international form required; the
+/// country must be determinable).
+pub fn canonical_public_number(raw: &str) -> Result<PublicRelayNumber, NormalizationError> {
+    if !raw.trim().starts_with('+') {
+        return Err(NormalizationError::Unparseable);
+    }
+    let n = parse_screened(raw, None)?;
+    let country_iso2 = n
+        .country_iso2()
+        .ok_or(NormalizationError::Unparseable)?
+        .to_string();
+    Ok(PublicRelayNumber {
+        e164: n.e164.to_string(),
+        masked: n.masked_display(),
+        country_iso2,
+    })
+}
+
+/// Masked display of a stored canonical relay number.
+pub fn mask_public_number(e164: &str) -> String {
+    match parse_screened(e164, None) {
+        Ok(n) => n.masked_display(),
+        Err(_) => "+\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}".to_string(),
+    }
+}
+
 fn parse_screened(
     input: &str,
     country: Option<country::Id>,
