@@ -4,7 +4,9 @@ name: Calling service
 # principal trust foundation; internal service authentication; Calling core: canonical
 # Call aggregate, state machine, events + transactional outbox, call API; application
 # calling: endpoints, signaling, ringing / arbitration, media provider boundary, call
-# control). Real-provider (LiveKit) certification runs in calling-rtc-certification.yml.
+# control; the Privacy Relay ingress, protected calls and active-call enforcement).
+# Real-provider (LiveKit) certification runs in calling-rtc-certification.yml; the
+# cross-service Privacy Relay e2e runs in privacy-relay.yml.
 # Independent of
 # services/meeting-service: this workflow never builds or starts the Meeting Service.
 # It depends only on the shared packages/service-auth crate and the Calling / platform
@@ -20,6 +22,7 @@ on:
       - "services/calling/**"
       - "packages/service-auth/**"
       - "packages/contracts/calling/**"
+      - "packages/contracts/privacy-relay/**"
       - "packages/contracts/platform/**"
       - "packages/contracts/manifest.json"
       - ".github/workflows/calling.yml"
@@ -28,6 +31,7 @@ on:
       - "services/calling/**"
       - "packages/service-auth/**"
       - "packages/contracts/calling/**"
+      - "packages/contracts/privacy-relay/**"
       - "packages/contracts/platform/**"
       - "packages/contracts/manifest.json"
       - ".github/workflows/calling.yml"
@@ -171,12 +175,13 @@ jobs:
           cargo run -q --locked -p calling-migration -- up
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'platform\_%'")" = "11"
-          # Call domain (Part C §15–§25): calls + 18 call_* tables + the outbox.
+          # Call domain (Part C §15–§25, Part D §26–§30 evidence): calls + 20 call_* tables
+          # + the outbox.
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' \
-             AND (tablename = 'calls' OR tablename LIKE 'call\_%' OR tablename = 'calling_outbox_events')")" = "20"
+             AND (tablename = 'calls' OR tablename LIKE 'call\_%' OR tablename = 'calling_outbox_events')")" = "22"
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
-            "SELECT count(*) FROM calling_seaql_migrations")" = "14"
+            "SELECT count(*) FROM calling_seaql_migrations")" = "15"
 
       - name: Service starts against the migrated database and refuses unsafe configuration
         env:
@@ -260,10 +265,14 @@ jobs:
           # The call API and call control require a platform credential.
           code=$(curl -s -o "$K/c.json" -w '%{http_code}' http://127.0.0.1:8090/v1/calls)
           test "$code" = "401" && grep -q '"code":"AUTHENTICATION_FAILED"' "$K/c.json"
-          for path in /v1/calls /v1/calling/endpoints /v1/calling/signaling-credentials; do
+          for path in /v1/calls /v1/calling/endpoints /v1/calling/signaling-credentials /v1/privacy-relay/contexts; do
             code=$(curl -s -o "$K/d.json" -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{}' "http://127.0.0.1:8090$path")
             test "$code" = "401" && grep -q '"code":"AUTHENTICATION_FAILED"' "$K/d.json"
           done
+          # Privacy Relay enforcement is internal: service token only.
+          code=$(curl -s -o "$K/g.json" -w '%{http_code}' -X POST -H 'Authorization: Bearer cfmk_live_x_y' \
+            -H 'content-type: application/json' -d '{}' http://127.0.0.1:8090/internal/v1/privacy-relay/enforcement)
+          test "$code" = "401" && grep -q '"code":"INTERNAL_AUTHENTICATION_FAILED"' "$K/g.json"
           # Endpoint signaling routes take a signaling credential only (never cfmk_*).
           for path in /v1/calling/invitations /v1/calling/signaling; do
             code=$(curl -s -o "$K/e.json" -w '%{http_code}' -H 'Authorization: Bearer cfmk_live_x_y' "http://127.0.0.1:8090$path")

@@ -1,0 +1,299 @@
+name: Privacy Relay service
+
+# services/privacy-relay — the Rust/Axum Privacy Relay peer service (Part D §§26–30):
+# Communication Contexts, participant reassignment / revocation, Privacy Relay
+# Sessions, communication authorization and durable active-call enforcement. It owns
+# its own PostgreSQL database and depends only on the shared packages/service-auth
+# crate and the contracts in packages/contracts. Contact Vault (§§31–33), relay-number
+# inventory and telephony are NOT implemented and must not appear here.
+#
+# The calling-e2e job runs Calling's cross-service test against the real privacy-relay
+# binary (each service with its own database, signed internal HTTP between them).
+#
+# CI builds carry no debug info and no incremental state; debug assertions stay on.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/privacy-relay/**"
+      - "services/calling/**"
+      - "packages/service-auth/**"
+      - "packages/contracts/privacy-relay/**"
+      - "packages/contracts/calling/**"
+      - "packages/contracts/platform/**"
+      - "packages/contracts/manifest.json"
+      - ".github/workflows/privacy-relay.yml"
+  pull_request:
+    paths:
+      - "services/privacy-relay/**"
+      - "services/calling/**"
+      - "packages/service-auth/**"
+      - "packages/contracts/privacy-relay/**"
+      - "packages/contracts/calling/**"
+      - "packages/contracts/platform/**"
+      - "packages/contracts/manifest.json"
+      - ".github/workflows/privacy-relay.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: privacy-relay-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: services/privacy-relay
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  lint:
+    name: fmt / check / clippy / boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/privacy-relay -> target
+          key: lint
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo check
+        run: cargo check --workspace --locked
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Architecture tests
+        run: cargo test --locked --test architecture
+
+      - name: Repository guards (no other service's source, no phase-03 paths)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -i 'phase-03'; then
+            echo "::error::a phase-03 path exists in the repository"; exit 1
+          fi
+          if grep -n -E 'services/calling|services/meeting-service|\.\./calling|\.\./meeting-service|calling-migration' \
+               services/privacy-relay/Cargo.toml services/privacy-relay/migration/Cargo.toml; then
+            echo "::error::services/privacy-relay depends on another service"; exit 1
+          fi
+          # Product-specific models / branching and later-section storage (Contact Vault,
+          # relay numbers, telephony) are checked by the architecture test above (it
+          # understands comments and test-only deny lists), and the migration smoke below
+          # asserts that no contact / telephone column exists.
+
+  test:
+    name: test (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      # Each test creates its own database from a migrated template.
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/privacy-relay -> target
+          key: test
+
+      # Contexts (validation, scope isolation, external references), participants and
+      # reassignment (version conflicts, concurrent updates), directions / channels,
+      # lifecycle and expiry workers, sessions (narrowing, inheritance, cascades),
+      # authorization (double check context ∩ session, recorded decisions), idempotency
+      # (concurrent replays, conflicts), audit gap-freedom + outbox, enforcement jobs
+      # (synchronous delivery, retry / backoff, real HTTP Calling mock), internal service
+      # authentication, migrations / database constraints, contract conformance, contact
+      # safety and architecture.
+      - name: cargo test
+        run: cargo test --workspace --no-fail-fast --locked
+
+  build:
+    name: build / migration smoke / startup
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/privacy-relay -> target
+          key: build
+
+      - name: cargo build
+        run: cargo build --workspace --locked
+
+      - name: Migration smoke (up / reset / up)
+        env:
+          PGPASSWORD: postgres
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/privacy_relay_migration_smoke
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE privacy_relay_migration_smoke"
+          ./target/debug/privacy-relay-migration up
+          ./target/debug/privacy-relay-migration status
+          ./target/debug/privacy-relay-migration reset
+          ./target/debug/privacy-relay-migration up
+          q() { psql -h 127.0.0.1 -U postgres -d privacy_relay_migration_smoke -tAc "$1"; }
+          test "$(q "SELECT count(*) FROM privacy_relay_seaql_migrations")" = "5"
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'privacy_relay_seaql_migrations'")" = "13"
+          # No contact storage, no telephone numbers (Contact Vault is a later section).
+          test "$(q "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' \
+            AND column_name ~* '(phone|e164|msisdn|telephone|contact_value|ciphertext)'")" = "0"
+
+      - name: Service starts against the migrated database and refuses unsafe configuration
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/privacy_relay_migration_smoke
+          PRIVACY_RELAY_BIND_ADDRESS: 127.0.0.1:8091
+        run: |
+          set -euo pipefail
+          K="$RUNNER_TEMP/service-auth"
+          mkdir -p "$K"
+          cargo run -q --locked --manifest-path ../../packages/service-auth/Cargo.toml --bin cf-service-keygen -- \
+            generate --kid privacy-relay-ci-1 --out "$K/privacy-relay-ci-1.pem" > "$K/privacy-relay-ci-1.jwk.json"
+          test "$(stat -c %a "$K/privacy-relay-ci-1.pem")" = "600"
+          echo '{"bundle_version":1,"receiver":"cfmeet.privacy-relay","runtime_environment":"local","trusted_issuers":[]}' > "$K/bundle.json"
+          echo '{"bundle_version":1,"receiver":"cfmeet.privacy-relay","runtime_environment":"staging","trusted_issuers":[]}' > "$K/staging-bundle.json"
+          echo '{"bundle_version":1,"receiver":"cfmeet.calling","runtime_environment":"local","trusted_issuers":[]}' > "$K/calling-bundle.json"
+          export CF_RUNTIME_ENVIRONMENT=local CF_SERVICE_AUTH_KEY_ID=privacy-relay-ci-1
+          export CF_SERVICE_AUTH_PRIVATE_KEY_FILE="$K/privacy-relay-ci-1.pem" CF_SERVICE_TRUST_BUNDLE_FILE="$K/bundle.json"
+
+          refuses() { # refuses <description> <env assignments...>: must exit 2 (config error)
+            local what="$1"; shift
+            set +e; env "$@" timeout 30 ./target/debug/privacy-relay > "$K/out.log" 2>&1; local rc=$?; set -e
+            if [ "$rc" != "2" ]; then
+              echo "::error::service did not refuse to start ($what): exit $rc"; cat "$K/out.log"; exit 1
+            fi
+            if grep -q -- "PRIVATE KEY" "$K/out.log"; then echo "::error::key material in startup output"; exit 1; fi
+            echo "refused as expected: $what"
+          }
+          refuses "missing database URL" DATABASE_URL=
+          refuses "missing signing key" CF_SERVICE_AUTH_PRIVATE_KEY_FILE=
+          refuses "unreadable signing key" CF_SERVICE_AUTH_PRIVATE_KEY_FILE="$K/missing.pem"
+          refuses "inline private key" CF_SERVICE_AUTH_PRIVATE_KEY=inline
+          refuses "missing trust bundle" CF_SERVICE_TRUST_BUNDLE_FILE=
+          refuses "bundle for another runtime environment" CF_SERVICE_TRUST_BUNDLE_FILE="$K/staging-bundle.json"
+          refuses "bundle of another receiver" CF_SERVICE_TRUST_BUNDLE_FILE="$K/calling-bundle.json"
+          refuses "wrong service identity" CF_SERVICE_ID=cfmeet.calling
+          refuses "unknown runtime environment" CF_RUNTIME_ENVIRONMENT=prod
+          refuses "invalid feature flag" PRIVACY_RELAY_ENABLED=maybe
+          refuses "insecure Calling URL outside local" CF_RUNTIME_ENVIRONMENT=staging \
+            CF_SERVICE_TRUST_BUNDLE_FILE="$K/staging-bundle.json" CALLING_INTERNAL_BASE_URL=http://calling.example.com
+
+          ./target/debug/privacy-relay > "$K/run.log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8091/health; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8091/health | grep -q '"status":"ok"'
+          # Every internal route requires a service token; a customer credential is refused.
+          for path in /internal/v1/contexts /internal/v1/communication/authorize /internal/v1/anything; do
+            code=$(curl -s -o "$K/a.json" -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{}' "http://127.0.0.1:8091$path")
+            test "$code" = "401" && grep -q '"code":"INTERNAL_AUTHENTICATION_FAILED"' "$K/a.json"
+            code=$(curl -s -o "$K/b.json" -w '%{http_code}' -X POST -H 'Authorization: Bearer cfmk_live_x_y' \
+              -H 'content-type: application/json' -d '{}' "http://127.0.0.1:8091$path")
+            test "$code" = "401" && grep -q '"code":"INTERNAL_AUTHENTICATION_FAILED"' "$K/b.json"
+          done
+          # There is no public customer API on Privacy Relay (customers go through Calling).
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8091/v1/privacy-relay/contexts)
+          test "$code" = "404"
+          grep -q "internal service authentication ready" "$K/run.log"
+          grep -q "privacy_relay_enabled" "$K/run.log"
+          if grep -q -- "PRIVATE KEY" "$K/run.log"; then echo "::error::key material in logs"; exit 1; fi
+          rm -rf "$K"
+
+  calling-e2e:
+    name: Calling ↔ Privacy Relay e2e
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            services/privacy-relay -> target
+            services/calling -> target
+          key: e2e
+
+      - name: Build privacy-relay binaries
+        run: cargo build --workspace --bins --locked
+
+      # Protected calls authorized by the real Privacy Relay, transfer re-authorization,
+      # reassignment / revocation enforcement delivered to Calling, and durable retry
+      # while Calling is unreachable. The test fails (rather than skips) here because the
+      # binaries are provided.
+      - name: Calling e2e against the real binary
+        working-directory: services/calling
+        run: |
+          set -euo pipefail
+          export PRIVACY_RELAY_BIN="$GITHUB_WORKSPACE/services/privacy-relay/target/debug/privacy-relay"
+          export PRIVACY_RELAY_MIGRATION_BIN="$GITHUB_WORKSPACE/services/privacy-relay/target/debug/privacy-relay-migration"
+          test -x "$PRIVACY_RELAY_BIN" && test -x "$PRIVACY_RELAY_MIGRATION_BIN"
+          cargo test --locked --test privacy_relay_e2e -- --nocapture 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+          grep -q "test result: ok. 2 passed" "$RUNNER_TEMP/e2e.log"
+
+  docker:
+    name: Docker image (repository-root context)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The context is filtered by services/privacy-relay/Dockerfile.dockerignore to
+      # packages/service-auth and services/privacy-relay only.
+      - name: docker build
+        working-directory: .
+        run: docker build -f services/privacy-relay/Dockerfile -t cfmeet-privacy-relay:ci .
+      - name: image contains only the Privacy Relay binaries and no key material
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint /bin/ls cfmeet-privacy-relay:ci /app | tr '\n' ' ')" = "privacy-relay privacy-relay-migration "
+          if docker run --rm --entrypoint /bin/sh cfmeet-privacy-relay:ci -c 'grep -rlI -- "PRIVATE KEY-----" / --exclude-dir=proc --exclude-dir=sys 2>/dev/null'; then
+            echo "::error::private key material in the image"; exit 1
+          fi

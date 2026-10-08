@@ -311,10 +311,26 @@ class RealRepository(unittest.TestCase):
             "call_endpoints", "call_invitations", "call_answer_claims",
             "call_participant_media_permissions", "call_media_sessions", "call_commands",
             "call_transfers", "call_media_provider_events",
+            # Part D sections 26-30: evidence of Privacy Relay decisions / enforcement.
+            "call_privacy_authorizations", "call_privacy_enforcements",
         }
         self.assertTrue(call_domain <= calling)
         self.assertTrue(all(t.startswith("platform_") or t in call_domain for t in calling), calling)
         self.assertFalse(calling & self.repo.tables["meeting-service"])
+
+    def test_privacy_relay_owns_its_tables(self):
+        self.assertIn("privacy-relay", self.repo.services)
+        relay = self.repo.tables["privacy-relay"]
+        self.assertTrue({
+            "communication_contexts", "communication_context_participants",
+            "privacy_relay_sessions", "relay_authorization_decisions", "relay_audit_events",
+            "privacy_relay_outbox", "privacy_relay_commands", "privacy_relay_enforcement_jobs",
+        } <= relay, relay)
+        self.assertFalse(relay & self.repo.tables["calling"])
+        self.assertFalse(relay & self.repo.tables["meeting-service"])
+        # Contact Vault (sections 31-33) is not implemented: no contact storage anywhere.
+        everything = set().union(*self.repo.tables.values())
+        self.assertFalse({"protected_contacts", "contact_vault_entries", "relay_numbers"} & everything)
 
     def mutated(self, mutate) -> list[guard.Violation]:
         with tempfile.TemporaryDirectory() as tmp:
@@ -377,6 +393,48 @@ class RealRepository(unittest.TestCase):
         self.assertMutationFails(
             "CROSS_SERVICE_DATABASE_URL",
             lambda r: append(r, "services/calling/.env.example", "\nTELEPHONY_DATABASE_URL=postgres://telephony\n"),
+        )
+
+    def test_privacy_relay_reading_the_calling_database(self):
+        self.assertMutationFails(
+            "CROSS_SERVICE_DATABASE_URL",
+            lambda r: append(r, "services/privacy-relay/.env.example", "\nCALLING_DATABASE_URL=postgres://calling\n"),
+        )
+
+    def test_privacy_relay_depending_on_calling(self):
+        self.assertMutationFails(
+            "CARGO_CROSS_SERVICE_DEPENDENCY",
+            lambda r: append(r, "services/privacy-relay/Cargo.toml", '\n[dev-dependencies.calling]\npath = "../calling"\n'),
+        )
+
+    def test_privacy_relay_querying_calling_tables(self):
+        self.assertMutationFails(
+            "CROSS_SERVICE_TABLE_ACCESS",
+            lambda r: append(r, "services/privacy-relay/src/db.rs", '\nconst CALLS: &str = "SELECT id FROM call_participants WHERE principal_id = $1";\n'),
+        )
+
+    def test_privacy_relay_platform_principal_lookup(self):
+        self.assertMutationFails(
+            "CROSS_SERVICE_TABLE_ACCESS",
+            lambda r: append(r, "services/privacy-relay/src/db.rs", '\nconst P: &str = "SELECT status FROM platform_principals WHERE id = $1";\n'),
+        )
+
+    def test_privacy_relay_including_calling_source(self):
+        self.assertMutationFails(
+            "CROSS_SERVICE_SOURCE_INCLUDE",
+            lambda r: append(r, "services/privacy-relay/src/lib.rs", '\n#[path = "../../calling/src/privacy_relay/mod.rs"]\nmod calling_privacy;\n'),
+        )
+
+    def test_calling_querying_privacy_relay_tables(self):
+        self.assertMutationFails(
+            "CROSS_SERVICE_TABLE_ACCESS",
+            lambda r: append(r, "services/calling/src/privacy_relay/mod.rs", '\nconst C: &str = "SELECT status FROM communication_contexts WHERE id = $1";\n'),
+        )
+
+    def test_calling_reading_the_privacy_relay_database(self):
+        self.assertMutationFails(
+            "CROSS_SERVICE_DATABASE_URL",
+            lambda r: append(r, "services/calling/.env.example", "\nPRIVACY_RELAY_DATABASE_URL=postgres://relay\n"),
         )
 
 

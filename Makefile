@@ -1,10 +1,12 @@
 # CF Meet — root developer commands.
 # Each target delegates to the app/service's own toolchain. services/meeting-service/,
-# services/calling/ and apps/web/ remain independently buildable and deployable.
+# services/calling/, services/privacy-relay/ and apps/web/ remain independently
+# buildable and deployable.
 # Shared code lives in packages/ (contracts, service-auth); no service depends on another.
 
 MEETING_SERVICE := services/meeting-service
 CALLING         := services/calling
+PRIVACY_RELAY   := services/privacy-relay
 WEB             := apps/web
 SERVICE_AUTH    := packages/service-auth
 CONTRACTS       := packages/contracts
@@ -12,6 +14,8 @@ CONTRACTS       := packages/contracts
 .PHONY: help deps deps-down meeting-service backend frontend web migrate dev test lint build \
         backend-test backend-lint backend-build frontend-test frontend-lint frontend-build \
         frontend-install calling calling-migrate calling-test calling-lint calling-build calling-admin \
+        privacy-relay privacy-relay-migrate privacy-relay-test privacy-relay-lint privacy-relay-build \
+        privacy-relay-integration \
         service-auth-test service-auth-lint contracts-validate contracts-test contracts-lint \
         service-boundaries
 
@@ -51,6 +55,28 @@ calling-lint: ## fmt + clippy for the Calling service
 calling-build: ## Build the Calling service
 	cd $(CALLING) && cargo build --workspace
 
+privacy-relay-migrate: ## Apply Privacy Relay database migrations (services/privacy-relay/.env)
+	cd $(PRIVACY_RELAY) && cargo run -p privacy-relay-migration -- up
+
+privacy-relay: ## Run the Privacy Relay service
+	cd $(PRIVACY_RELAY) && cargo run --bin privacy-relay
+
+privacy-relay-test: ## Run Privacy Relay tests (requires TEST_DATABASE_URL; no Docker needed)
+	cd $(PRIVACY_RELAY) && cargo test --workspace --no-fail-fast
+
+privacy-relay-lint: ## fmt + clippy for the Privacy Relay service
+	cd $(PRIVACY_RELAY) && cargo fmt --all -- --check
+	cd $(PRIVACY_RELAY) && cargo clippy --workspace --all-targets -- -D warnings
+
+privacy-relay-build: ## Build the Privacy Relay service
+	cd $(PRIVACY_RELAY) && cargo build --workspace
+
+privacy-relay-integration: ## Calling <-> Privacy Relay e2e against the real binary (requires TEST_DATABASE_URL)
+	cd $(PRIVACY_RELAY) && cargo build --workspace --bins
+	cd $(CALLING) && PRIVACY_RELAY_BIN=$(CURDIR)/$(PRIVACY_RELAY)/target/debug/privacy-relay \
+		PRIVACY_RELAY_MIGRATION_BIN=$(CURDIR)/$(PRIVACY_RELAY)/target/debug/privacy-relay-migration \
+		cargo test --test privacy_relay_e2e
+
 service-auth-test: ## Test packages/service-auth (core and client feature sets)
 	cd $(SERVICE_AUTH) && cargo test --no-fail-fast
 	cd $(SERVICE_AUTH) && cargo test --no-fail-fast --features client
@@ -82,11 +108,11 @@ web: frontend ## Alias for `make frontend`
 dev: ## Start deps, then meeting service + web app together (Ctrl+C stops both)
 	./scripts/dev.sh
 
-test: backend-test calling-test service-auth-test contracts-test contracts-validate service-boundaries frontend-test ## Run all tests
+test: backend-test calling-test privacy-relay-test service-auth-test contracts-test contracts-validate service-boundaries frontend-test ## Run all tests
 
-lint: backend-lint calling-lint service-auth-lint contracts-lint frontend-lint ## Run all linters
+lint: backend-lint calling-lint privacy-relay-lint service-auth-lint contracts-lint frontend-lint ## Run all linters
 
-build: backend-build calling-build frontend-build ## Build all applications and services
+build: backend-build calling-build privacy-relay-build frontend-build ## Build all applications and services
 
 backend-test:
 	cd $(MEETING_SERVICE) && cargo test --workspace
