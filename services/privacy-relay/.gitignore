@@ -1,0 +1,5 @@
+# Privacy Relay service — root .gitignore covers target/ and .env files as well.
+/target
+.env
+.env.*
+!.env.example

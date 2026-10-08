@@ -1,0 +1,37 @@
+//! CF Meet **Privacy Relay** service (Part D §26–§30).
+//!
+//! The authoritative service for Communication Contexts and Privacy Relay Sessions: WHY
+//! parties may communicate (an opaque consumer reference), WHO, in which DIRECTION, over
+//! which CHANNEL, during which time window, under which relay strategy — and whether that
+//! authority is still valid NOW. It is a generic platform capability: first-party and
+//! external applications use the same model, and nothing here knows any consumer
+//! product or business object.
+//!
+//! It owns contexts, context participants / channels / directions, relay sessions and
+//! their authorization snapshots, authorization decisions, immutable audit evidence, the
+//! transactional outbox, command idempotency and durable active-call enforcement jobs.
+//! It does NOT own calls, call sessions, endpoints, RTC rooms, meetings, telephony legs,
+//! protected contacts (Contact Vault, §31+) or relay-number inventory (§34+).
+//!
+//! It shares no source and no database with any other service: Calling reaches it over
+//! authenticated internal HTTP (`packages/service-auth`), and it reaches Calling's
+//! enforcement API the same way.
+
+pub mod audit;
+pub mod clock;
+pub mod commands;
+pub mod config;
+pub mod context;
+pub(crate) mod db;
+pub mod enforcement;
+pub mod error;
+pub mod internal;
+pub mod middleware;
+pub mod models;
+pub mod relay;
+pub mod routes;
+pub mod scope;
+pub mod service;
+pub mod state;
+pub mod vocabulary;
+pub mod workers;
