@@ -542,6 +542,25 @@ impl AppCallService {
                 if call_terminal {
                     return Ok(EventDisposition::IgnoredTerminal);
                 }
+                // A DEFINITE provider-side failure before connection may fail over to
+                // another interconnect (new leg + attempt) when the plan permits.
+                if super::failover::failover_candidate(event, &leg) && leg.state == LegState::Failed
+                {
+                    let attempt = match event.attempt_id {
+                        Some(a) => attempt_of(txn, call, CallAttemptId::from_uuid(a))
+                            .await
+                            .ok(),
+                        None => None,
+                    };
+                    let call_now = self.locked(txn, call).await?;
+                    if self
+                        .failover_in(txn, &call_now, &leg, attempt.as_ref())
+                        .await?
+                    {
+                        after.dispatch = true;
+                        return Ok(EventDisposition::Applied);
+                    }
+                }
                 let caller_leg = party_role(txn, leg.id).await?.as_deref() == Some("CALLER");
                 self.public_leg_terminal_in(txn, call, outcome, caller_leg, after, pending)
                     .await?;

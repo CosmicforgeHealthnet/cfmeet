@@ -19,6 +19,7 @@ mod bridge;
 mod callback;
 mod dispatch;
 mod events;
+mod failover;
 mod inbound;
 mod outbound;
 

@@ -104,6 +104,11 @@ CREATE TABLE telephony_legs (
 -- At most one non-terminal execution per canonical CallLeg (UNKNOWN included).
 CREATE UNIQUE INDEX uq_telephony_legs_one_live_execution ON telephony_legs (calling_call_leg_id)
     WHERE status NOT IN ('ENDED', 'FAILED');
+-- At most one non-terminal OUTBOUND execution per protected party of a Call (UNKNOWN
+-- included): a failover attempt (a new CallLeg) can never run beside an unresolved or
+-- live earlier attempt to the same destination (Part E §119, §146).
+CREATE UNIQUE INDEX uq_telephony_legs_one_live_per_party ON telephony_legs (calling_call_id, contact_reference)
+    WHERE direction = 'OUTBOUND' AND status NOT IN ('ENDED', 'FAILED');
 CREATE INDEX idx_telephony_legs_call ON telephony_legs (calling_call_id);
 CREATE INDEX idx_telephony_legs_status ON telephony_legs (status);
 CREATE INDEX idx_telephony_legs_live_route ON telephony_legs (route_id)

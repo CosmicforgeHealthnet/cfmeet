@@ -53,6 +53,8 @@ pub enum Script {
     /// Create the call, then the worker process dies before it can record anything
     /// (the executing task panics).
     AcceptThenCrash,
+    /// A provider-side error (the interconnect, not the callee): definite, no call.
+    ProviderError { transmitted: bool },
 }
 
 #[derive(Debug, Clone)]
@@ -351,7 +353,7 @@ impl TelecomInterconnectProvider for DeterministicProvider {
             Script::Fail {
                 transmitted: false,
                 ..
-            }
+            } | Script::ProviderError { transmitted: false }
         ) {
             s.seen.push(request.correlation_key.clone());
         }
@@ -390,6 +392,11 @@ impl TelecomInterconnectProvider for DeterministicProvider {
                 transmitted,
             },
             Script::LoseRequest(reason) => OriginateOutcome::UnknownOutcome { reason },
+            Script::ProviderError { transmitted } => OriginateOutcome::DefiniteFailure {
+                category: FailureCategory::Network,
+                reason: EndReason::Failed,
+                transmitted,
+            },
             Script::Stall { .. } | Script::AcceptThenCrash => unreachable!("handled above"),
         }
     }

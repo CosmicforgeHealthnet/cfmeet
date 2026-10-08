@@ -173,6 +173,29 @@ impl TelephonyService {
         )
         .await?
         .map(|r| (r.max_generation, r.live));
+        // A failover attempt (another CallLeg of the same Call to the same protected
+        // party) waits until every earlier attempt is resolved: never beside a live or
+        // UNKNOWN one (also a unique index).
+        let other_live = db::scalar_i64(
+            &txn,
+            "SELECT count(*) FROM telephony_legs WHERE calling_call_id = $1 AND contact_reference = $2 \
+               AND direction = 'OUTBOUND' AND calling_call_leg_id <> $3 AND status NOT IN ('ENDED', 'FAILED')",
+            vec![
+                command.call.call_id.into(),
+                command.destination.contact_reference.into(),
+                command.call.call_leg_id.into(),
+            ],
+        )
+        .await?;
+        if other_live > 0 {
+            drop(txn);
+            if let Some(existing) =
+                find_by_key(&self.db, &requester.service, &command.idempotency_key).await?
+            {
+                return self.replay(&existing, &digest).await;
+            }
+            return Err(TelephonyError::Refused(ErrorCode::ExecutionInProgress));
+        }
         if let Some((max_generation, live)) = prior {
             if live.is_some() {
                 drop(txn);
@@ -253,6 +276,7 @@ impl TelephonyService {
             drop(txn);
             let unique = [
                 "uq_telephony_legs_one_live_execution",
+                "uq_telephony_legs_one_live_per_party",
                 "uq_telephony_legs_attempt",
                 "uq_telephony_commands_idempotency",
                 "telephony_commands_pkey",
@@ -267,7 +291,9 @@ impl TelephonyService {
                 {
                     return self.replay(&existing, &digest).await;
                 }
-                if is_unique_violation(&e, "uq_telephony_legs_one_live_execution") {
+                if is_unique_violation(&e, "uq_telephony_legs_one_live_execution")
+                    || is_unique_violation(&e, "uq_telephony_legs_one_live_per_party")
+                {
                     return Err(TelephonyError::Refused(ErrorCode::ExecutionInProgress));
                 }
                 if is_unique_violation(&e, "uq_telephony_legs_attempt") {

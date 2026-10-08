@@ -354,9 +354,29 @@ impl TelephonyService {
         // Choose the interconnect: eligible route, caller identity bound to its
         // provider, capacity reserved — and the correlation key persisted — atomically.
         let txn = self.db.begin().await?;
-        let routes = self
+        // Attempt history (Part E §144): an interconnect that already failed DEFINITELY
+        // on the provider side for this party of this Call is not tried again.
+        let failed_before: Vec<String> = db::all::<RouteRef, _>(
+            &txn,
+            "SELECT DISTINCT route_id FROM telephony_legs WHERE calling_call_id = $1 AND contact_reference = $2 \
+               AND id <> $3 AND status = 'FAILED' AND route_id IS NOT NULL \
+               AND (failure_category IN ('ROUTING', 'NETWORK', 'EXECUTION') OR end_reason = 'ABSENT_AT_PROVIDER')",
+            vec![
+                leg.calling_call_id.into(),
+                leg.contact_reference.into(),
+                leg.id.into(),
+            ],
+        )
+        .await?
+        .into_iter()
+        .map(|r| r.route_id)
+        .collect();
+        let routes: Vec<_> = self
             .eligible_routes(&txn, &country, RouteCapability::VoiceOutbound, &candidates)
-            .await?;
+            .await?
+            .into_iter()
+            .filter(|r| !failed_before.contains(&r.id))
+            .collect();
         let mut chosen = None;
         let mut capacity_exhausted = false;
         for route in routes {
@@ -1061,6 +1081,11 @@ impl TelephonyService {
         txn.commit().await?;
         Ok(result)
     }
+}
+
+#[derive(Debug, sea_orm::FromQueryResult)]
+struct RouteRef {
+    route_id: String,
 }
 
 #[derive(Debug, sea_orm::FromQueryResult)]

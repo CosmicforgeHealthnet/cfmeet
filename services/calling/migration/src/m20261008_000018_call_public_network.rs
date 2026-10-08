@@ -63,9 +63,25 @@ CREATE TRIGGER trg_call_public_parties_immutable
     FOR EACH ROW EXECUTE FUNCTION platform_forbid_column_change(
         'id', 'call_id', 'tenant_id', 'application_id', 'environment_id', 'role',
         'contact_reference', 'country', 'created_at');
-CREATE TRIGGER trg_call_public_parties_leg_once
+-- A party is served by one public leg at a time. It moves to a new leg only after its
+-- current leg FAILED (a failover attempt after a DEFINITE failure, Part E §51); never
+-- while that leg is live or its outcome unknown, and never back to no leg.
+CREATE FUNCTION call_public_parties_guard_leg() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.call_leg_id IS NOT NULL AND NEW.call_leg_id IS DISTINCT FROM OLD.call_leg_id THEN
+        IF NEW.call_leg_id IS NULL OR NOT EXISTS (
+            SELECT 1 FROM call_legs WHERE id = OLD.call_leg_id AND state = 'FAILED') THEN
+            RAISE EXCEPTION 'calling invariant violated: a public party moves to a new leg only after its leg failed'
+                USING ERRCODE = 'integrity_constraint_violation';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER trg_call_public_parties_leg_guard
     BEFORE UPDATE ON call_public_parties
-    FOR EACH ROW EXECUTE FUNCTION platform_forbid_reassignment('call_leg_id');
+    FOR EACH ROW EXECUTE FUNCTION call_public_parties_guard_leg();
 CREATE TRIGGER trg_call_public_parties_no_delete
     BEFORE DELETE ON call_public_parties
     FOR EACH ROW EXECUTE FUNCTION calling_forbid_mutation();
@@ -313,6 +329,7 @@ DROP TABLE IF EXISTS call_public_bridges;
 DROP TABLE IF EXISTS call_telephony_events;
 DROP TABLE IF EXISTS call_telephony_commands;
 DROP TABLE IF EXISTS call_public_parties;
+DROP FUNCTION IF EXISTS call_public_parties_guard_leg();
 DROP TRIGGER IF EXISTS trg_calls_origin_immutable ON calls;
 ALTER TABLE calls
     DROP CONSTRAINT IF EXISTS ck_calls_origin,
