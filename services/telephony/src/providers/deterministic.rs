@@ -47,6 +47,12 @@ pub enum Script {
     },
     /// Never create the call, but the outcome is unknown to the caller.
     LoseRequest(UnknownReason),
+    /// Optionally create the call, then never answer within the request deadline (the
+    /// executor's own deadline decides: a timeout AFTER the request left).
+    Stall { create: bool },
+    /// Create the call, then the worker process dies before it can record anything
+    /// (the executing task panics).
+    AcceptThenCrash,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +75,9 @@ struct State {
     health: Option<Health>,
     max_concurrent: Option<u32>,
     query_unknown: bool,
+    /// Native idempotency: a repeated idempotency key returns the existing call.
+    native_idempotency: bool,
+    by_idempotency_key: HashMap<String, String>,
     next_event: u64,
 }
 
@@ -120,6 +129,12 @@ impl DeterministicProvider {
     /// Makes status read-back answer Unknown.
     pub fn set_query_unknown(&self, unknown: bool) {
         self.lock().query_unknown = unknown;
+    }
+
+    /// Native idempotency (`IDEMPOTENT_ORIGINATION`): the provider deduplicates by the
+    /// request's idempotency key and returns its own idempotency reference.
+    pub fn set_native_idempotency(&self, on: bool) {
+        self.lock().native_idempotency = on;
     }
 
     /// Correlation keys that produced a (paid) provider call.
@@ -218,6 +233,25 @@ impl DeterministicProvider {
         );
     }
 
+    fn create_call(s: &mut State, request: &OriginateRequest) -> String {
+        let provider_call_ref = format!("dp-{}", request.correlation_key);
+        s.calls.insert(
+            provider_call_ref.clone(),
+            FakeCall {
+                provider_call_ref: provider_call_ref.clone(),
+                correlation_key: request.correlation_key.clone(),
+                status: LegStatus::Originating,
+                end_reason: None,
+            },
+        );
+        s.effects.push(request.correlation_key.clone());
+        if s.native_idempotency {
+            s.by_idempotency_key
+                .insert(request.idempotency_key.clone(), provider_call_ref.clone());
+        }
+        provider_call_ref
+    }
+
     /// Signs a callback body the way the provider would.
     pub fn sign(&self, body: &[u8]) -> String {
         format!(
@@ -260,6 +294,43 @@ impl TelecomInterconnectProvider for DeterministicProvider {
     }
 
     async fn originate(&self, request: OriginateRequest) -> OriginateOutcome {
+        let step = {
+            let s = self.lock();
+            if s.native_idempotency {
+                if let Some(existing) = s.by_idempotency_key.get(&request.idempotency_key) {
+                    // Same key: the same provider call, no second effect.
+                    return OriginateOutcome::Accepted {
+                        provider_call_ref: existing.clone(),
+                        provider_idempotency_ref: Some(format!("idem-{}", request.idempotency_key)),
+                    };
+                }
+            }
+            s.script.front().copied().unwrap_or(Script::Accept)
+        };
+        if let Script::Stall { create } = step {
+            {
+                let mut s = self.lock();
+                s.script.pop_front();
+                s.seen.push(request.correlation_key.clone());
+                if create {
+                    Self::create_call(&mut s, &request);
+                }
+            }
+            tokio::time::sleep(request.request_timeout * 4).await;
+            return OriginateOutcome::Accepted {
+                provider_call_ref: format!("dp-{}", request.correlation_key),
+                provider_idempotency_ref: None,
+            };
+        }
+        if step == Script::AcceptThenCrash {
+            {
+                let mut s = self.lock();
+                s.script.pop_front();
+                s.seen.push(request.correlation_key.clone());
+                Self::create_call(&mut s, &request);
+            }
+            panic!("simulated worker crash after the provider accepted");
+        }
         let mut s = self.lock();
         let step = s.script.pop_front().unwrap_or(Script::Accept);
         if !matches!(
@@ -271,20 +342,7 @@ impl TelecomInterconnectProvider for DeterministicProvider {
         ) {
             s.seen.push(request.correlation_key.clone());
         }
-        let create = |s: &mut State| {
-            let provider_call_ref = format!("dp-{}", request.correlation_key);
-            s.calls.insert(
-                provider_call_ref.clone(),
-                FakeCall {
-                    provider_call_ref: provider_call_ref.clone(),
-                    correlation_key: request.correlation_key.clone(),
-                    status: LegStatus::Originating,
-                    end_reason: None,
-                },
-            );
-            s.effects.push(request.correlation_key.clone());
-            provider_call_ref
-        };
+        let create = |s: &mut State| Self::create_call(s, &request);
         match step {
             Script::Accept => {
                 if let Some(max) = s.max_concurrent {
@@ -298,9 +356,12 @@ impl TelecomInterconnectProvider for DeterministicProvider {
                     }
                 }
                 let provider_call_ref = create(&mut s);
+                let provider_idempotency_ref = s
+                    .native_idempotency
+                    .then(|| format!("idem-{}", request.idempotency_key));
                 OriginateOutcome::Accepted {
                     provider_call_ref,
-                    provider_idempotency_ref: None,
+                    provider_idempotency_ref,
                 }
             }
             Script::AcceptButLoseResponse(reason) => {
@@ -316,6 +377,7 @@ impl TelecomInterconnectProvider for DeterministicProvider {
                 transmitted,
             },
             Script::LoseRequest(reason) => OriginateOutcome::UnknownOutcome { reason },
+            Script::Stall { .. } | Script::AcceptThenCrash => unreachable!("handled above"),
         }
     }
 
