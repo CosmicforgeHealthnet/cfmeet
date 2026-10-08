@@ -1,6 +1,6 @@
 import api from "./api";
 import type { UserProfile, UpdateProfileRequest } from "@/types/user";
-import type { MessageResponse } from "@/types/auth";
+import type { MessageResponse, ChangePasswordRequest, ChangePasswordResponse } from "@/types/auth";
 
 export const userService = {
   getProfile: async () => {
@@ -15,6 +15,11 @@ export const userService = {
 
   deactivateAccount: async () => {
     const response = await api.post<MessageResponse>("/users/me/deactivate");
+    return response.data;
+  },
+
+  changePassword: async (data: ChangePasswordRequest) => {
+    const response = await api.post<ChangePasswordResponse>("/auth/change-password", data);
     return response.data;
   },
 };

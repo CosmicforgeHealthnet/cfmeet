@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(copy:*)",
+      "Bash(npx tsc:*)",
+      "Bash(cargo check:*)"
+    ]
+  }
+}
