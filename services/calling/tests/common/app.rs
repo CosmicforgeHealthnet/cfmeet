@@ -72,6 +72,25 @@ impl AppWorld {
         peers: super::Peers,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Option<Self> {
+        Self::with_service_auth_for(
+            service_auth,
+            peers,
+            now,
+            None,
+            calling::domain::TenantClassification::External,
+        )
+        .await
+    }
+
+    /// [`with_service_auth`](Self::with_service_auth) for a tenant of `classification`,
+    /// optionally minting Contact Vault access tokens with `contact_delegation`.
+    pub async fn with_service_auth_for(
+        service_auth: calling::internal_auth::ServiceAuthRuntime,
+        peers: super::Peers,
+        now: chrono::DateTime<chrono::Utc>,
+        contact_delegation: Option<std::sync::Arc<cf_service_auth::ContactDelegationSigner>>,
+        classification: calling::domain::TenantClassification,
+    ) -> Option<Self> {
         use std::sync::Arc;
         let db = Arc::new(super::TestDb::new().await?);
         let media = Arc::new(FakeMediaProvider::default());
@@ -82,6 +101,7 @@ impl AppWorld {
         ));
         let push = Arc::new(super::RecordingPush::default());
         runtime.push = push.clone();
+        runtime.contact_delegation = contact_delegation;
         let h = Harness::with_service_auth(
             db,
             super::TEST_PEPPER,
@@ -93,8 +113,9 @@ impl AppWorld {
             service_auth,
             peers,
         );
-        let w =
-            CallWorld::in_harness(h, "acme", calling::domain::EnvironmentKind::Production).await;
+        let consumer = h.consumer("acme", classification).await;
+        let w = CallWorld::for_consumer(h, consumer, calling::domain::EnvironmentKind::Production)
+            .await;
         Some(Self { w })
     }
 
