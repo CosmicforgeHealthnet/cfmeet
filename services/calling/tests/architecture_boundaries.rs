@@ -575,9 +575,9 @@ fn calling_never_handles_raw_contact_values() {
 }
 
 #[test]
-fn privacy_relay_is_a_peer_service_and_later_services_do_not_exist_yet() {
+fn privacy_relay_and_telephony_are_peer_services_and_later_services_do_not_exist_yet() {
     let services = manifest_dir().join("..");
-    for future in ["telephony", "numbering", "contact-vault"] {
+    for future in ["numbering", "contact-vault"] {
         assert!(
             !services.join(future).exists(),
             "services/{future} must not exist before its implementation phase"
@@ -586,12 +586,32 @@ fn privacy_relay_is_a_peer_service_and_later_services_do_not_exist_yet() {
     // Privacy Relay (Part D) is its own deployable service: Calling reaches it only over
     // authenticated internal HTTP and never depends on its source or migrations.
     assert!(services.join("privacy-relay/Cargo.toml").exists());
+    // Telephony (Part E) likewise: authenticated internal HTTP only, never its source,
+    // migrations or database.
+    assert!(services.join("telephony/Cargo.toml").exists());
     for manifest in ["Cargo.toml", "migration/Cargo.toml"] {
         let text = std::fs::read_to_string(manifest_dir().join(manifest)).unwrap();
         assert!(
             !text.contains("privacy-relay"),
             "{manifest} depends on privacy-relay"
         );
+        assert!(
+            !text.contains("telephony"),
+            "{manifest} depends on telephony"
+        );
+    }
+    for (file, code) in production_sources() {
+        for forbidden in [
+            "telephony_migration".to_string(),
+            "extern crate telephony".to_string(),
+            "use telephony::".to_string(),
+            format!("{}_DATABASE_URL", "TELEPHONY"),
+        ] {
+            assert!(
+                !code.contains(&forbidden),
+                "{file} imports Telephony source or data (`{forbidden}`)"
+            );
+        }
     }
     for (file, code) in production_sources() {
         for forbidden in [

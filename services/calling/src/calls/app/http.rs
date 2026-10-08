@@ -130,7 +130,13 @@ struct CreateCallBody {
     kind: CallKind,
     initiator_principal_id: Uuid,
     initiator_endpoint_id: Uuid,
+    #[serde(default)]
     target_principal_ids: Vec<Uuid>,
+    /// A protected telephone contact (opaque ContactReference — never a number): the
+    /// call is an app-to-phone call executed by Telephony (Part E §44). Requires
+    /// `privacyRelaySessionId` and no principal targets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target_contact_reference: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     initiator_display_name: Option<String>,
     /// Optional Privacy Relay Session: the call is authorized by Privacy Relay
@@ -158,6 +164,33 @@ async fn create_call(
         .map(DisplayName::parse)
         .transpose()
         .map_err(|_| CallingError::Validation("initiatorDisplayName is invalid."))?;
+    if let Some(contact) = body.target_contact_reference {
+        let (true, Some(session)) = (
+            body.target_principal_ids.is_empty(),
+            body.privacy_relay_session_id,
+        ) else {
+            return Err(CallingError::Validation(
+                "targetContactReference requires privacyRelaySessionId and no targetPrincipalIds.",
+            ));
+        };
+        let created = state
+            .app
+            .create_protected_contact_call(
+                &ctx,
+                crate::calls::app::public::CreatePublicCall {
+                    kind: body.kind,
+                    initiator: PrincipalId::from_uuid(body.initiator_principal_id),
+                    initiator_endpoint: CallEndpointId::from_uuid(body.initiator_endpoint_id),
+                    target_contact: contact,
+                    initiator_display_name: display,
+                    privacy_relay_session: session,
+                    key,
+                },
+            )
+            .await?;
+        let status = StatusCode::from_u16(created.status).unwrap_or(StatusCode::CREATED);
+        return Ok(respond(status, created.body, created.replayed));
+    }
     let created = state
         .app
         .create_app_call(

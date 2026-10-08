@@ -87,6 +87,15 @@ pub enum CallError {
     /// obtained (timeout, outage, authentication, malformed answer): fail closed.
     #[error("privacy authorization unavailable")]
     PrivacyAuthorizationUnavailable,
+    /// The Routing Engine denied a public-network route (stable denial code, safe).
+    #[error("public route denied ({0})")]
+    PublicRouteDenied(&'static str),
+    /// No public-network route is usable now (unavailable, full or unknown health).
+    #[error("public route unavailable ({0})")]
+    PublicRouteUnavailable(&'static str),
+    /// A durable spend reservation was refused (stable reason code).
+    #[error("telecom spend limit ({0})")]
+    TelecomSpendLimitExceeded(&'static str),
     /// Unexpected database failure (summary: SQLSTATE + constraint only).
     #[error("database error ({summary})")]
     Database { summary: String, connectivity: bool },
@@ -123,6 +132,9 @@ impl CallError {
             CallError::ParticipantLimitExceeded { .. } => "PARTICIPANT_LIMIT_EXCEEDED",
             CallError::TargetUnavailable => "TARGET_UNAVAILABLE",
             CallError::PrivacyAuthorizationUnavailable => "PRIVACY_AUTHORIZATION_UNAVAILABLE",
+            CallError::PublicRouteDenied(_) => "PUBLIC_ROUTE_DENIED",
+            CallError::PublicRouteUnavailable(_) => "PUBLIC_ROUTE_UNAVAILABLE",
+            CallError::TelecomSpendLimitExceeded(_) => "TELECOM_SPEND_LIMIT_EXCEEDED",
             CallError::Database { connectivity, .. } => {
                 if *connectivity {
                     "SERVICE_UNAVAILABLE"
@@ -158,9 +170,11 @@ impl CallError {
             CallError::CapabilityUnavailable(_) | CallError::ParticipantLimitExceeded { .. } => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
-            CallError::MediaUnavailable | CallError::PrivacyAuthorizationUnavailable => {
-                StatusCode::SERVICE_UNAVAILABLE
-            }
+            CallError::MediaUnavailable
+            | CallError::PrivacyAuthorizationUnavailable
+            | CallError::PublicRouteUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            CallError::PublicRouteDenied(_) => StatusCode::FORBIDDEN,
+            CallError::TelecomSpendLimitExceeded(_) => StatusCode::TOO_MANY_REQUESTS,
             CallError::Database { connectivity, .. } => {
                 if *connectivity {
                     StatusCode::SERVICE_UNAVAILABLE
@@ -230,6 +244,9 @@ impl From<CallError> for CallingError {
             CallError::PrivacyAuthorizationUnavailable => {
                 ErrorCode::PrivacyAuthorizationUnavailable
             }
+            CallError::PublicRouteDenied(_) => ErrorCode::PublicRouteDenied,
+            CallError::PublicRouteUnavailable(_) => ErrorCode::PublicRouteUnavailable,
+            CallError::TelecomSpendLimitExceeded(_) => ErrorCode::TelecomSpendLimitExceeded,
         };
         tracing::info!(code = code.as_str(), error = %err, "call operation refused");
         CallingError::Call {

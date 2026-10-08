@@ -196,7 +196,9 @@ fn contract_paths_equal_the_registered_routes() {
         let path = file.to_string_lossy().replace('\\', "/");
         let is_ingress = path.ends_with("src/privacy_relay/http.rs");
         // Internal routers are nested under /internal/v1 by routes::app.
-        let prefix = if path.ends_with("src/privacy_relay/enforcement.rs") {
+        let prefix = if path.ends_with("src/privacy_relay/enforcement.rs")
+            || path.ends_with("src/telephony/http.rs")
+        {
             "/internal/v1"
         } else {
             ""
@@ -547,8 +549,13 @@ fn every_operation_declares_its_authentication() {
                 .as_str();
             let expected = if path.starts_with("/internal/v1/") {
                 // Internal routes: a service token and a receiver-granted permission.
+                let expected_permission = if path == "/internal/v1/telephony/events" {
+                    "telephony-event.apply"
+                } else {
+                    "communication-authority.enforce"
+                };
                 assert_eq!(
-                    security[0]["cfServiceAuth"][0], "communication-authority.enforce",
+                    security[0]["cfServiceAuth"][0], expected_permission,
                     "{method} {path}"
                 );
                 "cfServiceAuth"

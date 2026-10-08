@@ -350,7 +350,8 @@ async fn telephone_endpoints_store_only_opaque_references() {
     let dump = common::dump_database(h.conn()).await;
     assert!(!dump.contains("2348012345678"));
     assert!(!dump.contains("08012345678"));
-    // The only `*_number` columns are the call domain's integer ordinals
+    // The only `*_number` columns are the call domain's integer ordinals; the only
+    // `contact` columns are opaque ContactReference uuids of public parties (Part E)
     // (call_session_intervals.interval_number, call_attempts.attempt_number).
     let phone_columns = scalar_i64(
         h.conn(),
@@ -358,7 +359,9 @@ async fn telephone_endpoints_store_only_opaque_references() {
          AND (column_name ILIKE '%phone%' OR column_name ILIKE '%e164%' OR column_name ILIKE '%msisdn%' \
               OR column_name ILIKE '%number%' OR column_name ILIKE '%contact%') \
          AND NOT (data_type = 'integer' AND (table_name, column_name) IN \
-              (('call_session_intervals', 'interval_number'), ('call_attempts', 'attempt_number')))",
+              (('call_session_intervals', 'interval_number'), ('call_attempts', 'attempt_number'))) \
+         AND NOT (data_type = 'uuid' AND column_name = 'contact_reference' \
+              AND table_name IN ('call_public_parties', 'call_spend_reservations'))",
     )
     .await;
     assert_eq!(phone_columns, 0);

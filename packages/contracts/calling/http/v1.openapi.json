@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Calling service API",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "description": "HTTP surface exposed by services/calling (Part C sections 15-25): the health endpoint; the call API (list, get, available actions); application call creation (POST /v1/calls) and control (accept, decline, cancel, end, hold, resume, transfer, session removal, media credentials); the application endpoint registry and signaling-credential minting; the endpoint's own signaling operations (WebSocket channel, offer recovery, accept / decline, media credentials) authenticated by a short-lived signaling credential; the media connection gateway, which admits every media signaling connection against authoritative state before the media server is contacted; and the media provider callback, authenticated by the provider's signature. There is no generic state mutation: a client never sends a state, a scope, an authorization result, a route, a provider, a room, a media identity, a permission or a telephone number. Tenant, application and environment scope comes only from the authenticated credential; a call, principal, endpoint, offer or session of another scope is answered exactly like a missing one (404). Every state-changing command carries expectedVersion (the single concurrency mechanism); Idempotency-Key is required for call creation and transfer and honoured on every other command (a replay returns the recorded response with Idempotent-Replayed: true; a different request under the same key is 409 IDEMPOTENCY_CONFLICT). Every response carries an x-request-id header with the server-generated request id; a well-formed client x-request-id is echoed as x-client-request-id."
   },
   "paths": {
@@ -50,6 +50,54 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/internal/v1/telephony/events": {
+      "post": {
+        "operationId": "applyTelephonyEvent",
+        "summary": "Normalized Telephony event (internal)",
+        "description": "Receives one normalized event from Telephony's outbox (contract cfmeet.telephony.event): requires an internal service token with the receiver-granted permission telephony-event.apply (grantable only to cfmeet.telephony). Calling deduplicates by eventId, applies per-leg sequences in order (an older one is STALE), quarantines events that do not match an execution it commanded (UNMATCHED) and never resurrects a terminal Call (IGNORED_TERMINAL; a late success triggers cleanup of the execution). Every delivered event is answered 200 with its disposition; only a failure to record it is an error (Telephony retries). Telephony never sets Calling state: each event is validated against Calling's own state machines. No telephone number, provider id or SIP data exists in the body.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "telephony-event.apply"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/telephony/events/v1.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recorded with its disposition (APPLIED, DUPLICATE, STALE, IGNORED_TERMINAL or UNMATCHED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/events/v1.schema.json#/$defs/EventDisposition"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "503": {
             "$ref": "#/components/responses/Unavailable"
@@ -2253,7 +2301,10 @@
           "MEDIA_UNAVAILABLE",
           "PARTICIPANT_LIMIT_EXCEEDED",
           "TARGET_UNAVAILABLE",
-          "PRIVACY_AUTHORIZATION_UNAVAILABLE"
+          "PRIVACY_AUTHORIZATION_UNAVAILABLE",
+          "PUBLIC_ROUTE_DENIED",
+          "PUBLIC_ROUTE_UNAVAILABLE",
+          "TELECOM_SPEND_LIMIT_EXCEEDED"
         ]
       },
       "ErrorEnvelope": {

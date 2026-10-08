@@ -20,6 +20,7 @@ mod create;
 pub mod http;
 pub mod media;
 mod privacy;
+pub mod public;
 mod ringing;
 mod transfer;
 mod workers;
@@ -155,6 +156,7 @@ pub struct AppCallService {
     bus: Arc<dyn RealtimeSignalBus>,
     push: Arc<dyn PushDispatcher>,
     privacy: Arc<dyn PrivacyRelayAuthority>,
+    public: public::PublicNetwork,
     config: AppCallingConfig,
 }
 
@@ -177,6 +179,7 @@ impl AppCallService {
             bus,
             push: Arc::new(NoPushTransport),
             privacy: Arc::new(UnconfiguredPrivacyRelay),
+            public: public::PublicNetwork::default(),
             config,
         }
     }

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1",
+  "eventId": "0b3e6f1a-2c4d-4e5f-8a9b-1c2d3e4f5a6b",
+  "eventType": "LEG_RINGING",
+  "occurredAt": "2031-03-01T10:00:03Z",
+  "telephonyLegId": "7a8b9c0d-1e2f-4a3b-9c4d-5e6f7a8b9c0d",
+  "callId": "11111111-2222-4333-8444-555555555555",
+  "callLegId": "22222222-3333-4444-8555-666666666666",
+  "attemptId": "33333333-4444-4555-8666-777777777777",
+  "sequence": 2,
+  "direction": "OUTBOUND",
+  "routeClass": "APP_TO_PSTN",
+  "legStatus": "RINGING",
+  "destination": "+2348031234567"
+}

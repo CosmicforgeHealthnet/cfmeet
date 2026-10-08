@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/telephony/events/v1.schema.json",
+  "title": "CF Meet Telephony normalized event v1",
+  "description": "A normalized Telephony event delivered to Calling (POST /internal/v1/telephony/events, permission telephony-event.apply) from Telephony's transactional outbox, in per-leg sequence order, at least once (Calling deduplicates by eventId). CF Meet ids, the normalized vocabulary and timestamps only: no provider id, provider call id, SIP data, raw provider payload, carrier status string or telephone number. Calling validates every transition against its own state machine; Telephony never sets Calling state.",
+  "oneOf": [
+    { "$ref": "#/$defs/LegEvent" },
+    { "$ref": "#/$defs/BridgeEvent" }
+  ],
+  "$defs": {
+    "LegEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "eventId", "eventType", "occurredAt", "telephonyLegId", "callId", "callLegId", "sequence", "direction", "routeClass"],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "eventId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "eventType": {
+          "allOf": [
+            { "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/NormalizedEventType" },
+            { "not": { "enum": ["BRIDGE_ESTABLISHED", "BRIDGE_ENDED"] } }
+          ]
+        },
+        "occurredAt": { "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/Timestamp" },
+        "telephonyLegId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "callId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "callLegId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "attemptId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "direction": { "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/LegDirection" },
+        "routeClass": { "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/PublicRouteClass" },
+        "legStatus": { "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/TelephonyLegStatus" },
+        "endReason": { "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/EndReason" },
+        "failureCategory": { "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/FailureCategory" },
+        "definite": {
+          "description": "On terminal and UNKNOWN statuses: whether the outcome is established (false for UNKNOWN).",
+          "type": "boolean"
+        },
+        "usage": { "$ref": "#/$defs/LegUsage" }
+      }
+    },
+    "LegUsage": {
+      "description": "USAGE_FINALIZED: exactly one usage fact per public leg. costMinor is the provider-reported cost when costKnown, otherwise a policy estimate; it is never presented as known when it is not.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connectedDurationMs", "billableSeconds", "costKnown"],
+      "properties": {
+        "connectedDurationMs": { "type": "integer", "minimum": 0 },
+        "billableSeconds": { "type": "integer", "minimum": 0 },
+        "costMinor": { "type": ["integer", "null"], "minimum": 0 },
+        "costKnown": { "type": "boolean" },
+        "currency": {
+          "oneOf": [
+            { "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/CurrencyCode" },
+            { "type": "null" }
+          ]
+        },
+        "destinationCountry": {
+          "oneOf": [
+            { "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/CountryCode" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "BridgeEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "eventId", "eventType", "occurredAt", "bridgeId", "callId", "bridgeKind"],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "eventId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "eventType": { "enum": ["BRIDGE_ESTABLISHED", "BRIDGE_ENDED"] },
+        "occurredAt": { "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/Timestamp" },
+        "bridgeId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "callId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "bridgeKind": { "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/BridgeKind" },
+        "telephonyLegIds": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" }
+        },
+        "applicationMedia": { "type": "boolean" },
+        "endReason": { "type": "string", "pattern": "^[A-Z][A-Z_]{1,47}$" },
+        "established": { "type": "boolean" }
+      }
+    },
+    "EventDisposition": {
+      "description": "Calling's answer (200) for every delivered event.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eventId", "disposition"],
+      "properties": {
+        "eventId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "disposition": { "enum": ["APPLIED", "DUPLICATE", "STALE", "IGNORED_TERMINAL", "UNMATCHED"] }
+      }
+    }
+  }
+}

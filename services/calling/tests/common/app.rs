@@ -55,6 +55,51 @@ impl AppWorld {
         Some(Self { w })
     }
 
+    /// A world whose Calling deployment executes public-network legs through `telephony`
+    /// (and attaches bridges with `bridge`), with Privacy Relay authority `privacy` and
+    /// every telecom switch ON. The Production environment is live-telecom allowed.
+    pub async fn with_public_network(
+        privacy: std::sync::Arc<dyn calling::privacy_relay::PrivacyRelayAuthority>,
+        telephony: std::sync::Arc<dyn calling::telephony::TelephonyPort>,
+        bridge: Option<std::sync::Arc<dyn calling::telephony::media::PublicMediaGateway>>,
+    ) -> Option<Self> {
+        use std::sync::Arc;
+        let db = Arc::new(super::TestDb::new().await?);
+        let media = Arc::new(FakeMediaProvider::default());
+        let bus = Arc::new(calling::signaling::InMemorySignalBus::new());
+        let mut runtime = super::test_runtime(Some(media.clone()), bus.clone());
+        runtime.privacy_relay = privacy;
+        runtime.public_network = calling::calls::app::public::PublicNetwork {
+            telephony,
+            media: bridge,
+            flags: calling::routing::engine::TelecomFlags {
+                public_outbound: true,
+                public_inbound: true,
+                callback_relay: true,
+            },
+        };
+        let h = Harness::with_runtime(
+            db,
+            super::TEST_PEPPER,
+            calling::domain::ManualClock::new(chrono::Utc::now()),
+            media,
+            bus,
+            runtime,
+        );
+        let w =
+            CallWorld::in_harness(h, "acme", calling::domain::EnvironmentKind::Production).await;
+        w.h.platform
+            .set_live_telecom_allowed(
+                w.consumer
+                    .env(calling::domain::EnvironmentKind::Production)
+                    .id,
+                true,
+            )
+            .await
+            .unwrap();
+        Some(Self { w })
+    }
+
     /// A world whose Calling deployment reaches a Privacy Relay over HTTP at `base_url`
     /// (Calling's real `HttpPrivacyRelay` adapter, signed service tokens).
     pub async fn with_privacy_relay_at(base_url: &str) -> Option<Self> {

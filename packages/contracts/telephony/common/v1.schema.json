@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/telephony/common/v1.schema.json",
+  "title": "CF Meet Telephony common vocabulary v1",
+  "description": "Provider-neutral vocabulary of public-network execution (Part E). Never a provider name, carrier id, provider call id, SIP Call-ID / dialog id, SIP body, provider payload, carrier status string, trunk credential or telephone number.",
+  "$defs": {
+    "TelephonyLegStatus": {
+      "description": "Normalized status of a Telephony execution leg. UNKNOWN is not terminal and never a failure: the provider may or may not have created a paid call; only evidence resolves it.",
+      "type": "string",
+      "enum": ["PLANNED", "ORIGINATING", "RINGING", "ANSWERED", "CONNECTED", "HELD", "ENDING", "ENDED", "FAILED", "UNKNOWN"]
+    },
+    "PublicRouteClass": {
+      "description": "Public-network route classes Telephony executes (Calling's Routing Engine classes; APP_RTC never reaches Telephony).",
+      "type": "string",
+      "enum": ["APP_TO_PSTN", "PSTN_TO_APP", "PSTN_RELAY", "CALLBACK_RELAY"]
+    },
+    "LegDirection": {
+      "type": "string",
+      "enum": ["OUTBOUND", "INBOUND"]
+    },
+    "EndReason": {
+      "type": "string",
+      "enum": ["COMPLETED", "BUSY", "NO_ANSWER", "DECLINED", "FAILED", "CANCELLED", "TIMEOUT", "DURATION_LIMIT", "ORPHANED", "NOT_SENT", "ABSENT_AT_PROVIDER"]
+    },
+    "FailureCategory": {
+      "description": "The same vocabulary as Calling's failure categories.",
+      "type": "string",
+      "enum": ["POLICY", "TARGET_UNAVAILABLE", "ROUTING", "TIMEOUT", "MEDIA", "NETWORK", "EXECUTION", "INTERNAL", "UNKNOWN"]
+    },
+    "NormalizedEventType": {
+      "type": "string",
+      "enum": [
+        "LEG_ACCEPTED", "LEG_RINGING", "LEG_ANSWERED", "LEG_CONNECTED", "LEG_HELD", "LEG_RESUMED",
+        "LEG_ENDED", "LEG_FAILED", "LEG_BUSY", "LEG_NO_ANSWER", "LEG_DECLINED", "LEG_STATUS_UNKNOWN",
+        "LEG_DTMF", "BRIDGE_ESTABLISHED", "BRIDGE_ENDED", "USAGE_FINALIZED"
+      ]
+    },
+    "BridgeKind": {
+      "type": "string",
+      "enum": ["APPLICATION_MEDIA", "PUBLIC_LEGS"]
+    },
+    "RouteHealth": {
+      "type": "string",
+      "enum": ["HEALTHY", "DEGRADED", "UNAVAILABLE", "UNKNOWN"]
+    },
+    "CountryCode": {
+      "type": "string",
+      "pattern": "^[A-Z]{2}$"
+    },
+    "CurrencyCode": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

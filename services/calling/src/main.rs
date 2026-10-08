@@ -161,6 +161,37 @@ async fn main() -> anyhow::Result<()> {
         "contact vault delegated access configured"
     );
 
+    // Telephony (Part E): public-network execution. Without CF_TELEPHONY_BASE_URL no
+    // public route exists; every telecom switch defaults OFF; app RTC never depends on it.
+    let telephony_configured = service_auth_settings
+        .targets
+        .iter()
+        .any(|(service, _)| service.as_str() == cf_service_auth::services::TELEPHONY);
+    let telecom_flags = match calling::calls::app::public::telecom_flags_from_lookup(&lookup) {
+        Ok(flags) => flags,
+        Err(err) => {
+            tracing::error!(error = %err, "telecom configuration error");
+            std::process::exit(2);
+        }
+    };
+    let public_network = calling::calls::app::public::PublicNetwork {
+        telephony: if telephony_configured {
+            Arc::new(calling::telephony::HttpTelephony::new(service_auth.clone()))
+        } else {
+            Arc::new(calling::telephony::UnconfiguredTelephony)
+        },
+        media: media.public_bridge.clone(),
+        flags: telecom_flags,
+    };
+    tracing::info!(
+        telephony_configured,
+        public_outbound_enabled = telecom_flags.public_outbound,
+        public_inbound_enabled = telecom_flags.public_inbound,
+        callback_relay_enabled = telecom_flags.callback_relay,
+        public_media_bridge = media.public_bridge.is_some(),
+        "public-network calling configured"
+    );
+
     let clock: SharedClock = Arc::new(SystemClock);
     let state = AppState::new(
         db,
@@ -180,6 +211,7 @@ async fn main() -> anyhow::Result<()> {
             call_config: CallServiceConfig::default(),
             privacy_relay,
             contact_delegation,
+            public_network,
         },
     );
 

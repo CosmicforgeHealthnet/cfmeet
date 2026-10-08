@@ -90,7 +90,12 @@ async fn trusted_peer_with_a_valid_token_is_authenticated() {
     assert_eq!(response.json["kid"], "telephony-test-1");
     assert_eq!(
         response.json["permissions"],
-        json!(["operational-callback.deliver"])
+        json!([
+            "operational-callback.deliver",
+            "telephony-event.apply",
+            "telephony-reconciliation.apply",
+            "telephony-inbound.offer"
+        ])
     );
     // The hop runs in the signed request / correlation context.
     assert_eq!(response.json["request_id"], request.request_id().as_str());

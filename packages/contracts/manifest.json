@@ -16,14 +16,14 @@
     },
     {
       "id": "cfmeet.calling.http-api",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "kind": "openapi",
       "path": "calling/http/v1.openapi.json",
       "owner": "calling",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface exposed by the Calling service: health, the call API (list, get, available actions), application call creation and control (accept, decline, cancel, end, hold, resume, transfer, session removal, media credentials), the endpoint registry, signaling-credential minting, the endpoint's signaling operations (WebSocket channel, offer recovery, accept / decline, media credentials), the media connection gateway (admission before every media connection) and the media provider callback; the platform credential, signaling credential, media credential and provider signature schemes; the error envelope. No generic state mutation. Protected calls (privacyRelaySessionId, PRIVACY_RELAY_V1, fail closed: PRIVACY_AUTHORIZATION_UNAVAILABLE) and the internal Privacy Relay enforcement route (POST /internal/v1/privacy-relay/enforcement). The public Privacy Relay API served by this ingress is specified by cfmeet.privacy-relay.http-api."
+      "description": "HTTP surface exposed by the Calling service: health, the call API (list, get, available actions), application call creation and control (accept, decline, cancel, end, hold, resume, transfer, session removal, media credentials), the endpoint registry, signaling-credential minting, the endpoint's signaling operations (WebSocket channel, offer recovery, accept / decline, media credentials), the media connection gateway (admission before every media connection) and the media provider callback; the platform credential, signaling credential, media credential and provider signature schemes; the error envelope. No generic state mutation. Protected calls (privacyRelaySessionId, PRIVACY_RELAY_V1, fail closed: PRIVACY_AUTHORIZATION_UNAVAILABLE) and the internal Privacy Relay enforcement route (POST /internal/v1/privacy-relay/enforcement). The public Privacy Relay API served by this ingress is specified by cfmeet.privacy-relay.http-api. Part E: protected public-network contact targets on POST /v1/calls (APP_TO_PSTN; PUBLIC_ROUTE_DENIED / PUBLIC_ROUTE_UNAVAILABLE / TELECOM_SPEND_LIMIT_EXCEEDED) and the internal Telephony event receiver (POST /internal/v1/telephony/events)."
     },
     {
       "id": "cfmeet.calling.call-common",
@@ -49,7 +49,7 @@
     },
     {
       "id": "cfmeet.calling.call-control",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "calling/control/v1.schema.json",
       "owner": "calling",
@@ -310,6 +310,28 @@
       "lifecycle": "beta",
       "authority": "contract-first",
       "description": "Privacy-safe call evidence of a Privacy Relay Session (served by Calling, privacy.evidence.read): canonical timing, normalized outcomes, authoritative connected duration, attempts and decision ids; never a number, provider identifier or credential."
+    },
+    {
+      "id": "cfmeet.telephony.common",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "telephony/common/v1.schema.json",
+      "owner": "telephony",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Provider-neutral vocabulary of public-network execution (Part E): leg statuses (UNKNOWN is never a failure), public route classes, directions, end reasons, failure categories, normalized event types, bridge kinds, route health, country / currency codes. No provider, carrier, SIP or telephone-number concept."
+    },
+    {
+      "id": "cfmeet.telephony.event",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "telephony/events/v1.schema.json",
+      "owner": "telephony",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Normalized Telephony events delivered to Calling (leg status, bridge and usage facts) and Calling's disposition answer. CF Meet ids, normalized vocabulary and timestamps only."
     }
   ]
 }

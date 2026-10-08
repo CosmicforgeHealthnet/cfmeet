@@ -488,6 +488,9 @@ impl AppCallService {
         participant: &ProviderParticipant,
     ) -> CallResult<Option<EvictionReason>> {
         let provider = self.provider()?.clone();
+        if crate::telephony::media::is_bridge_identity(&participant.identity) {
+            return self.admit_public_bridge(call, participant).await;
+        }
         let txn = self.db().begin().await?;
         let session = call_sessions::Entity::find()
             .filter(call_sessions::Column::CallId.eq(call.id))
@@ -670,6 +673,10 @@ impl AppCallService {
             .ok_or(CallError::NotFound)?;
         if call.current_state != CallState::Answered {
             return Ok(false);
+        }
+        if super::public::is_public(self.db(), call.id).await? {
+            // Public-network Calls connect on Telephony's bridge + leg evidence.
+            return self.try_confirm_public_connected(call.id).await;
         }
         let evidence = {
             let txn = self.db().begin().await?;

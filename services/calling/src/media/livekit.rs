@@ -83,6 +83,10 @@ pub struct LiveKitSettings {
     /// Calling's media-edge key sealing client credentials (unknown to LiveKit).
     edge_key: SecretString,
     api_timeout: StdDuration,
+    /// LiveKit SIP outbound trunk that reaches the SIP / media edge's internal media peer
+    /// (`CALLING_LIVEKIT_SIP_TRUNK_ID`). Without it no public-network leg can be bridged
+    /// into an application call (public routes then fail safely).
+    sip_trunk_id: Option<String>,
 }
 
 impl fmt::Debug for LiveKitSettings {
@@ -95,6 +99,7 @@ impl fmt::Debug for LiveKitSettings {
             .field("api_secret", &"[REDACTED]")
             .field("edge_key", &"[REDACTED]")
             .field("api_timeout", &self.api_timeout)
+            .field("sip_trunk_configured", &self.sip_trunk_id.is_some())
             .finish()
     }
 }
@@ -110,7 +115,12 @@ impl LiveKitSettings {
             api_secret: self.api_secret.clone(),
             edge_key: self.edge_key.clone(),
             api_timeout: self.api_timeout,
+            sip_trunk_id: self.sip_trunk_id.clone(),
         }
+    }
+
+    pub fn sip_trunk_id(&self) -> Option<&str> {
+        self.sip_trunk_id.as_deref()
     }
 
     /// Reads `CALLING_LIVEKIT_URL` (LiveKit signaling, gateway upstream),
@@ -194,6 +204,23 @@ impl LiveKitSettings {
                     )
                 })?,
         };
+        let sip_trunk_id = match get("CALLING_LIVEKIT_SIP_TRUNK_ID").map(|v| v.trim().to_string()) {
+            None => None,
+            Some(v) if v.is_empty() => None,
+            Some(v)
+                if v.len() <= 64
+                    && v.bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') =>
+            {
+                Some(v)
+            }
+            Some(_) => {
+                return Err(ConfigError::invalid(
+                    "CALLING_LIVEKIT_SIP_TRUNK_ID",
+                    "must be 1-64 characters of [A-Za-z0-9_-]".to_string(),
+                ))
+            }
+        };
         Ok(Self {
             signal_url,
             gateway_url,
@@ -202,6 +229,7 @@ impl LiveKitSettings {
             api_secret: SecretString::from(api_secret),
             edge_key: SecretString::from(edge_key),
             api_timeout: StdDuration::from_millis(api_timeout),
+            sip_trunk_id,
         })
     }
 }
@@ -269,6 +297,8 @@ struct AccessClaims<'a> {
     nbf: i64,
     exp: i64,
     video: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sip: Option<Value>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     attributes: BTreeMap<&'a str, String>,
 }
@@ -329,6 +359,7 @@ impl LiveKitAdapter {
             nbf: now.timestamp() - 5,
             exp: expires_at.timestamp(),
             video,
+            sip: None,
             attributes,
         };
         let token = jsonwebtoken::encode(
@@ -559,6 +590,68 @@ impl LiveKitAdapter {
 
     fn room_admin(room: &str) -> Value {
         json!({ "roomAdmin": true, "room": room })
+    }
+
+    /// Bridges a public-network leg into `room` (Part E §79): a LiveKit SIP participant
+    /// `identity` dials the SIP / media edge's internal media peer through the configured
+    /// outbound trunk with the single-use media join code. The token carries exactly
+    /// the room-admin grant of that room and the SIP call grant.
+    pub async fn attach_sip_bridge(
+        &self,
+        room: &str,
+        identity: &str,
+        join_code: &str,
+    ) -> Result<(), MediaProviderError> {
+        let Some(trunk) = self.settings.sip_trunk_id.as_deref() else {
+            return Err(MediaProviderError::Unavailable);
+        };
+        let now = Utc::now();
+        let (issuer, secret) = self.key(Signer::LiveKit);
+        let claims = AccessClaims {
+            iss: issuer,
+            sub: None,
+            nbf: now.timestamp() - 5,
+            exp: (now + Duration::seconds(ADMIN_TOKEN_TTL_SECONDS)).timestamp(),
+            video: Self::room_admin(room),
+            sip: Some(json!({ "call": true })),
+            attributes: BTreeMap::new(),
+        };
+        let token = jsonwebtoken::encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.expose_secret().as_bytes()),
+        )
+        .map_err(|_| MediaProviderError::Rejected)?;
+        let response = self
+            .http
+            .post(format!(
+                "{}/twirp/livekit.SIP/CreateSIPParticipant",
+                self.settings.api_url
+            ))
+            .bearer_auth(token)
+            .json(&json!({
+                "sip_trunk_id": trunk,
+                "sip_call_to": join_code,
+                "room_name": room,
+                "participant_identity": identity,
+                "participant_name": "Public network",
+                "play_ringtone": false,
+            }))
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_timeout() {
+                    MediaProviderError::Timeout
+                } else {
+                    MediaProviderError::Unavailable
+                }
+            })?;
+        match response.status().as_u16() {
+            200..=299 => Ok(()),
+            404 => Err(MediaProviderError::NotFound),
+            400..=499 => Err(MediaProviderError::Rejected),
+            _ => Err(MediaProviderError::Unavailable),
+        }
     }
 }
 
@@ -928,6 +1021,32 @@ impl CallMediaProvider for LiveKitAdapter {
             participant: event.get("participant").and_then(participant),
             occurred_at: timestamp(int64(field(&event, "created_at", "createdAt"))),
         })
+    }
+}
+
+/// The public-network bridge port backed by LiveKit SIP (Part E §79): an outbound SIP
+/// participant through the configured trunk to the edge's internal media peer.
+pub struct LiveKitSipGateway {
+    adapter: std::sync::Arc<LiveKitAdapter>,
+}
+
+impl LiveKitSipGateway {
+    pub fn new(adapter: std::sync::Arc<LiveKitAdapter>) -> Self {
+        Self { adapter }
+    }
+}
+
+#[async_trait]
+impl crate::telephony::media::PublicMediaGateway for LiveKitSipGateway {
+    async fn attach(
+        &self,
+        room: &str,
+        identity: &str,
+        join_code: &str,
+    ) -> Result<(), MediaProviderError> {
+        self.adapter
+            .attach_sip_bridge(room, identity, join_code)
+            .await
     }
 }
 

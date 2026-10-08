@@ -124,6 +124,17 @@ pub struct DestinationFacts {
     pub contact: Option<ContactFacts>,
 }
 
+impl DestinationFacts {
+    /// A protected public-network contact (no application endpoint).
+    pub fn protected_contact(contact: ContactFacts) -> Self {
+        Self {
+            class: EndpointClass::PublicTelephone,
+            app_reachable: Evidence::Known(false),
+            contact: Some(contact),
+        }
+    }
+}
+
 /// Normalized availability of one candidate Telephony route (opaque reference).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

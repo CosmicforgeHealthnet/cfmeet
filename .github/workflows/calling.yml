@@ -181,7 +181,7 @@ jobs:
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' \
              AND (tablename = 'calls' OR tablename LIKE 'call\_%' OR tablename = 'calling_outbox_events')")" = "22"
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
-            "SELECT count(*) FROM calling_seaql_migrations")" = "17"
+            "SELECT count(*) FROM calling_seaql_migrations")" = "18"
 
       - name: Service starts against the migrated database and refuses unsafe configuration
         env:

@@ -91,6 +91,7 @@ impl AppCallService {
                     source_principal_id: source.id().as_uuid(),
                     target_principal_ids: targets,
                     purpose,
+                    ..Default::default()
                 },
             )
             .await

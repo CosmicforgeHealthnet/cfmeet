@@ -14,6 +14,7 @@ pub mod calls;
 pub mod fake_media;
 pub mod privacy;
 pub mod provider_contract;
+pub mod telephony;
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -319,7 +320,12 @@ pub fn service_auth_fixture_targeting(
                 (
                     cf_service_auth::services::TELEPHONY,
                     vec![telephony_key.public_jwk()],
-                    &["operational-callback.deliver"],
+                    &[
+                        "operational-callback.deliver",
+                        "telephony-event.apply",
+                        "telephony-reconciliation.apply",
+                        "telephony-inbound.offer",
+                    ],
                 ),
             ],
         ),
@@ -462,6 +468,7 @@ pub fn test_runtime(
         call_config: CallServiceConfig::default(),
         privacy_relay: Arc::new(calling::privacy_relay::UnconfiguredPrivacyRelay),
         contact_delegation: None,
+        public_network: Default::default(),
     }
 }
 

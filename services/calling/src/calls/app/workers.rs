@@ -130,6 +130,10 @@ impl AppCallService {
                 if let Err(error) = self.reconcile_due(50).await {
                     tracing::warn!(%error, "media reconciliation sweep failed");
                 }
+                // Durable Telephony commands (retries, deferred originates, releases).
+                if let Err(error) = self.dispatch_telephony_commands(50).await {
+                    tracing::warn!(%error, "telephony command dispatch sweep failed");
+                }
             }
         });
         let _ = tokio::join!(expiry, reconcile);

@@ -60,18 +60,24 @@ const CALL_TABLES: &[&str] = &[
     "call_participants",
     "call_privacy_authorizations",
     "call_privacy_enforcements",
+    "call_public_bridges",
+    "call_public_parties",
     "call_quality_records",
     "call_routes",
     "call_routing_policies",
     "call_session_intervals",
     "call_sessions",
+    "call_spend_policies",
+    "call_spend_reservations",
+    "call_telephony_commands",
+    "call_telephony_events",
     "call_transfers",
     "call_usage_records",
     "calling_outbox_events",
     "calls",
 ];
 
-const MIGRATIONS: usize = 17;
+const MIGRATIONS: usize = 18;
 const PART_B_MIGRATIONS: u32 = 4;
 
 #[tokio::test]
@@ -531,9 +537,29 @@ async fn call_domain_columns_hold_no_contact_secret_or_provider_data() {
     for column in PRIVATE_PROVIDER_EVIDENCE {
         assert!(columns.contains(&column.to_string()), "{column}");
     }
+    // Part E: a public party is an OPAQUE ContactReference (a UUID issued by Privacy
+    // Relay) — never a contact value. Only these columns may carry one, typed uuid.
+    const OPAQUE_CONTACT_REFERENCES: &[&str] = &[
+        "call_public_parties.contact_reference",
+        "call_spend_reservations.contact_reference",
+    ];
+    for column in OPAQUE_CONTACT_REFERENCES {
+        let (table, name) = column.split_once('.').unwrap();
+        let types = strings(
+            &db.conn,
+            &format!(
+                "SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' \
+                 AND table_name = '{table}' AND column_name = '{name}'"
+            ),
+        )
+        .await;
+        assert_eq!(types, vec!["uuid".to_string()], "{column}");
+    }
     for column in &columns {
         let name = column.split('.').nth(1).unwrap();
-        if PRIVATE_PROVIDER_EVIDENCE.contains(&column.as_str()) {
+        if PRIVATE_PROVIDER_EVIDENCE.contains(&column.as_str())
+            || OPAQUE_CONTACT_REFERENCES.contains(&column.as_str())
+        {
             continue;
         }
         for forbidden in [

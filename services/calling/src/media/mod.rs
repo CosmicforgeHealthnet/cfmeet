@@ -83,12 +83,21 @@ impl MediaSettings {
             MediaProviderSelection::Disabled => MediaRuntime {
                 provider: None,
                 gateway: None,
+                public_bridge: None,
             },
             MediaProviderSelection::LiveKit(settings) => {
                 let adapter = Arc::new(livekit::LiveKitAdapter::new(settings.clone_settings())?);
+                let public_bridge: Option<Arc<dyn crate::telephony::media::PublicMediaGateway>> =
+                    settings.sip_trunk_id().map(|_| {
+                        Arc::new(livekit::LiveKitSipGateway::new(adapter.clone()))
+                            as Arc<dyn crate::telephony::media::PublicMediaGateway>
+                    });
                 MediaRuntime {
                     provider: Some(adapter.clone()),
-                    gateway: Some(Arc::new(livekit_gateway::LiveKitGateway::new(adapter))),
+                    gateway: Some(Arc::new(livekit_gateway::LiveKitGateway::new(
+                        adapter.clone(),
+                    ))),
+                    public_bridge,
                 }
             }
         })
@@ -99,4 +108,6 @@ impl MediaSettings {
 pub struct MediaRuntime {
     pub provider: Option<Arc<dyn CallMediaProvider>>,
     pub gateway: Option<Arc<dyn gateway::MediaConnectionGateway>>,
+    /// Attaches public-network bridges to application media (Part E §79).
+    pub public_bridge: Option<Arc<dyn crate::telephony::media::PublicMediaGateway>>,
 }

@@ -75,7 +75,7 @@ pub struct CreatedAppCall {
     pub replayed: bool,
 }
 
-fn resolution(err: PrincipalResolutionError, initiator: bool) -> CallError {
+pub(crate) fn resolution(err: PrincipalResolutionError, initiator: bool) -> CallError {
     match err {
         PrincipalResolutionError::NotFound => CallError::NotFound,
         PrincipalResolutionError::Inactive if initiator => CallError::AuthorizationDenied,
@@ -499,7 +499,7 @@ impl AppCallService {
             .ok_or(CallError::NotFound)
     }
 
-    async fn replay_create(
+    pub(crate) async fn replay_create(
         &self,
         scope: CallScope,
         prior: PriorCommand,
@@ -723,6 +723,25 @@ impl AppCallService {
             if participant.role == ParticipantRole::Initiator {
                 self.calls.authorize_session_media_in(&txn, session).await?;
             }
+        }
+        // A public-network Call does not ring application endpoints: Telephony dials
+        // its public party (the ORIGINATE is dispatched once the Call is DIALING).
+        if super::public::is_public(&txn, call.id).await? {
+            let body = self.create_response(&txn, &call).await?;
+            self.calls
+                .complete_call_command_in(
+                    &txn,
+                    call.id,
+                    CommandOperation::CreateCall,
+                    201,
+                    &body,
+                    Some(call.version),
+                )
+                .await?;
+            txn.commit().await?;
+            tracing::info!(call_id = %call.id, "public call dialing");
+            self.dispatch_call(call.id).await;
+            return Ok(());
         }
         // Ring every target on its eligible endpoints.
         let mut invitations = Vec::new();

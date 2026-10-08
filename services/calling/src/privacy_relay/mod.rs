@@ -42,8 +42,9 @@ pub const PRIVACY_RELAY_POLICY: &str = "PRIVACY_RELAY_V1";
 pub const AUTHORIZE_PATH: &str = "/internal/v1/communication/authorize";
 
 /// Why a protected-call authorization is requested.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AuthorizationPurpose {
+    #[default]
     CallCreate,
     CallTransfer,
 }
@@ -57,13 +58,80 @@ impl AuthorizationPurpose {
     }
 }
 
-/// One protected-call authorization question (CF Meet ids only).
-#[derive(Debug, Clone)]
+/// Which communication route an authorization asks about (Privacy Relay vocabulary).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RelayRoute {
+    /// Application media only (Part D).
+    #[default]
+    Application,
+    /// A public-network leg to / from a protected contact (Part E §44–§46).
+    PublicRelay,
+    /// Two public legs: the initiating contact is called first (Part E §47).
+    CallbackRelay,
+}
+
+impl RelayRoute {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RelayRoute::Application => "APPLICATION",
+            RelayRoute::PublicRelay => "PUBLIC_RELAY",
+            RelayRoute::CallbackRelay => "CALLBACK_RELAY",
+        }
+    }
+}
+
+/// One protected-call authorization question (CF Meet ids only — principals and opaque
+/// ContactReferences, never a contact value).
+#[derive(Debug, Clone, Default)]
 pub struct CallAuthorization {
     pub relay_session_id: Uuid,
+    /// The source principal (ignored when `source_contact` is set).
     pub source_principal_id: Uuid,
+    /// A protected contact as the source (callback relay; inbound callers).
+    pub source_contact: Option<Uuid>,
     pub target_principal_ids: Vec<Uuid>,
+    pub target_contacts: Vec<Uuid>,
+    pub route: RelayRoute,
     pub purpose: AuthorizationPurpose,
+}
+
+/// Routing facts of a protected contact on an AUTHORIZED public-network decision.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactFact {
+    pub contact_reference: Uuid,
+    #[serde(default)]
+    pub country: Option<String>,
+    pub verification: String,
+}
+
+/// A Contact Resolution Grant request (Part E §73): bound to the Call, the public
+/// CallLeg, the ContactReference, the relay session and the decision relied on.
+#[derive(Debug, Clone)]
+pub struct GrantRequest {
+    pub contact_reference: Uuid,
+    pub relay_session_id: Uuid,
+    pub decision_id: Uuid,
+    pub call_id: Uuid,
+    pub call_leg_id: Uuid,
+}
+
+/// An issued grant. The secret is handed to Telephony inside one command and never
+/// stored or logged by Calling.
+#[derive(Clone)]
+pub struct ResolutionGrant {
+    pub grant_id: Uuid,
+    pub secret: zeroize::Zeroizing<String>,
+    pub expires_at: DateTime<Utc>,
+}
+
+impl fmt::Debug for ResolutionGrant {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ResolutionGrant")
+            .field("grant_id", &self.grant_id)
+            .field("expires_at", &self.expires_at)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Privacy Relay's decision (safe ids, versions and validity only).
@@ -82,6 +150,12 @@ pub struct PrivacyDecision {
     #[serde(default)]
     pub valid_until: Option<DateTime<Utc>>,
     pub decided_at: DateTime<Utc>,
+    /// The route the decision covers (APPLICATION when absent).
+    #[serde(default)]
+    pub route: Option<String>,
+    /// Routing facts of the protected contacts of an authorized public decision.
+    #[serde(default)]
+    pub contact_facts: Vec<ContactFact>,
 }
 
 const STRATEGIES: &[&str] = &[
@@ -114,6 +188,21 @@ impl PrivacyDecision {
             && token(&self.policy_version)
             && self.context_version >= 1
             && self.relay_session_version >= 1
+            && self.route.as_deref().is_none_or(token)
+            && self.contact_facts.len() <= 65
+            && self.contact_facts.iter().all(|c| {
+                c.verification == "VERIFIED"
+                    && c.country.as_deref().is_none_or(|cc| {
+                        cc.len() == 2 && cc.bytes().all(|b| b.is_ascii_uppercase())
+                    })
+            })
+    }
+
+    /// The routing facts of `contact` on this decision, if any.
+    pub fn contact_fact(&self, contact: Uuid) -> Option<&ContactFact> {
+        self.contact_facts
+            .iter()
+            .find(|c| c.contact_reference == contact)
     }
 }
 
@@ -157,6 +246,17 @@ pub trait PrivacyRelayAuthority: Send + Sync {
 
     /// Forwards a public ingress request.
     async fn proxy(&self, request: ProxyRequest) -> Result<ProxyResponse, PrivacyRelayError>;
+
+    /// A Contact Resolution Grant for ONE public leg (Part E §73). Calling never receives
+    /// the number; it passes the grant to Telephony inside the originate command.
+    async fn grant_for_execution(
+        &self,
+        _delegated: &DelegatedPlatformContext,
+        _correlation_id: &CorrelationId,
+        _request: &GrantRequest,
+    ) -> Result<ResolutionGrant, PrivacyRelayError> {
+        Err(PrivacyRelayError::Unavailable)
+    }
 }
 
 /// No Privacy Relay configured: protected calls and the ingress fail closed.
@@ -220,12 +320,27 @@ impl PrivacyRelayAuthority for HttpPrivacyRelay {
         correlation_id: &CorrelationId,
         request: &CallAuthorization,
     ) -> Result<PrivacyDecision, PrivacyRelayError> {
+        let source = match request.source_contact {
+            Some(contact) => json!({ "contactReferenceId": contact }),
+            None => json!({ "principalId": request.source_principal_id }),
+        };
+        let targets: Vec<Value> = request
+            .target_principal_ids
+            .iter()
+            .map(|t| json!({ "principalId": t }))
+            .chain(
+                request
+                    .target_contacts
+                    .iter()
+                    .map(|c| json!({ "contactReferenceId": c })),
+            )
+            .collect();
         let body = json!({
             "relaySessionId": request.relay_session_id,
-            "source": { "principalId": request.source_principal_id },
-            "targets": request.target_principal_ids.iter().map(|t| json!({ "principalId": t })).collect::<Vec<_>>(),
+            "source": source,
+            "targets": targets,
             "channel": "VOICE",
-            "route": "APPLICATION",
+            "route": request.route.as_str(),
             "purpose": request.purpose.as_str(),
         });
         let response = self
@@ -242,11 +357,77 @@ impl PrivacyRelayAuthority for HttpPrivacyRelay {
                 other => unavailable(&other),
             })?;
         let decision: PrivacyDecision = response.json().map_err(|e| unavailable(&e))?;
-        if !decision.well_formed() || decision.relay_session_id != request.relay_session_id {
+        if !decision.well_formed()
+            || decision.relay_session_id != request.relay_session_id
+            || decision
+                .route
+                .as_deref()
+                .is_some_and(|r| r != request.route.as_str())
+        {
             tracing::warn!("privacy relay returned a malformed decision; failing closed");
             return Err(PrivacyRelayError::Unavailable);
         }
         Ok(decision)
+    }
+
+    async fn grant_for_execution(
+        &self,
+        delegated: &DelegatedPlatformContext,
+        correlation_id: &CorrelationId,
+        request: &GrantRequest,
+    ) -> Result<ResolutionGrant, PrivacyRelayError> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Grant {
+            grant_id: Uuid,
+            grant_secret: String,
+            call_leg_id: Uuid,
+            expires_at: DateTime<Utc>,
+        }
+        #[derive(Deserialize)]
+        struct Body {
+            grant: Grant,
+        }
+        let response = self
+            .service_auth
+            .client()
+            .post_json(
+                &Self::outbound(delegated, correlation_id),
+                &format!(
+                    "/internal/v1/contacts/{}/resolution-grants",
+                    request.contact_reference
+                ),
+                &json!({
+                    "relaySessionId": request.relay_session_id,
+                    "decisionId": request.decision_id,
+                    "callId": request.call_id,
+                    "callLegId": request.call_leg_id,
+                    "purpose": "PUBLIC_NETWORK_CALL_LEG",
+                }),
+            )
+            .await
+            .map_err(|e| match e {
+                InternalCallError::Status { status, .. } if (400..500).contains(&status) => {
+                    PrivacyRelayError::NotFound
+                }
+                other => unavailable(&other),
+            })?;
+        let body: Body = response.json().map_err(|e| unavailable(&e))?;
+        let secret_ok = (32..=128).contains(&body.grant.grant_secret.len())
+            && body
+                .grant
+                .grant_secret
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+        if !secret_ok || body.grant.call_leg_id != request.call_leg_id {
+            tracing::warn!("privacy relay returned a malformed grant; failing closed");
+            return Err(PrivacyRelayError::Unavailable);
+        }
+        Ok(ResolutionGrant {
+            grant_id: body.grant.grant_id,
+            secret: zeroize::Zeroizing::new(body.grant.grant_secret),
+            expires_at: body.grant.expires_at,
+        })
     }
 
     async fn proxy(&self, request: ProxyRequest) -> Result<ProxyResponse, PrivacyRelayError> {
@@ -291,6 +472,8 @@ mod tests {
             policy_version: "CONTEXT_POLICY_V1".into(),
             valid_until: Some(Utc::now()),
             decided_at: Utc::now(),
+            route: None,
+            contact_facts: Vec::new(),
         }
     }
 

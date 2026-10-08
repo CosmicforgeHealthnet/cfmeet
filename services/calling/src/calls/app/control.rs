@@ -270,6 +270,12 @@ impl AppCallService {
         if call.current_state != CallState::Ending {
             return Ok(call.current_state == CallState::Ended);
         }
+        // Public legs end first (Telephony confirms with LEG_ENDED, which finishes the
+        // Call); the Call never reports ENDED while a paid leg may still be live.
+        if self.release_public_legs(call.id).await? > 0 || self.live_public_legs(call.id).await? > 0
+        {
+            return Ok(false);
+        }
         let failure = self.cleanup_media(&call).await?;
         let txn = self.db().begin().await?;
         let call = self
@@ -410,6 +416,9 @@ impl AppCallService {
     /// After a terminal transition: provider teardown, then the binding is TERMINATED
     /// with evidence (or retried by reconciliation).
     pub(crate) async fn teardown_media(&self, call_id: Uuid) {
+        if let Err(error) = self.release_public_legs(call_id).await {
+            tracing::warn!(%call_id, %error, "public leg release pending; reconciliation retries");
+        }
         let result: CallResult<()> = async {
             let call = calls::Entity::find_by_id(call_id)
                 .one(self.db())

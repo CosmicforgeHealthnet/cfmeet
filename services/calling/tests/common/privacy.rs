@@ -5,8 +5,8 @@
 use std::sync::Mutex;
 
 use calling::privacy_relay::{
-    CallAuthorization, PrivacyDecision, PrivacyRelayAuthority, PrivacyRelayError, ProxyRequest,
-    ProxyResponse,
+    CallAuthorization, ContactFact, GrantRequest, PrivacyDecision, PrivacyRelayAuthority,
+    PrivacyRelayError, ProxyRequest, ProxyResponse, RelayRoute, ResolutionGrant,
 };
 use cf_service_auth::{CorrelationId, DelegatedPlatformContext};
 use chrono::{Duration, Utc};
@@ -33,6 +33,10 @@ pub struct FakePrivacyRelay {
     pub sessions: Mutex<Vec<(Uuid, Uuid)>>,
     /// Paths Calling forwarded through `proxy`.
     pub proxied: Mutex<Vec<String>>,
+    /// Verified protected contacts of the context and their routing country.
+    pub contacts: Mutex<Vec<(Uuid, String)>>,
+    /// Grants issued (grant id, request).
+    pub grants: Mutex<Vec<(Uuid, GrantRequest)>>,
 }
 
 impl FakePrivacyRelay {
@@ -46,7 +50,23 @@ impl FakePrivacyRelay {
             requests: Mutex::new(Vec::new()),
             sessions: Mutex::new(Vec::new()),
             proxied: Mutex::new(Vec::new()),
+            contacts: Mutex::new(Vec::new()),
+            grants: Mutex::new(Vec::new()),
         }
+    }
+
+    /// A verified protected contact of the context (routing country `country`).
+    pub fn add_contact(&self, country: &str) -> Uuid {
+        let id = Uuid::new_v4();
+        self.contacts
+            .lock()
+            .unwrap()
+            .push((id, country.to_string()));
+        id
+    }
+
+    pub fn grants(&self) -> Vec<(Uuid, GrantRequest)> {
+        self.grants.lock().unwrap().clone()
     }
 
     /// `session` exists and belongs to `tenant`.
@@ -92,11 +112,23 @@ impl PrivacyRelayAuthority for FakePrivacyRelay {
             Mode::NotFound => return Err(PrivacyRelayError::NotFound),
             Mode::Deny(reason) => reason,
             Mode::Policy => {
-                let ok = allowed.contains(&request.source_principal_id)
+                let contacts = self.contacts.lock().unwrap().clone();
+                let known = |c: &Uuid| contacts.iter().any(|(id, _)| id == c);
+                let source_ok = match request.source_contact {
+                    Some(c) => known(&c),
+                    None => allowed.contains(&request.source_principal_id),
+                };
+                let public = request.route != RelayRoute::Application;
+                let contacts_involved =
+                    request.source_contact.is_some() || !request.target_contacts.is_empty();
+                let ok = source_ok
                     && request
                         .target_principal_ids
                         .iter()
-                        .all(|t| allowed.contains(t));
+                        .all(|t| allowed.contains(t))
+                    && request.target_contacts.iter().all(known)
+                    // A contact has no application endpoint; a public route needs one.
+                    && public == contacts_involved;
                 if ok {
                     "AUTHORIZED"
                 } else {
@@ -105,6 +137,22 @@ impl PrivacyRelayAuthority for FakePrivacyRelay {
             }
         };
         let authorized = reason == "AUTHORIZED";
+        let contact_facts = if authorized && request.route != RelayRoute::Application {
+            let contacts = self.contacts.lock().unwrap().clone();
+            request
+                .source_contact
+                .iter()
+                .chain(request.target_contacts.iter())
+                .filter_map(|c| contacts.iter().find(|(id, _)| id == c))
+                .map(|(id, country)| ContactFact {
+                    contact_reference: *id,
+                    country: Some(country.clone()),
+                    verification: "VERIFIED".into(),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         Ok(PrivacyDecision {
             decision_id: Uuid::new_v4(),
             decision: if authorized { "AUTHORIZED" } else { "DENIED" }.to_string(),
@@ -113,10 +161,37 @@ impl PrivacyRelayAuthority for FakePrivacyRelay {
             context_version: *self.context_version.lock().unwrap(),
             relay_session_id: request.relay_session_id,
             relay_session_version: *self.session_version.lock().unwrap(),
-            strategy: "APP_ONLY".to_string(),
+            strategy: match request.route {
+                RelayRoute::Application => "APP_ONLY",
+                RelayRoute::PublicRelay => "PUBLIC_RELAY_ALLOWED",
+                RelayRoute::CallbackRelay => "CALLBACK_RELAY_ALLOWED",
+            }
+            .to_string(),
             policy_version: "CONTEXT_POLICY_V1".to_string(),
             valid_until: authorized.then(|| Utc::now() + Duration::hours(1)),
             decided_at: Utc::now(),
+            route: Some(request.route.as_str().to_string()),
+            contact_facts,
+        })
+    }
+
+    async fn grant_for_execution(
+        &self,
+        _: &DelegatedPlatformContext,
+        _: &CorrelationId,
+        request: &GrantRequest,
+    ) -> Result<ResolutionGrant, PrivacyRelayError> {
+        match *self.mode.lock().unwrap() {
+            Mode::Unavailable => return Err(PrivacyRelayError::Unavailable),
+            Mode::Policy => {}
+            _ => return Err(PrivacyRelayError::NotFound),
+        }
+        let id = Uuid::new_v4();
+        self.grants.lock().unwrap().push((id, request.clone()));
+        Ok(ResolutionGrant {
+            grant_id: id,
+            secret: zeroize::Zeroizing::new(format!("grant-secret-{}", Uuid::new_v4().simple())),
+            expires_at: Utc::now() + Duration::seconds(120),
         })
     }
 

@@ -51,6 +51,9 @@ pub enum ErrorCode {
     ParticipantLimitExceeded,
     TargetUnavailable,
     PrivacyAuthorizationUnavailable,
+    PublicRouteDenied,
+    PublicRouteUnavailable,
+    TelecomSpendLimitExceeded,
 }
 
 impl ErrorCode {
@@ -81,6 +84,9 @@ impl ErrorCode {
         ErrorCode::ParticipantLimitExceeded,
         ErrorCode::TargetUnavailable,
         ErrorCode::PrivacyAuthorizationUnavailable,
+        ErrorCode::PublicRouteDenied,
+        ErrorCode::PublicRouteUnavailable,
+        ErrorCode::TelecomSpendLimitExceeded,
     ];
 
     /// Codes that only internal routes return.
@@ -128,6 +134,15 @@ impl ErrorCode {
             ErrorCode::PrivacyAuthorizationUnavailable => {
                 "Privacy authorization is unavailable; the protected call was not placed. Retry later."
             }
+            ErrorCode::PublicRouteDenied => {
+                "Routing policy does not permit a public-network route for this call."
+            }
+            ErrorCode::PublicRouteUnavailable => {
+                "No public-network route is currently available; the call was not placed."
+            }
+            ErrorCode::TelecomSpendLimitExceeded => {
+                "A telecom spend or velocity limit is reached; the call was not placed."
+            }
             _ => "The request could not be completed.",
         }
     }
@@ -160,6 +175,9 @@ impl ErrorCode {
             ErrorCode::ParticipantLimitExceeded => "PARTICIPANT_LIMIT_EXCEEDED",
             ErrorCode::TargetUnavailable => "TARGET_UNAVAILABLE",
             ErrorCode::PrivacyAuthorizationUnavailable => "PRIVACY_AUTHORIZATION_UNAVAILABLE",
+            ErrorCode::PublicRouteDenied => "PUBLIC_ROUTE_DENIED",
+            ErrorCode::PublicRouteUnavailable => "PUBLIC_ROUTE_UNAVAILABLE",
+            ErrorCode::TelecomSpendLimitExceeded => "TELECOM_SPEND_LIMIT_EXCEEDED",
         }
     }
 }

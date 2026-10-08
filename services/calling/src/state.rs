@@ -43,6 +43,8 @@ pub struct CallingRuntime {
     pub privacy_relay: Arc<dyn PrivacyRelayAuthority>,
     /// Contact Vault access-token minting (§31; none: contact access grants are 503).
     pub contact_delegation: Option<Arc<cf_service_auth::ContactDelegationSigner>>,
+    /// Public-network execution (Part E; default: unconfigured — no public route).
+    pub public_network: crate::calls::app::public::PublicNetwork,
 }
 
 #[derive(Clone)]
@@ -106,7 +108,8 @@ impl AppState {
                 runtime.app_config,
             )
             .with_push(runtime.push)
-            .with_privacy_relay(runtime.privacy_relay.clone()),
+            .with_privacy_relay(runtime.privacy_relay.clone())
+            .with_public_network(runtime.public_network),
         );
         Self {
             authenticator: Arc::new(CredentialAuthenticator::new(
