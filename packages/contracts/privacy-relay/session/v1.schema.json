@@ -1,0 +1,285 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/privacy-relay/session/v1.schema.json",
+  "title": "CF Meet Privacy Relay Session bodies v1",
+  "description": "Request and response bodies of the Privacy Relay Session API (Part D section 30). The root accepts exactly one of the bodies (fixtures); the HTTP contracts reference the $defs.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/CreateSessionRequest"
+    },
+    {
+      "$ref": "#/$defs/PrivacyRelaySession"
+    },
+    {
+      "$ref": "#/$defs/SessionMutationResult"
+    },
+    {
+      "$ref": "#/$defs/SessionList"
+    }
+  ],
+  "$defs": {
+    "CreateSessionRequest": {
+      "description": "Create a Privacy Relay Session of a context (Idempotency-Key required). Everything except relayStrategy is optional and can only NARROW the context (participants, channels, directions, validity, a strategy among the context's allowed strategies). A relay identity or telephone number is never an input.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relayStrategy"
+      ],
+      "properties": {
+        "relayStrategy": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/RelayStrategy"
+        },
+        "participants": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 64,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/SubjectReference"
+          }
+        },
+        "allowedChannels": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/CommunicationChannel"
+          }
+        },
+        "directionPolicy": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/DirectionPolicy"
+        },
+        "directions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/DirectionRequest"
+          }
+        },
+        "startsAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "expiresAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "graceExpiresAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        }
+      }
+    },
+    "PrivacyRelaySession": {
+      "description": "Safe representation of a Privacy Relay Session (NOT a call; one session may authorize many call attempts). relayIdentityBindingRef is opaque and server-owned (never a number, carrier or provider resource).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relaySessionId",
+        "contextId",
+        "version",
+        "sourceContextVersion",
+        "status",
+        "effectiveStatus",
+        "strategy",
+        "executableRoutes",
+        "directionPolicy",
+        "participantScope",
+        "channelScope",
+        "directionScope",
+        "participants",
+        "allowedChannels",
+        "directions",
+        "startsAt",
+        "expiresAt",
+        "policyVersion",
+        "policy",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "relaySessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "contextId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "version": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+        },
+        "sourceContextVersion": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/PrivacyRelaySessionStatus"
+        },
+        "effectiveStatus": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/PrivacyRelaySessionStatus"
+        },
+        "strategy": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/RelayStrategy"
+        },
+        "executableRoutes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/CommunicationRoute"
+          },
+          "description": "Routes the strategy permits that CF Meet can execute today."
+        },
+        "directionPolicy": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/DirectionPolicy"
+        },
+        "participantScope": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/SnapshotScope"
+        },
+        "channelScope": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/SnapshotScope"
+        },
+        "directionScope": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/SnapshotScope"
+        },
+        "participants": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "participantId",
+              "subjectKind",
+              "sourceContextVersion"
+            ],
+            "properties": {
+              "participantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "subjectKind": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ParticipantSubjectKind"
+              },
+              "principalId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "contactReferenceId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "sourceContextVersion": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+              }
+            }
+          }
+        },
+        "allowedChannels": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/CommunicationChannel"
+          }
+        },
+        "directions": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "fromParticipantId",
+              "toParticipantId"
+            ],
+            "properties": {
+              "fromParticipantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "toParticipantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "channel": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/CommunicationChannel"
+              }
+            }
+          }
+        },
+        "startsAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "expiresAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "graceExpiresAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "policyVersion": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,31}$"
+        },
+        "policy": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContextPolicy"
+        },
+        "relayIdentityBindingRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "createdAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "updatedAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "suspendedAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "completedAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "revokedAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "expiredAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        }
+      }
+    },
+    "SessionMutationResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "session",
+        "enforcement"
+      ],
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/PrivacyRelaySession"
+        },
+        "enforcement": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Enforcement"
+        }
+      }
+    },
+    "SessionList": {
+      "description": "Keyset-paginated sessions (newest first).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/PrivacyRelaySession"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 512,
+              "pattern": "^[0-9a-f]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

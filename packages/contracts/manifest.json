@@ -16,14 +16,14 @@
     },
     {
       "id": "cfmeet.calling.http-api",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "kind": "openapi",
       "path": "calling/http/v1.openapi.json",
       "owner": "calling",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface exposed by the Calling service: health, the call API (list, get, available actions), application call creation and control (accept, decline, cancel, end, hold, resume, transfer, session removal, media credentials), the endpoint registry, signaling-credential minting, the endpoint's signaling operations (WebSocket channel, offer recovery, accept / decline, media credentials), the media connection gateway (admission before every media connection) and the media provider callback; the platform credential, signaling credential, media credential and provider signature schemes; the error envelope. No generic state mutation."
+      "description": "HTTP surface exposed by the Calling service: health, the call API (list, get, available actions), application call creation and control (accept, decline, cancel, end, hold, resume, transfer, session removal, media credentials), the endpoint registry, signaling-credential minting, the endpoint's signaling operations (WebSocket channel, offer recovery, accept / decline, media credentials), the media connection gateway (admission before every media connection) and the media provider callback; the platform credential, signaling credential, media credential and provider signature schemes; the error envelope. No generic state mutation. Protected calls (privacyRelaySessionId, PRIVACY_RELAY_V1, fail closed: PRIVACY_AUTHORIZATION_UNAVAILABLE) and the internal Privacy Relay enforcement route (POST /internal/v1/privacy-relay/enforcement). The public Privacy Relay API served by this ingress is specified by cfmeet.privacy-relay.http-api."
     },
     {
       "id": "cfmeet.calling.call-common",
@@ -49,7 +49,7 @@
     },
     {
       "id": "cfmeet.calling.call-control",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "calling/control/v1.schema.json",
       "owner": "calling",
@@ -82,7 +82,7 @@
     },
     {
       "id": "cfmeet.platform.common",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "platform/common/v1.schema.json",
       "owner": "platform",
@@ -148,14 +148,102 @@
     },
     {
       "id": "cfmeet.platform.event-envelope",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "kind": "json-schema",
       "path": "platform/events/envelope/v1.schema.json",
       "owner": "platform",
       "visibility": "internal",
       "lifecycle": "stable",
       "authority": "contract-first",
-      "description": "Envelope for durable cross-service events. Payload contracts are registered separately by the producing service (Calling: cfmeet.calling.call-lifecycle-event)."
+      "description": "Envelope for durable cross-service events. Payload contracts are registered separately by the producing service (Calling: cfmeet.calling.call-lifecycle-event; Privacy Relay: cfmeet.privacy-relay.event)."
+    },
+    {
+      "id": "cfmeet.privacy-relay.http-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "privacy-relay/http/v1.openapi.json",
+      "owner": "privacy-relay",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "The CF Meet Privacy Relay API (Part D sections 26-30): Communication Contexts (create, list, get, typed versioned update / participant reassignment, suspend, resume, complete, revoke, privacy-safe evidence) and Privacy Relay Sessions (create, list, get, suspend, resume, revoke). Served by the authenticated platform ingress; Privacy Relay is the business and data authority. One generic model for first-party and external applications; no telephone numbers, providers, Contact Vault material or credentials."
+    },
+    {
+      "id": "cfmeet.privacy-relay.internal-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "privacy-relay/internal/v1.openapi.json",
+      "owner": "privacy-relay",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Internal HTTP surface of services/privacy-relay: GET /health and the service-authenticated /internal/v1 API (context and session commands and reads for the platform ingress, communication authorization for protected calls). Scope only from the signed delegated platform context."
+    },
+    {
+      "id": "cfmeet.privacy-relay.common",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "privacy-relay/common/v1.schema.json",
+      "owner": "privacy-relay",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Canonical Privacy Relay vocabulary: context / session lifecycles, channels, direction policy, subject references (principal id or opaque ContactReference id), relay strategies, routes, authorization decisions and reasons, enforcement states and reasons, audit event types, the bounded context policy and the error envelope."
+    },
+    {
+      "id": "cfmeet.privacy-relay.context",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "privacy-relay/context/v1.schema.json",
+      "owner": "privacy-relay",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Communication Context request and response bodies: create, typed update, lifecycle command, representation, mutation result, list and evidence. No client-chosen scope, status, version, authorization result, telephone number, provider or arbitrary policy document."
+    },
+    {
+      "id": "cfmeet.privacy-relay.session",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "privacy-relay/session/v1.schema.json",
+      "owner": "privacy-relay",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Privacy Relay Session request and response bodies: create (narrowing only), representation, mutation result and list. A session is not a call; relayIdentityBindingRef is opaque and server-owned."
+    },
+    {
+      "id": "cfmeet.privacy-relay.authorization",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "privacy-relay/authorization/v1.schema.json",
+      "owner": "privacy-relay",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Communication authorization request (Calling -> Privacy Relay) and decision: current context AND session at server time, normalized reasons, validity, decision id. No contacts, no provider ids, no client-asserted result."
+    },
+    {
+      "id": "cfmeet.privacy-relay.event",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "privacy-relay/events/v1.schema.json",
+      "owner": "privacy-relay",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Payload of every Privacy Relay outbox event (privacy-relay.* inside cfmeet.platform.event-envelope): audit event id, gap-free sequence, versions, statuses, correlation id and bounded safe data."
+    },
+    {
+      "id": "cfmeet.privacy-relay.enforcement-command",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "privacy-relay/internal/enforcement/v1.schema.json",
+      "owner": "privacy-relay",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Privacy Relay -> Calling active-call enforcement command and result (restrictive only; deduplicated by enforcementEventId)."
     }
   ]
 }

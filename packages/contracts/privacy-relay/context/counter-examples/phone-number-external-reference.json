@@ -1,0 +1,23 @@
+{
+  "externalContextReference": "2348012345678",
+  "participants": [
+    {
+      "principalId": "11111111-2222-4333-8444-555555555555"
+    },
+    {
+      "principalId": "66666666-7777-4888-9999-aaaaaaaaaaaa"
+    }
+  ],
+  "allowedChannels": [
+    "VOICE"
+  ],
+  "directionPolicy": "BIDIRECTIONAL",
+  "startsAt": "2031-03-01T10:00:00Z",
+  "expiresAt": "2031-03-01T11:00:00Z",
+  "graceExpiresAt": "2031-03-01T11:30:00Z",
+  "policy": {
+    "terminateActiveCallsOnRevoke": true,
+    "terminateActiveCallsOnParticipantRemoval": true,
+    "graceAllowsNewCalls": true
+  }
+}

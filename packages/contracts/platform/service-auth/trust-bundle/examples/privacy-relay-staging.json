@@ -23,7 +23,10 @@
       ],
       "permissions": [
         "communication.authorize",
-        "communication-context.read"
+        "communication-context.read",
+        "communication-context.write",
+        "relay-session.read",
+        "relay-session.write"
       ]
     },
     {

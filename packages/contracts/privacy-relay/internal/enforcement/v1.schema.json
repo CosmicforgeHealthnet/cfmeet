@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/privacy-relay/internal/enforcement/v1.schema.json",
+  "title": "CF Meet Privacy Relay enforcement command v1",
+  "description": "Internal active-call enforcement command and result (Part D section 29). The root accepts exactly one of the bodies (fixtures).",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/EnforcementCommand"
+    },
+    {
+      "$ref": "#/$defs/EnforcementResult"
+    }
+  ],
+  "$defs": {
+    "EnforcementCommand": {
+      "description": "Privacy Relay -> Calling active-call enforcement command (POST /internal/v1/privacy-relay/enforcement, service-authenticated, receiver permission communication-authority.enforce, scope from the signed delegated context). Restrictive only. relaySessionIds empty: every session of the context; affectedPrincipalIds empty: every participant. relaySessionVersion accompanies exactly a session-level command.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enforcementEventId",
+        "contextId",
+        "contextVersion",
+        "relaySessionIds",
+        "reason",
+        "affectedPrincipalIds",
+        "terminateActiveCalls"
+      ],
+      "properties": {
+        "enforcementEventId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "contextId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "contextVersion": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+        },
+        "relaySessionIds": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "relaySessionVersion": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+        },
+        "reason": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/EnforcementReason"
+        },
+        "affectedPrincipalIds": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "terminateActiveCalls": {
+          "type": "boolean"
+        }
+      }
+    },
+    "EnforcementResult": {
+      "description": "Calling's confirmation (also the answer to every replay of the same enforcementEventId).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "enforcementEventId",
+        "matchedCalls",
+        "terminatedCalls"
+      ],
+      "properties": {
+        "status": {
+          "const": "APPLIED"
+        },
+        "enforcementEventId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "matchedCalls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "terminatedCalls": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

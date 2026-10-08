@@ -1,0 +1,43 @@
+{
+  "externalContextReference": "case:2031:A17",
+  "participants": [
+    {
+      "principalId": "11111111-2222-4333-8444-555555555555"
+    },
+    {
+      "principalId": "66666666-7777-4888-9999-aaaaaaaaaaaa"
+    },
+    {
+      "contactReferenceId": "c0ffee00-1234-4567-89ab-cdef01234567"
+    }
+  ],
+  "allowedChannels": [
+    "VOICE",
+    "MESSAGING"
+  ],
+  "directionPolicy": "EXPLICIT",
+  "directions": [
+    {
+      "from": {
+        "principalId": "11111111-2222-4333-8444-555555555555"
+      },
+      "to": {
+        "principalId": "66666666-7777-4888-9999-aaaaaaaaaaaa"
+      }
+    },
+    {
+      "from": {
+        "principalId": "66666666-7777-4888-9999-aaaaaaaaaaaa"
+      },
+      "to": {
+        "principalId": "11111111-2222-4333-8444-555555555555"
+      },
+      "channel": "VOICE"
+    }
+  ],
+  "expiresAt": "2031-03-01T18:00:00Z",
+  "allowedRelayStrategies": [
+    "APP_ONLY",
+    "APP_PREFERRED"
+  ]
+}

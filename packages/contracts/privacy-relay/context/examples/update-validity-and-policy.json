@@ -1,0 +1,7 @@
+{
+  "expectedVersion": 3,
+  "expiresAt": "2031-03-01T12:00:00Z",
+  "policy": {
+    "terminateActiveCallsOnParticipantRemoval": false
+  }
+}

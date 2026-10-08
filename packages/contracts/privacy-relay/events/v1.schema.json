@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/privacy-relay/events/v1.schema.json",
+  "title": "CF Meet Privacy Relay event payload v1",
+  "description": "Payload of every Privacy Relay outbox event inside the cfmeet.platform.event-envelope (event_type privacy-relay.*, schema_version 1): the immutable audit event's id, gap-free per-context sequence, versions, statuses, correlation id and bounded safe data (changed authority). Never contacts, provider identifiers, external business references, credentials or tokens.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "audit_event_id",
+    "event_type",
+    "sequence",
+    "context_id",
+    "context_version",
+    "context_status",
+    "occurred_at",
+    "correlation_id",
+    "actor_kind",
+    "data"
+  ],
+  "properties": {
+    "audit_event_id": {
+      "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+    },
+    "event_type": {
+      "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/AuditEventType"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "context_id": {
+      "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+    },
+    "context_version": {
+      "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+    },
+    "context_status": {
+      "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/CommunicationContextStatus"
+    },
+    "session_id": {
+      "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+    },
+    "session_version": {
+      "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+    },
+    "session_status": {
+      "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/PrivacyRelaySessionStatus"
+    },
+    "enforcement_job_id": {
+      "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+    },
+    "occurred_at": {
+      "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+    },
+    "correlation_id": {
+      "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/CorrelationId"
+    },
+    "actor_kind": {
+      "enum": [
+        "APPLICATION",
+        "SYSTEM"
+      ]
+    },
+    "data": {
+      "$ref": "#/$defs/EventData"
+    }
+  },
+  "dependentRequired": {
+    "session_id": [
+      "session_version"
+    ],
+    "session_version": [
+      "session_id"
+    ]
+  },
+  "$defs": {
+    "EnvelopeEventType": {
+      "description": "event_type values of Privacy Relay envelopes.",
+      "type": "string",
+      "enum": [
+        "privacy-relay.context.completed",
+        "privacy-relay.context.created",
+        "privacy-relay.context.expired",
+        "privacy-relay.context.participants-changed",
+        "privacy-relay.context.resumed",
+        "privacy-relay.context.revoked",
+        "privacy-relay.context.suspended",
+        "privacy-relay.context.updated",
+        "privacy-relay.enforcement.applied",
+        "privacy-relay.enforcement.failed",
+        "privacy-relay.enforcement.requested",
+        "privacy-relay.session.completed",
+        "privacy-relay.session.created",
+        "privacy-relay.session.expired",
+        "privacy-relay.session.resumed",
+        "privacy-relay.session.revoked",
+        "privacy-relay.session.suspended",
+        "privacy-relay.session.updated"
+      ]
+    },
+    "EventData": {
+      "description": "Bounded safe evidence: snake_case keys never naming secrets or contact data; ids, versions, counts, statuses.",
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]{0,62}$",
+        "not": {
+          "pattern": "(password|secret|token|credential|api_?key|phone|msisdn|e164|telephone|sip_?uri|contact_plaintext|provider|carrier)"
+        }
+      }
+    }
+  }
+}

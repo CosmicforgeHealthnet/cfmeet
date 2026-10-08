@@ -1,0 +1,50 @@
+{
+  "items": [
+    {
+      "relaySessionId": "5a9d2c7e-3b41-4f08-a6e2-91c4d7b03e58",
+      "contextId": "0e3c7a52-6f1b-4a7e-9d5c-2b8f4e1a9c30",
+      "version": 1,
+      "sourceContextVersion": 2,
+      "status": "ACTIVE",
+      "effectiveStatus": "ACTIVE",
+      "strategy": "APP_ONLY",
+      "executableRoutes": [
+        "APPLICATION"
+      ],
+      "directionPolicy": "BIDIRECTIONAL",
+      "participantScope": "INHERITED",
+      "channelScope": "INHERITED",
+      "directionScope": "INHERITED",
+      "participants": [
+        {
+          "participantId": "7c1e5f20-8a3d-4b96-b2e7-4d0a6c9f1e23",
+          "subjectKind": "PRINCIPAL",
+          "principalId": "11111111-2222-4333-8444-555555555555",
+          "sourceContextVersion": 2
+        },
+        {
+          "participantId": "9e3071a2-ac5f-4db8-94a9-6f2c8e1b3045",
+          "subjectKind": "PRINCIPAL",
+          "principalId": "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff",
+          "sourceContextVersion": 2
+        }
+      ],
+      "allowedChannels": [
+        "VOICE"
+      ],
+      "directions": [],
+      "startsAt": "2031-03-01T10:00:00.000000Z",
+      "expiresAt": "2031-03-01T11:00:00.000000Z",
+      "policyVersion": "CONTEXT_POLICY_V1",
+      "policy": {
+        "terminateActiveCallsOnRevoke": true,
+        "terminateActiveCallsOnParticipantRemoval": true,
+        "terminateActiveCallsOnSuspend": false,
+        "graceAllowsNewCalls": false
+      },
+      "createdAt": "2031-03-01T10:00:00.000000Z",
+      "updatedAt": "2031-03-01T10:00:00.000000Z"
+    }
+  ],
+  "nextCursor": "31393330323132303030303030303030307c"
+}

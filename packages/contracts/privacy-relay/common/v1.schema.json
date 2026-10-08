@@ -1,0 +1,382 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json",
+  "title": "CF Meet Privacy Relay common definitions v1",
+  "description": "Canonical, consumer-neutral Privacy Relay vocabulary (Part D sections 26-30): Communication Context and Privacy Relay Session lifecycles, channels, direction policy, subject references, relay strategies, authorization decisions and reasons, enforcement states and the stable error codes. No consumer product, business object, provider, carrier or telephone vocabulary. Definitions only: the root schema places no constraints.",
+  "$defs": {
+    "CommunicationContextStatus": {
+      "description": "Lifecycle of a Communication Context. REVOKED and EXPIRED are terminal; COMPLETED never returns to ACTIVE or SUSPENDED.",
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "SUSPENDED",
+        "REVOKED",
+        "COMPLETED",
+        "EXPIRED"
+      ]
+    },
+    "PrivacyRelaySessionStatus": {
+      "description": "Lifecycle of a Privacy Relay Session (same graph as contexts); a session never outlives its context's authority.",
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "SUSPENDED",
+        "REVOKED",
+        "COMPLETED",
+        "EXPIRED"
+      ]
+    },
+    "CommunicationChannel": {
+      "description": "Communication channel. VOICE is executed; MESSAGING may be declared for the future and is never executed by sections 26-30 (no chat, SMS or provider messaging).",
+      "type": "string",
+      "enum": [
+        "VOICE",
+        "MESSAGING"
+      ]
+    },
+    "DirectionPolicy": {
+      "description": "BIDIRECTIONAL: any two active participants, both directions. EXPLICIT: only directed edges authorize; A -> B never implies B -> A.",
+      "type": "string",
+      "enum": [
+        "BIDIRECTIONAL",
+        "EXPLICIT"
+      ]
+    },
+    "ParticipantSubjectKind": {
+      "description": "Kind of an authorization subject.",
+      "type": "string",
+      "enum": [
+        "PRINCIPAL",
+        "CONTACT_REFERENCE"
+      ]
+    },
+    "SnapshotScope": {
+      "description": "Whether a relay session follows its context (INHERITED) or was explicitly narrowed (NARROWED).",
+      "type": "string",
+      "enum": [
+        "INHERITED",
+        "NARROWED"
+      ]
+    },
+    "RelayStrategy": {
+      "description": "Relay strategy: policy, not proof that a route exists. Every strategy permits the application route; the public-network and callback strategies only become executable when relay-number and telephony infrastructure exists.",
+      "type": "string",
+      "enum": [
+        "APP_ONLY",
+        "APP_PREFERRED",
+        "PUBLIC_RELAY_ALLOWED",
+        "CALLBACK_RELAY_ALLOWED"
+      ]
+    },
+    "CommunicationRoute": {
+      "description": "Route an authorization asks for. Only APPLICATION is executable today.",
+      "type": "string",
+      "enum": [
+        "APPLICATION",
+        "PUBLIC_RELAY",
+        "CALLBACK_RELAY"
+      ]
+    },
+    "AuthorizationPurpose": {
+      "description": "Safe intent metadata of an authorization request.",
+      "type": "string",
+      "enum": [
+        "CALL_CREATE",
+        "CALL_TRANSFER",
+        "CHECK"
+      ]
+    },
+    "AuthorizationDecision": {
+      "description": "Outcome of a communication authorization.",
+      "type": "string",
+      "enum": [
+        "AUTHORIZED",
+        "DENIED"
+      ]
+    },
+    "AuthorizationReason": {
+      "description": "Normalized platform reason of a decision (no consumer-specific reasons).",
+      "type": "string",
+      "enum": [
+        "AUTHORIZED",
+        "FEATURE_DISABLED",
+        "CONTEXT_NOT_ACTIVE",
+        "CONTEXT_NOT_STARTED",
+        "CONTEXT_EXPIRED",
+        "CONTEXT_REVOKED",
+        "CONTEXT_SUSPENDED",
+        "SESSION_NOT_ACTIVE",
+        "SESSION_NOT_STARTED",
+        "SESSION_EXPIRED",
+        "PARTICIPANT_NOT_AUTHORIZED",
+        "DIRECTION_NOT_ALLOWED",
+        "CHANNEL_NOT_ALLOWED",
+        "STRATEGY_NOT_ALLOWED",
+        "GRACE_POLICY_DENIED",
+        "CAPABILITY_UNAVAILABLE"
+      ]
+    },
+    "EnforcementState": {
+      "description": "Active-call enforcement state of a mutation: NOT_REQUIRED, PENDING (durably queued; Calling has not confirmed) or APPLIED (Calling confirmed). Never claimed before Calling confirms.",
+      "type": "string",
+      "enum": [
+        "NOT_REQUIRED",
+        "PENDING",
+        "APPLIED"
+      ]
+    },
+    "EnforcementReason": {
+      "description": "Why active protected calls are enforced against.",
+      "type": "string",
+      "enum": [
+        "CONTEXT_REVOKED",
+        "CONTEXT_SUSPENDED",
+        "CONTEXT_COMPLETED",
+        "CONTEXT_EXPIRED",
+        "PARTICIPANT_REMOVED",
+        "SESSION_REVOKED",
+        "SESSION_SUSPENDED",
+        "SESSION_EXPIRED"
+      ]
+    },
+    "AuditEventType": {
+      "description": "Immutable Privacy Relay evidence event types.",
+      "type": "string",
+      "enum": [
+        "CONTEXT_CREATED",
+        "CONTEXT_UPDATED",
+        "CONTEXT_PARTICIPANTS_CHANGED",
+        "CONTEXT_SUSPENDED",
+        "CONTEXT_RESUMED",
+        "CONTEXT_REVOKED",
+        "CONTEXT_COMPLETED",
+        "CONTEXT_EXPIRED",
+        "RELAY_SESSION_CREATED",
+        "RELAY_SESSION_UPDATED",
+        "RELAY_SESSION_SUSPENDED",
+        "RELAY_SESSION_RESUMED",
+        "RELAY_SESSION_REVOKED",
+        "RELAY_SESSION_COMPLETED",
+        "RELAY_SESSION_EXPIRED",
+        "ENFORCEMENT_REQUESTED",
+        "ENFORCEMENT_APPLIED",
+        "ENFORCEMENT_FAILED"
+      ]
+    },
+    "ErrorCode": {
+      "description": "Stable error codes of the Privacy Relay API. AUTHENTICATION_FAILED, INSUFFICIENT_SCOPE and RATE_LIMITED come from the authenticated platform ingress; INTERNAL_* only from internal routes (never relayed to customers).",
+      "type": "string",
+      "enum": [
+        "AUTHENTICATION_FAILED",
+        "INSUFFICIENT_SCOPE",
+        "RATE_LIMITED",
+        "VALIDATION_ERROR",
+        "NOT_FOUND",
+        "METHOD_NOT_ALLOWED",
+        "CONTEXT_NOT_FOUND",
+        "SESSION_NOT_FOUND",
+        "CONTEXT_VERSION_CONFLICT",
+        "SESSION_VERSION_CONFLICT",
+        "CONTEXT_REFERENCE_CONFLICT",
+        "CONTEXT_NOT_ACTIVE",
+        "CONTEXT_EXPIRED",
+        "CONTEXT_REVOKED",
+        "CONTEXT_SUSPENDED",
+        "SESSION_NOT_ACTIVE",
+        "PARTICIPANT_NOT_AUTHORIZED",
+        "DIRECTION_NOT_ALLOWED",
+        "CHANNEL_NOT_ALLOWED",
+        "STRATEGY_NOT_ALLOWED",
+        "VALIDITY_NOT_CONTAINED",
+        "IDEMPOTENCY_CONFLICT",
+        "PRIVACY_RELAY_DISABLED",
+        "SERVICE_UNAVAILABLE",
+        "INTERNAL_ERROR",
+        "INTERNAL_AUTHENTICATION_FAILED",
+        "INTERNAL_PERMISSION_DENIED"
+      ]
+    },
+    "Timestamp": {
+      "description": "RFC 3339 timestamp (UTC).",
+      "type": "string",
+      "format": "date-time"
+    },
+    "Version": {
+      "description": "Monotonic version (starts at 1, +1 per accepted authority change).",
+      "type": "integer",
+      "minimum": 1
+    },
+    "IdempotencyKey": {
+      "description": "Client-chosen key: 1-255 printable ASCII characters without spaces.",
+      "type": "string",
+      "pattern": "^[!-~]{1,255}$"
+    },
+    "ExternalContextReference": {
+      "description": "Consumer-defined, opaque, bounded reference of the business relationship (CF Meet never parses it). It can never be contact data: no telephone number, e-mail address or tel / sip / mailto URI.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "not": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9.:-]*[0-9][0-9.:-]*[0-9][0-9.:-]*[0-9][0-9.:-]*[0-9][0-9.:-]*[0-9][0-9.:-]*[0-9][0-9.:-]*[0-9][0-9.:-]*$"
+          },
+          {
+            "pattern": "^([Tt][Ee][Ll]|[Ss][Ii][Pp][Ss]?|[Mm][Aa][Ii][Ll][Tt][Oo]|[Cc][Aa][Ll][Ll][Tt][Oo]|[Ww][Aa]|[Ss][Mm][Ss]):"
+          }
+        ]
+      }
+    },
+    "SubjectReference": {
+      "description": "Exactly one opaque subject reference: a CF Meet principal id or an opaque ContactReference id. A ContactReference is never a telephone number, e-mail address or SIP URI, and Privacy Relay never resolves it (Contact Vault is a later section).",
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "principalId"
+          ],
+          "properties": {
+            "principalId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          "not": {
+            "required": [
+              "contactReferenceId"
+            ]
+          }
+        },
+        {
+          "required": [
+            "contactReferenceId"
+          ],
+          "properties": {
+            "contactReferenceId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          "not": {
+            "required": [
+              "principalId"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "contactReferenceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "DirectionRequest": {
+      "description": "A directed edge between two subjects; channel restricts it to one channel (absent: every allowed channel).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to"
+      ],
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/SubjectReference"
+        },
+        "to": {
+          "$ref": "#/$defs/SubjectReference"
+        },
+        "channel": {
+          "$ref": "#/$defs/CommunicationChannel"
+        }
+      }
+    },
+    "ContextPolicy": {
+      "description": "The typed, bounded context policy (never an arbitrary document). Defaults are fail-safe.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "terminateActiveCallsOnRevoke": {
+          "type": "boolean",
+          "default": true,
+          "description": "On revoke, actively terminate protected calls (new authority is denied regardless)."
+        },
+        "terminateActiveCallsOnParticipantRemoval": {
+          "type": "boolean",
+          "default": true,
+          "description": "On participant removal, terminate protected calls involving the removed participant; when false they may continue but no new protected call or transfer involving that participant is authorized."
+        },
+        "terminateActiveCallsOnSuspend": {
+          "type": "boolean",
+          "default": false,
+          "description": "On suspend, terminate protected calls (new authority is denied regardless)."
+        },
+        "graceAllowsNewCalls": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether new calls may be authorized during the completion grace period."
+        }
+      }
+    },
+    "Enforcement": {
+      "description": "Active-call enforcement of a mutation (event ids of the durable enforcement jobs it created).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "enforcementEventIds"
+      ],
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/EnforcementState"
+        },
+        "enforcementEventIds": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        }
+      }
+    },
+    "ErrorEnvelope": {
+      "description": "Error response body: stable code, fixed safe message, server request id. Never database errors, foreign-resource existence, tokens or contact data.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message",
+            "requestId"
+          ],
+          "properties": {
+            "code": {
+              "$ref": "#/$defs/ErrorCode"
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "requestId": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "pattern": "^req_[0-9a-f]{32}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -68,7 +68,11 @@
         "protected-contact.resolve-for-execution",
         "call-leg.execute",
         "call-leg-status.read",
-        "operational-callback.deliver"
+        "operational-callback.deliver",
+        "communication-context.write",
+        "relay-session.read",
+        "relay-session.write",
+        "communication-authority.enforce"
       ]
     }
   }

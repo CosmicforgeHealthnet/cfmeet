@@ -1,0 +1,14 @@
+{
+  "relaySessionId": "5a9d2c7e-3b41-4f08-a6e2-91c4d7b03e58",
+  "source": {
+    "principalId": "11111111-2222-4333-8444-555555555555"
+  },
+  "targets": [
+    {
+      "principalId": "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
+    }
+  ],
+  "channel": "VOICE",
+  "route": "APPLICATION",
+  "purpose": "CALL_CREATE"
+}

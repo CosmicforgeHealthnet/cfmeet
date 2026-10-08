@@ -45,7 +45,7 @@ impl Sandbox {
         let repo = dir.path().to_path_buf();
         let contracts = repo.join("packages/contracts");
         copy_dir(&real_contracts(), &contracts);
-        for service in ["calling", "meeting-service"] {
+        for service in ["calling", "meeting-service", "privacy-relay"] {
             fs::create_dir_all(repo.join("services").join(service)).unwrap();
         }
         Self {
@@ -120,7 +120,7 @@ fn duplicate_contract_version_is_rejected() {
     let report = s.run();
     assert_rejected(
         &report,
-        "duplicate contract version cfmeet.platform.common@1.0.0",
+        "duplicate contract version cfmeet.platform.common@1.1.0",
     );
     assert_rejected(&report, "duplicate canonical ownership");
 }
@@ -238,16 +238,16 @@ fn unregistered_duplicate_authority_is_rejected() {
 fn contracts_for_unimplemented_services_are_rejected() {
     let s = Sandbox::new();
     s.write(
-        "privacy-relay/http/v1.openapi.json",
+        "telephony/http/v1.openapi.json",
         &json!({ "openapi": "3.1.0", "info": { "title": "x", "version": "1.0.0" }, "paths": {} }),
     );
     s.edit_manifest(|c| {
         c.push(json!({
-            "id": "cfmeet.privacy-relay.http-api",
+            "id": "cfmeet.telephony.http-api",
             "version": "1.0.0",
             "kind": "openapi",
-            "path": "privacy-relay/http/v1.openapi.json",
-            "owner": "privacy-relay",
+            "path": "telephony/http/v1.openapi.json",
+            "owner": "telephony",
             "visibility": "public",
             "lifecycle": "experimental",
             "authority": "contract-first",
@@ -256,7 +256,7 @@ fn contracts_for_unimplemented_services_are_rejected() {
     });
     assert_rejected(
         &s.run(),
-        "owner `privacy-relay` is not an existing deployable service",
+        "owner `telephony` is not an existing deployable service",
     );
 }
 

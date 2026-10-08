@@ -11,19 +11,27 @@ This package is the permanent home for shared, externally visible contracts acro
 | Id | Version | Kind | Path | Authority |
 |---|---|---|---|---|
 | `cfmeet.meeting-service.http-api` | 1.1.0 | OpenAPI 3.0 | [`openapi/meeting-service.json`](openapi/meeting-service.json) | generated from `services/meeting-service` (`export_openapi`, diffed by `backend.yml`) |
-| `cfmeet.calling.http-api` | 1.3.0 (beta) | OpenAPI 3.1 | [`calling/http/v1.openapi.json`](calling/http/v1.openapi.json) | contract-first; exactly the implemented routes: health, call API, call creation / control, endpoints, signaling credentials, endpoint signaling routes, the media connection gateway, media provider callback; security schemes and the error envelope |
+| `cfmeet.calling.http-api` | 1.4.0 (beta) | OpenAPI 3.1 | [`calling/http/v1.openapi.json`](calling/http/v1.openapi.json) | contract-first; exactly the implemented Calling routes: health, call API, call creation / control (incl. protected calls), endpoints, signaling credentials, endpoint signaling routes, the media connection gateway, media provider callback, Privacy Relay active-call enforcement (internal); security schemes and the error envelope. The Privacy Relay ingress routes Calling serves are specified by `cfmeet.privacy-relay.http-api` |
 | `cfmeet.calling.call-common` | 1.1.0 (beta) | JSON Schema 2020-12 | [`calling/common/v1.schema.json`](calling/common/v1.schema.json) | contract-first; canonical call vocabulary (17 call states, failure categories, terminal reasons, event types, ring-offer / media-access / transfer / endpoint vocabularies, call representation, media capabilities, safe event data), defined once |
 | `cfmeet.calling.call-lifecycle-event` | 1.0.0 (beta) | JSON Schema 2020-12 | [`calling/events/call-lifecycle/v1.schema.json`](calling/events/call-lifecycle/v1.schema.json) | contract-first; payload of every Calling outbox event (inside the event envelope) |
-| `cfmeet.calling.call-control` | 1.0.0 (beta) | JSON Schema 2020-12 | [`calling/control/v1.schema.json`](calling/control/v1.schema.json) | contract-first; request / response bodies of the application-calling API (creation, answers, control, transfer, media credentials, endpoints, signaling credentials, recovery) |
+| `cfmeet.calling.call-control` | 1.1.0 (beta) | JSON Schema 2020-12 | [`calling/control/v1.schema.json`](calling/control/v1.schema.json) | contract-first; request / response bodies of the application-calling API (creation, answers, control, transfer, media credentials, endpoints, signaling credentials, recovery) |
 | `cfmeet.calling.realtime-signal` | 1.0.0 (beta) | JSON Schema 2020-12 | [`calling/realtime/v1.schema.json`](calling/realtime/v1.schema.json) | contract-first; frames of the endpoint signaling channel (call signals, control frames) |
 | `cfmeet.calling.push-invitation` | 1.0.0 (experimental) | JSON Schema 2020-12 | [`calling/push/invitation/v1.schema.json`](calling/push/invitation/v1.schema.json) | contract-first; transport-neutral push-ready ring offer |
-| `cfmeet.platform.common` | 1.0.0 | JSON Schema 2020-12 | [`platform/common/v1.schema.json`](platform/common/v1.schema.json) | contract-first |
+| `cfmeet.platform.common` | 1.1.0 | JSON Schema 2020-12 | [`platform/common/v1.schema.json`](platform/common/v1.schema.json) | contract-first |
 | `cfmeet.platform.service-token-header` | 1.0.0 | JSON Schema 2020-12 | [`platform/service-auth/token-header/v1.schema.json`](platform/service-auth/token-header/v1.schema.json) | contract-first |
 | `cfmeet.platform.service-token-claims` | 1.0.0 | JSON Schema 2020-12 | [`platform/service-auth/token-claims/v1.schema.json`](platform/service-auth/token-claims/v1.schema.json) | contract-first |
 | `cfmeet.platform.delegated-platform-context` | 1.0.0 | JSON Schema 2020-12 | [`platform/service-auth/delegated-platform-context/v1.schema.json`](platform/service-auth/delegated-platform-context/v1.schema.json) | contract-first |
 | `cfmeet.platform.service-trust-bundle` | 1.0.0 | JSON Schema 2020-12 | [`platform/service-auth/trust-bundle/v1.schema.json`](platform/service-auth/trust-bundle/v1.schema.json) | contract-first |
 | `cfmeet.platform.internal-http` | 1.0.0 | OpenAPI 3.1 (components) | [`platform/internal-http/v1.openapi.json`](platform/internal-http/v1.openapi.json) | contract-first |
-| `cfmeet.platform.event-envelope` | 1.0.1 | JSON Schema 2020-12 | [`platform/events/envelope/v1.schema.json`](platform/events/envelope/v1.schema.json) | contract-first; payloads registered by producers (Calling: `cfmeet.calling.call-lifecycle-event`) |
+| `cfmeet.platform.event-envelope` | 1.0.2 | JSON Schema 2020-12 | [`platform/events/envelope/v1.schema.json`](platform/events/envelope/v1.schema.json) | contract-first; payloads registered by producers (Calling: `cfmeet.calling.call-lifecycle-event`; Privacy Relay: `cfmeet.privacy-relay.event`) |
+| `cfmeet.privacy-relay.http-api` | 1.0.0 (beta) | OpenAPI 3.1 | [`privacy-relay/http/v1.openapi.json`](privacy-relay/http/v1.openapi.json) | contract-first; the public `/v1/privacy-relay/...` API (served by Calling's platform ingress, Part D §26–§30) |
+| `cfmeet.privacy-relay.internal-api` | 1.0.0 (beta) | OpenAPI 3.1 | [`privacy-relay/internal/v1.openapi.json`](privacy-relay/internal/v1.openapi.json) | contract-first; Privacy Relay's service-authenticated `/internal/v1/...` API and `/health` |
+| `cfmeet.privacy-relay.common` | 1.0.0 (beta) | JSON Schema 2020-12 | [`privacy-relay/common/v1.schema.json`](privacy-relay/common/v1.schema.json) | contract-first; statuses, channels, strategies, subject references (principal id or opaque ContactReference id — never a contact value), versions, enforcement state |
+| `cfmeet.privacy-relay.context` | 1.0.0 (beta) | JSON Schema 2020-12 | [`privacy-relay/context/v1.schema.json`](privacy-relay/context/v1.schema.json) | contract-first; Communication Context requests / representations / evidence |
+| `cfmeet.privacy-relay.session` | 1.0.0 (beta) | JSON Schema 2020-12 | [`privacy-relay/session/v1.schema.json`](privacy-relay/session/v1.schema.json) | contract-first; Privacy Relay Session requests / representations |
+| `cfmeet.privacy-relay.authorization` | 1.0.0 (beta) | JSON Schema 2020-12 | [`privacy-relay/authorization/v1.schema.json`](privacy-relay/authorization/v1.schema.json) | contract-first; `communication.authorize` request / decision |
+| `cfmeet.privacy-relay.event` | 1.0.0 (beta) | JSON Schema 2020-12 | [`privacy-relay/events/v1.schema.json`](privacy-relay/events/v1.schema.json) | contract-first; payload of every Privacy Relay outbox event (inside the event envelope) |
+| `cfmeet.privacy-relay.enforcement-command` | 1.0.0 (beta) | JSON Schema 2020-12 | [`privacy-relay/internal/enforcement/v1.schema.json`](privacy-relay/internal/enforcement/v1.schema.json) | contract-first; Privacy Relay → Calling active-call enforcement command / result (received by Calling) |
 
 Schemas have `examples/` (must validate) and `counter-examples/` (must be rejected).
 Implementations are checked against these contracts in both directions by
@@ -38,7 +46,7 @@ every Calling outbox envelope / lifecycle payload).
 3. Contract-first files are `v<major>.schema.json` / `v<major>.openapi.json`. A breaking change is a new major file registered next to the old one; compatible changes bump the manifest version.
 4. `$schema` is JSON Schema 2020-12; `$id` is `https://schemas.cfmeet.com/<path>`; cross-contract `$ref`s use those ids and resolve offline.
 5. No unregistered JSON outside `examples/` / `counter-examples/`.
-6. Contracts describe what exists. Do not register Privacy Relay, Telephony or other contracts before their domain is implemented (the call domain and its lifecycle event exist since Part C §15–§19).
+6. Contracts describe what exists. Do not register Contact Vault, relay-number, Telephony or other contracts before their domain is implemented (the call domain and its lifecycle event exist since Part C §15–§19; Privacy Relay contexts, sessions, authorization and enforcement since Part D §26–§30).
 7. Generated code is not manually edited.
 
 The validator (`validator/`, Rust, no Docker, no network) enforces 2–5 plus meta-schema
@@ -98,4 +106,4 @@ Rules:
 4. Once consumers are wired to this package, `packages/contracts/**` must trigger the relevant CI workflows.
 5. Phase 2 meeting-specific contracts should be introduced here only when they cross the Meeting Service/Web boundary or become externally published contracts; internal Rust implementation types remain inside `services/meeting-service`.
 
-Calling's HTTP, call-vocabulary and call-lifecycle-event contracts and the platform service-auth / event-envelope contracts are registered above. Future Privacy Relay, messaging, telephony and numbering services will add their own externally shared contracts here, when implemented, without turning `meeting-service` into a universal platform API.
+Calling's HTTP, call-vocabulary and call-lifecycle-event contracts, Privacy Relay's context / session / authorization / event / enforcement contracts and the platform service-auth / event-envelope contracts are registered above. Future Contact Vault, messaging, telephony and numbering work will add their own externally shared contracts here, when implemented, without turning `meeting-service` into a universal platform API.

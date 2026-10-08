@@ -47,6 +47,10 @@
           "uniqueItems": true,
           "items": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" }
         },
+        "privacyRelaySessionId": {
+          "description": "Optional Privacy Relay Session (cfmeet.privacy-relay.session). The call becomes a PROTECTED call: Calling asks Privacy Relay for current authority (PRIVACY_RELAY_V1) before anything rings, records the decision and fails closed (503 PRIVACY_AUTHORIZATION_UNAVAILABLE) when no answer can be obtained; it never falls back to APP_DIRECT_V1. VOICE only. A transfer of a protected call re-authorizes the new target.",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
         "initiatorDisplayName": {
           "description": "Presentation metadata only.",
           "type": "string",

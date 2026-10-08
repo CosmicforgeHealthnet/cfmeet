@@ -1,0 +1,1330 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet Privacy Relay API",
+    "version": "1.0.0",
+    "description": "The CF Meet platform Privacy Relay API (Part D sections 26-30): Communication Contexts and Privacy Relay Sessions. One generic model for first-party and external applications alike; it never knows a consumer's business object. Privacy Relay (services/privacy-relay) is the business and data authority; the API is currently served by the authenticated platform ingress (services/calling), which authenticates the customer credential, checks the scope, validates referenced principals and forwards over authenticated internal service calls with a signed delegated platform context — the customer credential is never forwarded. Tenant, application and environment come only from the credential; a resource of another scope is answered exactly like a missing one (404). Every mutation requires expectedVersion where it changes an existing resource and an Idempotency-Key (a replay returns the recorded response with Idempotent-Replayed: true; a different request under the same key is 409 IDEMPOTENCY_CONFLICT). Lifecycle changes are explicit commands; there is no status patch. No telephone number, provider id, carrier, Contact Vault material or credential is ever accepted or returned."
+  },
+  "paths": {
+    "/v1/privacy-relay/contexts": {
+      "post": {
+        "operationId": "createContext",
+        "summary": "Create a communication context",
+        "description": "Creates a Communication Context (version 1): the consumer-neutral authority for WHY (opaque externalContextReference), WHO (participants: principal ids or opaque ContactReference ids), in which DIRECTION, over which CHANNEL, during which window and under which bounded policy parties may communicate. Requires privacy.contexts.write and an Idempotency-Key. Referenced principals must be active principals of the credential's own application environment. Scope comes only from the credential; status, version, authorization results, telephone numbers, providers and relay numbers are never inputs. One context per external reference in an application environment. 503 PRIVACY_RELAY_DISABLED while the feature is disabled.",
+        "security": [
+          {
+            "platformCredential": [
+              "privacy.contexts.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.contexts.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyRequired"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/CreateContextRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created context (or the recorded result of an identical earlier request).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              },
+              "idempotent-replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listContexts",
+        "summary": "List communication contexts",
+        "description": "Contexts of the credential's application environment, newest first, keyset-paginated (no offsets). Requires privacy.contexts.read.",
+        "security": [
+          {
+            "platformCredential": [
+              "privacy.contexts.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.contexts.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/ContextStatus"
+          },
+          {
+            "$ref": "#/components/parameters/ExternalContextReference"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of contexts.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/ContextList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/privacy-relay/contexts/{context_id}": {
+      "get": {
+        "operationId": "getContext",
+        "summary": "Get a communication context",
+        "description": "Requires privacy.contexts.read. A context of another tenant, application or environment is answered exactly like a missing one (404 CONTEXT_NOT_FOUND).",
+        "security": [
+          {
+            "platformCredential": [
+              "privacy.contexts.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.contexts.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The context.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/CommunicationContext"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateContext",
+        "summary": "Update a communication context",
+        "description": "Typed, versioned configuration update (participant replacement / reassignment on the SAME context, channels, directions, validity, bounded policy, allowed strategies) — never a status patch or an arbitrary merge patch. Requires privacy.contexts.write, expectedVersion (409 CONTEXT_VERSION_CONFLICT when stale; a stale write can never restore removed authority) and an Idempotency-Key. The version increments exactly once; removed participants lose authority the moment the update commits, in every relay session; active calls of removed participants are terminated when the policy says so (enforcement.status APPLIED or PENDING, never claimed early).",
+        "security": [
+          {
+            "platformCredential": [
+              "privacy.contexts.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.contexts.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyRequired"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/UpdateContextRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated context.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              },
+              "idempotent-replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/privacy-relay/contexts/{context_id}/evidence": {
+      "get": {
+        "operationId": "getContextEvidence",
+        "summary": "Privacy-safe context evidence",
+        "description": "Lifecycle, versions, participant and direction history, sessions, recent authorization decisions, audit events and enforcement status for support and debugging. Never contact values. Requires privacy.contexts.read.",
+        "security": [
+          {
+            "platformCredential": [
+              "privacy.contexts.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.contexts.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The evidence.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/ContextEvidence"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/privacy-relay/contexts/{context_id}/suspend": {
+      "post": {
+        "operationId": "suspendContext",
+        "summary": "Suspend a context",
+        "description": "Explicit lifecycle command (no status patch). Requires privacy.contexts.write, expectedVersion and an Idempotency-Key. ACTIVE -> SUSPENDED: new authority is denied immediately; active calls are terminated when terminateActiveCallsOnSuspend.",
+        "security": [
+          {
+            "platformCredential": [
+              "privacy.contexts.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.contexts.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyRequired"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/LifecycleCommandRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The command result (or the recorded result of an identical earlier request).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              },
+              "idempotent-replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/privacy-relay/contexts/{context_id}/resume": {
+      "post": {
+        "operationId": "resumeContext",
+        "summary": "Resume a context",
+        "description": "Explicit lifecycle command (no status patch). Requires privacy.contexts.write, expectedVersion and an Idempotency-Key. SUSPENDED -> ACTIVE, only while the validity window remains and never from COMPLETED, REVOKED or EXPIRED.",
+        "security": [
+          {
+            "platformCredential": [
+              "privacy.contexts.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.contexts.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyRequired"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/LifecycleCommandRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The command result (or the recorded result of an identical earlier request).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              },
+              "idempotent-replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/privacy-relay/contexts/{context_id}/complete": {
+      "post": {
+        "operationId": "completeContext",
+        "summary": "Complete a context",
+        "description": "Explicit lifecycle command (no status patch). Requires privacy.contexts.write, expectedVersion and an Idempotency-Key. -> COMPLETED (never back to ACTIVE): relay sessions complete; new calls during the grace period only when graceAllowsNewCalls; without remaining grace active calls are terminated; after the final grace all authority ends.",
+        "security": [
+          {
+            "platformCredential": [
+              "privacy.contexts.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.contexts.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyRequired"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/LifecycleCommandRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The command result (or the recorded result of an identical earlier request).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              },
+              "idempotent-replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/privacy-relay/contexts/{context_id}/revoke": {
+      "post": {
+        "operationId": "revokeContext",
+        "summary": "Revoke a context",
+        "description": "Explicit lifecycle command (no status patch). Requires privacy.contexts.write, expectedVersion and an Idempotency-Key. -> REVOKED (terminal, irreversible): every relay session is revoked, all new authority is denied, active calls are terminated when terminateActiveCallsOnRevoke. Repeating it is a safe idempotent answer.",
+        "security": [
+          {
+            "platformCredential": [
+              "privacy.contexts.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.contexts.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyRequired"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/LifecycleCommandRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The command result (or the recorded result of an identical earlier request).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              },
+              "idempotent-replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/privacy-relay/contexts/{context_id}/sessions": {
+      "post": {
+        "operationId": "createRelaySession",
+        "summary": "Create a Privacy Relay Session",
+        "description": "Creates a Privacy Relay Session (NOT a call: one session may authorize many call attempts during its window) under a relay strategy. Requires privacy.sessions.write and an Idempotency-Key. Participants, channels, directions, validity and strategy may only NARROW the context; anything broader is refused (PARTICIPANT_NOT_AUTHORIZED, CHANNEL_NOT_ALLOWED, DIRECTION_NOT_ALLOWED, STRATEGY_NOT_ALLOWED, VALIDITY_NOT_CONTAINED). Strategies are policy: only the application route is executable today.",
+        "security": [
+          {
+            "platformCredential": [
+              "privacy.sessions.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.sessions.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyRequired"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/session/v1.schema.json#/$defs/CreateSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created session.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              },
+              "idempotent-replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/session/v1.schema.json#/$defs/SessionMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/privacy-relay/sessions": {
+      "get": {
+        "operationId": "listRelaySessions",
+        "summary": "List Privacy Relay Sessions",
+        "description": "Sessions of the credential's application environment, newest first, keyset-paginated. Requires privacy.sessions.read.",
+        "security": [
+          {
+            "platformCredential": [
+              "privacy.sessions.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.sessions.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/SessionStatus"
+          },
+          {
+            "$ref": "#/components/parameters/ContextIdFilter"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of sessions.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/session/v1.schema.json#/$defs/SessionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/privacy-relay/sessions/{relay_session_id}": {
+      "get": {
+        "operationId": "getRelaySession",
+        "summary": "Get a Privacy Relay Session",
+        "description": "Requires privacy.sessions.read. A session of another scope is answered exactly like a missing one (404 SESSION_NOT_FOUND).",
+        "security": [
+          {
+            "platformCredential": [
+              "privacy.sessions.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.sessions.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RelaySessionId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The session.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/session/v1.schema.json#/$defs/PrivacyRelaySession"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/privacy-relay/sessions/{relay_session_id}/suspend": {
+      "post": {
+        "operationId": "suspendSession",
+        "summary": "Suspend a session",
+        "description": "Explicit lifecycle command (no status patch). Requires privacy.sessions.write, expectedVersion and an Idempotency-Key. New authority under this session is denied immediately.",
+        "security": [
+          {
+            "platformCredential": [
+              "privacy.sessions.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.sessions.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RelaySessionId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyRequired"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/LifecycleCommandRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The command result (or the recorded result of an identical earlier request).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              },
+              "idempotent-replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/session/v1.schema.json#/$defs/SessionMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/privacy-relay/sessions/{relay_session_id}/resume": {
+      "post": {
+        "operationId": "resumeSession",
+        "summary": "Resume a session",
+        "description": "Explicit lifecycle command (no status patch). Requires privacy.sessions.write, expectedVersion and an Idempotency-Key. Only within the session window and while its context is not terminal.",
+        "security": [
+          {
+            "platformCredential": [
+              "privacy.sessions.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.sessions.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RelaySessionId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyRequired"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/LifecycleCommandRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The command result (or the recorded result of an identical earlier request).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              },
+              "idempotent-replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/session/v1.schema.json#/$defs/SessionMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/privacy-relay/sessions/{relay_session_id}/revoke": {
+      "post": {
+        "operationId": "revokeSession",
+        "summary": "Revoke a session",
+        "description": "Explicit lifecycle command (no status patch). Requires privacy.sessions.write, expectedVersion and an Idempotency-Key. Terminal; active protected calls under the session are terminated when the context policy says so.",
+        "security": [
+          {
+            "platformCredential": [
+              "privacy.sessions.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.sessions.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RelaySessionId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyRequired"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/LifecycleCommandRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The command result (or the recorded result of an identical earlier request).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              },
+              "idempotent-replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/session/v1.schema.json#/$defs/SessionMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "platformCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "cfmk_<sbx|test|live>_<public id>_<secret>",
+        "description": "Customer platform API credential (Authorization: Bearer). The roles in an operation's security requirement are the platform scopes the credential must hold (privacy.contexts.read / .write, privacy.sessions.read / .write)."
+      }
+    },
+    "parameters": {
+      "ContextId": {
+        "name": "context_id",
+        "in": "path",
+        "required": true,
+        "description": "Communication Context id.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "RelaySessionId": {
+        "name": "relay_session_id",
+        "in": "path",
+        "required": true,
+        "description": "Privacy Relay Session id.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "IdempotencyKeyRequired": {
+        "name": "idempotency-key",
+        "in": "header",
+        "required": true,
+        "description": "Required on every mutation. Same key + same request: recorded response; different request: 409 IDEMPOTENCY_CONFLICT; concurrent duplicates take effect once.",
+        "schema": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/IdempotencyKey"
+        }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "description": "Page size 1-100 (default 50).",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "description": "Opaque keyset cursor (nextCursor of the previous page).",
+        "schema": {
+          "type": "string",
+          "maxLength": 512
+        }
+      },
+      "ContextStatus": {
+        "name": "status",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/CommunicationContextStatus"
+        }
+      },
+      "SessionStatus": {
+        "name": "status",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/PrivacyRelaySessionStatus"
+        }
+      },
+      "ExternalContextReference": {
+        "name": "externalContextReference",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ExternalContextReference"
+        }
+      },
+      "ContextIdFilter": {
+        "name": "contextId",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "headers": {
+      "XRequestId": {
+        "description": "Server-generated request id.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "CacheControlNoStore": {
+        "description": "Responses are never cached.",
+        "schema": {
+          "const": "no-store"
+        }
+      },
+      "IdempotentReplayed": {
+        "description": "true when the response replays an earlier identical request.",
+        "schema": {
+          "const": "true"
+        }
+      }
+    },
+    "responses": {
+      "InvalidRequest": {
+        "description": "Malformed or invalid request (VALIDATION_ERROR): unknown members (a tenantId, status, version, authorization result, telephone number, provider or arbitrary policy document is refused), invalid validity, missing Idempotency-Key, inactive or foreign principals.",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "AuthenticationFailed": {
+        "description": "AUTHENTICATION_FAILED (uniform for every reason).",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "INSUFFICIENT_SCOPE.",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "CONTEXT_NOT_FOUND / SESSION_NOT_FOUND / NOT_FOUND — identical for missing and foreign resources.",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "CONTEXT_VERSION_CONFLICT, SESSION_VERSION_CONFLICT, CONTEXT_REFERENCE_CONFLICT, CONTEXT_NOT_ACTIVE, CONTEXT_EXPIRED, CONTEXT_REVOKED, CONTEXT_SUSPENDED, SESSION_NOT_ACTIVE or IDEMPOTENCY_CONFLICT.",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Unprocessable": {
+        "description": "The request would broaden authority: PARTICIPANT_NOT_AUTHORIZED, DIRECTION_NOT_ALLOWED, CHANNEL_NOT_ALLOWED, STRATEGY_NOT_ALLOWED or VALIDITY_NOT_CONTAINED.",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "RATE_LIMITED.",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "PRIVACY_RELAY_DISABLED (feature kill switch) or SERVICE_UNAVAILABLE.",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ErrorEnvelope"
+            }
+          }
+        }
+      }
+    }
+  }
+}

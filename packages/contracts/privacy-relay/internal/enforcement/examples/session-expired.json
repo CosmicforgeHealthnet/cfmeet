@@ -1,0 +1,12 @@
+{
+  "enforcementEventId": "4a2b3c4d-5e6f-4071-8283-94a5b6c7d8e9",
+  "contextId": "0e3c7a52-6f1b-4a7e-9d5c-2b8f4e1a9c30",
+  "contextVersion": 3,
+  "relaySessionIds": [
+    "5a9d2c7e-3b41-4f08-a6e2-91c4d7b03e58"
+  ],
+  "reason": "SESSION_EXPIRED",
+  "affectedPrincipalIds": [],
+  "terminateActiveCalls": true,
+  "relaySessionVersion": 3
+}

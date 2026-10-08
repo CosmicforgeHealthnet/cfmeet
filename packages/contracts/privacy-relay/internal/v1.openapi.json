@@ -1,0 +1,1372 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet Privacy Relay internal API",
+    "version": "1.0.0",
+    "description": "Internal HTTP surface of services/privacy-relay: GET /health (public) and the service-authenticated /internal/v1 API used by the authenticated platform ingress (Calling) and by Calling's protected-call authorization. Every /internal/v1 path — including unknown ones — requires a valid service token; customer credentials are refused. Scope comes only from the signed delegated platform context; bodies refuse unknown members (tenantId, applicationId, environmentId, status, version, authorization results). Commands carry {idempotencyKey, request}."
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "description": "Liveness and database reachability. Public; reveals no configuration.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Healthy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unreachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts": {
+      "post": {
+        "operationId": "createContext",
+        "description": "Create a communication context. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/CreateContextRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/query": {
+      "post": {
+        "operationId": "listContexts",
+        "description": "List contexts (keyset). Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.read and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
+                  },
+                  "cursor": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "status": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/CommunicationContextStatus"
+                  },
+                  "externalContextReference": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ExternalContextReference"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/ContextList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/{context_id}": {
+      "get": {
+        "operationId": "getContext",
+        "description": "Get a context. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.read and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/CommunicationContext"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/{context_id}/evidence": {
+      "get": {
+        "operationId": "getContextEvidence",
+        "description": "Privacy-safe evidence. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.read and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/ContextEvidence"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/{context_id}/update": {
+      "post": {
+        "operationId": "updateContext",
+        "description": "Typed versioned update. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/UpdateContextRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/{context_id}/suspend": {
+      "post": {
+        "operationId": "suspendContext",
+        "description": "Suspend. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/LifecycleCommandRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/{context_id}/resume": {
+      "post": {
+        "operationId": "resumeContext",
+        "description": "Resume. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/LifecycleCommandRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/{context_id}/complete": {
+      "post": {
+        "operationId": "completeContext",
+        "description": "Complete. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/LifecycleCommandRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/{context_id}/revoke": {
+      "post": {
+        "operationId": "revokeContext",
+        "description": "Revoke. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/LifecycleCommandRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/{context_id}/sessions": {
+      "post": {
+        "operationId": "createRelaySession",
+        "description": "Create a relay session. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-session.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-session.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/session/v1.schema.json#/$defs/CreateSessionRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/session/v1.schema.json#/$defs/SessionMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/query": {
+      "post": {
+        "operationId": "listRelaySessions",
+        "description": "List sessions (keyset). Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.read and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-session.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-session.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
+                  },
+                  "cursor": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "status": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/PrivacyRelaySessionStatus"
+                  },
+                  "contextId": {
+                    "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/session/v1.schema.json#/$defs/SessionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/{session_id}": {
+      "get": {
+        "operationId": "getRelaySession",
+        "description": "Get a session. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.read and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-session.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-session.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/session/v1.schema.json#/$defs/PrivacyRelaySession"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/{session_id}/suspend": {
+      "post": {
+        "operationId": "suspendRelaySession",
+        "description": "Suspend a session. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-session.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-session.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/LifecycleCommandRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/session/v1.schema.json#/$defs/SessionMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/{session_id}/resume": {
+      "post": {
+        "operationId": "resumeRelaySession",
+        "description": "Resume a session. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-session.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-session.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/LifecycleCommandRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/session/v1.schema.json#/$defs/SessionMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/{session_id}/revoke": {
+      "post": {
+        "operationId": "revokeRelaySession",
+        "description": "Revoke a session. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-session.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-session.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json#/$defs/LifecycleCommandRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/session/v1.schema.json#/$defs/SessionMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/communication/authorize": {
+      "post": {
+        "operationId": "authorizeCommunication",
+        "description": "Decide (and record) whether source may communicate with every target, on channel, over route, under the relay session NOW: evaluates the current context AND the current session (their intersection) at server time. Every decision is recorded. Used by Calling before every protected call creation and transfer introduction; Calling fails closed without an answer. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication.authorize and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication.authorize"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication.authorize",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/authorization/v1.schema.json#/$defs/AuthorizationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/authorization/v1.schema.json#/$defs/AuthorizationDecisionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cfServiceAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Service-Authorization",
+        "description": "Bearer <service token> (contract cfmeet.platform.internal-http). Permissions come only from Privacy Relay's trust bundle."
+      }
+    },
+    "parameters": {
+      "CfRequestId": {
+        "name": "X-CF-Request-Id",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RequestId"
+        }
+      },
+      "CfCorrelationId": {
+        "name": "X-CF-Correlation-Id",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/CorrelationId"
+        }
+      }
+    },
+    "schemas": {
+      "HealthStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "service"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "ok",
+              "unavailable"
+            ]
+          },
+          "service": {
+            "const": "privacy-relay"
+          }
+        }
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Platform error envelope.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ErrorEnvelope"
+            }
+          }
+        }
+      }
+    }
+  }
+}
