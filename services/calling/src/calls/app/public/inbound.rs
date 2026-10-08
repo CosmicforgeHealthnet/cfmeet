@@ -170,6 +170,17 @@ impl AppCallService {
             }
         }
         if targets.is_empty() {
+            // Phone-to-phone (§46): the caller reaches exactly one protected contact.
+            let contacts: Vec<Uuid> = offer
+                .allowed_targets
+                .iter()
+                .filter_map(|t| t["contactReferenceId"].as_str())
+                .filter_map(|t| Uuid::parse_str(t).ok())
+                .filter(|c| *c != offer.caller_contact_reference)
+                .collect();
+            if let [callee] = contacts[..] {
+                return self.accept_relay_offer(offer, scope, &owner, callee).await;
+            }
             return Err(CallError::PublicRouteDenied("NO_APPLICATION_TARGET"));
         }
         let caller = self
@@ -563,5 +574,422 @@ impl AppCallService {
                 tracing::warn!(%call_id, %error, "inbound bridge request pending; reconciliation retries")
             }
         }
+    }
+
+    /// PSTN_RELAY (§46): ONE Call with two public CallLegs — the inbound caller's leg
+    /// (already ringing at Telephony) and an outbound leg to the protected callee. Each
+    /// party sees only the relay identity; neither number ever reaches Calling.
+    async fn accept_relay_offer(
+        &self,
+        offer: &InboundOffer,
+        scope: CallScope,
+        owner: &Owner,
+        callee_contact: Uuid,
+    ) -> CallResult<Value> {
+        let s = &offer.scope;
+        let caller = self
+            .principals
+            .ensure_public_party_principal(
+                scope.tenant_id(),
+                scope.application_id(),
+                scope.environment_id(),
+                offer.caller_contact_reference,
+            )
+            .await
+            .map_err(|_| CallError::TargetUnavailable)?;
+        let callee = self
+            .principals
+            .ensure_public_party_principal(
+                scope.tenant_id(),
+                scope.application_id(),
+                scope.environment_id(),
+                callee_contact,
+            )
+            .await
+            .map_err(|_| CallError::TargetUnavailable)?;
+        let kind = match owner.kind.as_str() {
+            "PRODUCTION" => ApplicationEnvironmentKind::Production,
+            "TEST" => ApplicationEnvironmentKind::Test,
+            _ => ApplicationEnvironmentKind::Sandbox,
+        };
+        let delegated = DelegatedPlatformContext::new(
+            s.tenant_id,
+            s.application_id,
+            s.environment_id,
+            kind,
+            owner.service_account_id,
+        );
+        let correlation = CorrelationId::parse(&offer.correlation_id)
+            .unwrap_or_else(|_| CorrelationId::generate());
+        let decision = self
+            .privacy
+            .authorize_call(
+                &delegated,
+                &correlation,
+                &CallAuthorization {
+                    relay_session_id: offer.inbound_resolution.relay_session_id,
+                    source_principal_id: caller.id().as_uuid(),
+                    source_contact: Some(offer.caller_contact_reference),
+                    target_principal_ids: Vec::new(),
+                    target_contacts: vec![callee_contact],
+                    route: RelayRoute::CallbackRelay,
+                    purpose: AuthorizationPurpose::CallCreate,
+                },
+            )
+            .await
+            .map_err(|e| match e {
+                PrivacyRelayError::NotFound => CallError::NotFound,
+                PrivacyRelayError::Unavailable => CallError::PrivacyAuthorizationUnavailable,
+            })?;
+        let (Some(caller_fact), Some(callee_fact)) = (
+            decision
+                .contact_fact(offer.caller_contact_reference)
+                .cloned(),
+            decision.contact_fact(callee_contact).cloned(),
+        ) else {
+            return Err(CallError::AuthorizationDenied);
+        };
+        if !decision.is_authorized_for(offer.inbound_resolution.relay_session_id)
+            || decision.context_id != offer.inbound_resolution.context_id
+        {
+            tracing::info!(reason = %decision.reason, "public relay call refused by privacy relay");
+            return Err(CallError::AuthorizationDenied);
+        }
+        let now = self.calls.now();
+        let routes = match callee_fact.country.as_deref() {
+            Some(country) => {
+                self.public
+                    .telephony
+                    .availability(
+                        country,
+                        crate::routing::engine::RouteCapability::VoiceOutbound,
+                        &correlation,
+                    )
+                    .await
+            }
+            None => Evidence::Unknown,
+        };
+        let headroom = match spend::headroom(self.db(), s.environment_id, now).await? {
+            Some(h) => Evidence::Known(h),
+            None => Evidence::Known(0),
+        };
+        let facts = |contact: Uuid, f: &crate::privacy_relay::ContactFact| ContactFacts {
+            contact_reference: contact,
+            verification: if f.verification == "VERIFIED" {
+                Evidence::Known(ContactVerification::Verified)
+            } else {
+                Evidence::Unknown
+            },
+            country: match &f.country {
+                Some(c) => Evidence::Known(c.clone()),
+                None => Evidence::Unknown,
+            },
+        };
+        let policy = crate::routing::store::load_policy(self.db(), s.environment_id).await?;
+        let inputs = RouteInputs {
+            direction: RouteDirection::Inbound,
+            source: EndpointClass::PUBLIC_NETWORK,
+            source_contact: Some(facts(offer.caller_contact_reference, &caller_fact)),
+            destinations: vec![DestinationFacts::protected_contact(facts(
+                callee_contact,
+                &callee_fact,
+            ))],
+            requested: None,
+            authorized: true,
+            permitted_classes: vec![RoutingClass::PstnRelay],
+            relay_session_id: Some(decision.relay_session_id),
+            context_id: Some(decision.context_id),
+            live_telecom_allowed: super::outbound::live_telecom_allowed(
+                self.db(),
+                s.environment_id,
+            )
+            .await?,
+            flags: self.public.flags,
+            routes,
+            spend_headroom_minor: headroom,
+            operational_incident: Evidence::Unknown,
+            duplicate_risk: DuplicateRisk::None,
+        };
+        let mut plan = match crate::routing::engine::select(&policy.policy, &inputs, now) {
+            RouteDecision::Selected(plan) => *plan,
+            RouteDecision::Denied(denial) => {
+                tracing::info!(denial = denial.as_str(), "public relay route denied");
+                return Err(super::outbound::denial_error(denial));
+            }
+        };
+        plan.policy_version = policy.version_label();
+        let candidate_routes = plan.candidate_routes.clone();
+
+        let cmd = CallCommandContext::system(
+            scope,
+            ServiceAccountId::from_uuid(owner.service_account_id),
+        );
+        let creator = CallCreator {
+            cmd: cmd.clone(),
+            service_account_id: ServiceAccountId::from_uuid(owner.service_account_id),
+            credential_id: CredentialId::from_uuid(owner.credential_id),
+            origin: "PUBLIC_INBOUND",
+        };
+        let txn = self.db().begin().await?;
+        self.guard_privacy_decision(
+            &txn,
+            scope,
+            &decision,
+            &[caller.id().as_uuid(), callee.id().as_uuid()],
+        )
+        .await?;
+        let (call, _, _) = self
+            .calls
+            .create_call_as_in(
+                &txn,
+                &creator,
+                &caller,
+                NewCall {
+                    kind: CallKind::Voice,
+                    communication_context_ref: Some(decision.context_id),
+                    privacy_relay_ref: Some(decision.relay_session_id),
+                    initiator_display_name: None,
+                },
+            )
+            .await?;
+        let mut policy_snapshot = SafeAttributes::new();
+        policy_snapshot.insert("call_kind", SafeValue::Text("VOICE".into()))?;
+        policy_snapshot.insert("target_count", SafeValue::from(1usize))?;
+        policy_snapshot.insert("scope_rule", SafeValue::Text("SAME_ENVIRONMENT".into()))?;
+        policy_snapshot.insert("relay_route", SafeValue::Text("CALLBACK_RELAY".into()))?;
+        policy_snapshot.insert(
+            "inbound_resolution_id",
+            SafeValue::Text(offer.inbound_resolution.decision_id.to_string()),
+        )?;
+        super::super::privacy::privacy_evidence(&mut policy_snapshot, &decision)?;
+        let authorization = self
+            .calls
+            .record_authorization_in(
+                &txn,
+                &cmd,
+                &call,
+                NewAuthorization {
+                    reason: AuthorizationReason::PolicySatisfied,
+                    policy_version: PolicyVersion::parse(PRIVACY_RELAY_POLICY)?,
+                    policy_snapshot,
+                    limits_snapshot: SafeAttributes::new(),
+                },
+            )
+            .await?;
+        self.record_privacy_decision(
+            &txn,
+            &call,
+            &decision,
+            AuthorizationPurpose::CallCreate,
+            None,
+        )
+        .await?;
+        let call = self
+            .calls
+            .transition_in(
+                &txn,
+                &cmd,
+                &call,
+                1,
+                CallAction::Authorize {
+                    authorization_id: CallAuthorizationId::from_uuid(authorization.id),
+                },
+            )
+            .await?
+            .call;
+        let call = self
+            .calls
+            .transition_in(&txn, &cmd, &call, call.version, CallAction::BeginResolution)
+            .await?
+            .call;
+        self.calls
+            .add_participant_in(&txn, &cmd, &call, &callee, None)
+            .await?;
+        let call = self.locked(&txn, &call).await?;
+        let call = self
+            .calls
+            .transition_in(&txn, &cmd, &call, call.version, CallAction::BeginRouting)
+            .await?
+            .call;
+        let mut snapshot = SafeAttributes::new();
+        snapshot.insert(
+            "reason",
+            SafeValue::Text("INBOUND_RELAY_TO_PROTECTED_CONTACT".into()),
+        )?;
+        let route_policy_version = plan.policy_version.clone();
+        let route = self
+            .calls
+            .record_route_in(
+                &txn,
+                &cmd,
+                &call,
+                NewRoute {
+                    route_class: RouteClass::PublicNetwork,
+                    policy_version: PolicyVersion::parse(&route_policy_version)?,
+                    decision_snapshot: snapshot,
+                    plan: Some(plan),
+                },
+            )
+            .await?;
+        let route_id = CallRouteId::from_uuid(route.id);
+        // Leg A: the inbound caller (already ringing at Telephony).
+        let leg_a = self
+            .calls
+            .record_leg_in(
+                &txn,
+                &cmd,
+                &call,
+                NewLeg {
+                    route_id: Some(route_id),
+                    participant_id: None,
+                    direction: LegDirection::Inbound,
+                    kind: LegKind::PublicNetwork,
+                },
+            )
+            .await?;
+        exec(
+            &txn,
+            "UPDATE call_legs SET execution_binding_ref = $2 WHERE id = $1 AND execution_binding_ref IS NULL",
+            vec![leg_a.id.into(), offer.telephony_leg_id.into()],
+        )
+        .await?;
+        self.calls
+            .record_attempt_in(
+                &txn,
+                &cmd,
+                &call,
+                NewAttempt {
+                    route_id: Some(route_id),
+                    leg_id: Some(CallLegId::from_uuid(leg_a.id)),
+                    previous_attempt_id: None,
+                },
+            )
+            .await?;
+        // Leg B: the protected callee (originated by Telephony).
+        let leg_b = self
+            .calls
+            .record_leg_in(
+                &txn,
+                &cmd,
+                &call,
+                NewLeg {
+                    route_id: Some(route_id),
+                    participant_id: None,
+                    direction: LegDirection::Outbound,
+                    kind: LegKind::PublicNetwork,
+                },
+            )
+            .await?;
+        let attempt_b = self
+            .calls
+            .record_attempt_in(
+                &txn,
+                &cmd,
+                &call,
+                NewAttempt {
+                    route_id: Some(route_id),
+                    leg_id: Some(CallLegId::from_uuid(leg_b.id)),
+                    previous_attempt_id: None,
+                },
+            )
+            .await?;
+        for (role, contact, country, leg) in [
+            (
+                "CALLER",
+                offer.caller_contact_reference,
+                caller_fact.country.clone(),
+                leg_a.id,
+            ),
+            (
+                "CALLEE",
+                callee_contact,
+                callee_fact.country.clone(),
+                leg_b.id,
+            ),
+        ] {
+            exec(
+                &txn,
+                "INSERT INTO call_public_parties (id, call_id, tenant_id, application_id, environment_id, role, \
+                   contact_reference, country, call_leg_id, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                vec![
+                    Uuid::new_v4().into(),
+                    call.id.into(),
+                    call.tenant_id.into(),
+                    call.application_id.into(),
+                    call.environment_id.into(),
+                    role.into(),
+                    contact.into(),
+                    country.into(),
+                    leg.into(),
+                    now.into(),
+                ],
+            )
+            .await?;
+        }
+        let spend_scope = SpendScope {
+            tenant_id: call.tenant_id,
+            application_id: call.application_id,
+            environment_id: call.environment_id,
+        };
+        let mut reservation_b = None;
+        for (leg, contact) in [
+            (leg_a.id, offer.caller_contact_reference),
+            (leg_b.id, callee_contact),
+        ] {
+            match spend::reserve_in(&txn, spend_scope, call.id, leg, Some(contact), now).await? {
+                Ok(r) => {
+                    if leg == leg_b.id {
+                        reservation_b = Some(r);
+                    }
+                }
+                Err(denial) => {
+                    txn.rollback().await?;
+                    return Err(CallError::TelecomSpendLimitExceeded(denial.as_str()));
+                }
+            }
+        }
+        let reservation_b =
+            reservation_b.ok_or(CallError::Conflict("spend reservation missing"))?;
+        super::outbound::enqueue_originate_in(
+            &txn,
+            &super::outbound::OriginateSpec {
+                call: &call,
+                call_leg_id: leg_b.id,
+                attempt_id: attempt_b.id,
+                route_id: route.id,
+                route_class: "PSTN_RELAY",
+                route_policy_version: &route_policy_version,
+                authorization_id: authorization.id,
+                decision: &decision,
+                contact_reference: callee_contact,
+                country: callee_fact.country.as_deref(),
+                reservation: &reservation_b,
+                media: "NONE",
+                candidate_routes: &candidate_routes,
+                correlation_id: correlation.as_str(),
+                generation: 1,
+            },
+            now,
+        )
+        .await?;
+        // No application media: the Call dials the callee right away.
+        let route_row = crate::calls::service::route_of(&txn, &call, route_id).await?;
+        self.calls
+            .move_route_in(
+                &txn,
+                &cmd,
+                &call,
+                route_row,
+                crate::calls::kinds::RouteState::Active,
+            )
+            .await?;
+        let call = self.locked(&txn, &call).await?;
+        self.calls
+            .transition_in(&txn, &cmd, &call, call.version, CallAction::BeginDialing)
+            .await?;
+        txn.commit().await?;
+        tracing::info!(call_id = %call.id, call_leg_id = %leg_a.id, "public relay call accepted (PSTN_RELAY); dialing the protected callee");
+        self.dispatch_call(call.id).await;
+        Ok(json!({ "callId": call.id, "callLegId": leg_a.id, "routeClass": "PSTN_RELAY" }))
     }
 }

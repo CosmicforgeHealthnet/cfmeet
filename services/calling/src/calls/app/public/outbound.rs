@@ -480,69 +480,25 @@ impl AppCallService {
                 },
             )
             .await?;
-        // The ORIGINATE command: complete authority proof, no number, no grant secret
-        // (a fresh single-use grant is attached at every submission).
-        let valid_until = decision
-            .valid_until
-            .ok_or(CallError::AuthorizationDenied)?
-            .min(now + Duration::seconds(PAID_PLAN_VALIDITY_SECONDS));
-        let command_id = Uuid::new_v4();
-        let payload = json!({
-            "schemaVersion": "1",
-            "commandId": command_id,
-            "idempotencyKey": format!("originate:{}:{}", public_leg.id, public_attempt.id),
-            "correlationId": cmd.correlation_id().as_str(),
-            "expectedGeneration": 1,
-            "call": {
-                "callId": call.id,
-                "callLegId": public_leg.id,
-                "attemptId": public_attempt.id,
-                "routeId": route.id,
-                "routeClass": "APP_TO_PSTN",
-                "routePolicyVersion": route_policy_version,
-            },
-            "scope": {
-                "tenantId": call.tenant_id,
-                "applicationId": call.application_id,
-                "environmentId": call.environment_id,
-            },
-            "authorization": {
-                "callAuthorizationId": authorization.id,
-                "callPolicyVersion": PRIVACY_RELAY_POLICY,
-                "privacyDecisionId": decision.decision_id,
-                "contextId": decision.context_id,
-                "contextVersion": decision.context_version,
-                "relaySessionId": decision.relay_session_id,
-                "relaySessionVersion": decision.relay_session_version,
-                "decidedAt": decision.decided_at,
-                "validUntil": valid_until,
-            },
-            "destination": {
-                "contactReference": request.target_contact,
-                "country": fact.country,
-            },
-            "spend": {
-                "reservationId": reservation.id,
-                "reservedAmountMinor": reservation.amount_minor,
-                "currency": reservation.currency,
-                "maxDurationSeconds": reservation.max_duration_seconds,
-            },
-            "media": "APPLICATION",
-            "candidateRoutes": candidate_routes,
-        });
-        let key = payload["idempotencyKey"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
-        enqueue_in(
+        enqueue_originate_in(
             &txn,
-            &call,
-            CommandKind::Originate,
-            Some(public_leg.id),
-            Some(public_attempt.id),
-            None,
-            &key,
-            payload,
+            &OriginateSpec {
+                call: &call,
+                call_leg_id: public_leg.id,
+                attempt_id: public_attempt.id,
+                route_id: route.id,
+                route_class: "APP_TO_PSTN",
+                route_policy_version: &route_policy_version,
+                authorization_id: authorization.id,
+                decision: &decision,
+                contact_reference: request.target_contact,
+                country: fact.country.as_deref(),
+                reservation: &reservation,
+                media: "APPLICATION",
+                candidate_routes: &candidate_routes,
+                correlation_id: cmd.correlation_id().as_str(),
+                generation: 1,
+            },
             now,
         )
         .await?;
@@ -566,4 +522,96 @@ impl AppCallService {
             replayed: false,
         })
     }
+}
+
+/// Everything an ORIGINATE command carries (complete authority proof; never a number).
+pub(crate) struct OriginateSpec<'a> {
+    pub call: &'a crate::models::calls::Model,
+    pub call_leg_id: Uuid,
+    pub attempt_id: Uuid,
+    pub route_id: Uuid,
+    pub route_class: &'static str,
+    pub route_policy_version: &'a str,
+    pub authorization_id: Uuid,
+    pub decision: &'a PrivacyDecision,
+    pub contact_reference: Uuid,
+    pub country: Option<&'a str>,
+    pub reservation: &'a crate::telephony::spend::Reservation,
+    pub media: &'static str,
+    pub candidate_routes: &'a [String],
+    pub correlation_id: &'a str,
+    pub generation: i32,
+}
+
+/// Writes the durable ORIGINATE command of one public leg (inside the caller's
+/// transaction). The grant secret is never part of it: a fresh single-use grant is
+/// attached at every submission. The proof's validity is capped at the plan window, so
+/// a stale resubmission is answered definitively by Telephony.
+pub(crate) async fn enqueue_originate_in<C: ConnectionTrait>(
+    txn: &C,
+    spec: &OriginateSpec<'_>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> CallResult<Uuid> {
+    let d = spec.decision;
+    let valid_until = d
+        .valid_until
+        .ok_or(CallError::AuthorizationDenied)?
+        .min(now + Duration::seconds(PAID_PLAN_VALIDITY_SECONDS));
+    let key = format!("originate:{}:{}", spec.call_leg_id, spec.attempt_id);
+    let call = spec.call;
+    let payload = json!({
+        "schemaVersion": "1",
+        "commandId": Uuid::new_v4(),
+        "idempotencyKey": key,
+        "correlationId": spec.correlation_id,
+        "expectedGeneration": spec.generation,
+        "call": {
+            "callId": call.id,
+            "callLegId": spec.call_leg_id,
+            "attemptId": spec.attempt_id,
+            "routeId": spec.route_id,
+            "routeClass": spec.route_class,
+            "routePolicyVersion": spec.route_policy_version,
+        },
+        "scope": {
+            "tenantId": call.tenant_id,
+            "applicationId": call.application_id,
+            "environmentId": call.environment_id,
+        },
+        "authorization": {
+            "callAuthorizationId": spec.authorization_id,
+            "callPolicyVersion": PRIVACY_RELAY_POLICY,
+            "privacyDecisionId": d.decision_id,
+            "contextId": d.context_id,
+            "contextVersion": d.context_version,
+            "relaySessionId": d.relay_session_id,
+            "relaySessionVersion": d.relay_session_version,
+            "decidedAt": d.decided_at,
+            "validUntil": valid_until,
+        },
+        "destination": {
+            "contactReference": spec.contact_reference,
+            "country": spec.country,
+        },
+        "spend": {
+            "reservationId": spec.reservation.id,
+            "reservedAmountMinor": spec.reservation.amount_minor,
+            "currency": spec.reservation.currency,
+            "maxDurationSeconds": spec.reservation.max_duration_seconds,
+        },
+        "media": spec.media,
+        "candidateRoutes": spec.candidate_routes,
+    });
+    enqueue_in(
+        txn,
+        call,
+        CommandKind::Originate,
+        Some(spec.call_leg_id),
+        Some(spec.attempt_id),
+        None,
+        &key,
+        payload,
+        now,
+    )
+    .await
 }

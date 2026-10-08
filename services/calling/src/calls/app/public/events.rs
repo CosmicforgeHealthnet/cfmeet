@@ -398,8 +398,13 @@ impl AppCallService {
                     after.release_legs = true;
                     return Ok(EventDisposition::Applied);
                 }
+                // Only a DIALED (outbound) leg rings / answers the Call; an inbound
+                // caller's leg is answered by the edge when its bridge is built.
+                let drives_call = leg.direction == crate::calls::kinds::LegDirection::Outbound;
                 match target {
-                    LegState::Ringing if call.current_state == CallState::Dialing => {
+                    LegState::Ringing
+                        if drives_call && call.current_state == CallState::Dialing =>
+                    {
                         call = self
                             .calls
                             .transition_in(txn, &cmd, &call, call.version, CallAction::MarkRinging)
@@ -416,10 +421,11 @@ impl AppCallService {
                         .await?;
                     }
                     LegState::Answered | LegState::Connected
-                        if matches!(
-                            call.current_state,
-                            CallState::Dialing | CallState::Ringing
-                        ) =>
+                        if drives_call
+                            && matches!(
+                                call.current_state,
+                                CallState::Dialing | CallState::Ringing
+                            ) =>
                     {
                         call = self
                             .calls
@@ -698,26 +704,33 @@ impl AppCallService {
             .iter()
             .filter(|l| l.leg_kind == LegKind::PublicNetwork && !l.state.is_terminal())
             .collect();
-        let answered: Vec<Uuid> = public
+        let answered =
+            |l: &&call_legs::Model| matches!(l.state, LegState::Answered | LegState::Connected);
+        let has_app_side = legs.iter().any(|l| l.leg_kind == LegKind::Application);
+        let (kind, ready) = if has_app_side {
+            (
+                "APPLICATION_MEDIA",
+                public.len() == 1 && public.iter().all(answered),
+            )
+        } else {
+            // Two public legs: every OUTBOUND leg answered; an inbound caller's leg is
+            // answered by the edge when the bridge is built.
+            (
+                "PUBLIC_LEGS",
+                public.len() >= 2
+                    && public.iter().all(|l| {
+                        answered(l) || l.direction == crate::calls::kinds::LegDirection::Inbound
+                    }),
+            )
+        };
+        let members: Vec<Uuid> = public
             .iter()
-            .filter(|l| matches!(l.state, LegState::Answered | LegState::Connected))
             .filter_map(|l| l.execution_binding_ref)
             .collect();
-        let has_app_side = legs.iter().any(|l| l.leg_kind == LegKind::Application);
-        let kind = if has_app_side {
-            "APPLICATION_MEDIA"
-        } else {
-            "PUBLIC_LEGS"
-        };
-        let ready = if has_app_side {
-            answered.len() == 1
-        } else {
-            answered.len() >= 2 && answered.len() == public.len()
-        };
-        if !ready {
+        if !ready || members.len() != public.len() {
             return Ok(());
         }
-        bridge::request_bridge_in(txn, call, kind, &answered, self.calls.now()).await?;
+        bridge::request_bridge_in(txn, call, kind, &members, self.calls.now()).await?;
         after.dispatch = true;
         Ok(())
     }
