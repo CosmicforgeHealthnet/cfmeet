@@ -78,6 +78,7 @@ struct State {
     /// Native idempotency: a repeated idempotency key returns the existing call.
     native_idempotency: bool,
     by_idempotency_key: HashMap<String, String>,
+    terminate_outcome: Option<ControlOutcome>,
     next_event: u64,
 }
 
@@ -135,6 +136,18 @@ impl DeterministicProvider {
     /// request's idempotency key and returns its own idempotency reference.
     pub fn set_native_idempotency(&self, on: bool) {
         self.lock().native_idempotency = on;
+    }
+
+    /// Makes terminate answer this outcome without ending the call (None: normal).
+    pub fn set_terminate_outcome(&self, outcome: Option<ControlOutcome>) {
+        self.lock().terminate_outcome = outcome;
+    }
+
+    /// The provider "loses" a call entirely (read-back answers Absent from now on).
+    pub fn forget(&self, correlation_key: &str) {
+        self.lock()
+            .calls
+            .retain(|_, c| c.correlation_key != correlation_key);
     }
 
     /// Correlation keys that produced a (paid) provider call.
@@ -384,6 +397,9 @@ impl TelecomInterconnectProvider for DeterministicProvider {
     async fn terminate(&self, provider_call_ref: &str) -> ControlOutcome {
         let mut s = self.lock();
         s.terminated.push(provider_call_ref.to_string());
+        if let Some(outcome) = s.terminate_outcome {
+            return outcome;
+        }
         match s.calls.get_mut(provider_call_ref) {
             Some(call) if !call.status.is_terminal() => {
                 call.status = LegStatus::Ended;
@@ -441,6 +457,21 @@ impl TelecomInterconnectProvider for DeterministicProvider {
                 status: c.status,
             },
         }
+    }
+
+    async fn list_active(&self) -> Option<Vec<super::ActiveCall>> {
+        Some(
+            self.lock()
+                .calls
+                .values()
+                .filter(|c| !c.status.is_terminal())
+                .map(|c| super::ActiveCall {
+                    provider_call_ref: c.provider_call_ref.clone(),
+                    correlation_key: Some(c.correlation_key.clone()),
+                    status: c.status,
+                })
+                .collect(),
+        )
     }
 
     async fn health(&self) -> Health {

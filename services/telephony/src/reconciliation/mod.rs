@@ -31,6 +31,8 @@ use crate::{
 
 /// Live legs with no provider news for this long get a read-back (event-gap check).
 pub const EVENT_GAP_SECONDS: i64 = 600;
+/// How often an instance reads back the interconnects' call inventory.
+pub const INVENTORY_EVERY_SECONDS: i64 = 60;
 
 #[derive(Debug, FromQueryResult)]
 struct BindingRow {
@@ -85,8 +87,16 @@ impl TelephonyService {
             ],
         )
         .await?;
-        self.enforce_duration_limits().await?;
-        self.repair_orphan_bridges().await?;
+        // Independent scans: one failing never stalls the others or leg reconciliation.
+        if let Err(e) = self.enforce_duration_limits().await {
+            tracing::warn!(error = %e, "duration limit scan failed");
+        }
+        if let Err(e) = self.repair_orphan_bridges().await {
+            tracing::warn!(error = %e, "orphan bridge scan failed");
+        }
+        if let Err(e) = self.reconcile_inventory().await {
+            tracing::warn!(error = %e, "provider inventory scan failed");
+        }
         let due: Vec<LegRow> = db::all(
             &self.db,
             &format!(
@@ -285,7 +295,8 @@ impl TelephonyService {
                     QueryOutcome::Unknown => self.reschedule_reconcile(leg, None).await,
                 }
             }
-            LegStatus::Answered | LegStatus::Connected | LegStatus::Held | LegStatus::Ending => {
+            LegStatus::Ending => self.reconcile_termination(leg, &*provider, outcome).await,
+            LegStatus::Answered | LegStatus::Connected | LegStatus::Held => {
                 match outcome {
                     QueryOutcome::Ended { reason, .. } => {
                         let event = if reason == EndReason::Completed {
@@ -343,6 +354,81 @@ impl TelephonyService {
             }
             LegStatus::Planned => self.clear_reconcile(leg.id).await,
         }
+    }
+
+    /// An unresolved termination (leg ENDING): the provider says ended or has no call ->
+    /// ENDED (unambiguous: the intent was to end it); still active -> terminate again
+    /// (idempotent); unknown -> keep reading back with backoff and escalate.
+    async fn reconcile_termination(
+        &self,
+        leg: &LegRow,
+        provider: &dyn crate::providers::TelecomInterconnectProvider,
+        outcome: QueryOutcome,
+    ) -> TelephonyResult<()> {
+        let key = format!("unknown-termination:{}", leg.id);
+        let observed = match &outcome {
+            QueryOutcome::Ended { .. } => "PROVIDER_ENDED",
+            QueryOutcome::Absent => "PROVIDER_ABSENT",
+            QueryOutcome::Active {
+                provider_call_ref, ..
+            } => match provider.terminate(provider_call_ref).await {
+                ControlOutcome::Done | ControlOutcome::AlreadyGone => "TERMINATED_ON_RETRY",
+                _ => {
+                    self.record_run(
+                        &self.db,
+                        leg,
+                        "UNKNOWN_TERMINATION",
+                        "PROVIDER_ACTIVE",
+                        "RETRY_SCHEDULED",
+                    )
+                    .await?;
+                    return self.reschedule_reconcile(leg, Some(key)).await;
+                }
+            },
+            QueryOutcome::Unknown => {
+                self.record_run(
+                    &self.db,
+                    leg,
+                    "UNKNOWN_TERMINATION",
+                    "READ_BACK_UNKNOWN",
+                    "RETRY_SCHEDULED",
+                )
+                .await?;
+                return self.reschedule_reconcile(leg, Some(key)).await;
+            }
+        };
+        let reason = if leg.answered_at.is_some() {
+            EndReason::Completed
+        } else {
+            EndReason::Cancelled
+        };
+        self.repair(
+            leg,
+            Change::ended(NormalizedEvent::LegEnded, reason, self.now()),
+            "UNKNOWN_TERMINATION",
+            observed,
+            "MARKED_ENDED",
+        )
+        .await?;
+        let now = self.now();
+        let txn = self.db.begin().await?;
+        db::exec(
+            &txn,
+            "UPDATE telephony_commands SET status = 'RECONCILING', updated_at = GREATEST(updated_at, $2) \
+             WHERE telephony_leg_id = $1 AND kind = 'TERMINATE' AND status = 'UNKNOWN_OUTCOME'",
+            vec![leg.id.into(), now.into()],
+        )
+        .await?;
+        db::exec(
+            &txn,
+            "UPDATE telephony_commands SET status = 'SUCCEEDED', result_code = $2, finished_at = GREATEST(created_at, $3), \
+               updated_at = GREATEST(updated_at, $3) WHERE telephony_leg_id = $1 AND kind = 'TERMINATE' AND status = 'RECONCILING'",
+            vec![leg.id.into(), observed.into(), now.into()],
+        )
+        .await?;
+        incidents::resolve(&txn, &key, now).await?;
+        txn.commit().await?;
+        Ok(())
     }
 
     /// Applies an unambiguous repair (version-checked: a concurrent reconciler's repair
@@ -558,6 +644,124 @@ impl TelephonyService {
         Ok(over.len())
     }
 
+    /// Provider calls without a valid internal binding (Part E §135): every interconnect
+    /// that can list its live calls is read back (at most every
+    /// `INVENTORY_EVERY_SECONDS` per instance). A live call bound to a terminal leg is an
+    /// orphan and is terminated (unambiguous); a call matching no binding / bridge member
+    /// at all is NOT guessed at — it becomes a PROVIDER_ACTIVE_WITHOUT_BINDING incident (restricted
+    /// evidence), resolved automatically once it is gone or bound.
+    pub async fn reconcile_inventory(&self) -> TelephonyResult<usize> {
+        let now = self.now();
+        {
+            let mut last = self
+                .last_inventory
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            if last.is_some_and(|at| now - at < Duration::seconds(INVENTORY_EVERY_SECONDS)) {
+                return Ok(0);
+            }
+            *last = Some(now);
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut unbound: Vec<String> = Vec::new();
+        let mut listed: Vec<String> = Vec::new();
+        let mut repaired = 0;
+        for id in self.providers.ids().cloned().collect::<Vec<_>>() {
+            let Some(provider) = self.providers.get(&id).cloned() else {
+                continue;
+            };
+            let Some(calls) = provider.list_active().await else {
+                continue;
+            };
+            listed.push(id.clone());
+            for call in calls {
+                // Interconnects sharing one edge list the same channels: once each.
+                if !seen.insert(call.provider_call_ref.clone()) {
+                    continue;
+                }
+                let bound: Option<InventoryMatch> = db::one(
+                    &self.db,
+                    "SELECT l.id AS telephony_leg_id, l.status, b.provider_id FROM provider_call_bindings b \
+                     JOIN telephony_legs l ON l.id = b.telephony_leg_id \
+                     WHERE b.provider_call_ref = $1 OR ($2::text IS NOT NULL AND b.correlation_key = $2) \
+                     ORDER BY b.created_at DESC LIMIT 1",
+                    vec![
+                        call.provider_call_ref.clone().into(),
+                        call.correlation_key.clone().into(),
+                    ],
+                )
+                .await?;
+                match bound {
+                    Some(m) if matches!(m.status.as_str(), "ENDED" | "FAILED") => {
+                        let owner = self
+                            .providers
+                            .get(&m.provider_id)
+                            .cloned()
+                            .unwrap_or(provider.clone());
+                        let result = owner.terminate(&call.provider_call_ref).await;
+                        if let Some(leg) = legs::load(&self.db, m.telephony_leg_id).await? {
+                            self.record_run(
+                                &self.db,
+                                &leg,
+                                "TERMINAL_CALL_ACTIVE_LEG",
+                                "PROVIDER_ACTIVE",
+                                if matches!(
+                                    result,
+                                    ControlOutcome::Done | ControlOutcome::AlreadyGone
+                                ) {
+                                    "TERMINATED_ORPHAN"
+                                } else {
+                                    "RETRY_SCHEDULED"
+                                },
+                            )
+                            .await?;
+                        }
+                        repaired += 1;
+                    }
+                    Some(_) => {}
+                    None => {
+                        let member = db::one::<InventoryMember, _>(
+                            &self.db,
+                            "SELECT bridge_id FROM telephony_bridge_legs WHERE edge_channel_ref = $1 LIMIT 1",
+                            vec![call.provider_call_ref.clone().into()],
+                        )
+                        .await?;
+                        if member.is_some() {
+                            continue;
+                        }
+                        let key = format!("unbound-call:{id}:{}", call.provider_call_ref);
+                        let mut incident = Incident::new(
+                            "PROVIDER_ACTIVE_WITHOUT_BINDING",
+                            Severity::Medium,
+                            key.clone(),
+                        )
+                        .evidence(json!({
+                            "providerCallRef": call.provider_call_ref,
+                            "status": call.status.as_str(),
+                        }));
+                        incident.provider_id = Some(id.clone());
+                        incidents::raise(&self.db, &incident, now).await?;
+                        unbound.push(key);
+                    }
+                }
+            }
+        }
+        // Self-healing: an unbound call that is gone or bound now closes its incident.
+        let open: Vec<OpenIncident> = db::all(
+            &self.db,
+            "SELECT dedupe_key FROM telephony_incidents WHERE category = 'PROVIDER_ACTIVE_WITHOUT_BINDING' \
+             AND status = 'OPEN' AND provider_id = ANY($1)",
+            vec![listed.into()],
+        )
+        .await?;
+        for incident in open {
+            if !unbound.contains(&incident.dedupe_key) {
+                incidents::resolve(&self.db, &incident.dedupe_key, now).await?;
+            }
+        }
+        Ok(repaired)
+    }
+
     /// Active bridges with a terminal member are orphans: end them.
     async fn repair_orphan_bridges(&self) -> TelephonyResult<usize> {
         let rows: Vec<BridgeId> = db::all(
@@ -569,7 +773,9 @@ impl TelephonyService {
         )
         .await?;
         for r in &rows {
-            self.finish_bridge(r.id, "ORPHANED", self.now()).await?;
+            if let Err(e) = self.finish_bridge(r.id, "ORPHANED", self.now()).await {
+                tracing::warn!(bridge_id = %r.id, error = %e, "ending an orphan bridge failed");
+            }
         }
         Ok(rows.len())
     }
@@ -590,6 +796,24 @@ async fn bind<C: ConnectionTrait>(
     )
     .await
     .map(|_| ())
+}
+
+#[derive(Debug, FromQueryResult)]
+struct InventoryMatch {
+    telephony_leg_id: Uuid,
+    status: String,
+    provider_id: String,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct InventoryMember {
+    #[allow(dead_code)]
+    bridge_id: Uuid,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct OpenIncident {
+    dedupe_key: String,
 }
 
 #[derive(Debug, FromQueryResult)]

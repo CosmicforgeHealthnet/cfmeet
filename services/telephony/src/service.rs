@@ -70,6 +70,8 @@ pub struct TelephonyService {
     pub(crate) calling: Arc<dyn CallingPort>,
     pub(crate) worker_id: String,
     pub settings: ExecutionSettings,
+    /// When this instance last read back the interconnects' call inventory.
+    pub(crate) last_inventory: Arc<std::sync::Mutex<Option<DateTime<Utc>>>>,
 }
 
 impl TelephonyService {
@@ -84,6 +86,7 @@ impl TelephonyService {
             calling: Arc::new(Unconfigured),
             worker_id: format!("w-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]),
             settings: ExecutionSettings::default(),
+            last_inventory: Arc::default(),
         }
     }
 

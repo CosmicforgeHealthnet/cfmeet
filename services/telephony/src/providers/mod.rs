@@ -231,6 +231,15 @@ impl EventRejection {
     }
 }
 
+/// One live call an interconnect reports in its inventory (restricted: provider refs
+/// never leave Telephony).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveCall {
+    pub provider_call_ref: String,
+    pub correlation_key: Option<String>,
+    pub status: LegStatus,
+}
+
 /// The provider-independent interconnect contract.
 #[async_trait]
 pub trait TelecomInterconnectProvider: Send + Sync {
@@ -259,6 +268,13 @@ pub trait TelecomInterconnectProvider: Send + Sync {
     }
 
     async fn query_call(&self, key: &QueryKey) -> QueryOutcome;
+
+    /// Inventory read-back: every call the interconnect currently holds, if it can list
+    /// them (`None`: not supported / not available now). Used by reconciliation to find
+    /// provider calls without a valid internal binding.
+    async fn list_active(&self) -> Option<Vec<ActiveCall>> {
+        None
+    }
 
     async fn health(&self) -> Health;
 

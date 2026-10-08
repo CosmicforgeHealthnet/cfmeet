@@ -728,6 +728,73 @@ impl TelephonyService {
         Ok(())
     }
 
+    /// A termination whose effect is not established (refused, or unknown after every
+    /// attempt): the leg is held in ENDING — never reported ended while the provider call
+    /// may be live — the command is UNKNOWN_OUTCOME, an incident is opened and the
+    /// reconciler keeps reading back and re-terminating until the provider confirms.
+    pub(crate) async fn termination_unresolved(
+        &self,
+        command: &CommandRow,
+        leg_id: Uuid,
+        code: &str,
+    ) -> TelephonyResult<Executed> {
+        let now = self.now();
+        let txn = self.db.begin().await?;
+        let locked = legs::lock(&txn, leg_id).await?;
+        let status = locked.status()?;
+        if !status.is_terminal() && status != LegStatus::Ending {
+            legs::transition_in(
+                &txn,
+                &locked,
+                &Change::to(LegStatus::Ending, NormalizedEvent::LegStatusUnknown, now).silent(),
+            )
+            .await?;
+        }
+        // The provider was contacted: CLAIMED -> RUNNING -> UNKNOWN_OUTCOME.
+        db::exec(
+            &txn,
+            "UPDATE telephony_commands SET status = 'RUNNING', updated_at = GREATEST(updated_at, $2) \
+             WHERE id = $1 AND status = 'CLAIMED'",
+            vec![command.id.into(), now.into()],
+        )
+        .await?;
+        db::exec(
+            &txn,
+            "UPDATE telephony_commands SET status = 'UNKNOWN_OUTCOME', result_code = $2, lease_owner = NULL, \
+               lease_until = NULL, updated_at = GREATEST(updated_at, $3) WHERE id = $1 AND status = 'RUNNING'",
+            vec![command.id.into(), code.into(), now.into()],
+        )
+        .await?;
+        if !status.is_terminal() {
+            db::exec(
+                &txn,
+                "UPDATE telephony_legs SET reconcile_after = $2, reconcile_lease_until = NULL WHERE id = $1",
+                vec![
+                    leg_id.into(),
+                    (now + Duration::from_std(self.settings.reconcile_delay)
+                        .unwrap_or(Duration::seconds(5)))
+                    .into(),
+                ],
+            )
+            .await?;
+            incidents::raise(
+                &txn,
+                &Incident::new(
+                    "UNKNOWN_TERMINATION_OUTCOME",
+                    Severity::High,
+                    format!("unknown-termination:{leg_id}"),
+                )
+                .leg(&locked)
+                .evidence(json!({ "code": code, "commandId": command.id })),
+                now,
+            )
+            .await?;
+        }
+        txn.commit().await?;
+        tracing::warn!(command_id = %command.id, telephony_leg_id = %leg_id, code, "termination outcome unresolved");
+        Ok(Executed::Unknown)
+    }
+
     /// The edge / provider reference of a leg's current binding, if bound.
     pub(crate) async fn bound_ref<C: ConnectionTrait>(
         &self,
@@ -885,6 +952,11 @@ impl TelephonyService {
                 }
                 QueryOutcome::Unknown => {
                     if command.attempts >= command.max_attempts {
+                        if kind == CommandKind::Terminate {
+                            return self
+                                .termination_unresolved(&command, leg_id, "READ_BACK_UNKNOWN")
+                                .await;
+                        }
                         self.finish_command(
                             &self.db,
                             command.id,
@@ -897,8 +969,8 @@ impl TelephonyService {
                         incidents::raise(
                             &self.db,
                             &Incident::new(
-                                "UNKNOWN_TERMINATION_OUTCOME",
-                                Severity::High,
+                                "UNKNOWN_CONTROL_OUTCOME",
+                                Severity::Medium,
                                 format!("unknown-control:{leg_id}"),
                             )
                             .leg(&leg),
@@ -962,6 +1034,16 @@ impl TelephonyService {
             (_, ControlOutcome::Unknown) if command.attempts < command.max_attempts => {
                 drop(txn);
                 return self.reschedule(&command, "CONTROL_UNKNOWN").await;
+            }
+            (CommandKind::Terminate, outcome) => {
+                // The provider call may still be up (and paid): never "just failed".
+                drop(txn);
+                let code = if outcome == ControlOutcome::Unknown {
+                    "CONTROL_UNKNOWN"
+                } else {
+                    "CONTROL_REFUSED"
+                };
+                return self.termination_unresolved(&command, leg_id, code).await;
             }
             (_, _) => {
                 self.finish_command(

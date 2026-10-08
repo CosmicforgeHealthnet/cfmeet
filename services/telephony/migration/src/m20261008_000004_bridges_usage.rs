@@ -82,7 +82,10 @@ CREATE TABLE telephony_bridge_legs (
     CONSTRAINT ck_telephony_bridge_legs_member
         CHECK ((member_kind = 'PUBLIC_LEG') = (telephony_leg_id IS NOT NULL)),
     CONSTRAINT ck_telephony_bridge_legs_status CHECK (status IN ('EXPECTED', 'JOINED', 'LEFT')),
-    CONSTRAINT ck_telephony_bridge_legs_joined CHECK ((status = 'EXPECTED') = (joined_at IS NULL)),
+    -- A member may leave without ever having joined (it ended before the bridge was up).
+    CONSTRAINT ck_telephony_bridge_legs_joined CHECK (
+        (status = 'EXPECTED' AND joined_at IS NULL) OR (status = 'JOINED' AND joined_at IS NOT NULL)
+        OR status = 'LEFT'),
     CONSTRAINT ck_telephony_bridge_legs_left CHECK ((status = 'LEFT') = (left_at IS NOT NULL)),
     CONSTRAINT ck_telephony_bridge_legs_channel
         CHECK (edge_channel_ref IS NULL OR edge_channel_ref ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$')

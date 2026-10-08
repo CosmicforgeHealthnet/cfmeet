@@ -165,6 +165,21 @@ impl TelecomInterconnectProvider for SipTrunkProvider {
         }
     }
 
+    async fn list_active(&self) -> Option<Vec<super::ActiveCall>> {
+        let channels = self.edge.list().await.ok()?;
+        Some(
+            channels
+                .into_iter()
+                .filter(|c| !c.status.is_terminal())
+                .map(|c| super::ActiveCall {
+                    provider_call_ref: c.channel,
+                    correlation_key: c.correlation_key,
+                    status: c.status,
+                })
+                .collect(),
+        )
+    }
+
     async fn health(&self) -> Health {
         self.edge.health().await
     }
