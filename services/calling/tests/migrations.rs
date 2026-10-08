@@ -58,6 +58,8 @@ const CALL_TABLES: &[&str] = &[
     "call_media_sessions",
     "call_participant_media_permissions",
     "call_participants",
+    "call_privacy_authorizations",
+    "call_privacy_enforcements",
     "call_quality_records",
     "call_routes",
     "call_session_intervals",
@@ -68,7 +70,7 @@ const CALL_TABLES: &[&str] = &[
     "calls",
 ];
 
-const MIGRATIONS: usize = 14;
+const MIGRATIONS: usize = 15;
 const PART_B_MIGRATIONS: u32 = 4;
 
 #[tokio::test]
@@ -589,6 +591,9 @@ async fn call_domain_columns_hold_no_contact_secret_or_provider_data() {
         references,
         [
             "call_legs.execution_binding_ref:uuid",
+            "call_privacy_authorizations.communication_context_ref:uuid",
+            "call_privacy_authorizations.privacy_relay_ref:uuid",
+            "call_privacy_enforcements.communication_context_ref:uuid",
             "calls.communication_context_ref:uuid",
             "calls.privacy_relay_ref:uuid",
         ]
@@ -602,7 +607,7 @@ async fn no_privacy_relay_telephony_or_meeting_service_tables_exist() {
     };
     let all = tables(&db.conn).await;
     for forbidden in [
-        // Privacy Relay / Contact Vault / Numbering (other services, not implemented).
+        // Privacy Relay (its own service and database), Contact Vault / Numbering.
         "communication_contexts",
         "privacy_relay_sessions",
         "relay_sessions",

@@ -6,7 +6,7 @@ shares no source, models, migrations or database with the Meeting Service.
 
 ## What is implemented
 
-**Part B §7–§14 (platform trust foundation), Part C §15–§19 (Calling core) and Part C §20–§25 (application calling).** The
+**Part B §7–§14 (platform trust foundation), Part C §15–§19 (Calling core), Part C §20–§25 (application calling) and Calling's side of Part D §26–§30 (Privacy Relay ingress, protected calls, active-call enforcement).** The
 service is the canonical authority for the **logical Call**: a CF Meet object with a CF
 Meet-generated UUID that stays the same whatever later executes it (application RTC,
 SIP, the public network, a relay, enterprise infrastructure, several legs or attempts).
@@ -15,7 +15,7 @@ Provider room / dialog / carrier / request identifiers are never Call identities
 | Area | Status |
 |---|---|
 | §7–§10 Platform consumer model, first-party / external consumers, API credential security, `PlatformAuthContext` vs `ResolvedPrincipal` | Implemented |
-| §11 Internal service authentication (`packages/service-auth`, `/internal/v1/*`, delegated context, internal client) | Implemented (no internal business routes yet) |
+| §11 Internal service authentication (`packages/service-auth`, `/internal/v1/*`, delegated context, internal client) | Implemented (internal route: Privacy Relay enforcement) |
 | §12 Contract authority: `packages/contracts/calling/**` describes exactly what is implemented; conformance tests | Implemented |
 | §13 Data ownership: own database only | Enforced (`architecture_boundaries`, `make service-boundaries`) |
 | §14 Runtime direction: events only through the platform event envelope | Implemented for call events (transactional outbox; no publisher yet) |
@@ -32,13 +32,14 @@ Provider room / dialog / carrier / request identifiers are never Call identities
 | **§23** App-to-app video and group calls (≤ 16 participants), per-participant permissions, individual session removal with provider enforcement | **Implemented** |
 | **§24** Calling media provider boundary: `CallMediaProvider` trait + capabilities, LiveKit adapter with its own config, media connection gateway (DB admission of every connection, edge-sealed credentials, refreshed-token re-sealing), signed callbacks as evidence only, dedupe, reconciliation, real-LiveKit certification incl. refreshed-token re-entry | **Implemented** (ADR 0007) |
 | **§25** Call control: accept, decline, cancel, end (ENDING → ENDED on cleanup evidence), hold / resume enforced at the provider, application transfer on the same Call with failure recovery, `expectedVersion`, `Idempotency-Key`, available actions | **Implemented** (ADR 0009) |
+| **Part D §26–§30** Privacy Relay ingress (`/v1/privacy-relay/...`), `PRIVACY_RELAY_V1` protected calls and transfers (fail closed), `POST /internal/v1/privacy-relay/enforcement` | **Implemented** (ADR 0010; the business authority is `services/privacy-relay`) |
 | Telecom-spend limits | Resolved; enforced by future telephony operations |
 
 **Deferred (later sections / services):** a general routing engine and network
 failover, the call policy engine beyond `APP_DIRECT_V1`, push delivery through a push
 vendor (a transport-neutral push-ready payload is produced), customer webhooks and
 outbox publishing, recording, quality metrics from providers that do not offer them,
-Privacy Relay, Contact Vault, Telephony (SIP / public network, carrier adapters),
+Contact Vault, relay numbers, Telephony (SIP / public network, carrier adapters),
 Numbering, enterprise calling and billing.
 
 HTTP surface (contract:
@@ -254,6 +255,40 @@ media generation, admission and removal.
 
 Invalid or partial media / signaling configuration stops the service at startup (exit 2).
 
+## Privacy Relay integration (Part D §26–§30)
+
+Privacy Relay (`services/privacy-relay`, [ADR 0010](../../docs/decisions/0010-communication-context-and-privacy-relay-session-architecture.md))
+is the authority for Communication Contexts and Privacy Relay Sessions. Calling holds
+none of that data and never reads Privacy Relay's database; it talks to it over signed
+internal HTTP (`CF_PRIVACY_RELAY_BASE_URL`; without it every privacy operation fails
+closed with 503).
+
+* **Ingress** (`src/privacy_relay/http.rs`, contract
+  [`privacy-relay/http`](../../packages/contracts/privacy-relay/http/v1.openapi.json)):
+  thin handlers for `/v1/privacy-relay/contexts…` and `/v1/privacy-relay/sessions…`.
+  Scopes `privacy.contexts.read|write`, `privacy.sessions.read|write`;
+  `Idempotency-Key` on every mutation; named principals must be ACTIVE principals of the
+  caller's environment; the request is forwarded with a delegated platform context —
+  never the customer credential. Privacy Relay's public error codes are relayed; internal
+  or unknown ones become `SERVICE_UNAVAILABLE`.
+* **Protected calls** (`src/calls/app/privacy.rs`): `POST /v1/calls` with
+  `privacyRelaySessionId` (VOICE) asks Privacy Relay `communication.authorize`
+  (`CALL_CREATE`); a transfer of a protected call asks again for the new target
+  (`CALL_TRANSFER`). Denied → 403 `CALL_NOT_AUTHORIZED`; unknown session → 404;
+  unreachable / malformed → 503 `PRIVACY_AUTHORIZATION_UNAVAILABLE`. The decision relied
+  on is recorded in `call_privacy_authorizations` (ids and versions only).
+* **Enforcement** (`src/privacy_relay/enforcement.rs`):
+  `POST /internal/v1/privacy-relay/enforcement` requires a Privacy Relay service token
+  with `communication-authority.enforce` (granted in Calling's trust bundle) and a
+  delegated scope. Commands are deduplicated by `enforcementEventId`
+  (`call_privacy_enforcements`); matching protected calls of that scope (decision at or
+  below the command's version, affected principal involved) are cancelled before answer
+  and ended (ENDING → cleanup → ENDED) after. An advisory lock per context serializes
+  enforcement with protected-call creation and transfer, and a decision already
+  superseded by a received enforcement is refused.
+
+Migration 000015 adds the two evidence tables.
+
 ## Internal service authentication
 
 ```text
@@ -426,7 +461,15 @@ reconciliation, privacy of stored evidence), `app_admission` (the gateway's admi
 authority for every token case, fail closed), `app_control` (cancel / end / hold /
 resume / transfer, idempotency, versions, provider failures) and `signaling` (real
 WebSocket, subprotocol auth, expiry close 4001, recovery, two-instance LISTEN / NOTIFY
-fan-out).
+fan-out); Part D: `privacy_protected_calls` (protected creation / transfer, fail
+closed, superseded decisions), `privacy_enforcement` (authentication, cancel / end,
+replays and concurrent duplicates, stale versions, scope isolation),
+`privacy_relay_gateway` (the ingress against a mock Privacy Relay that verifies service
+tokens: forwarding, delegated scope, no customer credential, edge validation, error
+relay, outages) and `privacy_relay_e2e` (against the real `privacy-relay` binary with
+its own database; skipped unless `PRIVACY_RELAY_BIN` / `PRIVACY_RELAY_MIGRATION_BIN`
+are set — `make privacy-relay-integration`, CI job `calling-e2e` in
+[`.github/workflows/privacy-relay.yml`](../../.github/workflows/privacy-relay.yml)).
 
 Real-provider certification (`rtc_certification`) runs against a real LiveKit server and
 real WebRTC clients (`tests/rtc/rtc_client.py`); it is skipped unless the
@@ -456,4 +499,5 @@ The image runs as a non-root user and contains `calling`, `calling-migration` an
 * [ADR 0007 — Calling media provider boundary](../../docs/decisions/0007-calling-media-provider-boundary.md)
 * [ADR 0008 — Endpoints, ringing and answer arbitration](../../docs/decisions/0008-calling-endpoints-ringing-and-answer-arbitration.md)
 * [ADR 0009 — Call control, idempotency and transfer](../../docs/decisions/0009-calling-call-control-idempotency-and-transfer.md)
+* [ADR 0010 — Communication Context and Privacy Relay Session architecture](../../docs/decisions/0010-communication-context-and-privacy-relay-session-architecture.md)
 * [Service data ownership](../../docs/architecture/service-data-ownership.md)

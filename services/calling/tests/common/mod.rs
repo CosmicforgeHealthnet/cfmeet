@@ -12,6 +12,7 @@
 pub mod app;
 pub mod calls;
 pub mod fake_media;
+pub mod privacy;
 pub mod provider_contract;
 
 use std::{collections::HashMap, sync::Arc};
@@ -286,6 +287,13 @@ pub fn trust_bundle_json(
 
 /// Calling's service-auth runtime (test runtime environment) and its peers.
 pub fn service_auth_fixture() -> (ServiceAuthRuntime, Peers) {
+    service_auth_fixture_targeting(&[])
+}
+
+/// [`service_auth_fixture`] whose outbound client reaches `targets` (service, base URL).
+pub fn service_auth_fixture_targeting(
+    targets: &[(ServiceId, &str)],
+) -> (ServiceAuthRuntime, Peers) {
     let env = RuntimeEnvironment::Test;
     let clock = cf_service_auth::ManualClock::new(SERVICE_T0);
     let shared: cf_service_auth::SharedClock = Arc::new(clock.clone());
@@ -303,7 +311,10 @@ pub fn service_auth_fixture() -> (ServiceAuthRuntime, Peers) {
                 (
                     cf_service_auth::services::PRIVACY_RELAY,
                     vec![relay_key.public_jwk()],
-                    &["operational-callback.deliver"],
+                    &[
+                        "operational-callback.deliver",
+                        "communication-authority.enforce",
+                    ],
                 ),
                 (
                     cf_service_auth::services::TELEPHONY,
@@ -323,7 +334,13 @@ pub fn service_auth_fixture() -> (ServiceAuthRuntime, Peers) {
             &[(
                 cf_service_auth::services::CALLING,
                 vec![calling_jwk],
-                &["communication.authorize", "communication-context.read"],
+                &[
+                    "communication.authorize",
+                    "communication-context.read",
+                    "communication-context.write",
+                    "relay-session.read",
+                    "relay-session.write",
+                ],
             )],
         ),
         &ServiceId::privacy_relay(),
@@ -342,7 +359,13 @@ pub fn service_auth_fixture() -> (ServiceAuthRuntime, Peers) {
     let client = Arc::new(
         InternalServiceClient::new(
             calling_signer.clone(),
-            InternalTargets::new(env),
+            {
+                let mut t = InternalTargets::new(env);
+                for (service, url) in targets {
+                    t.insert(service.clone(), url).unwrap();
+                }
+                t
+            },
             std::time::Duration::from_secs(5),
         )
         .unwrap(),
@@ -437,6 +460,7 @@ pub fn test_runtime(
         push: Arc::new(NoPushTransport),
         app_config: AppCallingConfig::default(),
         call_config: CallServiceConfig::default(),
+        privacy_relay: Arc::new(calling::privacy_relay::UnconfiguredPrivacyRelay),
     }
 }
 
@@ -464,6 +488,10 @@ pub const STANDARD_TEST_SCOPES: &[&str] = &[
     names::PRINCIPALS_WRITE,
     names::CALLS_READ,
     names::CALLS_WRITE,
+    names::PRIVACY_CONTEXTS_READ,
+    names::PRIVACY_CONTEXTS_WRITE,
+    names::PRIVACY_SESSIONS_READ,
+    names::PRIVACY_SESSIONS_WRITE,
 ];
 
 impl Harness {
@@ -505,6 +533,33 @@ impl Harness {
     ) -> Self {
         let push = Arc::new(RecordingPush::default());
         runtime.push = push.clone();
+        let (service_auth, peers) = service_auth_fixture();
+        Self::with_service_auth(
+            db,
+            pepper,
+            clock,
+            media,
+            bus,
+            runtime,
+            push,
+            service_auth,
+            peers,
+        )
+    }
+
+    /// A deployment with an explicit service-auth runtime (cross-service tests).
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_service_auth(
+        db: Arc<TestDb>,
+        pepper: &str,
+        clock: ManualClock,
+        media: Arc<fake_media::FakeMediaProvider>,
+        bus: Arc<InMemorySignalBus>,
+        runtime: CallingRuntime,
+        push: Arc<RecordingPush>,
+        service_auth: ServiceAuthRuntime,
+        peers: Peers,
+    ) -> Self {
         let keyring = Arc::new(test_keyring(pepper));
         let registry = Arc::new(ScopeRegistry::standard());
         let platform = PlatformService::new(
@@ -515,7 +570,6 @@ impl Harness {
             CredentialPolicy::default(),
             LimitDefaults::default(),
         );
-        let (service_auth, peers) = service_auth_fixture();
         let state = AppState::new(
             db.conn.clone(),
             Arc::new(clock.clone()),
@@ -635,7 +689,7 @@ impl Harness {
         routes::app(
             self.state.clone(),
             test_routes().merge(routes::public_api()),
-            test_internal_routes(),
+            test_internal_routes().merge(routes::internal_api()),
         )
     }
 

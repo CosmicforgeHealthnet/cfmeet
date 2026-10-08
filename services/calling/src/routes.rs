@@ -38,11 +38,19 @@ use crate::{
 };
 
 /// The public customer API (platform credential): call reads, creation and control,
-/// endpoint registry and signaling-credential minting. Mounted as `protected` by `main`.
+/// endpoint registry, signaling-credential minting and the Privacy Relay ingress.
+/// Mounted as `protected` by `main`.
 pub fn public_api() -> Router<AppState> {
     crate::calls::http::routes()
         .merge(crate::calls::app::http::routes())
         .merge(crate::endpoints::http::routes())
+        .merge(crate::privacy_relay::http::routes())
+}
+
+/// Internal routes (service authentication): Privacy Relay's active-call enforcement.
+/// Mounted as `internal` by `main` (nested under `/internal/v1`).
+pub fn internal_api() -> Router<AppState> {
+    crate::privacy_relay::enforcement::internal_routes()
 }
 
 /// Builds the service router.

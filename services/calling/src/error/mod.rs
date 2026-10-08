@@ -50,6 +50,7 @@ pub enum ErrorCode {
     MediaUnavailable,
     ParticipantLimitExceeded,
     TargetUnavailable,
+    PrivacyAuthorizationUnavailable,
 }
 
 impl ErrorCode {
@@ -79,6 +80,7 @@ impl ErrorCode {
         ErrorCode::MediaUnavailable,
         ErrorCode::ParticipantLimitExceeded,
         ErrorCode::TargetUnavailable,
+        ErrorCode::PrivacyAuthorizationUnavailable,
     ];
 
     /// Codes that only internal routes return.
@@ -123,6 +125,9 @@ impl ErrorCode {
                 "The call's participant limit would be exceeded."
             }
             ErrorCode::TargetUnavailable => "The target has no eligible application endpoint.",
+            ErrorCode::PrivacyAuthorizationUnavailable => {
+                "Privacy authorization is unavailable; the protected call was not placed. Retry later."
+            }
             _ => "The request could not be completed.",
         }
     }
@@ -154,6 +159,7 @@ impl ErrorCode {
             ErrorCode::MediaUnavailable => "MEDIA_UNAVAILABLE",
             ErrorCode::ParticipantLimitExceeded => "PARTICIPANT_LIMIT_EXCEEDED",
             ErrorCode::TargetUnavailable => "TARGET_UNAVAILABLE",
+            ErrorCode::PrivacyAuthorizationUnavailable => "PRIVACY_AUTHORIZATION_UNAVAILABLE",
         }
     }
 }

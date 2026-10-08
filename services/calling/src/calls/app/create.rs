@@ -35,8 +35,11 @@ use crate::{
         context::PlatformAuthContext,
         principals::{PrincipalReference, PrincipalResolutionError, ResolvedPrincipal},
     },
+    privacy_relay::{AuthorizationPurpose, PRIVACY_RELAY_POLICY},
     signaling::signals::SignalType,
 };
+
+use super::privacy::privacy_evidence;
 
 /// Authorization policy of direct application calls.
 pub const APP_DIRECT_POLICY: &str = "APP_DIRECT_V1";
@@ -52,6 +55,9 @@ pub struct CreateAppCall {
     pub initiator_endpoint: CallEndpointId,
     pub targets: Vec<PrincipalId>,
     pub initiator_display_name: Option<DisplayName>,
+    /// A Privacy Relay Session: the call becomes a PROTECTED call authorized by Privacy
+    /// Relay (PRIVACY_RELAY_V1) instead of APP_DIRECT_V1 — never a silent fallback.
+    pub privacy_relay_session: Option<Uuid>,
     pub key: CommandKey,
 }
 
@@ -135,6 +141,28 @@ impl AppCallService {
             .endpoints
             .active_endpoint(scope, request.initiator, request.initiator_endpoint)
             .await?;
+        // Protected call: CURRENT Privacy Relay authority, obtained before any lock is
+        // held. Denied -> nothing rings; unavailable -> fail closed.
+        let privacy = match request.privacy_relay_session {
+            None => None,
+            Some(session) => {
+                if request.kind != CallKind::Voice {
+                    return Err(CallError::CapabilityUnavailable(
+                        "privacy relay sessions authorize VOICE calls only",
+                    ));
+                }
+                Some(
+                    self.privacy_authority(
+                        ctx,
+                        &initiator,
+                        session,
+                        targets.iter().map(|t| t.id().as_uuid()).collect(),
+                        AuthorizationPurpose::CallCreate,
+                    )
+                    .await?,
+                )
+            }
+        };
 
         let cmd = CallCommandContext::customer(ctx);
         let txn = self.db().begin().await?;
@@ -146,6 +174,13 @@ impl AppCallService {
             txn.rollback().await?;
             return self.replay_create(scope, prior).await;
         }
+        if let Some(decision) = &privacy {
+            // An enforcement that committed after the decision supersedes it.
+            let mut involved: Vec<Uuid> = targets.iter().map(|t| t.id().as_uuid()).collect();
+            involved.push(initiator.id().as_uuid());
+            self.guard_privacy_decision(&txn, scope, decision, &involved)
+                .await?;
+        }
         let (call, initiator_participant, _) = self
             .calls
             .create_requested_call_in(
@@ -154,8 +189,8 @@ impl AppCallService {
                 &initiator,
                 NewCall {
                     kind: request.kind,
-                    communication_context_ref: None,
-                    privacy_relay_ref: None,
+                    communication_context_ref: privacy.as_ref().map(|d| d.context_id),
+                    privacy_relay_ref: privacy.as_ref().map(|d| d.relay_session_id),
                     initiator_display_name: request.initiator_display_name.clone(),
                 },
             )
@@ -167,11 +202,15 @@ impl AppCallService {
         // Authorization for this scope (APP_DIRECT_V1): authenticated application with
         // calls.write, initiator and every target resolved ACTIVE in the caller's own
         // scope, a supported kind, the concurrent-call limit passed (above), the group
-        // limit respected. Never a client-supplied result.
+        // limit respected. Never a client-supplied result. A protected call additionally
+        // carries Privacy Relay's AUTHORIZED decision (PRIVACY_RELAY_V1).
         let mut policy = SafeAttributes::new();
         policy.insert("call_kind", SafeValue::Text(request.kind.to_string()))?;
         policy.insert("target_count", SafeValue::from(targets.len()))?;
         policy.insert("scope_rule", SafeValue::Text("SAME_ENVIRONMENT".into()))?;
+        if let Some(decision) = &privacy {
+            privacy_evidence(&mut policy, decision)?;
+        }
         let mut limits = SafeAttributes::new();
         limits.insert(
             "max_group_participants",
@@ -185,12 +224,26 @@ impl AppCallService {
                 &call,
                 NewAuthorization {
                     reason: AuthorizationReason::PolicySatisfied,
-                    policy_version: PolicyVersion::parse(APP_DIRECT_POLICY)?,
+                    policy_version: PolicyVersion::parse(if privacy.is_some() {
+                        PRIVACY_RELAY_POLICY
+                    } else {
+                        APP_DIRECT_POLICY
+                    })?,
                     policy_snapshot: policy,
                     limits_snapshot: limits,
                 },
             )
             .await?;
+        if let Some(decision) = &privacy {
+            self.record_privacy_decision(
+                &txn,
+                &call,
+                decision,
+                AuthorizationPurpose::CallCreate,
+                None,
+            )
+            .await?;
+        }
         let call = self
             .calls
             .transition_in(

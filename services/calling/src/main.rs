@@ -3,7 +3,6 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::anyhow;
-use axum::Router;
 use calling::{
     calls::{app::AppCallingConfig, CallServiceConfig},
     config::CallingConfig,
@@ -11,6 +10,7 @@ use calling::{
     internal_auth::config::ServiceAuthSettings,
     media::MediaSettings,
     platform::{error::summarize_db_error, scopes::ScopeRegistry},
+    privacy_relay::{HttpPrivacyRelay, PrivacyRelayAuthority, UnconfiguredPrivacyRelay},
     routes,
     signaling::{NoPushTransport, PgNotifySignalBus, RealtimeSignalBus, SignalingKeys},
     state::{AppState, CallingRuntime},
@@ -124,6 +124,22 @@ async fn main() -> anyhow::Result<()> {
             .map_err(|e| anyhow!("cannot start the realtime signal listener ({e})"))?,
     );
 
+    // Privacy Relay (Part D): protected calls and the public ingress need it; ordinary
+    // application calling never does. Without CF_PRIVACY_RELAY_BASE_URL both fail closed.
+    let privacy_relay_configured = service_auth_settings
+        .targets
+        .iter()
+        .any(|(service, _)| service.as_str() == cf_service_auth::services::PRIVACY_RELAY);
+    let privacy_relay: Arc<dyn PrivacyRelayAuthority> = if privacy_relay_configured {
+        Arc::new(HttpPrivacyRelay::new(service_auth.clone()))
+    } else {
+        Arc::new(UnconfiguredPrivacyRelay)
+    };
+    tracing::info!(
+        privacy_relay_configured,
+        "privacy relay authority configured"
+    );
+
     let clock: SharedClock = Arc::new(SystemClock);
     let state = AppState::new(
         db,
@@ -141,6 +157,7 @@ async fn main() -> anyhow::Result<()> {
             push: Arc::new(NoPushTransport),
             app_config,
             call_config: CallServiceConfig::default(),
+            privacy_relay,
         },
     );
 
@@ -160,9 +177,10 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // Public customer API (call reads, creation, control, endpoints, signaling credentials).
-    // There are no internal routes yet; /internal/v1/* still requires service auth.
-    let app = routes::app(state, routes::public_api(), Router::new());
+    // Public customer API (call reads, creation, control, endpoints, signaling credentials,
+    // the Privacy Relay ingress) and the internal API (Privacy Relay enforcement), which
+    // like every /internal/v1/* path requires service authentication.
+    let app = routes::app(state, routes::public_api(), routes::internal_api());
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "calling service listening");
     axum::serve(listener, app)

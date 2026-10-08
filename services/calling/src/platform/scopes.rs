@@ -37,6 +37,14 @@ pub mod names {
     pub const CALLS_WRITE: &str = "calls.write";
     /// Private-network, low-latency event delivery (reserved; trusted).
     pub const EVENTS_PRIVATE_DELIVERY: &str = "events.private_delivery";
+    /// Read Privacy Relay communication contexts of the credential's environment.
+    pub const PRIVACY_CONTEXTS_READ: &str = "privacy.contexts.read";
+    /// Create, update and change the lifecycle of communication contexts.
+    pub const PRIVACY_CONTEXTS_WRITE: &str = "privacy.contexts.write";
+    /// Read Privacy Relay sessions of the credential's environment.
+    pub const PRIVACY_SESSIONS_READ: &str = "privacy.sessions.read";
+    /// Create Privacy Relay sessions and change their lifecycle.
+    pub const PRIVACY_SESSIONS_WRITE: &str = "privacy.sessions.write";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -74,6 +82,26 @@ const STANDARD_SCOPES: &[ScopeDefinition] = &[
     ScopeDefinition {
         name: names::CALLS_WRITE,
         description: "Create and control calls (reserved for the Calling API)",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::PRIVACY_CONTEXTS_READ,
+        description: "Read Privacy Relay communication contexts within the credential's application environment",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::PRIVACY_CONTEXTS_WRITE,
+        description: "Create, update and change the lifecycle of Privacy Relay communication contexts within the credential's application environment",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::PRIVACY_SESSIONS_READ,
+        description: "Read Privacy Relay sessions within the credential's application environment",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::PRIVACY_SESSIONS_WRITE,
+        description: "Create Privacy Relay sessions and change their lifecycle within the credential's application environment",
         trust: ScopeTrust::Standard,
     },
     ScopeDefinition {

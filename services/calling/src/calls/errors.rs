@@ -83,6 +83,10 @@ pub enum CallError {
     /// A target principal has no eligible application endpoint.
     #[error("target unavailable")]
     TargetUnavailable,
+    /// A protected call needs a current Privacy Relay decision and none could be
+    /// obtained (timeout, outage, authentication, malformed answer): fail closed.
+    #[error("privacy authorization unavailable")]
+    PrivacyAuthorizationUnavailable,
     /// Unexpected database failure (summary: SQLSTATE + constraint only).
     #[error("database error ({summary})")]
     Database { summary: String, connectivity: bool },
@@ -118,6 +122,7 @@ impl CallError {
             CallError::MediaUnavailable => "MEDIA_UNAVAILABLE",
             CallError::ParticipantLimitExceeded { .. } => "PARTICIPANT_LIMIT_EXCEEDED",
             CallError::TargetUnavailable => "TARGET_UNAVAILABLE",
+            CallError::PrivacyAuthorizationUnavailable => "PRIVACY_AUTHORIZATION_UNAVAILABLE",
             CallError::Database { connectivity, .. } => {
                 if *connectivity {
                     "SERVICE_UNAVAILABLE"
@@ -153,7 +158,9 @@ impl CallError {
             CallError::CapabilityUnavailable(_) | CallError::ParticipantLimitExceeded { .. } => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
-            CallError::MediaUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            CallError::MediaUnavailable | CallError::PrivacyAuthorizationUnavailable => {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
             CallError::Database { connectivity, .. } => {
                 if *connectivity {
                     StatusCode::SERVICE_UNAVAILABLE
@@ -220,6 +227,9 @@ impl From<CallError> for CallingError {
             CallError::MediaUnavailable => ErrorCode::MediaUnavailable,
             CallError::ParticipantLimitExceeded { .. } => ErrorCode::ParticipantLimitExceeded,
             CallError::TargetUnavailable => ErrorCode::TargetUnavailable,
+            CallError::PrivacyAuthorizationUnavailable => {
+                ErrorCode::PrivacyAuthorizationUnavailable
+            }
         };
         tracing::info!(code = code.as_str(), error = %err, "call operation refused");
         CallingError::Call {

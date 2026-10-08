@@ -32,6 +32,96 @@ impl AppWorld {
         })
     }
 
+    /// A world whose Calling deployment uses `privacy` as its Privacy Relay authority.
+    pub async fn with_privacy_relay(
+        privacy: std::sync::Arc<dyn calling::privacy_relay::PrivacyRelayAuthority>,
+    ) -> Option<Self> {
+        use std::sync::Arc;
+        let db = Arc::new(super::TestDb::new().await?);
+        let media = Arc::new(FakeMediaProvider::default());
+        let bus = Arc::new(calling::signaling::InMemorySignalBus::new());
+        let mut runtime = super::test_runtime(Some(media.clone()), bus.clone());
+        runtime.privacy_relay = privacy;
+        let h = Harness::with_runtime(
+            db,
+            super::TEST_PEPPER,
+            calling::domain::ManualClock::new(super::t0()),
+            media,
+            bus,
+            runtime,
+        );
+        let w =
+            CallWorld::in_harness(h, "acme", calling::domain::EnvironmentKind::Production).await;
+        Some(Self { w })
+    }
+
+    /// A world whose Calling deployment reaches a Privacy Relay over HTTP at `base_url`
+    /// (Calling's real `HttpPrivacyRelay` adapter, signed service tokens).
+    pub async fn with_privacy_relay_at(base_url: &str) -> Option<Self> {
+        let (service_auth, peers) = super::service_auth_fixture_targeting(&[(
+            cf_service_auth::ServiceId::privacy_relay(),
+            base_url,
+        )]);
+        Self::with_service_auth(service_auth, peers, super::t0()).await
+    }
+
+    /// A world over an explicit service-auth runtime whose Privacy Relay authority is the
+    /// HTTP adapter of that runtime; the Calling clock starts at `now`.
+    pub async fn with_service_auth(
+        service_auth: calling::internal_auth::ServiceAuthRuntime,
+        peers: super::Peers,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Option<Self> {
+        use std::sync::Arc;
+        let db = Arc::new(super::TestDb::new().await?);
+        let media = Arc::new(FakeMediaProvider::default());
+        let bus = Arc::new(calling::signaling::InMemorySignalBus::new());
+        let mut runtime = super::test_runtime(Some(media.clone()), bus.clone());
+        runtime.privacy_relay = Arc::new(calling::privacy_relay::HttpPrivacyRelay::new(
+            service_auth.clone(),
+        ));
+        let push = Arc::new(super::RecordingPush::default());
+        runtime.push = push.clone();
+        let h = Harness::with_service_auth(
+            db,
+            super::TEST_PEPPER,
+            calling::domain::ManualClock::new(now),
+            media,
+            bus,
+            runtime,
+            push,
+            service_auth,
+            peers,
+        );
+        let w =
+            CallWorld::in_harness(h, "acme", calling::domain::EnvironmentKind::Production).await;
+        Some(Self { w })
+    }
+
+    /// `POST /v1/calls` of a PROTECTED call under `session`.
+    pub async fn create_protected_call(
+        &self,
+        kind: &str,
+        initiator: &ResolvedPrincipal,
+        from: &Device,
+        targets: &[&ResolvedPrincipal],
+        session: Uuid,
+        key: &str,
+    ) -> TestResponse {
+        self.post_with(
+            "/v1/calls",
+            json!({
+                "kind": kind,
+                "initiatorPrincipalId": initiator.id(),
+                "initiatorEndpointId": from.endpoint,
+                "targetPrincipalIds": targets.iter().map(|t| t.id()).collect::<Vec<_>>(),
+                "privacyRelaySessionId": session,
+            }),
+            &[("idempotency-key", key)],
+        )
+        .await
+    }
+
     pub fn h(&self) -> &Harness {
         &self.w.h
     }

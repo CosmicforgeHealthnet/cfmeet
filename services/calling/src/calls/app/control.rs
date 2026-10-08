@@ -775,7 +775,11 @@ impl AppCallService {
         })
     }
 
-    async fn calls_row(&self, scope: CallScope, call_id: CallId) -> CallResult<calls::Model> {
+    pub(crate) async fn calls_row(
+        &self,
+        scope: CallScope,
+        call_id: CallId,
+    ) -> CallResult<calls::Model> {
         calls::Entity::find_by_id(call_id.as_uuid())
             .filter(calls::Column::TenantId.eq(scope.tenant_id().as_uuid()))
             .filter(calls::Column::ApplicationId.eq(scope.application_id().as_uuid()))

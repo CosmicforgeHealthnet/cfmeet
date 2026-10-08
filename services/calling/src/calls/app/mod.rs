@@ -19,6 +19,7 @@ mod control;
 mod create;
 pub mod http;
 pub mod media;
+mod privacy;
 mod ringing;
 mod transfer;
 mod workers;
@@ -53,6 +54,7 @@ use crate::{
     media::{CallMediaProvider, MediaCredentialPolicy},
     models::{call_endpoints, call_invitations, call_participants, call_sessions, calls},
     platform::principals::PrincipalResolver,
+    privacy_relay::{PrivacyRelayAuthority, UnconfiguredPrivacyRelay},
     signaling::{
         bus::{RealtimeSignalBus, SignalEnvelope},
         push::{NoPushTransport, PushDispatcher},
@@ -152,6 +154,7 @@ pub struct AppCallService {
     credentials: MediaCredentialPolicy,
     bus: Arc<dyn RealtimeSignalBus>,
     push: Arc<dyn PushDispatcher>,
+    privacy: Arc<dyn PrivacyRelayAuthority>,
     config: AppCallingConfig,
 }
 
@@ -173,8 +176,16 @@ impl AppCallService {
             credentials,
             bus,
             push: Arc::new(NoPushTransport),
+            privacy: Arc::new(UnconfiguredPrivacyRelay),
             config,
         }
+    }
+
+    /// Uses `privacy` as the Privacy Relay authority of protected calls (default:
+    /// unconfigured — protected calls fail closed; ordinary calls are unaffected).
+    pub fn with_privacy_relay(mut self, privacy: Arc<dyn PrivacyRelayAuthority>) -> Self {
+        self.privacy = privacy;
+        self
     }
 
     /// Uses `push` for push-ready ring offers (default: no push transport).

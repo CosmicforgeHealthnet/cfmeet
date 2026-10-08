@@ -133,6 +133,10 @@ struct CreateCallBody {
     target_principal_ids: Vec<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     initiator_display_name: Option<String>,
+    /// Optional Privacy Relay Session: the call is authorized by Privacy Relay
+    /// (PRIVACY_RELAY_V1) and fails closed if that authority is unavailable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    privacy_relay_session_id: Option<Uuid>,
 }
 
 async fn create_call(
@@ -168,6 +172,7 @@ async fn create_call(
                     .map(|p| PrincipalId::from_uuid(*p))
                     .collect(),
                 initiator_display_name: display,
+                privacy_relay_session: body.privacy_relay_session_id,
                 key,
             },
         )

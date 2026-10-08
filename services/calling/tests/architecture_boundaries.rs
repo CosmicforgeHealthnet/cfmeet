@@ -316,7 +316,18 @@ const TELEPHONE_FIELDS: &[&str] = &[
 /// Tables of other services' domains (Part III §13) Calling must never create or name.
 const FOREIGN_DOMAIN_TABLES: &[&str] = &[
     "communication_contexts",
+    "communication_context_participants",
+    "communication_context_channels",
+    "communication_context_directions",
     "privacy_relay_sessions",
+    "privacy_relay_session_participants",
+    "privacy_relay_session_channels",
+    "privacy_relay_session_directions",
+    "relay_authorization_decisions",
+    "relay_audit_events",
+    "privacy_relay_outbox",
+    "privacy_relay_commands",
+    "privacy_relay_enforcement_jobs",
     "relay_sessions",
     "protected_contacts",
     "relay_number_inventory",
@@ -520,13 +531,35 @@ fn media_identities_are_only_server_generated() {
 }
 
 #[test]
-fn no_privacy_relay_telephony_or_numbering_service_exists_yet() {
+fn privacy_relay_is_a_peer_service_and_later_services_do_not_exist_yet() {
     let services = manifest_dir().join("..");
-    for future in ["privacy-relay", "telephony", "numbering", "contact-vault"] {
+    for future in ["telephony", "numbering", "contact-vault"] {
         assert!(
             !services.join(future).exists(),
             "services/{future} must not exist before its implementation phase"
         );
+    }
+    // Privacy Relay (Part D) is its own deployable service: Calling reaches it only over
+    // authenticated internal HTTP and never depends on its source or migrations.
+    assert!(services.join("privacy-relay/Cargo.toml").exists());
+    for manifest in ["Cargo.toml", "migration/Cargo.toml"] {
+        let text = std::fs::read_to_string(manifest_dir().join(manifest)).unwrap();
+        assert!(
+            !text.contains("privacy-relay"),
+            "{manifest} depends on privacy-relay"
+        );
+    }
+    for (file, code) in production_sources() {
+        for forbidden in [
+            "privacy_relay_migration",
+            "extern crate privacy_relay",
+            "use privacy_relay::",
+        ] {
+            assert!(
+                !code.contains(forbidden),
+                "{file} imports Privacy Relay source (`{forbidden}`)"
+            );
+        }
     }
     // Calling's migrations create only Calling tables.
     let mut files = Vec::new();

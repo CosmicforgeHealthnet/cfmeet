@@ -20,6 +20,7 @@ use crate::{
         scopes::ScopeRegistry,
         verifier::VerifierKeyring,
     },
+    privacy_relay::PrivacyRelayAuthority,
     signaling::{PushDispatcher, RealtimeSignalBus, SignalingAuthority, SignalingKeys},
 };
 
@@ -37,6 +38,9 @@ pub struct CallingRuntime {
     pub push: Arc<dyn PushDispatcher>,
     pub app_config: AppCallingConfig,
     pub call_config: CallServiceConfig,
+    /// Privacy Relay authority (unconfigured: protected calls and the ingress fail closed;
+    /// ordinary application calling never depends on it).
+    pub privacy_relay: Arc<dyn PrivacyRelayAuthority>,
 }
 
 #[derive(Clone)]
@@ -59,6 +63,8 @@ pub struct AppState {
     pub media_gateway: Option<Arc<dyn MediaConnectionGateway>>,
     /// Internal service authentication (separate from customer credentials).
     pub service_auth: ServiceAuthRuntime,
+    /// Privacy Relay (protected-call authority and the public ingress target).
+    pub privacy_relay: Arc<dyn PrivacyRelayAuthority>,
 }
 
 impl AppState {
@@ -95,7 +101,8 @@ impl AppState {
                 runtime.bus,
                 runtime.app_config,
             )
-            .with_push(runtime.push),
+            .with_push(runtime.push)
+            .with_privacy_relay(runtime.privacy_relay.clone()),
         );
         Self {
             authenticator: Arc::new(CredentialAuthenticator::new(
@@ -117,6 +124,7 @@ impl AppState {
             app,
             media_gateway,
             service_auth,
+            privacy_relay: runtime.privacy_relay,
             clock,
             db,
         }

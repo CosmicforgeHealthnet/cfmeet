@@ -51,6 +51,7 @@ const CALLING_COMMON: &str = "calling/common/v1.schema.json";
 const CALL_LIFECYCLE: &str = "calling/events/call-lifecycle/v1.schema.json";
 const EVENT_ENVELOPE: &str = "platform/events/envelope/v1.schema.json";
 const INTERNAL_HTTP: &str = "platform/internal-http/v1.openapi.json";
+const PRIVACY_RELAY_HTTP: &str = "privacy-relay/http/v1.openapi.json";
 
 fn contracts() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/contracts")
@@ -186,9 +187,20 @@ fn contract_paths_equal_the_registered_routes() {
         &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src"),
         &mut files,
     );
+    // Calling's own routes (its contract) and the Privacy Relay ingress routes, whose
+    // contract is the Privacy Relay API (one contract, never defined twice).
     let mut registered = BTreeSet::new();
+    let mut ingress = BTreeSet::new();
     for file in files {
         let code = std::fs::read_to_string(&file).unwrap();
+        let path = file.to_string_lossy().replace('\\', "/");
+        let is_ingress = path.ends_with("src/privacy_relay/http.rs");
+        // Internal routers are nested under /internal/v1 by routes::app.
+        let prefix = if path.ends_with("src/privacy_relay/enforcement.rs") {
+            "/internal/v1"
+        } else {
+            ""
+        };
         for (i, _) in code.match_indices(".route(") {
             let rest = code[i + ".route(".len()..].trim_start();
             let literal = rest
@@ -203,7 +215,12 @@ fn contract_paths_equal_the_registered_routes() {
                     None => seg.to_string(),
                 })
                 .collect();
-            registered.insert(templated.join("/"));
+            let route = format!("{prefix}{}", templated.join("/"));
+            if is_ingress {
+                ingress.insert(route);
+            } else {
+                registered.insert(route);
+            }
         }
         assert!(
             !code.contains(".route_service(") && !code.contains(".nest_service("),
@@ -221,6 +238,17 @@ fn contract_paths_equal_the_registered_routes() {
         registered, documented,
         "Calling routes and its OpenAPI contract disagree"
     );
+    let privacy: BTreeSet<String> = read(PRIVACY_RELAY_HTTP)["paths"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    assert_eq!(
+        ingress, privacy,
+        "the Privacy Relay ingress and the Privacy Relay API contract disagree"
+    );
+    assert!(registered.is_disjoint(&privacy));
 }
 
 #[tokio::test]
@@ -509,7 +537,14 @@ fn every_operation_declares_its_authentication() {
                 .next()
                 .unwrap()
                 .as_str();
-            let expected = if path.starts_with("/internal/provider/") {
+            let expected = if path.starts_with("/internal/v1/") {
+                // Internal routes: a service token and a receiver-granted permission.
+                assert_eq!(
+                    security[0]["cfServiceAuth"][0], "communication-authority.enforce",
+                    "{method} {path}"
+                );
+                "cfServiceAuth"
+            } else if path.starts_with("/internal/provider/") {
                 "mediaProviderSignature"
             } else if path.starts_with("/v1/calling/media/") {
                 "mediaCredential"
@@ -536,6 +571,26 @@ fn every_operation_declares_its_authentication() {
                 op["responses"]["401"].is_object(),
                 "{method} {path}: authentication failure is not documented"
             );
+        }
+    }
+    // The Privacy Relay API served by this ingress: platform credential, privacy scopes.
+    for (path, item) in read(PRIVACY_RELAY_HTTP)["paths"].as_object().unwrap() {
+        for (method, op) in item.as_object().unwrap() {
+            let scope = op["security"][0]["platformCredential"][0].as_str().unwrap();
+            let family = if path.starts_with("/v1/privacy-relay/sessions")
+                || (path.ends_with("/sessions") && method == "post")
+            {
+                "privacy.sessions"
+            } else {
+                "privacy.contexts"
+            };
+            let expected = format!(
+                "{family}.{}",
+                if method == "get" { "read" } else { "write" }
+            );
+            assert_eq!(scope, expected, "{method} {path}");
+            assert_eq!(op["x-cfmeet-required-scope"], scope, "{method} {path}");
+            assert!(op["responses"]["401"].is_object(), "{method} {path}");
         }
     }
     // No generic state mutation and no provider vocabulary in the public contracts.

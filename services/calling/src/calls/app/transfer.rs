@@ -39,6 +39,7 @@ use crate::{
         context::PlatformAuthContext,
         principals::{PrincipalReference, PrincipalResolutionError},
     },
+    privacy_relay::AuthorizationPurpose,
     signaling::signals::SignalType,
 };
 
@@ -95,6 +96,42 @@ impl AppCallService {
                     connectivity: true,
                 },
             })?;
+        // A protected call never introduces a participant on its original authorization:
+        // the transferring participant -> target introduction needs CURRENT Privacy Relay
+        // authority under the call's relay session (fail closed).
+        let privacy = match self.protected_session(scope, call_id).await? {
+            None => None,
+            Some(session) => {
+                let transferring = call_participants::Entity::find_by_id(
+                    request.transferring_participant.as_uuid(),
+                )
+                .filter(call_participants::Column::CallId.eq(call_id.as_uuid()))
+                .one(self.db())
+                .await?
+                .ok_or(CallError::NotFound)?;
+                let source = self
+                    .principals
+                    .resolve(
+                        ctx,
+                        &PrincipalReference::Id(crate::domain::PrincipalId::from_uuid(
+                            transferring.principal_id,
+                        )),
+                    )
+                    .await
+                    .map_err(|_| CallError::AuthorizationDenied)?;
+                Some((
+                    self.privacy_authority(
+                        ctx,
+                        &source,
+                        session,
+                        vec![target.id().as_uuid()],
+                        AuthorizationPurpose::CallTransfer,
+                    )
+                    .await?,
+                    transferring.principal_id,
+                ))
+            }
+        };
         let cmd = CallCommandContext::customer(ctx);
         let txn = self.db().begin().await?;
         if let Some(prior) = self
@@ -104,7 +141,16 @@ impl AppCallService {
         {
             return replay(prior);
         }
+        if let Some((decision, source)) = &privacy {
+            self.guard_privacy_decision(&txn, scope, decision, &[target.id().as_uuid(), *source])
+                .await?;
+        }
         let call = self.calls.lock_call(&txn, scope, call_id).await?;
+        if let Some((decision, _)) = &privacy {
+            if call.privacy_relay_ref != Some(decision.relay_session_id) {
+                return Err(CallError::AuthorizationDenied);
+            }
+        }
         if call.version != request.expected_version {
             return Err(CallError::StaleVersion {
                 expected: request.expected_version,
@@ -193,6 +239,16 @@ impl AppCallService {
             .calls
             .add_participant_in(&txn, &cmd, &call, &target, None)
             .await?;
+        if let Some((decision, _)) = &privacy {
+            self.record_privacy_decision(
+                &txn,
+                &call,
+                decision,
+                AuthorizationPurpose::CallTransfer,
+                Some(target.id().as_uuid()),
+            )
+            .await?;
+        }
         self.calls
             .ensure_media_permissions_in(&txn, &call, &target_participant)
             .await?;
