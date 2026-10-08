@@ -166,6 +166,14 @@ impl AppCallService {
             }
         };
         plan.policy_version = policy.version_label();
+        // Both parties see the session's relay identity (never each other's number).
+        self.ensure_relay_identity(
+            ctx,
+            &initiator,
+            decision.relay_session_id,
+            fa.country.as_deref(),
+        )
+        .await?;
         let candidate_routes = plan.candidate_routes.clone();
         let party_a = self
             .principals

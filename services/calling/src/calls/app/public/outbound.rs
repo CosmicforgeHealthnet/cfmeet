@@ -147,6 +147,33 @@ impl AppCallService {
         Ok(decision)
     }
 
+    /// Before any paid outbound public leg exists: the Privacy Relay Session holds its
+    /// relay identity (the temporary relay number the called party sees and may call
+    /// back). Refused by Privacy Relay -> PUBLIC_ROUTE_DENIED; unreachable -> fail closed.
+    pub(crate) async fn ensure_relay_identity(
+        &self,
+        ctx: &PlatformAuthContext,
+        source: &ResolvedPrincipal,
+        relay_session: Uuid,
+        country: Option<&str>,
+    ) -> CallResult<()> {
+        let country = country.ok_or(CallError::PublicRouteDenied("DESTINATION_COUNTRY_UNKNOWN"))?;
+        let delegated = delegated_context(ctx, Some(source)).map_err(|_| CallError::NotFound)?;
+        self.privacy
+            .ensure_relay_identity(&delegated, ctx.correlation_id(), relay_session, country)
+            .await
+            .map_err(|e| match e {
+                PrivacyRelayError::NotFound => {
+                    crate::metrics::inc(
+                        "calling_public_route_denials_total",
+                        &[("reason", "RELAY_IDENTITY_UNAVAILABLE")],
+                    );
+                    CallError::PublicRouteDenied("RELAY_IDENTITY_UNAVAILABLE")
+                }
+                PrivacyRelayError::Unavailable => CallError::PrivacyAuthorizationUnavailable,
+            })
+    }
+
     /// `POST /v1/calls` → APP_TO_PSTN.
     pub async fn create_protected_contact_call(
         &self,
@@ -255,6 +282,13 @@ impl AppCallService {
             }
         };
         plan.policy_version = policy.version_label();
+        self.ensure_relay_identity(
+            ctx,
+            &initiator,
+            decision.relay_session_id,
+            fact.country.as_deref(),
+        )
+        .await?;
 
         let cmd = CallCommandContext::customer(ctx);
         let txn = self.db().begin().await?;

@@ -37,6 +37,9 @@ pub struct FakePrivacyRelay {
     pub contacts: Mutex<Vec<(Uuid, String)>>,
     /// Grants issued (grant id, request).
     pub grants: Mutex<Vec<(Uuid, GrantRequest)>>,
+    pub relay_identities: Mutex<Vec<(Uuid, String)>>,
+    /// Privacy Relay refuses relay identities (e.g. its pool is exhausted).
+    pub refuse_relay_identity: Mutex<bool>,
 }
 
 impl FakePrivacyRelay {
@@ -52,6 +55,8 @@ impl FakePrivacyRelay {
             proxied: Mutex::new(Vec::new()),
             contacts: Mutex::new(Vec::new()),
             grants: Mutex::new(Vec::new()),
+            relay_identities: Mutex::new(Vec::new()),
+            refuse_relay_identity: Mutex::new(false),
         }
     }
 
@@ -193,6 +198,29 @@ impl PrivacyRelayAuthority for FakePrivacyRelay {
             secret: zeroize::Zeroizing::new(format!("grant-secret-{}", Uuid::new_v4().simple())),
             expires_at: Utc::now() + Duration::seconds(120),
         })
+    }
+
+    /// Relay identities ensured (session, country).
+    async fn ensure_relay_identity(
+        &self,
+        _: &DelegatedPlatformContext,
+        _: &CorrelationId,
+        relay_session_id: Uuid,
+        country: &str,
+    ) -> Result<(), PrivacyRelayError> {
+        match *self.mode.lock().unwrap() {
+            Mode::Unavailable => return Err(PrivacyRelayError::Unavailable),
+            Mode::Policy => {}
+            _ => return Err(PrivacyRelayError::NotFound),
+        }
+        if *self.refuse_relay_identity.lock().unwrap() {
+            return Err(PrivacyRelayError::NotFound);
+        }
+        self.relay_identities
+            .lock()
+            .unwrap()
+            .push((relay_session_id, country.to_string()));
+        Ok(())
     }
 
     /// Answers `GET /internal/v1/sessions/{id}` in the delegated tenant's scope (a

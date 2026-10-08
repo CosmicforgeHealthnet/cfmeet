@@ -257,6 +257,22 @@ pub trait PrivacyRelayAuthority: Send + Sync {
     ) -> Result<ResolutionGrant, PrivacyRelayError> {
         Err(PrivacyRelayError::Unavailable)
     }
+
+    /// Ensures the Privacy Relay Session holds its relay identity (a temporary relay
+    /// number lent by Privacy Relay, Part D §34) before a paid outbound public leg
+    /// exists: the called party sees that number, never anyone's private number, and may
+    /// call it back (§35). Idempotent per session (a session holds at most one relay
+    /// identity ever). `NotFound`: Privacy Relay refuses (no public strategy, pool
+    /// exhausted or disabled, unverified contacts).
+    async fn ensure_relay_identity(
+        &self,
+        _delegated: &DelegatedPlatformContext,
+        _correlation_id: &CorrelationId,
+        _relay_session_id: Uuid,
+        _country: &str,
+    ) -> Result<(), PrivacyRelayError> {
+        Err(PrivacyRelayError::Unavailable)
+    }
 }
 
 /// No Privacy Relay configured: protected calls and the ingress fail closed.
@@ -428,6 +444,37 @@ impl PrivacyRelayAuthority for HttpPrivacyRelay {
             secret: zeroize::Zeroizing::new(body.grant.grant_secret),
             expires_at: body.grant.expires_at,
         })
+    }
+
+    async fn ensure_relay_identity(
+        &self,
+        delegated: &DelegatedPlatformContext,
+        correlation_id: &CorrelationId,
+        relay_session_id: Uuid,
+        country: &str,
+    ) -> Result<(), PrivacyRelayError> {
+        let result = self
+            .service_auth
+            .client()
+            .post_json(
+                &Self::outbound(delegated, correlation_id),
+                &format!("/internal/v1/sessions/{relay_session_id}/relay-number-assignment"),
+                &json!({ "country": country, "capabilities": ["VOICE_OUTBOUND", "VOICE_INBOUND"] }),
+            )
+            .await;
+        match result {
+            Ok(_) => Ok(()),
+            // The session already holds its (one) relay identity for other criteria.
+            Err(InternalCallError::Status {
+                status: 409,
+                code: Some(code),
+                ..
+            }) if code == "IDEMPOTENCY_CONFLICT" => Ok(()),
+            Err(InternalCallError::Status { status, .. }) if (400..500).contains(&status) => {
+                Err(PrivacyRelayError::NotFound)
+            }
+            Err(other) => Err(unavailable(&other)),
+        }
     }
 
     async fn proxy(&self, request: ProxyRequest) -> Result<ProxyResponse, PrivacyRelayError> {

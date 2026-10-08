@@ -238,6 +238,11 @@ async fn an_app_user_calls_a_protected_phone_and_hangs_up() {
     assert!(cmd["destination"]["grantSecret"].as_str().unwrap().len() >= 32);
     assert!(cmd["spend"]["reservedAmountMinor"].as_i64().unwrap() > 0);
     assert!(cmd.get("callerId").is_none() && cmd.get("fromNumber").is_none());
+    // The session's relay identity was ensured before anything was dialed.
+    assert_eq!(
+        x.privacy.relay_identities.lock().unwrap().clone(),
+        vec![(x.session, "NG".to_string())]
+    );
     let grants = x.privacy.grants();
     assert_eq!(grants.len(), 1);
     assert_eq!(grants[0].1.call_leg_id, leg);
@@ -527,6 +532,18 @@ async fn every_gate_fails_closed_before_any_paid_action() {
         r.text
     );
     x.telephony.set_routes(common::telephony::healthy_routes());
+    // No relay identity for the session (Privacy Relay refuses): nothing is placed.
+    *x.privacy.refuse_relay_identity.lock().unwrap() = true;
+    let before = x.telephony.originates().len();
+    let r = x.call("gate-identity").await;
+    assert_eq!(
+        (r.status, r.json["error"]["code"].as_str()),
+        (StatusCode::FORBIDDEN, Some("PUBLIC_ROUTE_DENIED")),
+        "{}",
+        r.text
+    );
+    assert_eq!(x.telephony.originates().len(), before);
+    *x.privacy.refuse_relay_identity.lock().unwrap() = false;
     // Spend: concurrency 1 then the next call is refused.
     set_spend(
         &x.w,
