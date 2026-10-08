@@ -8,9 +8,18 @@
 //! Every decision — AUTHORIZED or DENIED — is recorded in `relay_authorization_decisions`.
 //!
 //! Scope comes only from the signed delegated context; the request carries no tenant,
-//! application, environment or client-asserted result. ContactReference subjects can be
-//! authorized by policy but cannot be EXECUTED yet (no Contact Vault / telephony): such
-//! requests are CAPABILITY_UNAVAILABLE, never a fabricated destination.
+//! application, environment or client-asserted result.
+//!
+//! ContactReference subjects (§31–§33) are protected contacts of the same scope. A
+//! contact has no application endpoint, so a contact over the APPLICATION route is
+//! CAPABILITY_UNAVAILABLE. Over a public-network relay route (PUBLIC_RELAY /
+//! CALLBACK_RELAY, when the session strategy permits it) a decision about a contact
+//! requires the contact to be enabled and its EFFECTIVE verification (read time) to be
+//! VERIFIED; BLOCKED / INVALID contacts are CONTACT_BLOCKED whatever their history.
+//! Such a decision is relay AUTHORITY (it is what a Contact Resolution Grant is bound
+//! to); CF Meet still executes only APPLICATION routes until Telephony exists, which the
+//! session's `executableRoutes` states. Principal-only public-network requests remain
+//! CAPABILITY_UNAVAILABLE (a principal has no protected number).
 
 use chrono::{DateTime, Utc};
 use sea_orm::TransactionTrait;
@@ -65,6 +74,17 @@ pub struct Evaluation {
     pub valid_until: Option<DateTime<Utc>>,
 }
 
+/// The usability of a ContactReference subject, as of the decision time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContactUse {
+    /// Unknown, foreign or disabled.
+    Unavailable,
+    Blocked,
+    Expired,
+    NotVerified,
+    Verified,
+}
+
 /// What is being asked, in subject terms.
 #[derive(Debug, Clone)]
 pub struct Ask<'a> {
@@ -72,6 +92,10 @@ pub struct Ask<'a> {
     pub targets: &'a [SubjectRef],
     pub channel: CommunicationChannel,
     pub route: CommunicationRoute,
+    /// Contact usability per ContactReference subject (and whether the Contact Vault is
+    /// enabled at all).
+    pub contacts: &'a std::collections::BTreeMap<Uuid, ContactUse>,
+    pub contact_vault_enabled: bool,
 }
 
 /// Evaluates `ask` against the loaded context and session at `now`.
@@ -134,11 +158,48 @@ pub fn evaluate(
             return deny(AuthorizationReason::DirectionNotAllowed);
         }
     }
-    // Policy allows it; can CF Meet execute it today?
-    let needs_contact = matches!(source, SubjectRef::Contact(_))
-        || targets.iter().any(|t| matches!(t, SubjectRef::Contact(_)));
-    if !route.is_executable() || !channel.is_executable() || needs_contact {
+    // Policy allows it. Which subjects can this route reach?
+    let contacts: Vec<Uuid> = std::iter::once(&source)
+        .chain(targets.iter())
+        .filter_map(SubjectRef::contact)
+        .collect();
+    if !channel.is_executable() {
         return deny(AuthorizationReason::CapabilityUnavailable);
+    }
+    match route {
+        CommunicationRoute::Application => {
+            // A protected contact has no application endpoint.
+            if !contacts.is_empty() {
+                return deny(AuthorizationReason::CapabilityUnavailable);
+            }
+        }
+        CommunicationRoute::PublicRelay | CommunicationRoute::CallbackRelay => {
+            // Public-network relay authority exists only for protected contacts.
+            if contacts.is_empty() || !ask.contact_vault_enabled {
+                return deny(AuthorizationReason::CapabilityUnavailable);
+            }
+            let uses: Vec<ContactUse> = contacts
+                .iter()
+                .map(|c| {
+                    ask.contacts
+                        .get(c)
+                        .copied()
+                        .unwrap_or(ContactUse::Unavailable)
+                })
+                .collect();
+            if uses.contains(&ContactUse::Unavailable) {
+                return deny(AuthorizationReason::ParticipantNotAuthorized);
+            }
+            if uses.contains(&ContactUse::Blocked) {
+                return deny(AuthorizationReason::ContactBlocked);
+            }
+            if uses.contains(&ContactUse::Expired) {
+                return deny(AuthorizationReason::ContactVerificationExpired);
+            }
+            if uses.contains(&ContactUse::NotVerified) {
+                return deny(AuthorizationReason::ContactNotVerified);
+            }
+        }
     }
     Ok(Evaluation {
         reason: AuthorizationReason::Authorized,
@@ -181,6 +242,16 @@ impl RelayService {
         let session =
             SessionAggregate::load(&txn, scope, req.relay_session_id, Lock::Share).await?;
         let now = self.now();
+        let mut contacts = std::collections::BTreeMap::new();
+        for c in std::iter::once(&source)
+            .chain(targets.iter())
+            .filter_map(SubjectRef::contact)
+        {
+            contacts.insert(
+                c,
+                crate::contact_vault::verification::contact_use(&txn, scope, c, now).await?,
+            );
+        }
         let evaluation = evaluate(
             self.feature.enabled(),
             &ctx,
@@ -190,6 +261,8 @@ impl RelayService {
                 targets: &targets,
                 channel: req.channel,
                 route: req.route,
+                contacts: &contacts,
+                contact_vault_enabled: self.contact_vault_enabled(),
             },
             now,
         )?;

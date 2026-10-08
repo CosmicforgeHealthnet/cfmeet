@@ -232,8 +232,10 @@ fn the_contact_vault_is_an_isolated_code_boundary() {
 fn every_internal_route_checks_a_receiver_permission() {
     let code = std::fs::read_to_string(root().join("src/internal/mod.rs")).unwrap();
     let handlers = code.matches("caller: InternalCaller").count();
-    let checks =
-        code.matches("authorize_caller(&caller").count() + code.matches("reader(&caller").count();
+    let flat: String = code.split_whitespace().collect();
+    let checks = flat.matches("authorize_caller(&caller").count()
+        + flat.matches("reader(&caller").count()
+        + flat.matches("contact_actor(&caller").count();
     assert!(handlers >= 10, "{handlers}");
     assert_eq!(
         handlers, checks,

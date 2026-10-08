@@ -18,6 +18,9 @@
     },
     {
       "$ref": "#/$defs/ContactResult"
+    },
+    {
+      "$ref": "#/$defs/VerificationAssertionRequest"
     }
   ],
   "$defs": {
@@ -185,6 +188,44 @@
       "properties": {
         "contact": {
           "$ref": "#/$defs/ProtectedContact"
+        }
+      }
+    },
+    "VerificationAssertionRequest": {
+      "description": "A trusted verification assertion (Contact Vault access token with privacy.contacts.verify). validUntil only with VERIFIED (at most 366 days); restrictive targets (UNVERIFIED, INVALID, BLOCKED) are accepted while the Contact Vault is disabled.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "targetState",
+        "trustSource"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+        },
+        "targetState": {
+          "description": "EXPIRED is derived, never asserted.",
+          "type": "string",
+          "enum": [
+            "UNVERIFIED",
+            "PENDING",
+            "VERIFIED",
+            "INVALID",
+            "BLOCKED"
+          ]
+        },
+        "trustSource": {
+          "description": "Bounded code of the trusted source (e.g. OTP_PROVIDER, MANUAL_REVIEW, FRAUD_REVIEW).",
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "evidenceReference": {
+          "description": "Opaque reference to evidence held by the verifier (never the evidence itself, a number, address or URI).",
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ExternalContextReference"
+        },
+        "validUntil": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
         }
       }
     }

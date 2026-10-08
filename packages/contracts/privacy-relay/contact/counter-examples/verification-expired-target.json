@@ -1,0 +1,5 @@
+{
+  "expectedVersion": 1,
+  "targetState": "EXPIRED",
+  "trustSource": "OTP_PROVIDER"
+}

@@ -277,15 +277,15 @@ async fn routes_channels_and_contact_references_are_not_faked() {
         reason(ask(pa.clone(), pb.clone(), "MESSAGING", "APPLICATION")).await,
         "CAPABILITY_UNAVAILABLE"
     );
-    // A ContactReference participant is authorized by policy but cannot be executed
-    // without Contact Vault / telephony.
+    // A ContactReference participant is never reachable over the APPLICATION route, and
+    // over the public network it needs an effectively VERIFIED contact (§33).
     assert_eq!(
         reason(ask(pa.clone(), pc.clone(), "VOICE", "APPLICATION")).await,
         "CAPABILITY_UNAVAILABLE"
     );
     assert_eq!(
         reason(ask(pc, pa, "VOICE", "PUBLIC_RELAY")).await,
-        "CAPABILITY_UNAVAILABLE"
+        "CONTACT_NOT_VERIFIED"
     );
     // The session strategy cannot exceed the context's allowed strategies.
     let r = h

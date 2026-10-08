@@ -432,6 +432,9 @@ impl ContactVault {
     /// One maintenance sweep (workers): re-encryption batches until a batch is short.
     pub async fn run_sweep(&self) -> RelayResult<()> {
         if self.keys.is_none() {
+            // Verification expiry and grant expiry need no key material.
+            while self.expire_verifications(REWRAP_BATCH).await? == REWRAP_BATCH {}
+            while self.expire_grants(REWRAP_BATCH).await? == REWRAP_BATCH {}
             return Ok(());
         }
         loop {
@@ -443,9 +446,12 @@ impl ContactVault {
         loop {
             let report = self.backfill_fingerprints(REWRAP_BATCH).await?;
             if report.backfilled == 0 || report.remaining == 0 {
-                return Ok(());
+                break;
             }
         }
+        while self.expire_verifications(REWRAP_BATCH).await? == REWRAP_BATCH {}
+        while self.expire_grants(REWRAP_BATCH).await? == REWRAP_BATCH {}
+        Ok(())
     }
 }
 

@@ -34,6 +34,9 @@ pub struct RelayService {
     pub(crate) runtime: RuntimeEnvironment,
     pub(crate) enforcer: Arc<dyn CallingEnforcer>,
     pub(crate) worker_id: String,
+    /// CONTACT_VAULT_ENABLED (shared with the Contact Vault): public-network relay
+    /// authority over protected contacts requires it.
+    pub(crate) contact_feature: FeatureFlag,
 }
 
 /// Result of a mutation: HTTP status, body and whether it replays an earlier execution.
@@ -59,7 +62,18 @@ impl RelayService {
             runtime,
             enforcer,
             worker_id: format!("privacy-relay-{}", Uuid::new_v4().simple()),
+            contact_feature: FeatureFlag::new(false),
         }
+    }
+
+    /// Shares the Contact Vault kill switch with this service.
+    pub fn with_contact_feature(mut self, flag: FeatureFlag) -> Self {
+        self.contact_feature = flag;
+        self
+    }
+
+    pub fn contact_vault_enabled(&self) -> bool {
+        self.contact_feature.enabled()
     }
 
     pub fn db(&self) -> &DatabaseConnection {

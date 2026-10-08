@@ -60,6 +60,14 @@ pub fn routes() -> Router<AppState> {
         .route("/sessions/:session_id/resume", post(resume_session))
         .route("/sessions/:session_id/revoke", post(revoke_session))
         .route("/communication/authorize", post(authorize))
+        .route(
+            "/contacts/:contact_reference/resolution-grants",
+            post(grant_for_execution),
+        )
+        .route(
+            "/contacts/:contact_reference/resolve-for-execution",
+            post(resolve_for_execution),
+        )
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
 }
 
@@ -310,6 +318,70 @@ async fn authorize(
     Ok(respond(
         StatusCode::OK,
         relay(&state).authorize(&cmd, request).await?,
+        false,
+    ))
+}
+
+/// The calling service acting in its signed delegated scope, as a Contact Vault actor.
+fn contact_actor(
+    caller: &InternalCaller,
+    permission: InternalPermission,
+) -> Result<crate::contact_vault::ContactActor, RelayError> {
+    let cmd = authorize_caller(caller, permission)?;
+    Ok(crate::contact_vault::ContactActor::service(
+        cmd.scope(),
+        cmd.actor_service().clone(),
+        Some(cmd.service_account_id()),
+        cmd.request_id().clone(),
+        cmd.correlation_id().clone(),
+    ))
+}
+
+fn contact_id(raw: &str) -> Result<Uuid, RelayError> {
+    Uuid::parse_str(raw).map_err(|_| RelayError::Refused(ErrorCode::ContactNotFound))
+}
+
+async fn grant_for_execution(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    Path(id): Path<String>,
+    raw: Result<Json<crate::contact_vault::resolution::GrantRequest>, JsonRejection>,
+) -> Result<Response, RelayError> {
+    let actor = contact_actor(
+        &caller,
+        InternalPermission::ProtectedContactGrantForExecution,
+    )?;
+    let id = contact_id(&id)?;
+    let request = body(raw)?;
+    Ok(respond(
+        StatusCode::CREATED,
+        state
+            .contacts
+            .grant_for_execution(&actor, id, request)
+            .await?,
+        false,
+    ))
+}
+
+/// Telephony only. The response carries the canonical number and is never logged.
+async fn resolve_for_execution(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    Path(id): Path<String>,
+    raw: Result<Json<crate::contact_vault::resolution::ResolveRequest>, JsonRejection>,
+) -> Result<Response, RelayError> {
+    let actor = contact_actor(
+        &caller,
+        InternalPermission::ProtectedContactResolveForExecution,
+    )?;
+    let id = contact_id(&id)?;
+    let request = body(raw)?;
+    Ok(respond(
+        StatusCode::OK,
+        state
+            .contacts
+            .resolve_for_execution(&actor, id, request)
+            .await?,
         false,
     ))
 }

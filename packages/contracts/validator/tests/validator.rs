@@ -112,15 +112,17 @@ fn an_unmodified_copy_is_valid() {
 #[test]
 fn duplicate_contract_version_is_rejected() {
     let s = Sandbox::new();
+    let mut version = String::new();
     s.edit_manifest(|c| {
         let mut dup = contract(c, "cfmeet.platform.common").clone();
+        version = dup["version"].as_str().unwrap().to_string();
         dup["path"] = json!("platform/common/v1.schema.json");
         c.push(dup);
     });
     let report = s.run();
     assert_rejected(
         &report,
-        "duplicate contract version cfmeet.platform.common@1.1.0",
+        &format!("duplicate contract version cfmeet.platform.common@{version}"),
     );
     assert_rejected(&report, "duplicate canonical ownership");
 }

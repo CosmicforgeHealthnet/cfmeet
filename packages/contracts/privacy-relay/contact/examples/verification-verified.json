@@ -1,0 +1,7 @@
+{
+  "expectedVersion": 1,
+  "targetState": "VERIFIED",
+  "trustSource": "OTP_PROVIDER",
+  "evidenceReference": "otp-7731",
+  "validUntil": "2031-09-01T00:00:00Z"
+}

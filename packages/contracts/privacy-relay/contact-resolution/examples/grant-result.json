@@ -1,0 +1,15 @@
+{
+  "grant": {
+    "grantId": "6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5",
+    "grantSecret": "Zm9vYmFyYmF6cXV4cXV1eHNlY3JldHNlY3JldDAwMDA",
+    "contactReference": "5a7c2e10-3b4d-4f6e-8a9b-0c1d2e3f4a5b",
+    "contextId": "0e3c7a52-6f1b-4a7e-9d5c-2b8f4e1a9c30",
+    "relaySessionId": "7c1e5f20-8a3d-4b96-b2e7-4d0a6c9f1e23",
+    "decisionId": "9e3071a2-ac5f-4db8-94a9-6f2c8e1b3045",
+    "callId": "11111111-2222-4333-8444-555555555555",
+    "callLegId": "22222222-3333-4444-8555-666666666666",
+    "purpose": "PUBLIC_NETWORK_CALL_LEG",
+    "issuedAt": "2031-03-01T10:00:00.000Z",
+    "expiresAt": "2031-03-01T10:02:00.000Z"
+  }
+}

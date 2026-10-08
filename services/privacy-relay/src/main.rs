@@ -112,6 +112,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let clock: SharedClock = Arc::new(SystemClock);
+    let contact_feature = FeatureFlag::new(vault_settings.enabled);
     let feature = FeatureFlag::new(config.enabled);
     tracing::info!(
         privacy_relay_enabled = feature.enabled(),
@@ -123,14 +124,15 @@ async fn main() -> anyhow::Result<()> {
         feature,
         service_auth.signer().runtime_environment(),
         Arc::new(HttpCallingEnforcer::new(service_auth.client().clone())),
-    );
+    )
+    .with_contact_feature(contact_feature.clone());
     // Expiry and enforcement retry on every instance (SKIP LOCKED makes them safe).
     tokio::spawn(relay.clone().run_workers(config.worker_interval));
 
     let contacts = ContactVault::new(
         relay.db().clone(),
         clock.clone(),
-        FeatureFlag::new(vault_settings.enabled),
+        contact_feature,
         vault_material.keys,
     );
     // Key-rotation re-encryption runs on every instance (SKIP LOCKED batches).

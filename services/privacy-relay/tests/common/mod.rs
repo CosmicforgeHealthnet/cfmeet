@@ -273,6 +273,13 @@ pub const ALL_CALLING_PERMISSIONS: &[&str] = &[
     "communication-context.write",
     "relay-session.read",
     "relay-session.write",
+    "protected-contact.grant-for-execution",
+];
+
+/// What Telephony (a fixture identity; the service does not exist yet) is granted.
+pub const TELEPHONY_PERMISSIONS: &[&str] = &[
+    "communication-context.read",
+    "protected-contact.resolve-for-execution",
 ];
 
 pub fn trust_bundle_json(
@@ -331,7 +338,7 @@ pub fn identities(calling_permissions: &[&str]) -> Identities {
                 (
                     cf_service_auth::services::TELEPHONY,
                     vec![telephony_key.public_jwk()],
-                    &["communication-context.read"],
+                    TELEPHONY_PERMISSIONS,
                 ),
             ],
         ),
@@ -551,6 +558,7 @@ impl Harness {
 
     pub fn on(db: Arc<TestDb>, clock: ManualClock, calling_permissions: &[&str]) -> Self {
         let feature = FeatureFlag::new(true);
+        let contact_feature = FeatureFlag::new(true);
         let calling = Arc::new(FakeCalling::default());
         let ids = Arc::new(identities(calling_permissions));
         let relay = RelayService::new(
@@ -559,8 +567,8 @@ impl Harness {
             feature.clone(),
             RuntimeEnvironment::Test,
             calling.clone(),
-        );
-        let contact_feature = FeatureFlag::new(true);
+        )
+        .with_contact_feature(contact_feature.clone());
         let vault_keys = test_vault_keys("ck-test-1", "fk-test-1");
         let contacts = ContactVault::new(
             db.conn.clone(),
@@ -614,6 +622,7 @@ impl Harness {
             RuntimeEnvironment::Test,
             self.calling.clone(),
         )
+        .with_contact_feature(self.contact_feature.clone())
     }
 
     pub fn conn(&self) -> &DatabaseConnection {
@@ -722,6 +731,48 @@ impl Harness {
             .unwrap()
             .expose_for_delivery()
             .to_string()
+    }
+
+    /// A trusted verification integration's token (privacy.contacts.verify).
+    pub fn verifier_token(&self, consumer: &Consumer) -> String {
+        self.contact_token(consumer, &[ContactScope::Verify])
+    }
+
+    /// Asserts `state` for a contact through the trusted verification route.
+    pub async fn verify_contact(
+        &self,
+        consumer: &Consumer,
+        contact: &str,
+        state: &str,
+        valid_until: Option<String>,
+    ) -> Value {
+        let current = self
+            .contact_call(
+                Method::GET,
+                &format!("/v1/privacy-relay/contacts/{contact}"),
+                Some(&self.writer(consumer)),
+                None,
+            )
+            .await;
+        let mut body = json!({
+            "expectedVersion": current.json["contact"]["version"],
+            "targetState": state,
+            "trustSource": "OTP_PROVIDER",
+            "evidenceReference": format!("otp-{}", Uuid::new_v4().simple()),
+        });
+        if let Some(until) = valid_until {
+            body["validUntil"] = json!(until);
+        }
+        let r = self
+            .contact_call(
+                Method::POST,
+                &format!("/v1/privacy-relay/contacts/{contact}/verification"),
+                Some(&self.verifier_token(consumer)),
+                Some(body),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        r.json["contact"].clone()
     }
 
     pub fn writer(&self, consumer: &Consumer) -> String {

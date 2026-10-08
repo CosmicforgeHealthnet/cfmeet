@@ -113,7 +113,10 @@
         "CHANNEL_NOT_ALLOWED",
         "STRATEGY_NOT_ALLOWED",
         "GRACE_POLICY_DENIED",
-        "CAPABILITY_UNAVAILABLE"
+        "CAPABILITY_UNAVAILABLE",
+        "CONTACT_NOT_VERIFIED",
+        "CONTACT_VERIFICATION_EXPIRED",
+        "CONTACT_BLOCKED"
       ]
     },
     "EnforcementState": {

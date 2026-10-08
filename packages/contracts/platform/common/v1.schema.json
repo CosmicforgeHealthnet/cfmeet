@@ -72,7 +72,8 @@
         "communication-context.write",
         "relay-session.read",
         "relay-session.write",
-        "communication-authority.enforce"
+        "communication-authority.enforce",
+        "protected-contact.grant-for-execution"
       ]
     }
   }

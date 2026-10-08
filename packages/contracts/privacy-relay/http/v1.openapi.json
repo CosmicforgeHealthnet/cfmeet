@@ -1415,6 +1415,75 @@
           }
         }
       }
+    },
+    "/v1/privacy-relay/contacts/{contact_reference}/verification": {
+      "post": {
+        "operationId": "assertContactVerification",
+        "summary": "Assert contact verification (trusted integrations)",
+        "description": "Requires a Contact Vault access token with privacy.contacts.verify (privacy.contacts.write is not enough) and expectedVersion. Records a bounded trust source and an opaque evidence reference (never evidence JSON); appends the verification history and the access audit. VERIFIED may carry validUntil, after which the contact is EXPIRED at read time. BLOCKED / INVALID contacts are never resolved, whatever their history. Restrictive targets are accepted while the Contact Vault is disabled.",
+        "x-cfmeet-served-by": "cfmeet.privacy-relay",
+        "security": [
+          {
+            "contactDelegation": [
+              "privacy.contacts.verify"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "privacy.contacts.verify",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContactReference"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/contact/v1.schema.json#/$defs/VerificationAssertionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The safe contact after the assertion.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/contact/v1.schema.json#/$defs/ContactResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
     }
   },
   "components": {

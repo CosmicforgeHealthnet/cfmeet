@@ -142,6 +142,9 @@ text_enum!(
         StrategyNotAllowed = "STRATEGY_NOT_ALLOWED",
         GracePolicyDenied = "GRACE_POLICY_DENIED",
         CapabilityUnavailable = "CAPABILITY_UNAVAILABLE",
+        ContactNotVerified = "CONTACT_NOT_VERIFIED",
+        ContactVerificationExpired = "CONTACT_VERIFICATION_EXPIRED",
+        ContactBlocked = "CONTACT_BLOCKED",
     }
 );
 

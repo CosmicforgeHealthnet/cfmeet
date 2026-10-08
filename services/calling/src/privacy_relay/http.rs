@@ -55,6 +55,7 @@ pub const RELAYED_ERROR_CODES: &[&str] = &[
     "NOT_FOUND",
     "CONTEXT_NOT_FOUND",
     "SESSION_NOT_FOUND",
+    "CONTACT_NOT_FOUND",
     "CONTEXT_VERSION_CONFLICT",
     "SESSION_VERSION_CONFLICT",
     "CONTEXT_REFERENCE_CONFLICT",
@@ -662,5 +663,12 @@ mod tests {
             false,
         );
         assert_eq!(r.status(), StatusCode::CONFLICT);
+        // A context naming an unknown (or foreign-scope) contact is the caller's error.
+        let r = relay_response(
+            404,
+            json!({ "error": { "code": "CONTACT_NOT_FOUND", "message": "m" } }),
+            false,
+        );
+        assert_eq!(r.status(), StatusCode::NOT_FOUND);
     }
 }

@@ -82,7 +82,7 @@
     },
     {
       "id": "cfmeet.platform.common",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "platform/common/v1.schema.json",
       "owner": "platform",
@@ -170,7 +170,7 @@
     },
     {
       "id": "cfmeet.privacy-relay.internal-api",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "openapi",
       "path": "privacy-relay/internal/v1.openapi.json",
       "owner": "privacy-relay",
@@ -266,6 +266,17 @@
       "lifecycle": "beta",
       "authority": "contract-first",
       "description": "Contact Vault delegated access (Part D section 31): grant request / response (served by Calling, no telephone number), the Contact Vault access token claims (typ cf-contact-access+jwt, dedicated key) and the receiver-authoritative contact delegation trust bundle."
+    },
+    {
+      "id": "cfmeet.privacy-relay.contact-resolution",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "privacy-relay/contact-resolution/v1.schema.json",
+      "owner": "privacy-relay",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Contact Resolution Grants (Calling, protected-contact.grant-for-execution; no contact value) and Telephony-only execution resolution (protected-contact.resolve-for-execution): the only internal body that carries a canonical E.164 number."
     }
   ]
 }

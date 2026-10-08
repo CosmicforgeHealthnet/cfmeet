@@ -60,6 +60,10 @@ pub enum InternalPermission {
     /// participant removal, suspension, expiry) on protected calls. Restrictive only.
     #[serde(rename = "communication-authority.enforce")]
     CommunicationAuthorityEnforce,
+    /// Privacy Relay: issue a short-lived Contact Resolution Grant for one specific,
+    /// authorized protected call leg (Part D §33). Reveals no contact value.
+    #[serde(rename = "protected-contact.grant-for-execution")]
+    ProtectedContactGrantForExecution,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -156,6 +160,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: false,
         description: "Enforce a restrictive communication-authority change on protected calls (terminate only)",
     },
+    PermissionDefinition {
+        permission: InternalPermission::ProtectedContactGrantForExecution,
+        name: "protected-contact.grant-for-execution",
+        receiver: services::PRIVACY_RELAY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Issue a short-lived Contact Resolution Grant for one authorized protected call leg (no contact value)",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -173,6 +185,7 @@ impl InternalPermission {
         InternalPermission::RelaySessionRead,
         InternalPermission::RelaySessionWrite,
         InternalPermission::CommunicationAuthorityEnforce,
+        InternalPermission::ProtectedContactGrantForExecution,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -292,6 +305,13 @@ mod tests {
             assert_eq!(d.receiver, services::PRIVACY_RELAY, "{}", d.name);
             assert_eq!(d.grantable_to, &[services::CALLING], "{}", d.name);
         }
+        // Calling may REQUEST a Contact Resolution Grant but never resolve plaintext.
+        let d = ProtectedContactGrantForExecution.definition();
+        assert_eq!(
+            (d.receiver, d.grantable_to),
+            (services::PRIVACY_RELAY, &[services::CALLING][..])
+        );
+        assert!(!d.sensitive);
         // Privacy Relay -> Calling: restrictive enforcement only.
         let d = CommunicationAuthorityEnforce.definition();
         assert_eq!(d.receiver, services::CALLING);

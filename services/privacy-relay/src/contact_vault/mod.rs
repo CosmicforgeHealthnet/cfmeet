@@ -26,7 +26,9 @@ pub mod keyring;
 pub mod model;
 pub mod normalization;
 pub mod repository;
+pub mod resolution;
 pub mod service;
+pub mod verification;
 
 use std::sync::Arc;
 

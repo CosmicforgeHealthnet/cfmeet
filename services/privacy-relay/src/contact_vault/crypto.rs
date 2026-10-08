@@ -166,6 +166,14 @@ pub fn open(
     CanonicalNumber::from_decrypted(text).map_err(|_| CryptoError::Malformed)
 }
 
+/// 32 bytes from the operating-system CSPRNG (grant secrets).
+pub(crate) fn random_secret() -> zeroize::Zeroizing<[u8; 32]> {
+    use aes_gcm::aead::rand_core::RngCore;
+    let mut bytes = zeroize::Zeroizing::new([0u8; 32]);
+    OsRng.fill_bytes(&mut *bytes);
+    bytes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

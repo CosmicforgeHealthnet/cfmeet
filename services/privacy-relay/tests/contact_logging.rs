@@ -115,6 +115,84 @@ async fn no_number_token_or_key_reaches_the_logs() {
     .await;
     h.contacts.rewrap_batch(10).await.unwrap();
 
+    // §33: verification, a resolution grant and Telephony's execution resolution. The
+    // number appears ONLY in the resolve response body, never in a log line.
+    let principal = uuid::Uuid::new_v4();
+    let contact = h.create_contact(&c, CANARY).await["contactReference"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    h.verify_contact(&c, &contact, "VERIFIED", None).await;
+    let mut req = common::context_request(&[principal], "BIDIRECTIONAL", &[]);
+    req["participants"] = json!([{ "principalId": principal }, { "contactReferenceId": contact }]);
+    req["allowedRelayStrategies"] = json!(["APP_ONLY", "PUBLIC_RELAY_ALLOWED"]);
+    let ctx = h.create_context(&c, req).await;
+    let session = h
+        .create_session(
+            &c,
+            ctx["contextId"].as_str().unwrap(),
+            json!({ "relayStrategy": "PUBLIC_RELAY_ALLOWED" }),
+        )
+        .await;
+    let session = session["relaySessionId"].as_str().unwrap().to_string();
+    let decision = h
+        .post(
+            "/internal/v1/communication/authorize",
+            &c,
+            json!({
+                "relaySessionId": session, "source": { "principalId": principal },
+                "targets": [{ "contactReferenceId": contact }],
+                "channel": "VOICE", "route": "PUBLIC_RELAY", "purpose": "CALL_CREATE",
+            }),
+        )
+        .await;
+    assert_eq!(decision.json["decision"], "AUTHORIZED", "{}", decision.text);
+    let (call, leg) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+    let grant = h
+        .post(
+            &format!("/internal/v1/contacts/{contact}/resolution-grants"),
+            &c,
+            json!({
+                "relaySessionId": session, "decisionId": decision.json["decisionId"],
+                "callId": call, "callLegId": leg, "purpose": "PUBLIC_NETWORK_CALL_LEG",
+            }),
+        )
+        .await;
+    assert_eq!(grant.status, StatusCode::CREATED, "{}", grant.text);
+    let g = grant.json["grant"].clone();
+    let telephony = h.ids.telephony.clone();
+    let resolved = h
+        .send_as(
+            &telephony,
+            Method::POST,
+            &format!("/internal/v1/contacts/{contact}/resolve-for-execution"),
+            Some(&c),
+            Some(json!({
+                "grantId": g["grantId"], "grantSecret": g["grantSecret"],
+                "callId": call, "callLegId": leg, "executionAttemptId": uuid::Uuid::new_v4(),
+            })),
+        )
+        .await;
+    assert_eq!(
+        resolved.json["resolution"]["e164"], "+442079460123",
+        "{}",
+        resolved.text
+    );
+    // A refused resolution (wrong secret) is audited and logged without the number.
+    let mut forged = g.clone();
+    forged["grantSecret"] = json!("A".repeat(43));
+    h.send_as(
+        &telephony,
+        Method::POST,
+        &format!("/internal/v1/contacts/{contact}/resolve-for-execution"),
+        Some(&c),
+        Some(json!({
+            "grantId": forged["grantId"], "grantSecret": forged["grantSecret"],
+            "callId": call, "callLegId": leg, "executionAttemptId": uuid::Uuid::new_v4(),
+        })),
+    )
+    .await;
+
     let text = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
     assert!(
         text.contains("contact vault delegation rejected"),
@@ -134,6 +212,7 @@ async fn no_number_token_or_key_reaches_the_logs() {
         "7946 0123",
         &token,
         &other,
+        g["grantSecret"].as_str().unwrap(),
     ] {
         assert!(!text.contains(needle), "logs contain {needle}");
     }

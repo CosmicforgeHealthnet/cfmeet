@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Privacy Relay internal API",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Internal HTTP surface of services/privacy-relay: GET /health (public) and the service-authenticated /internal/v1 API used by the authenticated platform ingress (Calling) and by Calling's protected-call authorization. Every /internal/v1 path — including unknown ones — requires a valid service token; customer credentials are refused. Scope comes only from the signed delegated platform context; bodies refuse unknown members (tenantId, applicationId, environmentId, status, version, authorization results). Commands carry {idempotencyKey, request}."
   },
   "paths": {
@@ -1279,6 +1279,152 @@
               "application/json": {
                 "schema": {
                   "$ref": "https://schemas.cfmeet.com/privacy-relay/authorization/v1.schema.json#/$defs/AuthorizationDecisionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contacts/{contact_reference}/resolution-grants": {
+      "post": {
+        "operationId": "grantContactResolution",
+        "description": "Calling only: issue a short-lived Contact Resolution Grant for one authorized public-network call leg. Reveals no contact value. Every attempt is audited.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "protected-contact.grant-for-execution"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "protected-contact.grant-for-execution",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "contact_reference",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContactReference"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/contact-resolution/v1.schema.json#/$defs/ResolutionGrantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/contact-resolution/v1.schema.json#/$defs/ResolutionGrantResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contacts/{contact_reference}/resolve-for-execution": {
+      "post": {
+        "operationId": "resolveContactForExecution",
+        "description": "Telephony only: exchange a valid, unexpired, unconsumed grant (same scope, contact, call, leg; unchanged authority; enabled and effectively VERIFIED contact) for the canonical E.164 value of that one execution. The response is never logged or persisted; every attempt is audited without the number.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "protected-contact.resolve-for-execution"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "protected-contact.resolve-for-execution",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "contact_reference",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContactReference"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/contact-resolution/v1.schema.json#/$defs/ResolveForExecutionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/contact-resolution/v1.schema.json#/$defs/ExecutionResolutionResult"
                 }
               }
             }

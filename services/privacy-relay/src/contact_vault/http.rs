@@ -27,6 +27,7 @@ use uuid::Uuid;
 
 use super::{
     service::{CreateContactRequest, DisableContactRequest, UpdateContactRequest},
+    verification::VerificationAssertion,
     ContactActor,
 };
 use crate::{
@@ -47,6 +48,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/v1/privacy-relay/contacts/:contact_reference/disable",
             post(disable_contact),
+        )
+        .route(
+            "/v1/privacy-relay/contacts/:contact_reference/verification",
+            post(assert_verification),
         )
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
 }
@@ -190,5 +195,24 @@ async fn disable_contact(
     Ok(respond(
         StatusCode::OK,
         state.contacts.disable(&actor, id, request).await?,
+    ))
+}
+
+async fn assert_verification(
+    State(state): State<AppState>,
+    caller: ContactCaller,
+    Path(id): Path<String>,
+    raw: Result<Json<VerificationAssertion>, JsonRejection>,
+) -> Result<Response, RelayError> {
+    // A trusted verification integration only: privacy.contacts.write is not enough.
+    let actor = caller.actor(ContactScope::Verify)?;
+    let id = reference(&id)?;
+    let request = body(raw)?;
+    Ok(respond(
+        StatusCode::OK,
+        state
+            .contacts
+            .assert_verification(&actor, id, request)
+            .await?,
     ))
 }
