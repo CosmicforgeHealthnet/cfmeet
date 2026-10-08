@@ -7,8 +7,8 @@ This document defines where each CF Meet capability belongs. Anything marked *pl
 ```text
 services/
 ├── meeting-service/     ✅ current Meeting & Conference Platform backend
-├── calling/             ◐ active: trust foundation, internal service auth, Calling core (Part C §15–§19) and application calling (§20–§25) implemented; telephony execution planned
-├── privacy-relay/       ◻ planned: masked/private transaction communications
+├── calling/             ◐ active: trust foundation, internal service auth, Calling core (Part C §15–§19), application calling (§20–§25) and the Privacy Relay ingress / protected calls (Part D §26–§30) implemented; telephony execution planned
+├── privacy-relay/       ◐ active: Communication Contexts, reassignment / revocation, Privacy Relay Sessions, authorization and active-call enforcement (Part D §26–§30); Contact Vault (§31–§33) planned
 ├── messaging/           ◻ planned: unified messaging
 ├── telephony/           ◻ planned: SIP/PSTN telephony
 ├── numbering/           ◻ planned: Digital Communications Numbers

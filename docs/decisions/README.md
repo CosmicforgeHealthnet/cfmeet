@@ -13,3 +13,4 @@ Short, numbered records of significant architectural decisions.
 | [0007](0007-calling-media-provider-boundary.md) | Calling media provider boundary; LiveKit as an adapter; join-then-admit; stale re-entry (Part C §22–§24) | Accepted |
 | [0008](0008-calling-endpoints-ringing-and-answer-arbitration.md) | Endpoints, signaling credentials, ringing and per-participant answer arbitration (Part C §20) | Accepted |
 | [0009](0009-calling-call-control-idempotency-and-transfer.md) | Call control, idempotency, hold semantics and application transfer (Part C §21, §25) | Accepted |
+| [0010](0010-communication-context-and-privacy-relay-session-architecture.md) | Communication Context and Privacy Relay Session architecture; protected calls and active-call enforcement (Part D §26–§30) | Accepted |

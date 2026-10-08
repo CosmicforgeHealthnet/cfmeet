@@ -17,8 +17,8 @@ schema or contract exists for them until their implementation phase begins.
 
 | Service | Status | Owns | Must not |
 |---|---|---|---|
-| **Calling** (`services/calling`) | **Active.** Platform-consumer foundation, Calling core (Part C §15–§19: calls, participants, sessions, routes, legs, attempts, authorizations, events, quality, usage) and application calling (§20–§25: endpoints, invitations, answer claims, media permissions, private media bindings, command idempotency, transfers, verified media-provider evidence) implemented | • Calls<br>• Participants<br>• Sessions<br>• Routes<br>• Authorizations<br>• Call records<br>• Call quality<br>• Call-level usage<br>• Platform-consumer foundation *(implemented)*: tenants, applications, application environments, service accounts, API credentials and their scopes, limit policy, request-rate windows, communication principals | • read/write Privacy Relay private tables directly<br>• read/write Telephony private tables directly<br>• read Meeting Service tables<br>• receive ordinary plaintext protected contacts |
-| **Privacy Relay** (`services/privacy-relay`) | **Planned — not yet created** | • Communication Contexts<br>• Relay sessions<br>• Protected contact references<br>• Contact Vault metadata<br>• Relay authorization | • expose plaintext contacts to ordinary consumers<br>• become a general product/order database |
+| **Calling** (`services/calling`) | **Active.** Platform-consumer foundation, Calling core (Part C §15–§19: calls, participants, sessions, routes, legs, attempts, authorizations, events, quality, usage), application calling (§20–§25: endpoints, invitations, answer claims, media permissions, private media bindings, command idempotency, transfers, verified media-provider evidence) and Part D §26–§30 evidence (`call_privacy_authorizations`: the Privacy Relay decisions protected calls relied on; `call_privacy_enforcements`: received enforcement commands, deduplicated) implemented | • Calls<br>• Participants<br>• Sessions<br>• Routes<br>• Authorizations<br>• Call records<br>• Call quality<br>• Call-level usage<br>• Platform-consumer foundation *(implemented)*: tenants, applications, application environments, service accounts, API credentials and their scopes, limit policy, request-rate windows, communication principals | • read/write Privacy Relay private tables directly<br>• read/write Telephony private tables directly<br>• read Meeting Service tables<br>• receive ordinary plaintext protected contacts |
+| **Privacy Relay** (`services/privacy-relay`) | **Active (Part D §26–§30).** Communication Contexts, participant reassignment / revocation, Privacy Relay Sessions, relay authorization decisions, audit + outbox, command idempotency and durable enforcement jobs implemented ([ADR 0010](../decisions/0010-communication-context-and-privacy-relay-session-architecture.md)). **Contact Vault (§31–§33) planned — no contact storage exists.** | • Communication Contexts *(implemented)*<br>• Relay sessions *(implemented)*<br>• Relay authorization *(implemented)*<br>• Protected contact references *(planned)*<br>• Contact Vault metadata *(planned)* | • expose plaintext contacts to ordinary consumers<br>• become a general product/order database<br>• read Calling's principals, calls or credentials (it receives a signed delegated scope and CF Meet ids only)<br>• terminate calls itself (it asks Calling: `communication-authority.enforce`) |
 | **Telephony** (`services/telephony`) | **Planned — not yet created** | • Call legs<br>• Provider bindings<br>• Carrier events<br>• Telephony routes<br>• SIP/provider operational state | • independently decide whether a business user is authorized to call<br>• bypass Calling / Privacy Relay policy |
 | **Meeting Service** (`services/meeting-service`) | **Current** | • Meeting Spaces<br>• Conference Sessions<br>• Meeting participants<br>• Meeting-specific media control | • act as the universal backend for calls or telephony |
 | **Numbering** (future `services/numbering`) | **Future — not yet created; no code** | • Permanent public-number inventory<br>• Public-number assignment<br>• Public-number lifecycle | • be prematurely implemented as Part III relay-number logic |
@@ -39,7 +39,18 @@ Notes on the model:
   Authorizations; Privacy Relay owns Relay authorization. Each service keeps its own
   records in its own database; Calling obtains a relay decision through Privacy Relay's
   authenticated API (`communication.authorize`, received by Privacy Relay) — never by
-  reading its tables.
+  reading its tables — and stores only the decision's ids and versions it relied on
+  (`call_privacy_authorizations`). Privacy Relay never reads calls: when authority is
+  narrowed it sends Calling an enforcement command (`communication-authority.enforce`,
+  received by Calling), and Calling decides which of its calls match.
+* **Privacy Relay's tables** (from its migrations): `communication_contexts`,
+  `communication_context_participants`, `communication_context_channels`,
+  `communication_context_directions`, `privacy_relay_sessions`,
+  `privacy_relay_session_participants`, `privacy_relay_session_channels`,
+  `privacy_relay_session_directions`, `relay_authorization_decisions`,
+  `relay_audit_events`, `privacy_relay_outbox`, `privacy_relay_commands`,
+  `privacy_relay_enforcement_jobs`. None holds a telephone number, e-mail address,
+  SIP URI or other contact value.
 * **Routes and telephony routes are separate records.** Calling owns Routes; Telephony
   owns Telephony routes. Neither service reads the other's.
 * **Plaintext contacts.** The only path to a plaintext contact is Privacy Relay's
@@ -68,8 +79,8 @@ Table ownership is **derived from migrations**, so it cannot drift: the guard co
 every `CREATE TABLE` and SeaORM `X::Table` in `services/<name>/**/migration/**`. Two
 services may each own a table with the same name in their own databases (for example an
 outbox); that is not shared data. Planned services are already known to the guard
-through the service identities registered in `packages/service-auth` (`privacy-relay`,
-`telephony`), so Calling cannot read their database locations even before they exist;
+through the service identities registered in `packages/service-auth` (`telephony`), so
+Calling cannot read their database locations even before they exist;
 Numbering becomes known when it is registered or created.
 
 ## How to use another service's data

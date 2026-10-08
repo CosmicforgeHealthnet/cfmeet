@@ -19,7 +19,7 @@ APPLICATION SURFACES
 PLATFORM SERVICES
   services/meeting-service ✅
   services/calling ◐
-  services/privacy-relay ◻
+  services/privacy-relay ◐
   services/messaging ◻
   services/telephony ◻
   services/numbering ◻
@@ -49,8 +49,8 @@ INFRASTRUCTURE
 | Service | Path | Status / responsibility |
 |---|---|---|
 | Meeting & Conference Platform | `services/meeting-service` | **Current.** Meeting-domain control plane and Phase 2 backend. One deployable modular monolith during Phase 2. |
-| Realtime app-to-app calling | `services/calling` | **Active.** Platform consumer / credential / principal trust foundation (Part B §7–§10, [ADR 0003](../decisions/0003-calling-platform-trust-model.md)) and Calling core (Part C §15–§19, [ADR 0006](../decisions/0006-canonical-call-aggregate-and-state-machine.md)): canonical Call model, state machine, events, call API; application calling (Part C §20–§25, ADRs [0007](../decisions/0007-calling-media-provider-boundary.md), [0008](../decisions/0008-calling-endpoints-ringing-and-answer-arbitration.md), [0009](../decisions/0009-calling-call-control-idempotency-and-transfer.md)): endpoints, signaling, multi-device ringing, single-winner arbitration, app voice / video / group calls over Calling's own media provider boundary, call control and transfer. Telephony execution planned. |
-| Privacy Relay communications | `services/privacy-relay` | Planned |
+| Realtime app-to-app calling | `services/calling` | **Active.** Platform consumer / credential / principal trust foundation (Part B §7–§10, [ADR 0003](../decisions/0003-calling-platform-trust-model.md)) and Calling core (Part C §15–§19, [ADR 0006](../decisions/0006-canonical-call-aggregate-and-state-machine.md)): canonical Call model, state machine, events, call API; application calling (Part C §20–§25, ADRs [0007](../decisions/0007-calling-media-provider-boundary.md), [0008](../decisions/0008-calling-endpoints-ringing-and-answer-arbitration.md), [0009](../decisions/0009-calling-call-control-idempotency-and-transfer.md)): endpoints, signaling, multi-device ringing, single-winner arbitration, app voice / video / group calls over Calling's own media provider boundary, call control and transfer; Part D §26–§30: the public Privacy Relay ingress, PRIVACY_RELAY_V1 protected calls and transfers (fail closed) and the active-call enforcement endpoint. Telephony execution planned. |
+| Privacy Relay communications | `services/privacy-relay` | **Active.** Part D §26–§30 ([ADR 0010](../decisions/0010-communication-context-and-privacy-relay-session-architecture.md)): generic Communication Contexts (participants, channels, directions, validity, policy; reassignment and revocation without replacement), Privacy Relay Sessions that can only narrow their context, recorded communication authorization for Calling's protected calls, gap-free audit + outbox, durable active-call enforcement. Own database; internal API only (customers reach it through Calling). Contact Vault (§31–§33), relay numbers and telephony routes planned. |
 | Unified messaging | `services/messaging` | Planned |
 | SIP/PSTN telephony | `services/telephony` | Planned |
 | Digital Communications Numbers | `services/numbering` | Planned |
