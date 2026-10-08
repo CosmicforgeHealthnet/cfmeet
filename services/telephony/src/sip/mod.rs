@@ -1,0 +1,296 @@
+//! SIP / media edge boundary (Part E §41, §45–§53).
+//!
+//! [`SipMediaEdge`] is the only way Telephony drives the self-operated SIP / media edge:
+//! originate a SIP leg, accept / ring / reject an inbound dialog, hang up, bridge and
+//! unbridge (media anchored at the edge), hold / resume, send DTMF, redirect (the
+//! transfer primitive), query and list channels, health. Stack-specific control-plane
+//! types (the Asterisk ARI adapter in [`ari`]) never leave this directory; business code
+//! sees only these neutral types.
+//!
+//! Every edge channel is correlated to Telephony state through channel variables set at
+//! creation (correlation key / media join code); SIP Call-IDs and channel ids stay inside
+//! Telephony.
+
+pub mod ari;
+
+use std::{fmt, sync::Arc};
+
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use tokio::sync::broadcast;
+
+use crate::{
+    domain::{EndReason, Health, LegStatus},
+    providers::ExecutionNumber,
+};
+
+/// An edge channel reference (internal; never leaves Telephony).
+pub type ChannelRef = String;
+
+/// What the edge reports when it cannot perform an operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeError {
+    /// The edge is not configured / not reachable: public routes fail safely.
+    Unavailable,
+    /// The channel / bridge does not exist (anymore).
+    NotFound,
+    /// The edge refused the operation (bad state / argument).
+    Refused,
+    /// The request was sent but no answer arrived: outcome unknown.
+    Timeout,
+}
+
+pub type EdgeResult<T> = Result<T, EdgeError>;
+
+/// A SIP leg origination through a configured trunk.
+#[derive(Debug, Clone)]
+pub struct EdgeOriginate {
+    /// The edge's trunk / endpoint configuration name for the route (from the route's
+    /// SIP peer configuration reference; never a credential).
+    pub trunk: String,
+    pub destination: ExecutionNumber,
+    pub caller_identity: ExecutionNumber,
+    pub correlation_key: String,
+    pub ring_timeout_seconds: u32,
+}
+
+/// Inbound dialog details as the edge observed them.
+#[derive(Debug, Clone)]
+pub struct EdgeInbound {
+    /// Which configured peer / trunk the INVITE arrived on (validated peer only).
+    pub peer: Option<String>,
+    pub called: Option<ExecutionNumber>,
+    pub caller: Option<ExecutionNumber>,
+    /// A media join code presented by the application media side (internal peer).
+    pub media_join_code: Option<String>,
+}
+
+/// Normalized edge events.
+#[derive(Clone)]
+pub enum EdgeEventKind {
+    /// A new inbound dialog entered Telephony's control application.
+    Inbound(EdgeInbound),
+    /// An originated channel entered the control application (it answered).
+    OriginatedAnswered,
+    Ringing,
+    Answered,
+    Hangup {
+        reason: EndReason,
+        cause: u16,
+    },
+    Dtmf {
+        digit: char,
+    },
+    Held,
+    Unheld,
+    EnteredBridge {
+        bridge: String,
+    },
+    LeftBridge {
+        bridge: String,
+    },
+}
+
+impl fmt::Debug for EdgeEventKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EdgeEventKind::Inbound(_) => f.write_str("Inbound(..)"),
+            EdgeEventKind::OriginatedAnswered => f.write_str("OriginatedAnswered"),
+            EdgeEventKind::Ringing => f.write_str("Ringing"),
+            EdgeEventKind::Answered => f.write_str("Answered"),
+            EdgeEventKind::Hangup { reason, cause } => write!(f, "Hangup({reason}, {cause})"),
+            EdgeEventKind::Dtmf { .. } => f.write_str("Dtmf(<redacted>)"),
+            EdgeEventKind::Held => f.write_str("Held"),
+            EdgeEventKind::Unheld => f.write_str("Unheld"),
+            EdgeEventKind::EnteredBridge { .. } => f.write_str("EnteredBridge"),
+            EdgeEventKind::LeftBridge { .. } => f.write_str("LeftBridge"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EdgeEvent {
+    /// Stable, unique event id (dedupe key at the edge provider).
+    pub event_id: String,
+    pub channel: ChannelRef,
+    pub correlation_key: Option<String>,
+    pub kind: EdgeEventKind,
+    pub at: DateTime<Utc>,
+}
+
+/// A channel as the edge sees it now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChannelState {
+    Active(LegStatus),
+    Gone,
+    Unknown,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChannelSummary {
+    pub channel: ChannelRef,
+    pub correlation_key: Option<String>,
+    pub status: LegStatus,
+}
+
+/// The neutral SIP / media edge contract.
+#[async_trait]
+pub trait SipMediaEdge: Send + Sync {
+    fn name(&self) -> &'static str;
+
+    async fn health(&self) -> Health;
+
+    /// Originates a SIP leg; returns the edge channel reference once the edge accepted
+    /// the request. `Timeout` means the request may have been executed.
+    async fn originate(&self, request: &EdgeOriginate) -> EdgeResult<ChannelRef>;
+
+    /// Signals ringing to an inbound caller (no answer yet: no charge starts).
+    async fn ring(&self, channel: &ChannelRef) -> EdgeResult<()>;
+
+    /// Answers an inbound dialog.
+    async fn answer(&self, channel: &ChannelRef) -> EdgeResult<()>;
+
+    /// Hangs a channel up (reject an inbound dialog, terminate a leg).
+    async fn hangup(&self, channel: &ChannelRef) -> EdgeResult<()>;
+
+    async fn create_bridge(&self, name: &str) -> EdgeResult<String>;
+
+    async fn add_to_bridge(&self, bridge: &str, channel: &ChannelRef) -> EdgeResult<()>;
+
+    async fn remove_from_bridge(&self, bridge: &str, channel: &ChannelRef) -> EdgeResult<()>;
+
+    async fn destroy_bridge(&self, bridge: &str) -> EdgeResult<()>;
+
+    async fn hold(&self, channel: &ChannelRef) -> EdgeResult<()>;
+
+    async fn resume(&self, channel: &ChannelRef) -> EdgeResult<()>;
+
+    async fn send_dtmf(&self, channel: &ChannelRef, digits: &str) -> EdgeResult<()>;
+
+    /// Transfer primitive: moves a channel to another edge endpoint. Business transfer
+    /// permission is decided by Calling, never by the edge or a provider.
+    async fn redirect(&self, channel: &ChannelRef, endpoint: &str) -> EdgeResult<()>;
+
+    async fn query(&self, channel: &ChannelRef) -> ChannelState;
+
+    /// Finds the channel created for a correlation key (status read-back after an
+    /// unknown outcome).
+    async fn find_by_correlation(
+        &self,
+        correlation_key: &str,
+    ) -> EdgeResult<Option<ChannelSummary>>;
+
+    /// All live channels (reconciliation).
+    async fn list(&self) -> EdgeResult<Vec<ChannelSummary>>;
+
+    /// The edge event stream.
+    fn subscribe(&self) -> broadcast::Receiver<EdgeEvent>;
+}
+
+/// No SIP / media edge configured: every SIP operation fails safely (`Unavailable`);
+/// application RTC is unaffected (Calling serves it without Telephony).
+pub struct NoEdge {
+    events: broadcast::Sender<EdgeEvent>,
+}
+
+impl Default for NoEdge {
+    fn default() -> Self {
+        Self {
+            events: broadcast::channel(1).0,
+        }
+    }
+}
+
+impl NoEdge {
+    pub fn shared() -> Arc<dyn SipMediaEdge> {
+        Arc::new(Self::default())
+    }
+}
+
+#[async_trait]
+impl SipMediaEdge for NoEdge {
+    fn name(&self) -> &'static str {
+        "none"
+    }
+    async fn health(&self) -> Health {
+        Health::Unavailable
+    }
+    async fn originate(&self, _: &EdgeOriginate) -> EdgeResult<ChannelRef> {
+        Err(EdgeError::Unavailable)
+    }
+    async fn ring(&self, _: &ChannelRef) -> EdgeResult<()> {
+        Err(EdgeError::Unavailable)
+    }
+    async fn answer(&self, _: &ChannelRef) -> EdgeResult<()> {
+        Err(EdgeError::Unavailable)
+    }
+    async fn hangup(&self, _: &ChannelRef) -> EdgeResult<()> {
+        Err(EdgeError::Unavailable)
+    }
+    async fn create_bridge(&self, _: &str) -> EdgeResult<String> {
+        Err(EdgeError::Unavailable)
+    }
+    async fn add_to_bridge(&self, _: &str, _: &ChannelRef) -> EdgeResult<()> {
+        Err(EdgeError::Unavailable)
+    }
+    async fn remove_from_bridge(&self, _: &str, _: &ChannelRef) -> EdgeResult<()> {
+        Err(EdgeError::Unavailable)
+    }
+    async fn destroy_bridge(&self, _: &str) -> EdgeResult<()> {
+        Err(EdgeError::Unavailable)
+    }
+    async fn hold(&self, _: &ChannelRef) -> EdgeResult<()> {
+        Err(EdgeError::Unavailable)
+    }
+    async fn resume(&self, _: &ChannelRef) -> EdgeResult<()> {
+        Err(EdgeError::Unavailable)
+    }
+    async fn send_dtmf(&self, _: &ChannelRef, _: &str) -> EdgeResult<()> {
+        Err(EdgeError::Unavailable)
+    }
+    async fn redirect(&self, _: &ChannelRef, _: &str) -> EdgeResult<()> {
+        Err(EdgeError::Unavailable)
+    }
+    async fn query(&self, _: &ChannelRef) -> ChannelState {
+        ChannelState::Unknown
+    }
+    async fn find_by_correlation(&self, _: &str) -> EdgeResult<Option<ChannelSummary>> {
+        Err(EdgeError::Unavailable)
+    }
+    async fn list(&self) -> EdgeResult<Vec<ChannelSummary>> {
+        Err(EdgeError::Unavailable)
+    }
+    fn subscribe(&self) -> broadcast::Receiver<EdgeEvent> {
+        self.events.subscribe()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum EdgeConfigError {
+    #[error("{0} is required for the selected SIP / media edge")]
+    Missing(&'static str),
+    #[error("{0} is invalid: {1}")]
+    Invalid(&'static str, String),
+}
+
+/// Selects the SIP / media edge from the environment:
+/// `TELEPHONY_SIP_EDGE=none` (default) or `asterisk-ari` (see [`ari::AriSettings`]).
+pub fn edge_from_env(
+    environment: cf_service_auth::RuntimeEnvironment,
+) -> Result<Arc<dyn SipMediaEdge>, EdgeConfigError> {
+    match std::env::var("TELEPHONY_SIP_EDGE")
+        .ok()
+        .as_deref()
+        .map(str::trim)
+    {
+        None | Some("") | Some("none") => Ok(NoEdge::shared()),
+        Some("asterisk-ari") => {
+            let settings = ari::AriSettings::from_env(environment)?;
+            Ok(Arc::new(ari::AriEdge::start(settings)))
+        }
+        Some(_) => Err(EdgeConfigError::Invalid(
+            "TELEPHONY_SIP_EDGE",
+            "must be none or asterisk-ari".into(),
+        )),
+    }
+}

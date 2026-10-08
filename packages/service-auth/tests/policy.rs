@@ -124,7 +124,7 @@ fn i_permissions_come_only_from_the_receiver_policy() {
         .unwrap_err();
     assert_eq!(denied.service, ServiceId::calling());
     assert!(ctx
-        .require_permission(InternalPermission::CallLegExecute)
+        .require_permission(InternalPermission::TelephonyLegOriginate)
         .is_err());
 
     // A caller self-declaring permissions in its own (validly signed) token gains nothing:
@@ -134,7 +134,7 @@ fn i_permissions_come_only_from_the_receiver_policy() {
     for extra in [
         json!({"permissions": ["protected-contact.resolve-for-execution"]}),
         json!({"scope": "protected-contact.resolve-for-execution"}),
-        json!({"scp": ["call-leg.execute"]}),
+        json!({"scp": ["telephony-leg.originate"]}),
         json!({"roles": ["admin"]}),
     ] {
         let mut claims = standard_claims(

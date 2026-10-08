@@ -60,7 +60,7 @@ fn a_privacy_relay_to_calling_and_telephony_to_privacy_relay_are_accepted() {
     );
     assert_eq!(
         ctx.permissions().names(),
-        vec!["call-leg.execute", "call-leg-status.read"]
+        vec!["telephony-leg.originate", "telephony-status.read"]
     );
 }
 

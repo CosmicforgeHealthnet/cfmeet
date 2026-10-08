@@ -494,13 +494,13 @@ class RealRepository(unittest.TestCase):
             lambda r: append(r, "services/privacy-relay/src/relay_numbers/mod.rs", "\npub fn start_number_porting() {}\n"),
         )
 
-    def test_telephony_service_created_early(self):
+    def test_contact_vault_service_created_early(self):
         self.assertMutationFails(
             "FUTURE_SERVICE_IMPLEMENTED",
-            lambda r: write(r, "services/telephony/src/main.rs", "fn main() {}\n"),
+            lambda r: write(r, "services/contact-vault/src/main.rs", "fn main() {}\n"),
         )
 
-    def test_future_telephony_reading_the_privacy_relay_database(self):
+    def test_telephony_reading_the_privacy_relay_database(self):
         self.assertMutationFails(
             "CROSS_SERVICE_DATABASE_URL",
             lambda r: write(r, "services/telephony/.env.example", "PRIVACY_RELAY_DATABASE_URL=postgres://relay\n"),

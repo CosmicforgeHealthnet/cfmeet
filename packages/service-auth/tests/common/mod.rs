@@ -95,7 +95,7 @@ impl FleetKey {
 /// policies:
 /// * Privacy Relay trusts Calling (authorize, context read) and Telephony (context read,
 ///   protected-contact resolution);
-/// * Telephony trusts Calling (call-leg execute / status read);
+/// * Telephony trusts Calling (telephony-leg originate / status read);
 /// * Calling trusts Privacy Relay and Telephony (operational callbacks).
 pub struct Fleet {
     pub env: RuntimeEnvironment,
@@ -157,7 +157,7 @@ impl Fleet {
                 &[Grant {
                     issuer: &calling_id,
                     keys: vec![cj.clone()],
-                    permissions: &["call-leg.execute", "call-leg-status.read"],
+                    permissions: &["telephony-leg.originate", "telephony-status.read"],
                 }],
             ),
             &clock,

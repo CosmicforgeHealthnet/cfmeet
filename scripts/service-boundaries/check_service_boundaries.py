@@ -28,8 +28,8 @@ crosses another service's boundary:
   PLAINTEXT_CONTACT_FIELD         a plaintext telephone field in Calling's production code
   NUMBERING_IN_PRIVACY_RELAY      permanent Numbering concepts (porting, ownership,
                                   purchase, marketplace) inside Privacy Relay
-  FUTURE_SERVICE_IMPLEMENTED      services/telephony, services/numbering or
-                                  services/contact-vault exists before its phase
+  FUTURE_SERVICE_IMPLEMENTED      services/numbering or services/contact-vault exists
+                                  before its phase (Telephony is a Part E service)
 
 Table ownership is derived from each service's own migrations (raw ``CREATE TABLE`` and
 SeaORM ``X::Table`` idents), so it cannot drift from the schema. Known service names are
@@ -208,7 +208,7 @@ NUMBERING_RE = re.compile(
     r"number_ownership|purchase_number|number_purchase)[a-z_]*\b",
     re.I,
 )
-FUTURE_SERVICES = {"telephony", "numbering", "contact-vault"}
+FUTURE_SERVICES = {"numbering", "contact-vault"}
 PRIVACY_RELAY_DOMAIN_PREFIXES = (
     "protected_contact", "contact_fingerprint", "contact_access", "contact_verification",
     "contact_resolution", "relay_number", "relay_inbound",

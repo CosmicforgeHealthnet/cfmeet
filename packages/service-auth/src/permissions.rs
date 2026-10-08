@@ -36,12 +36,24 @@ pub enum InternalPermission {
     /// authorized call leg. Telephony only.
     #[serde(rename = "protected-contact.resolve-for-execution")]
     ProtectedContactResolveForExecution,
-    /// Telephony: execute an authorized public-network call leg.
-    #[serde(rename = "call-leg.execute")]
-    CallLegExecute,
-    /// Telephony: read the status of an authorized call leg.
-    #[serde(rename = "call-leg-status.read")]
-    CallLegStatusRead,
+    /// Telephony: originate one authorized, paid public-network call leg (Part E).
+    #[serde(rename = "telephony-leg.originate")]
+    TelephonyLegOriginate,
+    /// Telephony: terminate a public-network call leg.
+    #[serde(rename = "telephony-leg.terminate")]
+    TelephonyLegTerminate,
+    /// Telephony: hold a public-network call leg.
+    #[serde(rename = "telephony-leg.hold")]
+    TelephonyLegHold,
+    /// Telephony: resume a held public-network call leg.
+    #[serde(rename = "telephony-leg.resume")]
+    TelephonyLegResume,
+    /// Telephony: create and end bridges between legs / application media.
+    #[serde(rename = "telephony-bridge.manage")]
+    TelephonyBridgeManage,
+    /// Telephony: read normalized leg status and route availability.
+    #[serde(rename = "telephony-status.read")]
+    TelephonyStatusRead,
     /// Calling: receive tightly scoped operational callbacks.
     #[serde(rename = "operational-callback.deliver")]
     OperationalCallbackDeliver,
@@ -76,6 +88,16 @@ pub enum InternalPermission {
     /// resolved relay mapping and get its ContactReference (Part D §35). Telephony only.
     #[serde(rename = "protected-contact.protect-inbound")]
     ProtectedContactProtectInbound,
+    /// Calling: apply a normalized Telephony execution event to the canonical Call (Part E).
+    #[serde(rename = "telephony-event.apply")]
+    CallsTelephonyEventApply,
+    /// Calling: apply a normalized Telephony reconciliation result (Part E §50).
+    #[serde(rename = "telephony-reconciliation.apply")]
+    CallsTelephonyReconciliationApply,
+    /// Calling: offer an authenticated inbound public-network call with its resolved
+    /// relay mapping and protected caller reference (Part E §45).
+    #[serde(rename = "telephony-inbound.offer")]
+    CallsTelephonyInboundOffer,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -117,20 +139,52 @@ pub const REGISTRY: &[PermissionDefinition] = &[
             "Resolve a protected contact reference for execution of a specific authorized call leg",
     },
     PermissionDefinition {
-        permission: InternalPermission::CallLegExecute,
-        name: "call-leg.execute",
+        permission: InternalPermission::TelephonyLegOriginate,
+        name: "telephony-leg.originate",
         receiver: services::TELEPHONY,
         grantable_to: &[services::CALLING],
         sensitive: false,
-        description: "Execute an authorized public-network call leg",
+        description: "Originate one authorized, paid public-network call leg (with authorization, grant and spend proof)",
     },
     PermissionDefinition {
-        permission: InternalPermission::CallLegStatusRead,
-        name: "call-leg-status.read",
+        permission: InternalPermission::TelephonyLegTerminate,
+        name: "telephony-leg.terminate",
         receiver: services::TELEPHONY,
         grantable_to: &[services::CALLING],
         sensitive: false,
-        description: "Read the status of an authorized call leg",
+        description: "Terminate a public-network call leg",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::TelephonyLegHold,
+        name: "telephony-leg.hold",
+        receiver: services::TELEPHONY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Hold a public-network call leg",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::TelephonyLegResume,
+        name: "telephony-leg.resume",
+        receiver: services::TELEPHONY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Resume a held public-network call leg",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::TelephonyBridgeManage,
+        name: "telephony-bridge.manage",
+        receiver: services::TELEPHONY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Create and end bridges between public legs and application media",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::TelephonyStatusRead,
+        name: "telephony-status.read",
+        receiver: services::TELEPHONY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Read normalized leg status and route availability (no provider data)",
     },
     PermissionDefinition {
         permission: InternalPermission::OperationalCallbackDeliver,
@@ -204,6 +258,30 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: true,
         description: "Protect an inbound caller's presented number in the scope of a resolved relay mapping (returns a ContactReference only)",
     },
+    PermissionDefinition {
+        permission: InternalPermission::CallsTelephonyEventApply,
+        name: "telephony-event.apply",
+        receiver: services::CALLING,
+        grantable_to: &[services::TELEPHONY],
+        sensitive: false,
+        description: "Apply a normalized Telephony execution event to the canonical Call (Calling validates it)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CallsTelephonyReconciliationApply,
+        name: "telephony-reconciliation.apply",
+        receiver: services::CALLING,
+        grantable_to: &[services::TELEPHONY],
+        sensitive: false,
+        description: "Apply a normalized Telephony reconciliation result (Calling validates it)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CallsTelephonyInboundOffer,
+        name: "telephony-inbound.offer",
+        receiver: services::CALLING,
+        grantable_to: &[services::TELEPHONY],
+        sensitive: false,
+        description: "Offer an authenticated inbound public-network call (resolved relay mapping and protected caller reference only)",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -214,8 +292,12 @@ impl InternalPermission {
         InternalPermission::CommunicationAuthorize,
         InternalPermission::CommunicationContextRead,
         InternalPermission::ProtectedContactResolveForExecution,
-        InternalPermission::CallLegExecute,
-        InternalPermission::CallLegStatusRead,
+        InternalPermission::TelephonyLegOriginate,
+        InternalPermission::TelephonyLegTerminate,
+        InternalPermission::TelephonyLegHold,
+        InternalPermission::TelephonyLegResume,
+        InternalPermission::TelephonyBridgeManage,
+        InternalPermission::TelephonyStatusRead,
         InternalPermission::OperationalCallbackDeliver,
         InternalPermission::CommunicationContextWrite,
         InternalPermission::RelaySessionRead,
@@ -225,6 +307,9 @@ impl InternalPermission {
         InternalPermission::RelayNumberAssign,
         InternalPermission::RelayNumberResolveInbound,
         InternalPermission::ProtectedContactProtectInbound,
+        InternalPermission::CallsTelephonyEventApply,
+        InternalPermission::CallsTelephonyReconciliationApply,
+        InternalPermission::CallsTelephonyInboundOffer,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -364,6 +449,42 @@ mod tests {
         assert_eq!(d.receiver, services::CALLING);
         assert_eq!(d.grantable_to, &[services::PRIVACY_RELAY]);
         assert!(!d.sensitive);
+    }
+
+    #[test]
+    fn telephony_flows_are_least_privilege() {
+        use InternalPermission::*;
+        // Calling -> Telephony: commands and status, Calling only.
+        for p in [
+            TelephonyLegOriginate,
+            TelephonyLegTerminate,
+            TelephonyLegHold,
+            TelephonyLegResume,
+            TelephonyBridgeManage,
+            TelephonyStatusRead,
+        ] {
+            let d = p.definition();
+            assert_eq!(
+                (d.receiver, d.grantable_to),
+                (services::TELEPHONY, &[services::CALLING][..]),
+                "{}",
+                d.name
+            );
+        }
+        // Telephony -> Calling: normalized facts only, Telephony only.
+        for p in [
+            CallsTelephonyEventApply,
+            CallsTelephonyReconciliationApply,
+            CallsTelephonyInboundOffer,
+        ] {
+            let d = p.definition();
+            assert_eq!(
+                (d.receiver, d.grantable_to),
+                (services::CALLING, &[services::TELEPHONY][..]),
+                "{}",
+                d.name
+            );
+        }
     }
 
     #[test]
