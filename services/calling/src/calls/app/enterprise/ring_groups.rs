@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use super::{
     context_of, exec, record_step, router, update_context, ContextRow, Continuation,
-    EnterprisePhase,
+    EnterprisePhase, RouteAction,
 };
 use crate::{
     calls::{
@@ -31,6 +31,7 @@ use crate::{
     enterprise::{
         destinations::{Destination, DestinationType},
         extensions,
+        forwarding::ForwardingCondition,
         policy::{effective_policy, EffectivePolicy},
         ring_groups::{self, RingGroupRow, RingStrategy},
     },
@@ -43,7 +44,7 @@ type Rung = (calls::Model, Vec<call_invitations::Model>);
 impl AppCallService {
     /// The members of `group` in order, resolved to ACTIVE principals (an extension
     /// member to its principal destination); unusable members are skipped.
-    async fn group_members(
+    pub(crate) async fn group_members(
         &self,
         txn: &DatabaseTransaction,
         call: &calls::Model,
@@ -336,6 +337,10 @@ impl AppCallService {
                 .await
                 .map(Some);
         }
+        if context.phase == EnterprisePhase::Ringing.as_str() {
+            // One principal rang: its BUSY / NO_ANSWER forwarding, if any.
+            return self.principal_forward_in(txn, cmd, call, &context).await;
+        }
         let Some(group_id) = context.ring_group_id else {
             return Ok(None);
         };
@@ -393,6 +398,78 @@ impl AppCallService {
         let rung = self
             .group_fallback(txn, cmd, call, &leg, &context, &policy, &group)
             .await?;
+        self.classify(txn, rung).await
+    }
+
+    /// After a principal's ring offers all ended unanswered: BUSY (every offer declined) or
+    /// NO_ANSWER forwarding of that principal takes the SAME Call (hop-budgeted, loop-safe).
+    async fn principal_forward_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        context: &ContextRow,
+    ) -> CallResult<Option<Continuation>> {
+        let Some(destination) = context.destination().filter(|d| d.kind.is_principal()) else {
+            return Ok(None);
+        };
+        let statuses = super::strings_in(
+            txn,
+            "SELECT status FROM call_invitations WHERE call_id = $1 AND principal_id = $2 \
+               AND purpose = 'CALL'",
+            vec![call.id.into(), destination.id.into()],
+        )
+        .await?;
+        if statuses.is_empty() {
+            return Ok(None);
+        }
+        let condition = if statuses.iter().all(|s| s == "DECLINED") {
+            ForwardingCondition::Busy
+        } else {
+            ForwardingCondition::NoAnswer
+        };
+        let scope = scope_of(call);
+        let policy = effective_policy(txn, scope, context.policy_id)
+            .await
+            .map_err(super::enterprise_error)?;
+        let Some(action) = router::resolve_forward(
+            txn,
+            &self.principals,
+            scope,
+            &policy,
+            context,
+            destination.id,
+            condition,
+            self.calls.now(),
+        )
+        .await?
+        else {
+            return Ok(None);
+        };
+        if let RouteAction::NoRoute {
+            reason,
+            destination,
+        } = action
+        {
+            // A forward that would loop / exceed the budget: the ordinary outcome
+            // (NO_ANSWER / DECLINED) applies, with the evidence.
+            record_step(
+                txn,
+                call,
+                "NO_ROUTE",
+                destination,
+                reason,
+                None,
+                self.calls.now(),
+            )
+            .await?;
+            return Ok(None);
+        }
+        let context = context_of(txn, call.id).await?.unwrap_or(context.clone());
+        let leg = self.rtc_leg(txn, call).await?;
+        let rung =
+            Box::pin(self.apply_route_action(txn, cmd, call, &leg, &context, &policy, action))
+                .await?;
         self.classify(txn, rung).await
     }
 

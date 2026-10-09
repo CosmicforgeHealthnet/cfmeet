@@ -1,0 +1,19 @@
+{
+  "name": "Office",
+  "timezone": "Africa/Lagos",
+  "openDestination": {
+    "type": "QUEUE",
+    "id": "8b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b"
+  },
+  "closedDestination": {
+    "type": "IVR",
+    "id": "9b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b"
+  },
+  "weeklyWindows": [
+    {
+      "dayOfWeek": "MONDAY",
+      "start": "9am",
+      "end": "25:00"
+    }
+  ]
+}

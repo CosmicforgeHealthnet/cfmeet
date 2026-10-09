@@ -82,16 +82,21 @@ const CALL_TABLES: &[&str] = &[
 /// Part F enterprise calling and continuity (Calling-owned, ADR 0018).
 const ENTERPRISE_TABLES: &[&str] = &[
     "enterprise_admin_audit",
+    "enterprise_business_hours",
+    "enterprise_business_hours_exceptions",
+    "enterprise_business_hours_windows",
     "enterprise_call_contexts",
     "enterprise_call_policies",
     "enterprise_call_queues",
     "enterprise_department_members",
     "enterprise_departments",
     "enterprise_extensions",
+    "enterprise_forwarding_rules",
     "enterprise_ivr_flow_destinations",
     "enterprise_ivr_flow_versions",
     "enterprise_ivr_flows",
     "enterprise_ivr_sessions",
+    "enterprise_public_contacts",
     "enterprise_queue_entries",
     "enterprise_queue_members",
     "enterprise_queue_offers",
@@ -726,10 +731,7 @@ async fn enterprise_columns_hold_no_contact_secret_dtmf_or_provider_data() {
     .await;
     assert!(!columns.is_empty());
     // Opaque references to records other services own (never contact values).
-    const OPAQUE_REFERENCES: &[&str] = &[
-        "enterprise_forwarding_rules.target_contact_reference",
-        "enterprise_forwarding_rules.privacy_relay_session_ref",
-    ];
+    const OPAQUE_REFERENCES: &[&str] = &["enterprise_public_contacts.contact_reference"];
     for column in &columns {
         if OPAQUE_REFERENCES.contains(&column.as_str()) {
             continue;

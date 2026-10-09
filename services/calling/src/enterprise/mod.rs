@@ -19,6 +19,8 @@ pub mod audit;
 pub mod departments;
 pub mod destinations;
 pub mod extensions;
+pub mod forwarding;
+pub mod hours;
 pub mod http;
 pub mod ivr;
 pub mod policy;

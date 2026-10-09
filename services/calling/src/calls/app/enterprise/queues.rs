@@ -701,7 +701,17 @@ impl AppCallService {
     /// Post-commit nudge of an enterprise Call: a queued Call's queue is dispatched now
     /// (the worker would otherwise pick it up on its next pass).
     pub(crate) async fn enterprise_after_commit(&self, call_id: Uuid) {
-        let queue = match context_of(self.db(), call_id).await {
+        let context = context_of(self.db(), call_id).await;
+        if let Ok(Some(c)) = &context {
+            if c.phase == EnterprisePhase::Forwarded.as_str() {
+                // A public forward waits for its Part E gates (the worker retries).
+                if let Err(error) = self.execute_public_forward(call_id).await {
+                    tracing::warn!(%call_id, %error, "public forward pending; the worker retries");
+                }
+                return;
+            }
+        }
+        let queue = match context {
             Ok(Some(context)) if context.phase == EnterprisePhase::Queued.as_str() => {
                 match context.queue_entry_id {
                     Some(id) => entry(self.db(), id, false)
@@ -844,7 +854,7 @@ impl AppCallService {
     /// Available agents of the queue, least recently offered first: ACTIVE members whose
     /// principal is ACTIVE, without a pending offer (of any queue) and not on an answered
     /// Call.
-    async fn available_agents(
+    pub(crate) async fn available_agents(
         &self,
         txn: &DatabaseTransaction,
         queue_id: Uuid,

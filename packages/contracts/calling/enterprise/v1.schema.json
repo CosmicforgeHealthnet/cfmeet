@@ -123,6 +123,45 @@
     },
     {
       "$ref": "#/$defs/SipDeviceList"
+    },
+    {
+      "$ref": "#/$defs/CreateBusinessHoursRequest"
+    },
+    {
+      "$ref": "#/$defs/ReplaceBusinessHoursRequest"
+    },
+    {
+      "$ref": "#/$defs/BusinessHours"
+    },
+    {
+      "$ref": "#/$defs/BusinessHoursList"
+    },
+    {
+      "$ref": "#/$defs/EvaluateBusinessHoursRequest"
+    },
+    {
+      "$ref": "#/$defs/BusinessHoursEvaluation"
+    },
+    {
+      "$ref": "#/$defs/CreatePublicContactRequest"
+    },
+    {
+      "$ref": "#/$defs/PublicContact"
+    },
+    {
+      "$ref": "#/$defs/PublicContactList"
+    },
+    {
+      "$ref": "#/$defs/CreateForwardingRuleRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdateForwardingRuleRequest"
+    },
+    {
+      "$ref": "#/$defs/ForwardingRule"
+    },
+    {
+      "$ref": "#/$defs/ForwardingRuleList"
     }
   ],
   "$defs": {
@@ -752,7 +791,7 @@
       }
     },
     "DestinationType": {
-      "description": "Kinds of enterprise destination. PUBLIC_CONTACT is an opaque Privacy Relay ContactReference (forwarding only), never a telephone number.",
+      "description": "Kinds of enterprise destination. SCHEDULE is a business-hours schedule (its OPEN / CLOSED route). PUBLIC_CONTACT is a registered public contact (an opaque Privacy Relay ContactReference; forwarding and closed-hours routes only), never a telephone number.",
       "type": "string",
       "enum": [
         "ENTERPRISE_MEMBER",
@@ -2422,6 +2461,689 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/SipDevice"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "DayOfWeek": {
+      "description": "ISO day of the week.",
+      "type": "string",
+      "enum": [
+        "MONDAY",
+        "TUESDAY",
+        "WEDNESDAY",
+        "THURSDAY",
+        "FRIDAY",
+        "SATURDAY",
+        "SUNDAY"
+      ]
+    },
+    "WeeklyWindow": {
+      "description": "A weekly open window in the schedule's local time. An end before the start crosses midnight into the next day (FRIDAY 22:00-02:00). Windows never overlap anywhere on the week.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dayOfWeek",
+        "start",
+        "end"
+      ],
+      "properties": {
+        "dayOfWeek": {
+          "$ref": "#/$defs/DayOfWeek"
+        },
+        "start": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "description": "Local wall-clock time HH:MM."
+        },
+        "end": {
+          "type": "string",
+          "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+          "description": "Local wall-clock time HH:MM (24:00 = end of day)."
+        }
+      }
+    },
+    "DayWindow": {
+      "description": "An open window inside one exception date (start before end).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "description": "Local wall-clock time HH:MM."
+        },
+        "end": {
+          "type": "string",
+          "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+          "description": "Local wall-clock time HH:MM (24:00 = end of day)."
+        }
+      }
+    },
+    "HoursExceptionKind": {
+      "description": "CLOSED: closed the whole local date. CUSTOM_HOURS: open only in its windows.",
+      "type": "string",
+      "enum": [
+        "CLOSED",
+        "CUSTOM_HOURS"
+      ]
+    },
+    "HoursException": {
+      "description": "An exception date (holiday, special hours). It governs its whole local date: the date's weekly windows, and a previous day's window crossing midnight, do not apply on it. No global holiday calendar is used.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "date",
+        "kind"
+      ],
+      "properties": {
+        "date": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "Local date YYYY-MM-DD."
+        },
+        "kind": {
+          "$ref": "#/$defs/HoursExceptionKind"
+        },
+        "windows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DayWindow"
+          },
+          "maxItems": 6
+        }
+      }
+    },
+    "CreateBusinessHoursRequest": {
+      "description": "Body of POST /v1/enterprise/business-hours.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "timezone",
+        "openDestination",
+        "closedDestination",
+        "weeklyWindows"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$",
+          "description": "An IANA time-zone identifier (e.g. Africa/Lagos, Europe/London). Never a raw UTC offset: DST and historical offset changes come from the IANA database."
+        },
+        "openDestination": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            }
+          ],
+          "description": "The OPEN route: an ENTERPRISE_MEMBER, PRINCIPAL, EXTENSION, RING_GROUP, QUEUE or IVR of the same scope."
+        },
+        "closedDestination": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            }
+          ],
+          "description": "The CLOSED route: an ENTERPRISE_MEMBER, PRINCIPAL, EXTENSION, RING_GROUP, QUEUE, IVR, VOICEMAIL or (where the enterprise policy permits public forwarding) a PUBLIC_CONTACT of the same scope."
+        },
+        "weeklyWindows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WeeklyWindow"
+          },
+          "maxItems": 42
+        },
+        "exceptions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HoursException"
+          },
+          "maxItems": 400
+        }
+      }
+    },
+    "ReplaceBusinessHoursRequest": {
+      "description": "Body of PUT /v1/enterprise/business-hours/{business_hours_id}: replaces the whole schedule atomically (a Call already routed keeps its route).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "name",
+        "timezone",
+        "openDestination",
+        "closedDestination",
+        "weeklyWindows"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$",
+          "description": "An IANA time-zone identifier (e.g. Africa/Lagos, Europe/London). Never a raw UTC offset: DST and historical offset changes come from the IANA database."
+        },
+        "openDestination": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            }
+          ],
+          "description": "The OPEN route: an ENTERPRISE_MEMBER, PRINCIPAL, EXTENSION, RING_GROUP, QUEUE or IVR of the same scope."
+        },
+        "closedDestination": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            }
+          ],
+          "description": "The CLOSED route: an ENTERPRISE_MEMBER, PRINCIPAL, EXTENSION, RING_GROUP, QUEUE, IVR, VOICEMAIL or (where the enterprise policy permits public forwarding) a PUBLIC_CONTACT of the same scope."
+        },
+        "weeklyWindows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WeeklyWindow"
+          },
+          "maxItems": 42
+        },
+        "exceptions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HoursException"
+          },
+          "maxItems": 400
+        }
+      }
+    },
+    "BusinessHours": {
+      "description": "A business-hours schedule.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "businessHoursId",
+        "name",
+        "timezone",
+        "openDestination",
+        "closedDestination",
+        "weeklyWindows",
+        "exceptions",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "businessHoursId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$",
+          "description": "An IANA time-zone identifier (e.g. Africa/Lagos, Europe/London). Never a raw UTC offset: DST and historical offset changes come from the IANA database."
+        },
+        "openDestination": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "closedDestination": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "weeklyWindows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WeeklyWindow"
+          },
+          "maxItems": 42
+        },
+        "exceptions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HoursException"
+          },
+          "maxItems": 400
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "BusinessHoursList": {
+      "description": "A page of business-hours schedules.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "businessHours",
+        "nextCursor"
+      ],
+      "properties": {
+        "businessHours": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BusinessHours"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "EvaluateBusinessHoursRequest": {
+      "description": "Body of POST /v1/enterprise/business-hours/{business_hours_id}/evaluation: the instant to evaluate (now when absent).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "HoursStatus": {
+      "description": "Whether the schedule is open.",
+      "type": "string",
+      "enum": [
+        "OPEN",
+        "CLOSED"
+      ]
+    },
+    "HoursReason": {
+      "description": "Why (bounded).",
+      "type": "string",
+      "enum": [
+        "WEEKLY_WINDOW",
+        "OUTSIDE_WEEKLY_WINDOWS",
+        "EXCEPTION_CLOSED",
+        "EXCEPTION_HOURS",
+        "OUTSIDE_EXCEPTION_HOURS"
+      ]
+    },
+    "BusinessHoursEvaluation": {
+      "description": "A deterministic evaluation: (schedule version, instant) -> OPEN / CLOSED, the local date / time / UTC offset it used and the route it selects.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "businessHoursId",
+        "version",
+        "at",
+        "status",
+        "reason",
+        "timezone",
+        "localDate",
+        "localTime",
+        "utcOffset",
+        "destination"
+      ],
+      "properties": {
+        "businessHoursId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "$ref": "#/$defs/HoursStatus"
+        },
+        "reason": {
+          "$ref": "#/$defs/HoursReason"
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$",
+          "description": "An IANA time-zone identifier (e.g. Africa/Lagos, Europe/London). Never a raw UTC offset: DST and historical offset changes come from the IANA database."
+        },
+        "localDate": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "Local date YYYY-MM-DD."
+        },
+        "localTime": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "description": "Local wall-clock time HH:MM."
+        },
+        "utcOffset": {
+          "type": "string",
+          "pattern": "^[+-][0-9]{2}:[0-9]{2}$"
+        },
+        "destination": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "CreatePublicContactRequest": {
+      "description": "Body of POST /v1/enterprise/public-contacts: registers a PROTECTED public destination for forwarding / closed routes — an opaque Privacy Relay ContactReference and the Privacy Relay Session whose authority covers it. Never a telephone number. Requires an enterprise policy that permits public forwarding.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "contactReference",
+        "privacyRelaySessionId"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "contactReference": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "privacyRelaySessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "PublicContact": {
+      "description": "A registered protected public destination (the PUBLIC_CONTACT destination type names it). Every use still passes every Part E gate: enterprise policy, public route flags, Privacy Relay's current authority, verified contact, destination country, spend / concurrency limits and an available Telephony route.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "publicContactId",
+        "label",
+        "contactReference",
+        "privacyRelaySessionId",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "publicContactId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "contactReference": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "privacyRelaySessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "PublicContactList": {
+      "description": "A page of public contacts.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "publicContacts",
+        "nextCursor"
+      ],
+      "properties": {
+        "publicContacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PublicContact"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "ForwardingCondition": {
+      "description": "ALWAYS: before ringing. BUSY: every ring offer to the principal was declined. NO_ANSWER: the offers expired. UNAVAILABLE: the principal has no eligible endpoint.",
+      "type": "string",
+      "enum": [
+        "ALWAYS",
+        "BUSY",
+        "NO_ANSWER",
+        "UNAVAILABLE"
+      ]
+    },
+    "CreateForwardingRuleRequest": {
+      "description": "Body of POST /v1/enterprise/forwarding-rules. At most one ACTIVE rule per principal and condition; an ALWAYS rule that would close a cycle of principals is refused (routing also stops loops with its visited set and hop budget).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "principalId",
+        "condition",
+        "destination"
+      ],
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "condition": {
+          "$ref": "#/$defs/ForwardingCondition"
+        },
+        "destination": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            }
+          ],
+          "description": "An ENTERPRISE_MEMBER, PRINCIPAL (not the owner), EXTENSION, RING_GROUP, QUEUE, IVR, VOICEMAIL or PUBLIC_CONTACT of the same scope. Never a number."
+        }
+      }
+    },
+    "UpdateForwardingRuleRequest": {
+      "description": "Body of PATCH /v1/enterprise/forwarding-rules/{forwarding_rule_id}: a new target (principal and condition are fixed).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "destination"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "destination": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            }
+          ],
+          "description": "An ENTERPRISE_MEMBER, PRINCIPAL (not the owner), EXTENSION, RING_GROUP, QUEUE, IVR, VOICEMAIL or PUBLIC_CONTACT of the same scope. Never a number."
+        }
+      }
+    },
+    "ForwardingRule": {
+      "description": "A principal's typed call forwarding.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "forwardingRuleId",
+        "principalId",
+        "condition",
+        "destination",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "forwardingRuleId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "condition": {
+          "$ref": "#/$defs/ForwardingCondition"
+        },
+        "destination": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "ForwardingRuleList": {
+      "description": "A page of forwarding rules.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "forwardingRules",
+        "nextCursor"
+      ],
+      "properties": {
+        "forwardingRules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ForwardingRule"
           },
           "maxItems": 100
         },

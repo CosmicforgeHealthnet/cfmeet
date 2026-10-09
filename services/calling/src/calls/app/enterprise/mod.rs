@@ -15,6 +15,7 @@
 //! snapshot, the policy version relied on, the current destination, the hop budget and the
 //! visited set; `enterprise_routing_steps` is the append-only routing evidence.
 
+mod forward;
 mod ivr;
 mod queues;
 mod ring_groups;
@@ -54,6 +55,7 @@ use crate::{
     enterprise::{
         destinations::{Destination, DestinationType},
         extensions,
+        forwarding::ForwardingCondition,
         policy::{effective_policy, EffectivePolicy},
         EnterpriseError,
     },
@@ -178,10 +180,48 @@ pub(crate) async fn context_of<C: ConnectionTrait>(
     .await?)
 }
 
+/// The first column of every row (text).
+pub(crate) async fn strings_in<C: ConnectionTrait>(
+    db: &C,
+    sql: &str,
+    values: Vec<sea_orm::Value>,
+) -> CallResult<Vec<String>> {
+    db.query_all(stmt(sql, values))
+        .await?
+        .into_iter()
+        .map(|r| r.try_get_by_index::<String>(0).map_err(Into::into))
+        .collect()
+}
+
 /// Appends one routing-evidence step.
 pub(crate) async fn record_step<C: ConnectionTrait>(
     db: &C,
     call: &calls::Model,
+    decision: &'static str,
+    destination: Option<Destination>,
+    reason: &'static str,
+    answer_group: Option<Uuid>,
+    at: chrono::DateTime<chrono::Utc>,
+) -> CallResult<()> {
+    record_step_of(
+        db,
+        call.id,
+        super::scope_of(call),
+        decision,
+        destination,
+        reason,
+        answer_group,
+        at,
+    )
+    .await
+}
+
+/// [`record_step`] by Call id and scope (the router, which holds no Call model).
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn record_step_of<C: ConnectionTrait>(
+    db: &C,
+    call_id: Uuid,
+    scope: CallScope,
     decision: &'static str,
     destination: Option<Destination>,
     reason: &'static str,
@@ -195,10 +235,10 @@ pub(crate) async fn record_step<C: ConnectionTrait>(
          decided_at) SELECT $1, COALESCE(MAX(step_number), 0) + 1, $2, $3, $4, $5, $6, $7, $8, $9, $10 \
          FROM enterprise_routing_steps WHERE call_id = $1",
         vec![
-            call.id.into(),
-            call.tenant_id.into(),
-            call.application_id.into(),
-            call.environment_id.into(),
+            call_id.into(),
+            scope.tenant_id().as_uuid().into(),
+            scope.application_id().as_uuid().into(),
+            scope.environment_id().as_uuid().into(),
             decision.into(),
             destination.map(|d| d.kind.as_str()).into(),
             destination.map(|d| d.id).into(),
@@ -703,7 +743,9 @@ impl AppCallService {
         call: &calls::Model,
     ) -> CallResult<bool> {
         Ok(context_of(db, call.id).await?.is_some_and(|c| {
-            c.phase == EnterprisePhase::Queued.as_str() || c.phase == EnterprisePhase::Ivr.as_str()
+            c.phase == EnterprisePhase::Queued.as_str()
+                || c.phase == EnterprisePhase::Ivr.as_str()
+                || c.phase == EnterprisePhase::Forwarded.as_str()
         }))
     }
 
@@ -743,6 +785,39 @@ impl AppCallService {
                     )
                     .await?;
                 if endpoints.is_empty() {
+                    // The principal's UNAVAILABLE forwarding, if any, takes the SAME Call.
+                    let fresh = context_of(txn, call.id).await?.unwrap_or(context.clone());
+                    if let Some(action) = router::resolve_forward(
+                        txn,
+                        &self.principals,
+                        super::scope_of(call),
+                        policy,
+                        &fresh,
+                        principal.id().as_uuid(),
+                        ForwardingCondition::Unavailable,
+                        now,
+                    )
+                    .await?
+                    {
+                        match action {
+                            // A forward that would loop / exceed the budget: evidence, then
+                            // the ordinary TARGET_UNREACHABLE outcome below.
+                            RouteAction::NoRoute {
+                                reason,
+                                destination,
+                            } => {
+                                record_step(txn, call, "NO_ROUTE", destination, reason, None, now)
+                                    .await?;
+                            }
+                            action => {
+                                let fresh = context_of(txn, call.id).await?.unwrap_or(fresh);
+                                return Box::pin(self.apply_route_action(
+                                    txn, cmd, call, leg, &fresh, policy, action,
+                                ))
+                                .await;
+                            }
+                        }
+                    }
                     record_step(
                         txn,
                         call,
@@ -820,6 +895,10 @@ impl AppCallService {
             }
             RouteAction::EnterQueue { queue, destination } => {
                 Box::pin(self.enter_queue(txn, cmd, call, leg, context, policy, queue, destination))
+                    .await
+            }
+            RouteAction::ForwardPublic { destination } => {
+                self.begin_public_forward_in(txn, cmd, call, context, destination)
                     .await
             }
             RouteAction::NoRoute {

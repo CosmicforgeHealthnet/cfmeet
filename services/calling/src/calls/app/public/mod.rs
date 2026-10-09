@@ -35,6 +35,7 @@ pub use callback::CreateCallbackRelay;
 pub use events::EventDisposition;
 pub use inbound::InboundOffer;
 pub use outbound::CreatePublicCall;
+pub(crate) use outbound::{enqueue_originate_in, live_telecom_allowed, OriginateSpec};
 
 use super::AppCallService;
 use crate::{

@@ -1,0 +1,40 @@
+{
+  "name": "Lagos office",
+  "timezone": "Africa/Lagos",
+  "openDestination": {
+    "type": "RING_GROUP",
+    "id": "8b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b"
+  },
+  "closedDestination": {
+    "type": "IVR",
+    "id": "9b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b"
+  },
+  "weeklyWindows": [
+    {
+      "dayOfWeek": "MONDAY",
+      "start": "09:00",
+      "end": "17:00"
+    },
+    {
+      "dayOfWeek": "FRIDAY",
+      "start": "22:00",
+      "end": "02:00"
+    }
+  ],
+  "exceptions": [
+    {
+      "date": "2031-12-25",
+      "kind": "CLOSED"
+    },
+    {
+      "date": "2031-12-24",
+      "kind": "CUSTOM_HOURS",
+      "windows": [
+        {
+          "start": "09:00",
+          "end": "12:00"
+        }
+      ]
+    }
+  ]
+}

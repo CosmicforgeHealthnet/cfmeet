@@ -32,6 +32,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1.11", features = ["v4", "serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+# IANA time zones for business hours (Part F §58): never hand-written DST arithmetic.
+chrono-tz = { version = "0.10", default-features = false, features = ["std"] }
 thiserror = "2.0"
 anyhow = "1.0"
 dotenvy = "0.15"

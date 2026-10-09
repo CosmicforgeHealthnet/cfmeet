@@ -736,7 +736,8 @@ fn enterprise_scope(path: &str, method: &str) -> Option<&'static str> {
         } else {
             names::ENTERPRISE_RECORDING_MANAGE
         }
-    } else if method == "get" {
+    } else if method == "get" || path.ends_with("/evaluation") {
+        // Evaluating business hours is a read.
         names::ENTERPRISE_CONFIG_READ
     } else {
         names::ENTERPRISE_CONFIG_WRITE

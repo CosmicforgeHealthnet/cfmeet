@@ -28,6 +28,7 @@ pub struct WorkerReport {
     pub queue_entries_finished: usize,
     pub queue_offers: usize,
     pub ivr_timeouts: usize,
+    pub public_forwards: usize,
 }
 
 impl AppCallService {
@@ -76,6 +77,8 @@ impl AppCallService {
         report.queue_offers = offers;
         // IVR menus whose input deadline passed (retry / onTimeout).
         report.ivr_timeouts = self.ivr_tick(limit).await?;
+        // Public forwards waiting for their Part E gates (placed, or refused safely).
+        report.public_forwards = self.public_forward_tick(limit).await?;
         Ok(report)
     }
 

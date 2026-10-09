@@ -5316,6 +5316,1100 @@
           }
         }
       }
+    },
+    "/v1/enterprise/business-hours": {
+      "post": {
+        "operationId": "createBusinessHours",
+        "summary": "Create a business-hours schedule",
+        "description": "Requires enterprise.config.write and MANAGE_ROUTING. The time zone is an IANA identifier; windows never overlap; routes are typed destinations of the same scope. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/CreateBusinessHoursRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The schedule (version 1).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/BusinessHours"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listBusinessHours",
+        "summary": "List business-hours schedules",
+        "description": "Requires enterprise.config.read.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1-100, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Only resources in this status.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ACTIVE",
+                "DISABLED"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of schedules.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/BusinessHoursList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/business-hours/{business_hours_id}": {
+      "get": {
+        "operationId": "getBusinessHours",
+        "summary": "Get a schedule",
+        "description": "Requires enterprise.config.read.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.read",
+        "parameters": [
+          {
+            "name": "business_hours_id",
+            "in": "path",
+            "required": true,
+            "description": "Business-hours id (another scope's is 404).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The schedule.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/BusinessHours"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "put": {
+        "operationId": "replaceBusinessHours",
+        "summary": "Replace a schedule",
+        "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Atomic. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "parameters": [
+          {
+            "name": "business_hours_id",
+            "in": "path",
+            "required": true,
+            "description": "Business-hours id (another scope's is 404).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/ReplaceBusinessHoursRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The new schedule.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/BusinessHours"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "disableBusinessHours",
+        "summary": "Disable a schedule",
+        "description": "Requires enterprise.config.write and expectedVersion. Routing through a disabled schedule ends in NO_ROUTE / DESTINATION_DISABLED. Never blocked. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "parameters": [
+          {
+            "name": "business_hours_id",
+            "in": "path",
+            "required": true,
+            "description": "Business-hours id (another scope's is 404).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expectedVersion",
+            "in": "query",
+            "required": true,
+            "description": "The version the change was decided on (409 VERSION_CONFLICT otherwise).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The disabled schedule.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/BusinessHours"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/business-hours/{business_hours_id}/evaluation": {
+      "post": {
+        "operationId": "evaluateBusinessHours",
+        "summary": "Evaluate a schedule",
+        "description": "Requires enterprise.config.read. Deterministic: the same schedule version and instant always give the same result.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.read",
+        "parameters": [
+          {
+            "name": "business_hours_id",
+            "in": "path",
+            "required": true,
+            "description": "Business-hours id (another scope's is 404).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/EvaluateBusinessHoursRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OPEN / CLOSED and the selected route.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/BusinessHoursEvaluation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/public-contacts": {
+      "post": {
+        "operationId": "createPublicContact",
+        "summary": "Register a protected public destination",
+        "description": "Requires enterprise.config.write, MANAGE_ROUTING and an enterprise policy permitting public forwarding (else 403). Opaque references only. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/CreatePublicContactRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The public contact.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/PublicContact"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listPublicContacts",
+        "summary": "List public contacts",
+        "description": "Requires enterprise.config.read.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1-100, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Only resources in this status.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ACTIVE",
+                "DISABLED"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of public contacts.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/PublicContactList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/public-contacts/{public_contact_id}": {
+      "get": {
+        "operationId": "getPublicContact",
+        "summary": "Get a public contact",
+        "description": "Requires enterprise.config.read.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.read",
+        "parameters": [
+          {
+            "name": "public_contact_id",
+            "in": "path",
+            "required": true,
+            "description": "Public contact id (another scope's is 404).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The public contact.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/PublicContact"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "disablePublicContact",
+        "summary": "Disable a public contact",
+        "description": "Requires enterprise.config.write and expectedVersion. Stops new forwarding to it. Never blocked. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "parameters": [
+          {
+            "name": "public_contact_id",
+            "in": "path",
+            "required": true,
+            "description": "Public contact id (another scope's is 404).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expectedVersion",
+            "in": "query",
+            "required": true,
+            "description": "The version the change was decided on (409 VERSION_CONFLICT otherwise).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The disabled public contact.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/PublicContact"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/forwarding-rules": {
+      "post": {
+        "operationId": "createForwardingRule",
+        "summary": "Create a forwarding rule",
+        "description": "Requires enterprise.config.write, MANAGE_ROUTING and an enterprise policy permitting forwarding (public targets: public forwarding). Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/CreateForwardingRuleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The rule (version 1).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/ForwardingRule"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listForwardingRules",
+        "summary": "List forwarding rules",
+        "description": "Requires enterprise.config.read.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1-100, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Only resources in this status.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ACTIVE",
+                "DISABLED"
+              ]
+            }
+          },
+          {
+            "name": "principalId",
+            "in": "query",
+            "required": false,
+            "description": "Only this principal's rules.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of rules.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/ForwardingRuleList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/forwarding-rules/{forwarding_rule_id}": {
+      "get": {
+        "operationId": "getForwardingRule",
+        "summary": "Get a forwarding rule",
+        "description": "Requires enterprise.config.read.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.read",
+        "parameters": [
+          {
+            "name": "forwarding_rule_id",
+            "in": "path",
+            "required": true,
+            "description": "Forwarding rule id (another scope's is 404).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The rule.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/ForwardingRule"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateForwardingRule",
+        "summary": "Change a forwarding rule's target",
+        "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "parameters": [
+          {
+            "name": "forwarding_rule_id",
+            "in": "path",
+            "required": true,
+            "description": "Forwarding rule id (another scope's is 404).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/UpdateForwardingRuleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The changed rule.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/ForwardingRule"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "disableForwardingRule",
+        "summary": "Disable a forwarding rule",
+        "description": "Requires enterprise.config.write and expectedVersion. Never blocked. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "parameters": [
+          {
+            "name": "forwarding_rule_id",
+            "in": "path",
+            "required": true,
+            "description": "Forwarding rule id (another scope's is 404).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expectedVersion",
+            "in": "query",
+            "required": true,
+            "description": "The version the change was decided on (409 VERSION_CONFLICT otherwise).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The disabled rule.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/ForwardingRule"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
     }
   },
   "components": {

@@ -5,8 +5,9 @@
 //! `(type, id)` pair. The service validates that the target exists, is ACTIVE and belongs
 //! to the caller's tenant / application / environment; the database independently
 //! refuses a dangling or cross-scope destination (`enterprise_destination_exists`).
-//! A public telephone destination exists only as an opaque Privacy Relay
-//! ContactReference (`PUBLIC_CONTACT`, forwarding only) — never a number.
+//! A public telephone destination exists only as a registered public contact
+//! (`PUBLIC_CONTACT`: an opaque Privacy Relay ContactReference, forwarding / closed-hours
+//! routes only) — never a number.
 
 use sea_orm::ConnectionTrait;
 use serde::{Deserialize, Serialize};
@@ -62,6 +63,7 @@ pub const EXTENSION_TARGETS: &[DestinationType] = &[
     DestinationType::RingGroup,
     DestinationType::Queue,
     DestinationType::Ivr,
+    DestinationType::Schedule,
 ];
 
 /// Whether `dest` exists and is usable (ACTIVE) in `scope`.
@@ -95,6 +97,14 @@ pub(crate) async fn destination_active<C: ConnectionTrait>(
             "SELECT 1 FROM enterprise_ivr_flows WHERE tenant_id = $1 AND application_id = $2 \
              AND environment_id = $3 AND id = $4 AND status = 'ACTIVE' AND active_version_id IS NOT NULL"
         }
+        DestinationType::Schedule => {
+            "SELECT 1 FROM enterprise_business_hours WHERE tenant_id = $1 AND application_id = $2 \
+             AND environment_id = $3 AND id = $4 AND status = 'ACTIVE'"
+        }
+        DestinationType::PublicContact => {
+            "SELECT 1 FROM enterprise_public_contacts WHERE tenant_id = $1 AND application_id = $2 \
+             AND environment_id = $3 AND id = $4 AND status = 'ACTIVE'"
+        }
         // Destination kinds whose configuration is not available in this deployment
         // never resolve (and the database refuses to store them).
         _ => return Ok(false),
@@ -116,10 +126,6 @@ pub(crate) async fn validate<C: ConnectionTrait>(
         return Err(EnterpriseError::Validation(
             "the destination type is not allowed here.",
         ));
-    }
-    if dest.kind == DestinationType::PublicContact {
-        // Opaque Privacy Relay reference: validated by Privacy Relay at use time.
-        return Ok(());
     }
     if destination_active(db, scope, dest).await? {
         Ok(())

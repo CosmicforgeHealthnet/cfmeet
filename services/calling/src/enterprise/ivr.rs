@@ -205,6 +205,7 @@ pub fn route_types() -> &'static [DestinationType] {
         DestinationType::Extension,
         DestinationType::RingGroup,
         DestinationType::Queue,
+        DestinationType::Schedule,
     ]
 }
 

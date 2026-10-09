@@ -34,6 +34,7 @@ text_enum!(
         RecordingPolicy = "RECORDING_POLICY",
         Recording = "RECORDING",
         SipDevice = "SIP_DEVICE",
+        PublicContact = "PUBLIC_CONTACT",
     }
 );
 

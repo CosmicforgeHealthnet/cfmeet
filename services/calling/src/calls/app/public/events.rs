@@ -460,6 +460,8 @@ impl AppCallService {
                             .transition_in(txn, &cmd, &call, call.version, CallAction::Accept)
                             .await?
                             .call;
+                        // An enterprise Call forwarded to a public contact: answered there.
+                        self.enterprise_public_answered_in(txn, &call).await?;
                         self.call_signal(
                             txn,
                             pending,

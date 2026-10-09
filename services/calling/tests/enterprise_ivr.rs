@@ -226,7 +226,6 @@ async fn ivr_flow_administration_and_validation() {
             "prompt": { "builtin": "WELCOME", "url": "https://x.example/a.wav" }, "next": "b" }, bye()] }),
         json!({ "startNode": "a", "nodes": [{ "id": "a", "kind": "PROMPT",
             "prompt": { "builtin": "tt-monkeys" }, "next": "bye" }, bye()] }),
-        json!({ "startNode": "a", "nodes": [{ "id": "a", "kind": "ROUTE_SCHEDULE", "scheduleId": Uuid::new_v4() }] }),
         json!({ "startNode": "main", "nodes": [menu(json!([{ "digit": "1", "next": "bye" }]), 500, 1), bye()] }),
     ];
     for graph in bad {
@@ -238,6 +237,13 @@ async fn ivr_flow_administration_and_validation() {
         &e,
         f,
         json!({ "startNode": "a", "nodes": [{ "id": "a", "kind": "ROUTE_EXTENSION", "extensionId": Uuid::new_v4() }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = publish(
+        &e,
+        f,
+        json!({ "startNode": "a", "nodes": [{ "id": "a", "kind": "ROUTE_SCHEDULE", "scheduleId": Uuid::new_v4() }] }),
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);

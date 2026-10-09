@@ -1,0 +1,15 @@
+{
+  "businessHoursId": "11111111-2222-4333-8444-555555555555",
+  "version": 3,
+  "at": "2031-03-30T01:00:00.000Z",
+  "status": "OPEN",
+  "reason": "WEEKLY_WINDOW",
+  "timezone": "Europe/London",
+  "localDate": "2031-03-30",
+  "localTime": "02:00",
+  "utcOffset": "+01:00",
+  "destination": {
+    "type": "QUEUE",
+    "id": "8b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b"
+  }
+}

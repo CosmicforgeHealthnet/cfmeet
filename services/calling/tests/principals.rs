@@ -367,7 +367,8 @@ async fn telephone_endpoints_store_only_opaque_references() {
               (('enterprise_extensions', 'extension_number'), \
                ('enterprise_call_contexts', 'entry_extension_number'))) \
          AND NOT (data_type = 'uuid' AND column_name = 'contact_reference' \
-              AND table_name IN ('call_public_parties', 'call_spend_reservations'))",
+              AND table_name IN ('call_public_parties', 'call_spend_reservations', \
+                                 'enterprise_public_contacts'))",
     )
     .await;
     assert_eq!(phone_columns, 0);

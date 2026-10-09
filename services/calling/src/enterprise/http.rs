@@ -13,7 +13,7 @@ use axum::{
     },
     http::StatusCode,
     response::Response,
-    routing::{get, put},
+    routing::{get, post, put},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -23,6 +23,8 @@ use super::{
     departments::{DepartmentChange, DepartmentMember, DepartmentRole, NewDepartment},
     destinations::{Destination, DestinationType},
     extensions::{ExtensionChange, ExtensionFilter, NewExtension},
+    forwarding::ForwardingCondition,
+    hours::{HoursException, HoursSettings, WeeklyWindow},
     ivr::IvrGraph,
     policy::{NewPolicy, PolicyChange, PolicyRules, ResourceStatus},
     queues::{QueueChange, QueueMember, QueueSettings},
@@ -134,6 +136,38 @@ pub fn routes() -> Router<AppState> {
             get(get_extension)
                 .patch(update_extension)
                 .delete(disable_extension),
+        )
+        .route(
+            "/v1/enterprise/business-hours",
+            get(list_business_hours).post(create_business_hours),
+        )
+        .route(
+            "/v1/enterprise/business-hours/:business_hours_id",
+            get(get_business_hours)
+                .put(replace_business_hours)
+                .delete(disable_business_hours),
+        )
+        .route(
+            "/v1/enterprise/business-hours/:business_hours_id/evaluation",
+            post(evaluate_business_hours),
+        )
+        .route(
+            "/v1/enterprise/public-contacts",
+            get(list_public_contacts).post(create_public_contact),
+        )
+        .route(
+            "/v1/enterprise/public-contacts/:public_contact_id",
+            get(get_public_contact).delete(disable_public_contact),
+        )
+        .route(
+            "/v1/enterprise/forwarding-rules",
+            get(list_forwarding_rules).post(create_forwarding_rule),
+        )
+        .route(
+            "/v1/enterprise/forwarding-rules/:forwarding_rule_id",
+            get(get_forwarding_rule)
+                .patch(update_forwarding_rule)
+                .delete(disable_forwarding_rule),
         )
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
 }
@@ -1241,6 +1275,314 @@ async fn disable_sip_device(
     let view = state
         .enterprise
         .disable_sip_device(&AdminActor::of(&ctx), id, q.expected_version()?)
+        .await?;
+    Ok(ok(view))
+}
+
+// ---------------------------------------------------------------------------
+// Business hours, public contacts, forwarding (§58)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BusinessHoursBody {
+    #[serde(default)]
+    expected_version: Option<i64>,
+    name: String,
+    timezone: String,
+    open_destination: Destination,
+    closed_destination: Destination,
+    weekly_windows: Vec<WeeklyWindow>,
+    #[serde(default)]
+    exceptions: Vec<HoursException>,
+}
+
+impl BusinessHoursBody {
+    fn settings(self) -> HoursSettings {
+        HoursSettings {
+            name: self.name,
+            timezone: self.timezone,
+            open_destination: self.open_destination,
+            closed_destination: self.closed_destination,
+            weekly_windows: self.weekly_windows,
+            exceptions: self.exceptions,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EvaluateBody {
+    #[serde(default)]
+    at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+async fn create_business_hours(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    body: Result<Json<BusinessHoursBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let body = parse_body(body)?;
+    if body.expected_version.is_some() {
+        return Err(CallingError::Validation(
+            "expectedVersion is not allowed when creating.",
+        ));
+    }
+    let view = state
+        .enterprise
+        .create_business_hours(&AdminActor::of(&ctx), body.settings())
+        .await?;
+    Ok(created(view))
+}
+
+async fn list_business_hours(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let q = QueryParams::parse(query, &["limit", "cursor", "status"])?;
+    let page = state
+        .enterprise
+        .list_business_hours(CallScope::of_platform(&ctx), q.status()?, &q.page()?)
+        .await?;
+    Ok(ok(page))
+}
+
+async fn get_business_hours(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let view = state
+        .enterprise
+        .get_business_hours(CallScope::of_platform(&ctx), uuid_path(&id)?)
+        .await?;
+    Ok(ok(view))
+}
+
+async fn replace_business_hours(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    body: Result<Json<BusinessHoursBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let body = parse_body(body)?;
+    let expected = body.expected_version.ok_or(CallingError::Validation(
+        "expectedVersion is required and must be an integer.",
+    ))?;
+    let view = state
+        .enterprise
+        .replace_business_hours(&AdminActor::of(&ctx), id, expected, body.settings())
+        .await?;
+    Ok(ok(view))
+}
+
+async fn disable_business_hours(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let q = QueryParams::parse(query, &["expectedVersion"])?;
+    let view = state
+        .enterprise
+        .disable_business_hours(&AdminActor::of(&ctx), id, q.expected_version()?)
+        .await?;
+    Ok(ok(view))
+}
+
+async fn evaluate_business_hours(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    body: Result<Json<EvaluateBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let id = uuid_path(&id)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .evaluate_business_hours(CallScope::of_platform(&ctx), id, body.at)
+        .await?;
+    Ok(ok(view))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreatePublicContactBody {
+    label: String,
+    contact_reference: Uuid,
+    privacy_relay_session_id: Uuid,
+}
+
+async fn create_public_contact(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    body: Result<Json<CreatePublicContactBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .create_public_contact(
+            &AdminActor::of(&ctx),
+            body.label,
+            body.contact_reference,
+            body.privacy_relay_session_id,
+        )
+        .await?;
+    Ok(created(view))
+}
+
+async fn list_public_contacts(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let q = QueryParams::parse(query, &["limit", "cursor", "status"])?;
+    let page = state
+        .enterprise
+        .list_public_contacts(CallScope::of_platform(&ctx), q.status()?, &q.page()?)
+        .await?;
+    Ok(ok(page))
+}
+
+async fn get_public_contact(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let view = state
+        .enterprise
+        .get_public_contact(CallScope::of_platform(&ctx), uuid_path(&id)?)
+        .await?;
+    Ok(ok(view))
+}
+
+async fn disable_public_contact(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let q = QueryParams::parse(query, &["expectedVersion"])?;
+    let view = state
+        .enterprise
+        .disable_public_contact(&AdminActor::of(&ctx), id, q.expected_version()?)
+        .await?;
+    Ok(ok(view))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateForwardingRuleBody {
+    principal_id: Uuid,
+    condition: ForwardingCondition,
+    destination: Destination,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UpdateForwardingRuleBody {
+    expected_version: i64,
+    destination: Destination,
+}
+
+async fn create_forwarding_rule(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    body: Result<Json<CreateForwardingRuleBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .create_forwarding_rule(
+            &AdminActor::of(&ctx),
+            body.principal_id,
+            body.condition,
+            body.destination,
+        )
+        .await?;
+    Ok(created(view))
+}
+
+async fn list_forwarding_rules(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let q = QueryParams::parse(query, &["limit", "cursor", "status", "principalId"])?;
+    let page = state
+        .enterprise
+        .list_forwarding_rules(
+            CallScope::of_platform(&ctx),
+            q.status()?,
+            q.uuid("principalId")?,
+            &q.page()?,
+        )
+        .await?;
+    Ok(ok(page))
+}
+
+async fn get_forwarding_rule(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let view = state
+        .enterprise
+        .get_forwarding_rule(CallScope::of_platform(&ctx), uuid_path(&id)?)
+        .await?;
+    Ok(ok(view))
+}
+
+async fn update_forwarding_rule(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    body: Result<Json<UpdateForwardingRuleBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .update_forwarding_rule(
+            &AdminActor::of(&ctx),
+            id,
+            body.expected_version,
+            body.destination,
+        )
+        .await?;
+    Ok(ok(view))
+}
+
+async fn disable_forwarding_rule(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let q = QueryParams::parse(query, &["expectedVersion"])?;
+    let view = state
+        .enterprise
+        .disable_forwarding_rule(&AdminActor::of(&ctx), id, q.expected_version()?)
         .await?;
     Ok(ok(view))
 }
