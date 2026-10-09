@@ -34,7 +34,7 @@ Provider room / dialog / carrier / request identifiers are never Call identities
 | **§25** Call control: accept, decline, cancel, end (ENDING → ENDED on cleanup evidence), hold / resume enforced at the provider, application transfer on the same Call with failure recovery, `expectedVersion`, `Idempotency-Key`, available actions | **Implemented** (ADR 0009) |
 | **Part D §26–§30** Privacy Relay ingress (`/v1/privacy-relay/...`), `PRIVACY_RELAY_V1` protected calls and transfers (fail closed), `POST /internal/v1/privacy-relay/enforcement` | **Implemented** (ADR 0010; the business authority is `services/privacy-relay`) |
 | **Part E §37–§51** Routing Engine and route plans, public-network calls executed by `services/telephony` (ContactReference parties, durable command outbox, normalized events, bridges, spend reservations, failover) | **Implemented** (ADRs 0013–0017). **Real lawful telecom interconnect certification remains an external blocker (ADR 0016): no PSTN result is claimed** |
-| **Part F §52–§62** Enterprise calling and continuity on the ONE canonical Call | **Implemented** (ADRs 0018–0026; summary below) |
+| **Part F §52–§62** Enterprise calling and continuity on the ONE canonical Call | **Implemented** (ADRs 0018–0027; summary below) |
 
 **Deferred (later sections / services):** push delivery through a push vendor (a
 transport-neutral push-ready payload is produced), customer webhooks and outbox
@@ -270,8 +270,8 @@ Meeting Service dependency; Telephony only executes edge primitives.
 | §57 | Declarative versioned IVR (keys never stored or logged), built-in prompts, RTC keypad and SIP DTMF | ADR 0020 |
 | §58 | Business hours (IANA zones, DST, exceptions), typed forwarding, loop / hop protection; public forwarding only through every Part E gate | ADR 0021 |
 | §59 | Hold / resume / transfer to enterprise targets on the same Call | ADR 0022 |
-| §60 | Voicemail: mailboxes, edge / RTC capture, protected object storage (`packages/object-storage`), READY, authorized signed retrieval, read state, deletion, retention | ADR 0023 |
-| §61 | Call recording: separate policy, server-issued notice, per-participant consent, immutable decisions, bridge capture, protected artifacts, audited access | ADR 0024 |
+| §60 | Voicemail: mailboxes, edge (SIP) / LiveKit Egress (RTC) capture, protected object storage (`packages/object-storage`), READY, authorized signed retrieval, read state, deletion, retention | ADR 0023, 0027 |
+| §61 | Call recording: separate policy, server-issued notice, per-participant consent, immutable decisions, bridge (SIP) / audio-only room-composite (RTC) capture, protected artifacts, audited access | ADR 0024, 0027 |
 | §62 | Missed calls and history derived per logical participant from Call evidence; `GET /v1/calls?principalId=`, `GET /v1/calling/history` | ADR 0025 |
 | cross-cutting | Durable `ENTERPRISE_ROUTING_STEP` outbox events, `calling_incidents`, bounded metrics, races, failure injection, load | ADR 0026 |
 
@@ -281,11 +281,19 @@ finalization, deletion or retention): `ENTERPRISE_CALLING_ENABLED`, `VOICEMAIL_E
 `enterprise.voicemail.read|manage`, `enterprise.recording.read|manage` — never implied by
 `calls.*`.
 
+**Application (RTC) capture** (ADR 0027): `CALLING_CAPTURE_PROVIDER=livekit-egress`
+(default `none`) captures application-only Calls through LiveKit Egress — voicemail as a
+track egress of the caller's microphone only, recording as an audio-only room composite —
+into the private staging prefix `CALLING_CAPTURE_STAGING_PREFIX` (default
+`capture-staging`); a worker pass collects, verifies and stores it through the same
+protected-artifact path as SIP captures. With `none`, RTC voicemail / recording are
+refused (`CAPTURE_UNAVAILABLE`), never faked. Recording length is the policy's
+`maxRecordingSeconds` (60–1440), bounded by the single-artifact delivery ceiling.
+
 **Not offered / pending (recorded, never faked):** public forwarding to a real carrier
 and real PSTN results (Part E external blocker); transfer of an established Call to a
-public contact; an RTC media-capture adapter (application-only Calls are refused voicemail
-/ recording capture rather than faked); keypad consent from SIP desk phones (policies that
-need it deny recording); recordings longer than 24 minutes (single delivery bound).
+public contact; keypad consent from SIP desk phones (policies that need it deny
+recording).
 Real-stack certification (`tests/enterprise_sip_certification.rs`, workflow
 [`enterprise-calling-certification.yml`](../../.github/workflows/enterprise-calling-certification.yml))
 drives a real Asterisk edge, SIPp desk phones, the real Telephony binary and an
@@ -547,5 +555,5 @@ The image runs as a non-root user and contains `calling`, `calling-migration` an
 * [ADR 0009 — Call control, idempotency and transfer](../../docs/decisions/0009-calling-call-control-idempotency-and-transfer.md)
 * [ADR 0010 — Communication Context and Privacy Relay Session architecture](../../docs/decisions/0010-communication-context-and-privacy-relay-session-architecture.md)
 * [ADR 0013 — Routing Engine and route plans](../../docs/decisions/0013-routing-engine-and-route-plans.md) … [ADR 0017 — Provider failover](../../docs/decisions/0017-provider-failover.md) (Part E)
-* [ADR 0018 — Enterprise calling architecture](../../docs/decisions/0018-enterprise-calling-architecture.md) … [ADR 0026 — Enterprise operations](../../docs/decisions/0026-enterprise-operations-events-incidents-metrics.md) (Part F)
+* [ADR 0018 — Enterprise calling architecture](../../docs/decisions/0018-enterprise-calling-architecture.md) … [ADR 0026 — Enterprise operations](../../docs/decisions/0026-enterprise-operations-events-incidents-metrics.md), [ADR 0027 — RTC call-audio capture](../../docs/decisions/0027-rtc-call-audio-capture-livekit-egress.md) (Part F)
 * [Service data ownership](../../docs/architecture/service-data-ownership.md)

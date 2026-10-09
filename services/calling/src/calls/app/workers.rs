@@ -37,6 +37,8 @@ pub struct WorkerReport {
     pub recordings_failed: usize,
     pub recordings_auto_started: usize,
     pub recordings_deleted: usize,
+    pub captures_stored: usize,
+    pub captures_failed: usize,
 }
 
 impl AppCallService {
@@ -101,6 +103,10 @@ impl AppCallService {
         report.recordings_failed = failed;
         report.recordings_auto_started = auto;
         report.recordings_deleted = deleted;
+        // Application (RTC) captures: stop when due, collect, store, release.
+        let (stored, failed) = self.capture_tick(limit).await?;
+        report.captures_stored = stored;
+        report.captures_failed = failed;
         Ok(report)
     }
 

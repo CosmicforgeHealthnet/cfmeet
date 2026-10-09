@@ -360,9 +360,15 @@ pub(crate) async fn mailbox_owners<C: ConnectionTrait>(
 }
 
 /// The object key of a message's audio (opaque, internal, never returned).
-pub(crate) fn object_key(scope: CallScope, message_id: Uuid) -> String {
+pub(crate) fn object_key(scope: CallScope, message_id: Uuid, content_type: &str) -> String {
+    // The extension follows the verified format (SIP edge: WAV; RTC egress: Ogg/Opus).
+    let extension = if content_type == "audio/ogg" {
+        "ogg"
+    } else {
+        "wav"
+    };
     format!(
-        "voicemail/{}/{}/{}/{message_id}.wav",
+        "voicemail/{}/{}/{}/{message_id}.{extension}",
         scope.tenant_id().as_uuid().simple(),
         scope.application_id().as_uuid().simple(),
         scope.environment_id().as_uuid().simple()

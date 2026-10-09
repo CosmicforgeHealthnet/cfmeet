@@ -598,9 +598,15 @@ pub(crate) async fn was_participant<C: ConnectionTrait>(
 }
 
 /// The object key of a recording (opaque, internal, never returned).
-pub(crate) fn object_key(scope: CallScope, recording_id: Uuid) -> String {
+pub(crate) fn object_key(scope: CallScope, recording_id: Uuid, content_type: &str) -> String {
+    // The extension follows the verified format (SIP edge: WAV; RTC egress: Ogg/Opus).
+    let extension = if content_type == "audio/ogg" {
+        "ogg"
+    } else {
+        "wav"
+    };
     format!(
-        "recordings/{}/{}/{}/{recording_id}.wav",
+        "recordings/{}/{}/{}/{recording_id}.{extension}",
         scope.tenant_id().as_uuid().simple(),
         scope.application_id().as_uuid().simple(),
         scope.environment_id().as_uuid().simple()

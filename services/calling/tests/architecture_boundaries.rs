@@ -356,6 +356,7 @@ const FOREIGN_DOMAIN_TABLES: &[&str] = &[
 const MEDIA_ADAPTER_FILES: &[&str] = &[
     "src/media/livekit.rs",
     "src/media/livekit_gateway.rs",
+    "src/media/livekit_egress.rs",
     "src/media/mod.rs",
 ];
 

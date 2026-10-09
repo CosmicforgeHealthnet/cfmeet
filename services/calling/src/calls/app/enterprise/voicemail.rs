@@ -52,9 +52,11 @@ use crate::{
 
 type Rung = (calls::Model, Vec<call_invitations::Model>);
 
-/// The only audio format accepted from a capture source.
+/// The audio format a SIP edge capture delivers (PCM WAV).
 pub const CAPTURE_CONTENT_TYPE: &str = "audio/wav";
-/// Upper bound of one captured message (600 s of 16-bit 16 kHz mono ≈ 19 MiB).
+/// The audio format an RTC media-server capture delivers (Opus in Ogg).
+pub const CAPTURE_CONTENT_TYPE_OGG: &str = "audio/ogg";
+/// Upper bound of one captured artifact (600 s of 16-bit 16 kHz mono ≈ 19 MiB).
 pub const MAX_CAPTURE_BYTES: usize = 24 * 1024 * 1024;
 /// Grace after the maximum message length before the platform ends a recording Call.
 const RECORDING_GRACE_SECONDS: i64 = 30;
@@ -77,27 +79,61 @@ impl CapturePurpose {
     }
 }
 
-/// A request to capture an application (RTC) caller's audio.
+/// A request to capture an application (RTC) Call's audio. Calling decides everything
+/// in it; the adapter only executes it.
 #[derive(Debug, Clone)]
 pub struct CaptureRequest {
+    /// The voicemail message / call recording id (the capture's idempotency key).
     pub capture_id: Uuid,
     pub call_id: Uuid,
     pub purpose: CapturePurpose,
     pub max_duration_seconds: i32,
+    /// The authorized media scope: the media identities whose audio ALONE is captured
+    /// (a voicemail: the caller's sessions). Empty: the Call's mixed audio (a recording
+    /// authorized for the whole Call).
+    pub sources: Vec<String>,
+}
+
+/// What an adapter reports about one capture (no provider identifier crosses this).
+#[derive(Debug)]
+pub enum CaptureStatus {
+    /// The capture is still recording (a due stop is (re-)issued for it).
+    Running,
+    /// Nothing to collect yet (finishing, or the adapter could not tell).
+    Pending,
+    /// The capture finished; its media is handed over for protected storage.
+    Finished(CapturedMedia),
+    /// The capture ended without usable media (bounded code).
+    Failed(&'static str),
 }
 
 /// The neutral call media artifact interface (§105): an RTC media capture adapter (e.g.
-/// a media-server egress) records the Call's media and delivers it through
+/// a media-server egress) records the Call's media; Calling collects the result
+/// ([`CallMediaCapture::poll`]) or the adapter pushes it through
 /// [`AppCallService::deliver_capture`]. No Meeting Service type is involved.
 #[async_trait]
 pub trait CallMediaCapture: Send + Sync {
     /// Whether this deployment can capture application media at all.
     fn available(&self) -> bool;
 
+    /// Starts the capture. Idempotent per `capture_id`: a repeated start never creates
+    /// a second capture.
     async fn start(&self, request: CaptureRequest) -> Result<(), &'static str>;
 
-    /// Stops a running capture early (idempotent); its media is still delivered.
-    async fn stop(&self, _capture_id: Uuid) -> Result<(), &'static str> {
+    /// Stops a running capture early (idempotent); its media is still collected.
+    async fn stop(&self, _call_id: Uuid, _capture_id: Uuid) -> Result<(), &'static str> {
+        Ok(())
+    }
+
+    /// The capture's current outcome (collecting adapters). A pushing adapter delivers
+    /// on its own and always reports [`CaptureStatus::Pending`].
+    async fn poll(&self, _call_id: Uuid, _capture_id: Uuid) -> CaptureStatus {
+        CaptureStatus::Pending
+    }
+
+    /// Releases the adapter's intermediate media once Calling has stored (or abandoned)
+    /// the artifact (idempotent).
+    async fn release(&self, _call_id: Uuid, _capture_id: Uuid) -> Result<(), &'static str> {
         Ok(())
     }
 }
@@ -343,6 +379,16 @@ impl AppCallService {
         };
         let max = (message.recording_deadline - message.received_at).num_seconds() as i32
             - RECORDING_GRACE_SECONDS as i32;
+        // The authorized media scope: the caller's own live sessions, nobody else.
+        let sources = match caller_media_identities(self.db(), call_id, message.caller_principal_id)
+            .await
+        {
+            Ok(sources) => sources,
+            Err(error) => {
+                tracing::warn!(%call_id, %error, "voicemail capture scope not read; the worker retries");
+                return;
+            }
+        };
         if let Err(code) = self
             .capture
             .start(CaptureRequest {
@@ -350,6 +396,7 @@ impl AppCallService {
                 call_id,
                 purpose: CapturePurpose::Voicemail,
                 max_duration_seconds: max.max(1),
+                sources,
             })
             .await
         {
@@ -416,9 +463,18 @@ impl AppCallService {
         call_id: Uuid,
         media: CapturedMedia,
     ) -> CallResult<CaptureDelivery> {
-        if media.content_type != CAPTURE_CONTENT_TYPE {
-            return Err(CallError::Validation("the capture must be audio/wav."));
-        }
+        let content_type = match media.content_type.as_str() {
+            CAPTURE_CONTENT_TYPE => CAPTURE_CONTENT_TYPE,
+            // An Ogg container is verified, never trusted by its label.
+            CAPTURE_CONTENT_TYPE_OGG if media.bytes.starts_with(b"OggS") => {
+                CAPTURE_CONTENT_TYPE_OGG
+            }
+            _ => {
+                return Err(CallError::Validation(
+                    "the capture must be audio/wav or audio/ogg.",
+                ))
+            }
+        };
         if media.bytes.is_empty() || media.bytes.len() > MAX_CAPTURE_BYTES {
             return Err(CallError::Validation("the capture size is out of bounds."));
         }
@@ -464,12 +520,8 @@ impl AppCallService {
         .await?;
         txn.commit().await?;
         let scope = message_scope(self.db(), capture_id).await?;
-        let key = config::object_key(scope, capture_id);
-        let stored = match self
-            .artifacts
-            .put(&key, media.bytes, CAPTURE_CONTENT_TYPE)
-            .await
-        {
+        let key = config::object_key(scope, capture_id, content_type);
+        let stored = match self.artifacts.put(&key, media.bytes, content_type).await {
             Ok(s) if s.sha256 == digest => s,
             outcome => {
                 let code = match outcome {
@@ -523,7 +575,7 @@ impl AppCallService {
             vec![
                 capture_id.into(),
                 key.into(),
-                CAPTURE_CONTENT_TYPE.into(),
+                content_type.into(),
                 (stored.size as i64).into(),
                 media.duration_ms.into(),
                 stored.sha256.clone().into(),
@@ -840,6 +892,26 @@ impl AppCallService {
         }
         Ok(out)
     }
+}
+
+/// The media identities of `caller`'s live sessions in `call_id`.
+async fn caller_media_identities<C: ConnectionTrait>(
+    db: &C,
+    call_id: Uuid,
+    caller: Uuid,
+) -> CallResult<Vec<String>> {
+    Ok(db
+        .query_all(stmt(
+            "SELECT s.media_identity FROM call_sessions s \
+               JOIN call_participants p ON p.id = s.participant_id \
+              WHERE s.call_id = $1 AND p.principal_id = $2 AND s.ended_at IS NULL \
+                AND p.ended_at IS NULL ORDER BY s.created_at, s.id",
+            vec![call_id.into(), caller.into()],
+        ))
+        .await?
+        .into_iter()
+        .map(|r| r.try_get_by_index::<String>(0))
+        .collect::<Result<_, _>>()?)
 }
 
 /// (tenant, application, environment) of a message.

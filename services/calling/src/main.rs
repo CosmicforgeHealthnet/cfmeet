@@ -229,6 +229,23 @@ async fn main() -> anyhow::Result<()> {
         "protected artifact storage configured"
     );
 
+    // Application (RTC) call-audio capture (Part F §60 / §61): LiveKit Egress when
+    // selected, otherwise none (SIP captures still work; RTC voicemail / recording are
+    // refused with CAPTURE_UNAVAILABLE).
+    let capture = match calling::media::CaptureSettings::from_lookup(&lookup)
+        .and_then(|settings| media.capture(&settings, artifacts.clone()))
+    {
+        Ok(capture) => capture,
+        Err(err) => {
+            tracing::error!(error = %err, "application capture configuration error");
+            std::process::exit(2);
+        }
+    };
+    tracing::info!(
+        application_capture_available = capture.available(),
+        "application call-audio capture configured"
+    );
+
     let clock: SharedClock = Arc::new(SystemClock);
     let state = AppState::new(
         db,
@@ -251,7 +268,7 @@ async fn main() -> anyhow::Result<()> {
             public_network,
             enterprise_flags,
             artifacts,
-            capture: Arc::new(calling::calls::app::enterprise::UnavailableCapture),
+            capture,
         },
     );
 

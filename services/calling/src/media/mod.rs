@@ -10,7 +10,9 @@
 //! * [`gateway`] — CF Meet's admission authority over every media signaling connection
 //!   (provider-neutral; fail closed);
 //! * [`livekit`] / [`livekit_gateway`] — the self-hosted LiveKit adapter and its
-//!   connection gateway, the only provider-specific code.
+//!   connection gateway, the only provider-specific code;
+//! * [`livekit_egress`] — application call-audio capture (voicemail, call recording) through
+//!   LiveKit Egress behind the neutral capture interface.
 //!
 //! This module is independent of the Meeting Service: it shares no source, type, HTTP API
 //! or database with it.
@@ -19,6 +21,7 @@ pub mod credentials;
 pub mod events;
 pub mod gateway;
 pub mod livekit;
+pub mod livekit_egress;
 pub mod livekit_gateway;
 pub mod permissions;
 pub mod provider;
@@ -27,6 +30,8 @@ pub mod reconciliation;
 use std::sync::Arc;
 
 pub use credentials::{MediaCredentialPolicy, MediaCredentialView};
+/// Application capture selection (`CALLING_CAPTURE_PROVIDER`), provider-neutral to callers.
+pub use livekit_egress::CaptureSettings;
 pub use permissions::{MediaPermissions, MEDIA_POLICY_VERSION};
 pub use provider::{
     CallMediaProvider, MediaProviderCapabilities, MediaProviderError, MediaResourceName,
@@ -84,6 +89,7 @@ impl MediaSettings {
                 provider: None,
                 gateway: None,
                 public_bridge: None,
+                livekit: None,
             },
             MediaProviderSelection::LiveKit(settings) => {
                 let adapter = Arc::new(livekit::LiveKitAdapter::new(settings.clone_settings())?);
@@ -98,6 +104,7 @@ impl MediaSettings {
                         adapter.clone(),
                     ))),
                     public_bridge,
+                    livekit: Some(adapter),
                 }
             }
         })
@@ -110,4 +117,35 @@ pub struct MediaRuntime {
     pub gateway: Option<Arc<dyn gateway::MediaConnectionGateway>>,
     /// Attaches public-network bridges to application media (Part E §79).
     pub public_bridge: Option<Arc<dyn crate::telephony::media::PublicMediaGateway>>,
+    /// The LiveKit adapter itself (application capture through its Egress).
+    pub livekit: Option<Arc<livekit::LiveKitAdapter>>,
+}
+
+impl MediaRuntime {
+    /// The application capture adapter `settings` select: LiveKit Egress requires the
+    /// LiveKit provider and a protected artifact store (no silent fallback).
+    pub fn capture(
+        &self,
+        settings: &livekit_egress::CaptureSettings,
+        artifacts: Arc<dyn cf_object_storage::ObjectStore>,
+    ) -> Result<Arc<dyn crate::calls::app::enterprise::CallMediaCapture>, ConfigError> {
+        if !settings.egress {
+            return Ok(Arc::new(crate::calls::app::enterprise::UnavailableCapture));
+        }
+        let Some(livekit) = self.livekit.clone() else {
+            return Err(ConfigError::invalid(
+                "CALLING_CAPTURE_PROVIDER",
+                "`livekit-egress` requires CALLING_MEDIA_PROVIDER=livekit".to_string(),
+            ));
+        };
+        if !artifacts.configured() {
+            return Err(ConfigError::invalid(
+                "CALLING_CAPTURE_PROVIDER",
+                "`livekit-egress` requires the protected artifact storage".to_string(),
+            ));
+        }
+        Ok(Arc::new(livekit_egress::LiveKitEgressCapture::new(
+            livekit, artifacts, settings,
+        )))
+    }
 }

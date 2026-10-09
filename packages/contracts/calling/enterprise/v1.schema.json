@@ -3491,6 +3491,7 @@
           ],
           "enum": [
             "audio/wav",
+            "audio/ogg",
             null
           ]
         },
@@ -3649,7 +3650,8 @@
         "contentType": {
           "type": "string",
           "enum": [
-            "audio/wav"
+            "audio/wav",
+            "audio/ogg"
           ]
         },
         "sizeBytes": {
@@ -4074,6 +4076,7 @@
           ],
           "enum": [
             "audio/wav",
+            "audio/ogg",
             null
           ]
         },
@@ -4450,7 +4453,8 @@
         "contentType": {
           "type": "string",
           "enum": [
-            "audio/wav"
+            "audio/wav",
+            "audio/ogg"
           ]
         },
         "sizeBytes": {

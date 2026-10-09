@@ -306,7 +306,7 @@ impl AppCallService {
         txn.commit().await?;
         self.publish(pending).await;
         if let Some(id) = stop_app_capture {
-            let _ = self.capture.stop(id).await;
+            let _ = self.capture.stop(call_id, id).await;
         }
         // AUTO_WHEN_AUTHORIZED: a new consent may complete the evidence.
         if decision == ConsentDecision::Granted && call.current_state == CallState::Connected {
@@ -542,6 +542,8 @@ impl AppCallService {
                 call_id: call.id,
                 purpose: CapturePurpose::Recording,
                 max_duration_seconds: max_seconds,
+                // Authorized for the whole Call: its mixed audio.
+                sources: Vec::new(),
             })
             .await;
         match started {
@@ -867,7 +869,7 @@ impl AppCallService {
         txn.commit().await?;
         self.publish(pending).await;
         if recording.capture_source == "APPLICATION" {
-            let _ = self.capture.stop(recording_id).await;
+            let _ = self.capture.stop(call_id, recording_id).await;
         }
         Ok(config::recording_view(row))
     }
@@ -938,7 +940,7 @@ impl AppCallService {
         txn.commit().await?;
         self.publish(pending).await;
         if recording.capture_source == "APPLICATION" {
-            let _ = self.capture.stop(recording_id).await;
+            let _ = self.capture.stop(call_id, recording_id).await;
         }
         Ok(true)
     }
@@ -1022,12 +1024,10 @@ impl AppCallService {
             .await?
             .ok_or(CallError::NotFound)?;
         let scope = scope_of(&call);
-        let key = config::object_key(scope, recording_id);
-        let stored = match self
-            .artifacts
-            .put(&key, media.bytes, super::CAPTURE_CONTENT_TYPE)
-            .await
-        {
+        // Validated by `deliver_capture` (audio/wav or a verified audio/ogg).
+        let content_type = media.content_type.clone();
+        let key = config::object_key(scope, recording_id, &content_type);
+        let stored = match self.artifacts.put(&key, media.bytes, &content_type).await {
             Ok(s) if s.sha256 == digest => s,
             outcome => {
                 let code = match outcome {
@@ -1084,7 +1084,7 @@ impl AppCallService {
             vec![
                 recording_id.into(),
                 key.into(),
-                super::CAPTURE_CONTENT_TYPE.into(),
+                content_type.into(),
                 (stored.size as i64).into(),
                 media.duration_ms.into(),
                 stored.sha256.clone().into(),

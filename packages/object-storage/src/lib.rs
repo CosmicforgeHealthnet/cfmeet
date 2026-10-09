@@ -103,6 +103,11 @@ pub trait ObjectStore: Send + Sync {
 
     async fn head(&self, key: &str) -> StorageResult<Option<ObjectMeta>>;
 
+    /// Reads ONE object of at most `max_bytes` (a larger object is
+    /// [`StorageError::Integrity`], never truncated). `None`: no such object. Used by
+    /// server-side finalizers only; clients read through [`ObjectStore::signed_read`].
+    async fn get(&self, key: &str, max_bytes: usize) -> StorageResult<Option<Vec<u8>>>;
+
     /// Removes `key`. Idempotent: a missing object is success.
     async fn delete(&self, key: &str) -> StorageResult<()>;
 
@@ -134,6 +139,10 @@ impl ObjectStore for UnconfiguredStore {
     }
 
     async fn head(&self, _: &str) -> StorageResult<Option<ObjectMeta>> {
+        Err(StorageError::NotConfigured)
+    }
+
+    async fn get(&self, _: &str, _: usize) -> StorageResult<Option<Vec<u8>>> {
         Err(StorageError::NotConfigured)
     }
 
@@ -552,6 +561,34 @@ impl ObjectStore for S3ObjectStore {
         }
     }
 
+    async fn get(&self, key: &str, max_bytes: usize) -> StorageResult<Option<Vec<u8>>> {
+        if !valid_key(key) {
+            return Err(StorageError::Rejected(400));
+        }
+        let empty = sha256_hex(b"");
+        let mut res = self
+            .request(reqwest::Method::GET, Some(key), &empty, &[])
+            .send()
+            .await
+            .map_err(|_| StorageError::Unavailable)?;
+        match res.status().as_u16() {
+            404 => return Ok(None),
+            s if (200..300).contains(&s) => {}
+            s => return Err(status_error(s)),
+        }
+        if res.content_length().is_some_and(|n| n > max_bytes as u64) {
+            return Err(StorageError::Integrity);
+        }
+        let mut out = Vec::new();
+        while let Some(chunk) = res.chunk().await.map_err(|_| StorageError::Unavailable)? {
+            if out.len() + chunk.len() > max_bytes {
+                return Err(StorageError::Integrity);
+            }
+            out.extend_from_slice(&chunk);
+        }
+        Ok(Some(out))
+    }
+
     async fn delete(&self, key: &str) -> StorageResult<()> {
         let empty = sha256_hex(b"");
         let res = self
@@ -683,6 +720,14 @@ impl ObjectStore for MemoryObjectStore {
                 content_type: Some(ct.clone()),
                 encrypted: true,
             }))
+    }
+
+    async fn get(&self, key: &str, max_bytes: usize) -> StorageResult<Option<Vec<u8>>> {
+        self.check()?;
+        match self.get_raw(key) {
+            Some(b) if b.len() > max_bytes => Err(StorageError::Integrity),
+            other => Ok(other),
+        }
     }
 
     async fn delete(&self, key: &str) -> StorageResult<()> {
@@ -832,10 +877,20 @@ mod tests {
         assert_eq!(stored.size, 8);
         assert_eq!(stored.sha256, sha256_hex(b"RIFF...."));
         assert!(store.head("v/1.wav").await.unwrap().is_some());
+        assert_eq!(
+            store.get("v/1.wav", 8).await.unwrap(),
+            Some(b"RIFF....".to_vec())
+        );
+        assert_eq!(store.get("v/1.wav", 7).await, Err(StorageError::Integrity));
         store.delete("v/1.wav").await.unwrap();
         store.delete("v/1.wav").await.unwrap();
         assert!(store.head("v/1.wav").await.unwrap().is_none());
+        assert_eq!(store.get("v/1.wav", 8).await.unwrap(), None);
         store.set_available(false);
+        assert_eq!(
+            store.get("v/2.wav", 8).await,
+            Err(StorageError::Unavailable)
+        );
         assert_eq!(
             store.put("v/2.wav", vec![1], "audio/wav").await,
             Err(StorageError::Unavailable)

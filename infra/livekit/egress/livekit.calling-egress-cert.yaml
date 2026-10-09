@@ -1,0 +1,29 @@
+# LiveKit server configuration for the Calling RTC CAPTURE (LiveKit Egress)
+# CERTIFICATION ONLY — `livekit.calling-cert.yaml` plus the Redis bus Egress needs.
+#
+# * Loopback only; never used by a shared, staging or production deployment.
+# * The key pair is the same well-known, test-only certification credential as
+#   `../livekit.calling-cert.yaml` (not a secret). Production keys are injected.
+port: 7880
+bind_addresses: ["127.0.0.1", "172.17.0.1"]
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50200
+  use_external_ip: false
+  # The headless-Chrome recorder of an audio-only room composite does not gather ICE
+  # candidates on loopback: media is offered on the host's private Docker bridge
+  # address (never a public interface).
+  node_ip: 172.17.0.1
+redis:
+  address: 127.0.0.1:6379
+keys:
+  calling-cert: calling-cert-only-key-not-a-secret-0123456789
+webhook:
+  api_key: calling-cert
+  urls:
+    - http://127.0.0.1:18089/internal/provider/media/events
+room:
+  auto_create: false
+logging:
+  level: info

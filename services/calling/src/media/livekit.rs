@@ -541,11 +541,20 @@ impl LiveKitAdapter {
         grant: Value,
         body: Value,
     ) -> Result<Value, MediaProviderError> {
+        self.twirp("RoomService", method, grant, body).await
+    }
+
+    /// One server API request (`livekit.{service}/{method}`) under a short-lived token
+    /// carrying exactly `grant`.
+    pub(crate) async fn twirp(
+        &self,
+        service: &str,
+        method: &str,
+        grant: Value,
+        body: Value,
+    ) -> Result<Value, MediaProviderError> {
         let token = self.admin_token(grant)?;
-        let url = format!(
-            "{}/twirp/livekit.RoomService/{method}",
-            self.settings.api_url
-        );
+        let url = format!("{}/twirp/livekit.{service}/{method}", self.settings.api_url);
         let response = self
             .http
             .post(url)
@@ -703,7 +712,18 @@ fn timestamp(seconds: Option<i64>) -> Option<DateTime<Utc>> {
 }
 
 /// Normalizes a LiveKit `ParticipantInfo` (Twirp proto names or webhook camelCase).
+/// A server-side recorder (participant kind EGRESS): started only by Calling's own
+/// server API credential for an authorized capture (`media::livekit_egress`). It is not a client
+/// connection and is neither admitted as a session nor quarantined.
+fn is_recorder(v: &Value) -> bool {
+    matches!(v.get("kind"), Some(Value::String(k)) if k == "EGRESS")
+        || matches!(v.get("kind"), Some(Value::Number(n)) if n.as_i64() == Some(2))
+}
+
 fn participant(v: &Value) -> Option<ProviderParticipant> {
+    if is_recorder(v) {
+        return None;
+    }
     let identity = v.get("identity")?.as_str()?.to_string();
     let permission = v.get("permission").cloned().unwrap_or(Value::Null);
     let sources: Vec<String> = field(&permission, "can_publish_sources", "canPublishSources")
@@ -1008,6 +1028,12 @@ impl CallMediaProvider for LiveKitAdapter {
             Some("track_unpublished") => MediaEventKind::TrackUnpublished,
             Some(_) => MediaEventKind::Other,
             None => return Err(EventVerificationError::Malformed),
+        };
+        // A recorder's own join / leave / tracks are not session evidence.
+        let kind = if event.get("participant").is_some_and(is_recorder) {
+            MediaEventKind::Other
+        } else {
+            kind
         };
         let resource_name = event
             .get("room")
@@ -1402,6 +1428,19 @@ mod tests {
         let p = event.participant.unwrap();
         assert_eq!(p.generation, Some(2));
         assert!(p.active && p.permissions.can_publish_audio && !p.permissions.can_publish_video);
+        // Calling's own server-side recorder (kind EGRESS) is neither a session nor an
+        // unknown connection to quarantine; a client identity claiming nothing is.
+        let recorder = body.replace(
+            r#""identity":"cfmid_ab""#,
+            r#""identity":"EG_x","kind":"EGRESS""#,
+        );
+        let event = adapter
+            .verify_event(Some(&signed(&recorder, SECRET)), recorder.as_bytes())
+            .unwrap();
+        assert_eq!(event.kind, MediaEventKind::Other);
+        assert!(event.participant.is_none());
+        assert!(participant(&json!({ "identity": "EG_y", "kind": 2 })).is_none());
+        assert!(participant(&json!({ "identity": "EG_y", "kind": "STANDARD" })).is_some());
         // Unsigned, wrongly signed, tampered or expired callbacks are refused.
         assert_eq!(
             adapter.verify_event(None, body.as_bytes()).unwrap_err(),

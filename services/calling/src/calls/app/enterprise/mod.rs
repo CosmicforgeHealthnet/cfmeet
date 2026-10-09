@@ -15,6 +15,7 @@
 //! snapshot, the policy version relied on, the current destination, the hop budget and the
 //! visited set; `enterprise_routing_steps` is the append-only routing evidence.
 
+mod capture;
 mod forward;
 mod ivr;
 mod queues;
@@ -30,8 +31,9 @@ pub use recording::{RecordingActor, RecordingConsentView, StartOutcome};
 pub use sip::{EnterpriseDialogOffer, EnterpriseKeypad, OfferScope};
 pub use transfer::{ResolvedTransferTarget, TransferTarget};
 pub use voicemail::{
-    CallMediaCapture, CaptureDelivery, CapturePurpose, CaptureRequest, CapturedMedia,
-    UnavailableCapture, CAPTURE_CONTENT_TYPE, MAX_CAPTURE_BYTES,
+    CallMediaCapture, CaptureDelivery, CapturePurpose, CaptureRequest, CaptureStatus,
+    CapturedMedia, UnavailableCapture, CAPTURE_CONTENT_TYPE, CAPTURE_CONTENT_TYPE_OGG,
+    MAX_CAPTURE_BYTES,
 };
 
 use sea_orm::{

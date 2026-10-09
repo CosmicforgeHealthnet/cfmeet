@@ -358,7 +358,7 @@ impl calling::calls::app::enterprise::CallMediaCapture for RecordingCapture {
         Ok(())
     }
 
-    async fn stop(&self, capture_id: uuid::Uuid) -> Result<(), &'static str> {
+    async fn stop(&self, _call_id: uuid::Uuid, capture_id: uuid::Uuid) -> Result<(), &'static str> {
         self.stopped.lock().unwrap().push(capture_id);
         Ok(())
     }
