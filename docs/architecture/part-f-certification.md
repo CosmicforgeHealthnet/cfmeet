@@ -7,7 +7,8 @@ against the simulated Part E adapter only and is **real-carrier certification pe
 
 Decisions: ADR 0018 (architecture), 0019 (ring groups / queues), 0020 (IVR / SIP devices),
 0021 (business hours / forwarding), 0022 (hold / resume / transfer), 0023 (object storage
-/ voicemail), 0024 (recording policy), 0025 (history), 0026 (operations).
+/ voicemail), 0024 (recording policy), 0025 (history), 0026 (operations), 0027 (RTC call-audio
+capture through LiveKit Egress).
 
 ## 1. Certification evidence (§200–§213)
 
@@ -22,8 +23,8 @@ Decisions: ADR 0018 (architecture), 0019 (ring groups / queues), 0020 (IVR / SIP
 | 206 | Hold / resume of an actual enterprise call with state and media evidence | `rtc_certification::enterprise_extension_call` (HELD with publish permission revoked at the provider, CONNECTED with it restored); `enterprise_transfer::hold_resume_and_transfer_to_an_extension_keep_one_call` | real LiveKit |
 | 207 | Transfer A/B → C on the same Call | `rtc_certification::enterprise_transfer` (B removed from the room, A hears C, same Call id); `enterprise_transfer::*` | real LiveKit |
 | 208 | Failed transfer recovers, no orphan leg | `rtc_certification::enterprise_transfer` (declined transfer, CONNECTED, media intact); `enterprise_transfer::failed_transfers_recover_without_orphans`, `transfer_races_leave_one_owner` | real LiveKit |
-| 209 | Unanswered → voicemail, real media captured, object finalized, history, authorized retrieval, read state, delete / retention | `enterprise_sip_certification` scenario 5 (edge capture, S3-compatible upload, READY, signed retrieval of the same bytes, READ, deletion, caller history); `enterprise_voicemail::*`; `call_history::voicemail_is_linked_for_the_mailbox_owner_only` | real Asterisk + SIPp + S3-compatible store |
-| 210 | Call without recording; denied without evidence; allowed with evidence; protected artifact; access audited | `enterprise_sip_certification` scenario 6; `enterprise_recording::*` | real Asterisk + SIPp + S3-compatible store |
+| 209 | Unanswered → voicemail, real media captured, object finalized, history, authorized retrieval, read state, delete / retention | SIP: `enterprise_sip_certification` scenario 5 (edge capture, S3-compatible upload, READY, signed retrieval of the same bytes, READ, deletion, caller history). RTC: `rtc_certification::rtc_voicemail_through_egress` (LiveKit Egress track capture of ONLY the caller's real WebRTC microphone, protected Ogg/Opus artifact, READY, caller history outcome VOICEMAIL, owner link, owner retrieval verified by ffprobe / ffmpeg, 404 for non-owner and other tenant, READ, deletion removes the object). `enterprise_voicemail::*`, `enterprise_capture_egress::*`; `call_history::voicemail_is_linked_for_the_mailbox_owner_only` | real Asterisk + SIPp + S3-compatible store; real LiveKit + LiveKit Egress + WebRTC + S3-compatible store |
+| 210 | Call without recording; denied without evidence; allowed with evidence; protected artifact; access audited | SIP: `enterprise_sip_certification` scenario 6. RTC: `rtc_certification::rtc_recording_through_egress` (the Call works unrecorded; DENIED CONSENT_MISSING with nothing captured; per-participant consent + notice evidence; audio-only room-composite Egress of the real mixed audio; READY; audited participant retrieval verified by ffprobe / ffmpeg; 404 across tenants; a recording active at Call end stops and finalizes once; retention deletes the object). `enterprise_recording::*`, `enterprise_capture_egress::*` | real Asterisk + SIPp + S3-compatible store; real LiveKit + LiveKit Egress + WebRTC + S3-compatible store |
 | 211 | Realtime / push disabled; missed and answered Calls; reconnect; canonical history | `call_history::a_missed_call_survives_push_and_realtime_outage`, `one_answered_device_answers_for_the_logical_participant` | — |
 | 212 | Tenant A admin with B's ids cannot read, update, route through, listen to voicemail, download recording | `enterprise_certification::org_isolation_certification` | — |
 | 213 | Public forwarding through the simulated Part E adapter | `enterprise_hours_forwarding::public_forwarding_passes_every_part_e_gate`, `public_forwarding_cannot_bypass_part_e` — **real-carrier certification pending (Part E)** | simulated adapter |
@@ -123,8 +124,74 @@ WebRTC clients, an S3-compatible store), before the push:
 * **Part E external blocker:** real lawful telecom interconnect certification
   (ADR 0016). Part F's public forwarding is certified against the simulated adapter only.
 * Not offered by this deployment, refused safely rather than faked: transfer of an
-  established Call to a public contact (422); voicemail / recording capture of
-  application-only (RTC) Calls — needs a LiveKit Egress deployment as the RTC capture
-  adapter (SIP edge capture is certified); keypad consent from SIP desk phones (policies
-  that require it deny recording); recordings longer than 24 minutes (single bounded
-  delivery).
+  established Call to a public contact (422; §59 is certified for extension / internal
+  transfer, public routing stays under §58 forwarding and the Part E gates); keypad
+  consent from SIP desk phones (policies that require it deny recording — fail closed).
+* Closed by the final closure pass (ADR 0027): voicemail / recording capture of
+  application-only (RTC) Calls through LiveKit Egress. Recording length: the per-policy
+  `maxRecordingSeconds` (60–1440) under the single-artifact delivery ceiling — an explicit
+  policy value, documented, unchanged.
+
+## 6. DIRECT CERTIFICATION (final closure)
+
+**Result: DIRECT CLEAN-ENV CERTIFICATION — PASS.** This replaces the GitHub Actions
+closure gate for Part F.
+
+* **GitHub Actions:** GitHub refused to allocate runners for this account (billing /
+  spending restriction: "the job was not started because recent account payments have
+  failed or your spending limit needs to be increased"). Those jobs never started; they are
+  **not** code failures. Every workflow is kept unchanged for a rerun once billing is
+  restored.
+* **Certified code commit:** `d159acee89fadf3bc4b78fe8be7ade0e55928e4d` (staging; the
+  commit that follows it only adds this record). Started from `86e26707b0fc340169a15dd59feb2002b4b04245`.
+* **Date:** 2026-10-09 (finished 13:17 UTC).
+* **Environment (local container, fresh databases per test, fresh rooms / processes /
+  bucket prefixes, Cargo cache reused):** PostgreSQL 16.15; LiveKit server 1.13.9
+  (`infra/livekit/egress/livekit.calling-egress-cert.yaml`, Redis 7.0.15); LiveKit Egress
+  1.10.0 (`infra/livekit/egress/egress.calling-cert.yaml`, Docker, host network); LiveKit
+  Python RTC SDK 1.1.20 (real WebRTC clients publishing a 440 Hz tone); Asterisk 20.6.0;
+  SIPp 3.7.2; S3-compatible private store (moto, signature-unverifying — the live test runs
+  with `OBJECT_STORAGE_TEST_VERIFIES_SIGNATURES=0`); ffprobe / ffmpeg 6.1.1; rustc 1.97.0.
+
+| Gate | Command / scope | Result |
+|---|---|---|
+| A static / architecture | `make contracts-validate` (38 contracts, 150 examples, 218 counter-examples), `make contracts-test` 17 / 17, contracts lint, `make service-auth-test` 114 / 114, `make service-boundaries` (55 mutation tests + guard), Calling + object-storage `cargo fmt --check` and `clippy --all-targets -D warnings`, architecture boundary tests 18 / 18, PEM / secret scan, raw-number / provider / Meeting-import / public-URL / Egress-identifier review of the diff | **PASS** |
+| B full Calling | `cargo test --workspace --locked --no-fail-fast` on `d159ace` (68 test binaries) | **515 / 515** |
+| C Telephony | full suite with the real-Asterisk SIP certification (`TELEPHONY_SIP_CERT_REQUIRED=1`); Telephony code unchanged | **87 / 87** |
+| D object storage | `packages/object-storage` against the S3-compatible store (incl. the new bounded `get`) | **6 / 6** |
+| E migrations | no schema change: one clean database `up` + `status` (30 migrations applied) | **PASS** |
+| F RTC | `rtc_certification` (real LiveKit + WebRTC): Part C security cases (refreshed-token re-entry × 3, superseded generation, terminal-call tokens, reconnect, quarantine, reconciliation), enterprise extension, SIMULTANEOUS / ORDERED groups, queue, transfer, failed transfer, **RTC voicemail through Egress**, **RTC recording through Egress** | **PASS** |
+| G SIP | Telephony SIP certification (in gate C) | **PASS** |
+| H enterprise | `enterprise_sip_certification` (real Telephony + Asterisk + SIPp + S3): IVR × 4, SIP voicemail (7.1 s real edge capture), SIP recording (denied without consent, notice, 9.2 s bridge capture, audited); `enterprise_certification` (org isolation); RTC capture scenarios in gate F | **PASS** |
+| I capture races | new / touched races × 3: `enterprise_capture_egress` (8 tests: Egress unavailable, start timeout executed late, stop timeout reconciled, storage outage, failed egress, duplicate start + stop racing Call end × 3 rounds, voicemail maximum length, caller-only capture collected once), recording `concurrent_starts_record_once` + `stop_racing_the_call_end_stops_once`, voicemail `concurrent_finalization_stores_once` + `delete_racing_retention_deletes_once`; untouched ring-group / queue / transfer races smoke-run once in gate B | **3 / 3 runs, 36 / 36** |
+| J e2e | Calling ↔ Privacy Relay (real binary); Calling ↔ Telephony ↔ Privacy Relay (real binaries) | **3 / 3; 2 / 2** |
+
+**RTC Egress results.** Voicemail: track egress of ONLY the caller's microphone; 5.0 s
+Opus/Ogg, audio only, max −14.5 dB (real tone, not silence); READY; caller history outcome
+VOICEMAIL, mailbox owner linked; owner retrieval through a short-lived signed URL returns
+the stored bytes (digest verified); non-owner and other tenant 404; READ; deletion removed
+the object; staging object released. Recording: DENIED `CONSENT_MISSING` with nothing
+captured; each participant's consent + notice evidence; audio-only room composite of the
+real mixed audio (Opus/Ogg, audio only, max −18.2 dB); READY; participant retrieval audited
+`MEDIA_ACCESS:GRANTED`; other tenant 404; a recording active at Call end stopped
+(`CALL_ENDED`) and finalized exactly once (one RECORDING_STOPPED, one RECORDING_READY);
+retention deleted the object.
+
+**Security.** Cross-tenant: 404 for voicemail / recording reads and media access (RTC and
+SIP), org isolation certification. No raw telephone number in the diff, no credential
+committed (test-only certification keys are labelled as such; production Egress config is
+secret-injected), no Egress / provider identifier in public contracts or views, no public
+object URL stored, staging keys only inside the adapter, no Meeting Service import.
+Consent remains fail-closed (SIP desk-phone consent still denies).
+
+**Observation, not a defect of this change.** The first full Calling run (on the
+pre-rename commit, concurrently with the Telephony suite) had one load-induced miss in
+`app_ringing::offers_expire_on_the_server_and_are_never_revived`: the invitation-expiry pass
+takes the Call row with `SKIP LOCKED` and skipped a Call still locked by a concurrent
+post-commit task (the next pass expires it by design). It passed 3 / 3 isolated, 5 / 5 as a
+whole file and in the final full run; the ringing path is untouched by this change. The same
+run's architecture failure (provider-specific code outside the adapter files) was a real
+finding and was fixed (`media/livekit_egress.rs`, neutral `media::CaptureSettings`).
+
+**Part E carry-forward:** REAL LAWFUL TELECOM INTERCONNECT CERTIFICATION — **PENDING**
+(no carrier / trunk credentials or public test number). Not a Part F blocker.
