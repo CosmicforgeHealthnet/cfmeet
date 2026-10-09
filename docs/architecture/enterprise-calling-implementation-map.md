@@ -4,7 +4,7 @@ Baseline: `staging` at `f28bdb92977747def4f2ac56b02bb59770359071` (Part E comple
 external item — real lawful telecom interconnect certification — stays pending, ADR 0016).
 
 This map records what already exists, what Part F adds and where. It is the Stage 0
-result of the Part F implementation; ADRs 0018–0023 hold the decisions.
+result of the Part F implementation; ADRs 0018–0025 hold the decisions.
 
 ## 1. What already exists (audited, reused — never re-implemented)
 
@@ -71,7 +71,7 @@ packages/object-storage/   neutral protected object storage (S3 SigV4 + memory b
 | 6 | `enterprise_business_hours_rules`, `…_windows`, `…_exceptions`, `enterprise_forwarding_rules` |
 | 8 | `voicemail_mailboxes`, `voicemail_messages` |
 | 9 | `call_recording_policies`, `call_recording_authorizations`, `call_recording_consents`, `call_recordings`, `call_recording_access_audit` (ADR 0024) |
-| 10 | history indexes |
+| 10 | `call_participants.call_created_at` (trigger-stamped, immutable), `idx_call_participants_history`, `idx_enterprise_routing_steps_destination` — history is derived, never stored (ADR 0025) |
 
 Polymorphic destinations (`EXTENSION`, `PRINCIPAL`, `RING_GROUP`, `QUEUE`, `IVR`,
 `VOICEMAIL`, `SCHEDULE`, `PUBLIC_CONTACT`) are `(type, id)` pairs validated by one
@@ -106,6 +106,11 @@ Relay-owned; never a foreign key, never a number). Config rows are never deleted
   BEFORE the ordinary DECLINED / NO_ANSWER derivation.
 * Queue workers, IVR timers, voicemail / recording finalizers and retention run on every
   instance with `FOR UPDATE SKIP LOCKED` and persisted deadlines (restart-safe).
+* History (§62, `calls/app/history.rs`, ADR 0025): each principal's Calls with the
+  participant outcome (ANSWERED / DECLINED / ANSWERED_ELSEWHERE / RINGING / MISSED / …)
+  derived at read time from offers on every device, sessions and the Call state — never
+  from push or realtime delivery; `GET /v1/calls?principalId=` and the endpoint's
+  `GET /v1/calling/history`.
 
 ## 6. Telephony additions (execution only)
 

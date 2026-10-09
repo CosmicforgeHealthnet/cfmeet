@@ -182,16 +182,18 @@ jobs:
           # Call domain (Part C §15–§25, Part D §26–§30 evidence, Part E §37–§51 routing,
           # public-network parties / bridges / telephony commands and events, spend): calls
           # + 28 call_* tables + the outbox; Part F §55 adds call_answer_group_claims (the
-          # group-level single-winner claim of ring groups / queue offers).
+          # group-level single-winner claim of ring groups / queue offers) and §61 the five
+          # call_recording_* tables. The count is updated intentionally with each family and
+          # paired with the structural checks below (required tables, no foreign domain).
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' \
-             AND (tablename = 'calls' OR tablename LIKE 'call\_%' OR tablename = 'calling_outbox_events')")" = "31"
+             AND (tablename = 'calls' OR tablename LIKE 'call\_%' OR tablename = 'calling_outbox_events')")" = "36"
           # Applied = registered migrations (derived from the migrator, never hand-counted).
           registered="$(grep -c 'Box::new(m20' migration/src/lib.rs)"
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
             "SELECT count(*) FROM calling_seaql_migrations")" = "$registered"
-          # Part F (ADR 0018): the enterprise foundation exists, and there is no second
-          # Call authority.
+          # Part F (ADR 0018, 0023, 0024): the enterprise foundation, voicemail and call
+          # recording exist, and there is no second Call authority.
           for t in enterprise_call_policies enterprise_departments enterprise_department_members \
                    enterprise_admin_audit enterprise_extensions enterprise_call_contexts \
                    enterprise_routing_steps enterprise_ring_groups enterprise_ring_group_members \
@@ -200,14 +202,18 @@ jobs:
                    enterprise_ivr_flow_versions enterprise_ivr_flow_destinations \
                    enterprise_ivr_sessions enterprise_sip_devices enterprise_business_hours \
                    enterprise_business_hours_windows enterprise_business_hours_exceptions \
-                   enterprise_public_contacts enterprise_forwarding_rules; do
+                   enterprise_public_contacts enterprise_forwarding_rules \
+                   voicemail_mailboxes voicemail_messages call_recording_policies \
+                   call_recording_consents call_recording_authorizations call_recordings \
+                   call_recording_access_audit; do
             test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
               "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename = '$t'")" = "1" \
               || { echo "::error::missing enterprise table $t"; exit 1; }
           done
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename IN \
-             ('enterprise_calls', 'pbx_calls', 'voicemail_calls', 'ivr_calls')")" = "0"
+             ('enterprise_calls', 'pbx_calls', 'voicemail_calls', 'ivr_calls', 'queue_calls', \
+              'enterprise_call_legs', 'enterprise_participants')")" = "0"
           # Every public table is Calling's own.
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND NOT ( \

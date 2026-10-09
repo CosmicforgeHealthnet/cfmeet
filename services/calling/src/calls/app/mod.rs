@@ -18,6 +18,7 @@
 mod control;
 mod create;
 pub mod enterprise;
+pub mod history;
 pub mod http;
 pub mod media;
 mod privacy;

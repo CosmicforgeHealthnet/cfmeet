@@ -689,6 +689,14 @@ async fn call_end_stops_and_artifacts_are_protected_and_audited() {
     assert_eq!(keys.len(), 1);
     assert!(keys[0].starts_with("recordings/"));
     assert_eq!(rec.store.get_raw(&keys[0]).unwrap(), audio);
+    // Both participants' history shows the recording as available (no key, no URL).
+    for principal in [caller.principal.id(), callee.principal.id()] {
+        let r = e.a.get(&format!("/v1/calls?principalId={principal}")).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        assert_eq!(r.json["data"][0]["callId"], call.to_string());
+        assert_eq!(r.json["data"][0]["recordingAvailable"], true);
+        assert!(!r.text.contains("recordings/"), "{}", r.text);
+    }
     // Metadata: integrity only — no key, URL or number.
     let owner = caller.principal.id().as_uuid();
     let r = rec

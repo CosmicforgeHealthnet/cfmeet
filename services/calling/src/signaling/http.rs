@@ -4,13 +4,19 @@
 //!
 //! * `GET  /v1/calling/invitations` — recovery: live and recently finished offers with
 //!   the authoritative Call state and whether each is still actionable;
+//! * `GET  /v1/calling/history` — recovery: the endpoint's principal's canonical call
+//!   history (Part F §62), the same derivation and filters as `GET /v1/calls` — a client
+//!   that missed every push and signal reads the authoritative missed / answered state;
 //! * `POST /v1/calling/invitations/{invitation_id}/accept|decline` — answer one's own offer
 //!   (`expectedVersion` required; Idempotency-Key honoured);
 //! * `POST /v1/calling/sessions/{session_id}/media-credentials` — a join credential for one's
 //!   own authorized session.
 
 use axum::{
-    extract::{rejection::JsonRejection, DefaultBodyLimit, Path, State},
+    extract::{
+        rejection::{JsonRejection, QueryRejection},
+        DefaultBodyLimit, Path, Query, State,
+    },
     http::{HeaderMap, StatusCode},
     response::Response,
     routing::{get, post},
@@ -21,11 +27,13 @@ use serde::Serialize;
 use super::SignalingIdentity;
 use crate::{
     calls::{
+        app::history::CallHistoryListView,
         app::{
             http::{command_key, parse_body, respond, uuid_path, EmptyBody, VersionBody},
             media::MediaCredentialActor,
             InvitationActor, RecoveredInvitation,
         },
+        http::parse_list_query,
         ids::{CallInvitationId, CallSessionId},
         kinds::CommandOperation,
     },
@@ -37,6 +45,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/calling/signaling", get(super::ws::signaling))
         .route("/v1/calling/invitations", get(invitations))
+        .route("/v1/calling/history", get(history))
         .route(
             "/v1/calling/invitations/:invitation_id/accept",
             post(accept),
@@ -70,6 +79,31 @@ async fn invitations(
             endpoint_id: identity.endpoint_id().as_uuid(),
             data,
         },
+        false,
+    ))
+}
+
+async fn history(
+    State(state): State<AppState>,
+    identity: SignalingIdentity,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    let Query(pairs) =
+        query.map_err(|_| CallingError::Validation("The query string is invalid."))?;
+    let request = parse_list_query(&pairs, false)?;
+    let page = state
+        .app
+        .call_history(
+            identity.scope(),
+            identity.principal_id(),
+            &request.query,
+            request.filter,
+            request.destination,
+        )
+        .await?;
+    Ok(respond(
+        StatusCode::OK,
+        CallHistoryListView::from(&page),
         false,
     ))
 }

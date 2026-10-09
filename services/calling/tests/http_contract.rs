@@ -580,6 +580,7 @@ fn every_operation_declares_its_authentication() {
             } else if path.starts_with("/v1/calling/media/") {
                 "mediaCredential"
             } else if path == "/v1/calling/signaling"
+                || path == "/v1/calling/history"
                 || path.starts_with("/v1/calling/invitations")
                 || path.starts_with("/v1/calling/sessions/")
             {

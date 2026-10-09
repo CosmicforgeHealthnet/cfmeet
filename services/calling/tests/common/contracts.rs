@@ -42,3 +42,12 @@ pub fn check(reference: &str, value: &Value) {
         .collect();
     assert!(errors.is_empty(), "{reference}: {errors:?}\n{value:#}");
 }
+
+/// Asserts `value` validates against the Calling HTTP contract's component `name`.
+#[allow(dead_code)]
+pub fn check_openapi_component(name: &str, value: &Value) {
+    check(
+        &format!("calling/http/v1.openapi.json#/components/schemas/{name}"),
+        value,
+    );
+}

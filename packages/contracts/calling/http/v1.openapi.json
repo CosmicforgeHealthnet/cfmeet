@@ -201,8 +201,8 @@
     "/v1/calls": {
       "get": {
         "operationId": "listCalls",
-        "summary": "List the caller's calls (newest first, keyset pagination)",
-        "description": "Requires the calls.read scope. Ordered by createdAt descending, then callId descending. Only the bounded filters below are accepted; unknown or repeated query parameters are rejected with 400. The cursor is opaque, carries position only and never scope.",
+        "summary": "List the caller's calls, or one principal's call history (newest first, keyset pagination)",
+        "description": "Requires the calls.read scope. Ordered by createdAt descending, then callId descending. Only the bounded filters below are accepted; unknown or repeated query parameters are rejected with 400. The cursor is opaque, carries position only and never scope. Part F §62: with principalId the response is that principal's canonical call history (CallHistoryList): only Calls it participates in, each with its participant-relative direction and outcome derived from Call evidence (never from push or realtime delivery), safe enterprise labels, the voicemail link for mailbox owners and recording availability; direction / outcome / missed need principalId. enterpriseDestinationType + enterpriseDestinationId narrow either listing.",
         "security": [
           {
             "platformCredential": [
@@ -269,11 +269,65 @@
             "schema": {
               "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
             }
+          },
+          {
+            "name": "principalId",
+            "in": "query",
+            "required": false,
+            "description": "Part F §62: this principal's history (a principal of the credential's scope; any other id yields an empty page).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false,
+            "description": "History only (needs a principal): INBOUND (the principal was a recipient) or OUTBOUND (the principal initiated the Call).",
+            "schema": {
+              "$ref": "#/components/schemas/HistoryDirection"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "required": false,
+            "description": "History only (needs a principal): the participant outcome derived from Call evidence.",
+            "schema": {
+              "$ref": "#/components/schemas/ParticipantOutcome"
+            }
+          },
+          {
+            "name": "missed",
+            "in": "query",
+            "required": false,
+            "description": "History only (needs a principal): true lists only Calls the principal missed (outcome MISSED); false excludes them.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "enterpriseDestinationType",
+            "in": "query",
+            "required": false,
+            "description": "With enterpriseDestinationId: only Calls routed through this enterprise destination (an extension — as dialed or reached —, a ring group, a queue, an IVR flow or a voicemail mailbox of the same scope). Never a public contact.",
+            "schema": {
+              "$ref": "#/components/schemas/HistoryDestinationType"
+            }
+          },
+          {
+            "name": "enterpriseDestinationId",
+            "in": "query",
+            "required": false,
+            "description": "With enterpriseDestinationType: the destination's id.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "One page of calls.",
+            "description": "One page of calls (CallList), or with principalId one page of history (CallHistoryList).",
             "headers": {
               "x-request-id": {
                 "$ref": "#/components/headers/XRequestId"
@@ -285,7 +339,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CallList"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CallList"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CallHistoryList"
+                    }
+                  ]
                 }
               }
             }
@@ -1533,6 +1594,152 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/SignalingAuthenticationFailed"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/calling/history": {
+      "get": {
+        "operationId": "recoverCallHistory",
+        "summary": "The endpoint's principal's call history",
+        "description": "Signaling credential. Recovery after a reconnect: the canonical call history of the credential's principal (every device of it sees the same entries), with the same derivation and filters as GET /v1/calls?principalId= — a client that missed every push and realtime signal reads the authoritative missed / answered outcome here. principalId is not accepted (an endpoint reads its own principal only).",
+        "security": [
+          {
+            "signalingCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (default 25, at most 100).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque nextCursor of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallState"
+            }
+          },
+          {
+            "name": "createdAfter",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive lower bound of createdAt (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "createdBefore",
+            "in": "query",
+            "required": false,
+            "description": "Exclusive upper bound of createdAt (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "initiatorPrincipalId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false,
+            "description": "History only (needs a principal): INBOUND (the principal was a recipient) or OUTBOUND (the principal initiated the Call).",
+            "schema": {
+              "$ref": "#/components/schemas/HistoryDirection"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "required": false,
+            "description": "History only (needs a principal): the participant outcome derived from Call evidence.",
+            "schema": {
+              "$ref": "#/components/schemas/ParticipantOutcome"
+            }
+          },
+          {
+            "name": "missed",
+            "in": "query",
+            "required": false,
+            "description": "History only (needs a principal): true lists only Calls the principal missed (outcome MISSED); false excludes them.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "enterpriseDestinationType",
+            "in": "query",
+            "required": false,
+            "description": "With enterpriseDestinationId: only Calls routed through this enterprise destination (an extension — as dialed or reached —, a ring group, a queue, an IVR flow or a voicemail mailbox of the same scope). Never a public contact.",
+            "schema": {
+              "$ref": "#/components/schemas/HistoryDestinationType"
+            }
+          },
+          {
+            "name": "enterpriseDestinationId",
+            "in": "query",
+            "required": false,
+            "description": "With enterpriseDestinationType: the destination's id.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of the principal's history.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallHistoryList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "$ref": "#/components/responses/SignalingAuthenticationFailed"
@@ -9029,6 +9236,290 @@
             "maxItems": 100,
             "items": {
               "$ref": "#/components/schemas/CallSummary"
+            }
+          },
+          "nextCursor": {
+            "description": "Opaque cursor of the next page; null on the last page.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          }
+        }
+      },
+      "HistoryDirection": {
+        "description": "Direction of a Call relative to the principal whose history it is.",
+        "type": "string",
+        "enum": [
+          "INBOUND",
+          "OUTBOUND"
+        ]
+      },
+      "ParticipantOutcome": {
+        "description": "The outcome of a Call for ONE logical participant, derived from Call evidence only (participant, ring offers on every device, session connection intervals, the Call's state) — never from a push, a realtime signal or a client acknowledgement, and never stored as a flag. OUTBOUND: ANSWERED, NOT_ANSWERED (ended unanswered), IN_PROGRESS. INBOUND, first match wins: ANSWERED (an offer accepted on any of the participant's devices, or a session connected), DECLINED, ANSWERED_ELSEWHERE (the offers were won by another participant of the same answer group — a ring-group or queue colleague), RINGING (an offer is live), MISSED (offered on at least one device and every offer ended unanswered), NOT_REACHED (never offered, Call over), IN_PROGRESS. A losing device of a participant that answered is never a second (missed) entry.",
+        "type": "string",
+        "enum": [
+          "ANSWERED",
+          "NOT_ANSWERED",
+          "MISSED",
+          "DECLINED",
+          "ANSWERED_ELSEWHERE",
+          "RINGING",
+          "NOT_REACHED",
+          "IN_PROGRESS"
+        ]
+      },
+      "HistoryDestinationType": {
+        "description": "Enterprise destinations a listing may be narrowed to.",
+        "type": "string",
+        "enum": [
+          "EXTENSION",
+          "RING_GROUP",
+          "QUEUE",
+          "IVR",
+          "VOICEMAIL"
+        ]
+      },
+      "CallParticipation": {
+        "description": "The principal's own part in the Call (one per logical participant, whatever its devices).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "participantId",
+          "direction",
+          "outcome",
+          "missed",
+          "addedAt",
+          "answeredAt",
+          "leftAt"
+        ],
+        "properties": {
+          "participantId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/HistoryDirection"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/ParticipantOutcome"
+          },
+          "missed": {
+            "type": "boolean",
+            "description": "outcome is MISSED."
+          },
+          "addedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "answeredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the participant (any device) answered; for the initiator, when the Call was answered."
+          },
+          "leftAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "CallCounterpart": {
+        "description": "Another participant of the Call (internal display identity only).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "principalId",
+          "direction",
+          "displayName"
+        ],
+        "properties": {
+          "principalId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/HistoryDirection"
+          },
+          "displayName": {
+            "oneOf": [
+              {
+                "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/SafeText"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "CallHistoryEnterprise": {
+        "description": "Safe enterprise labels of an enterprise Call: the dialed internal extension (a short code or alias, never a telephone number), its label, the routing phase / outcome and the current ring group / queue labels.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entryExtension",
+          "entryLabel",
+          "phase",
+          "outcome",
+          "ringGroupLabel",
+          "queueLabel"
+        ],
+        "properties": {
+          "entryExtension": {
+            "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/ExtensionNumber"
+          },
+          "entryLabel": {
+            "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/SafeText"
+          },
+          "phase": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{1,31}$"
+          },
+          "outcome": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z_]{1,31}$"
+          },
+          "ringGroupLabel": {
+            "oneOf": [
+              {
+                "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/SafeText"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "queueLabel": {
+            "oneOf": [
+              {
+                "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/SafeText"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "CallHistoryVoicemail": {
+        "description": "The voicemail message left on the Call — present only for an owner of its mailbox. Its audio is reached through the authorized, audited voicemail routes (never a URL here).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "messageId",
+          "state",
+          "readState"
+        ],
+        "properties": {
+          "messageId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "RECORDING",
+              "PROCESSING",
+              "READY",
+              "FAILED",
+              "DELETING"
+            ]
+          },
+          "readState": {
+            "type": "string",
+            "enum": [
+              "UNREAD",
+              "READ"
+            ]
+          }
+        }
+      },
+      "CallHistoryEntry": {
+        "description": "A Call as it appears in one principal's history.",
+        "allOf": [
+          {
+            "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallCore"
+          }
+        ],
+        "required": [
+          "durationMs",
+          "participation",
+          "counterparts",
+          "enterprise",
+          "voicemail",
+          "recordingAvailable"
+        ],
+        "properties": {
+          "durationMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "From CONNECTED to the end of the Call; null while it lasts or if it never connected."
+          },
+          "participation": {
+            "$ref": "#/components/schemas/CallParticipation"
+          },
+          "counterparts": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "$ref": "#/components/schemas/CallCounterpart"
+            }
+          },
+          "enterprise": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CallHistoryEnterprise"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "voicemail": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CallHistoryVoicemail"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recordingAvailable": {
+            "type": "boolean",
+            "description": "A READY call recording exists (metadata and audio through the authorized, audited recording routes)."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "CallHistoryList": {
+        "description": "One page of a principal's call history, newest Call first (createdAt DESC, callId DESC).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "principalId",
+          "data",
+          "nextCursor"
+        ],
+        "properties": {
+          "principalId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "data": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallHistoryEntry"
             }
           },
           "nextCursor": {

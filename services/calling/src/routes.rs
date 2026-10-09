@@ -5,6 +5,7 @@
 //!   credential minting) are passed to [`app`] as `protected` and every one of them runs
 //!   behind platform credential authentication.
 //! * Endpoint signaling routes (`/v1/calling/signaling`, `/v1/calling/invitations…`,
+//!   `/v1/calling/history`,
 //!   `/v1/calling/sessions/…/media-credentials`) authenticate with a short-lived signaling
 //!   credential and never accept a platform API credential.
 //! * The media provider callback (`POST /internal/provider/media/events`) is
