@@ -16,7 +16,7 @@
     },
     {
       "id": "cfmeet.calling.http-api",
-      "version": "1.7.0",
+      "version": "1.8.0",
       "kind": "openapi",
       "path": "calling/http/v1.openapi.json",
       "owner": "calling",
@@ -181,14 +181,14 @@
     },
     {
       "id": "cfmeet.platform.usage",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "platform/usage/v1.schema.json",
       "owner": "platform",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Usage and limits (Part G §69 / §70): the ledger of final consumption facts of the authenticated application environment (application media, public-network legs with KNOWN / ESTIMATED / UNKNOWN cost evidence, stored voicemail / recording artifacts — never a bill) and the limit status (request rate, concurrent calls, telecom spend) with every level of the tenant → application → credential precedence chain and the binding level. Served by Calling's platform ingress."
+      "description": "Usage and limits (Part G §69 / §70): the ledger of final consumption facts of the authenticated application environment (application media, public-network legs with KNOWN / ESTIMATED / UNKNOWN cost evidence, stored voicemail / recording artifacts — never a bill) and the limit status (request rate, concurrent calls, telecom spend) with every level of the API-client chain (tenant → application → service account → credential), the independent principal axis of a principal resolved in the caller's scope, and the binding level. Served by Calling's platform ingress."
     },
     {
       "id": "cfmeet.privacy-relay.http-api",

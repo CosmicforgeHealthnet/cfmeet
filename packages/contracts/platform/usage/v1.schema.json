@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/platform/usage/v1.schema.json",
   "title": "CF Meet usage and limits v1",
-  "description": "Usage facts and limit status of the authenticated application environment (Part G §69 / §70). Usage is a ledger of final consumption facts — NOT a bill: no price list, invoice, tax or balance. Public-network legs carry cost evidence (KNOWN / ESTIMATED / UNKNOWN; UNKNOWN has no amount). No provider identifier, telephone number, SIP URI, object key or credential appears. Limits are resolved most-restrictive-wins along tenant → application → credential (and the environment's telecom-spend policy); configured tenant / application levels are also aggregate ceilings. Scope comes only from the authenticated credential.",
+  "description": "Usage facts and limit status of the authenticated application environment (Part G §69 / §70). Usage is a ledger of final consumption facts — NOT a bill: no price list, invoice, tax or balance. Public-network legs carry cost evidence (KNOWN / ESTIMATED / UNKNOWN; UNKNOWN has no amount). No provider identifier, telephone number, SIP URI, object key or credential appears. Limits are enforced at every applicable level: the API-client chain tenant → application → service account → credential (the effective per-credential value is the most restrictive configured one; every configured parent is also an aggregate ceiling) and the independent principal axis of a server-resolved principal, plus the environment's telecom-spend policy. Tenant, application, service account and credential come only from the authenticated credential; a principal only after resolution in that scope.",
   "oneOf": [
     {
       "$ref": "#/$defs/UsageList"
@@ -282,10 +282,13 @@
           "enum": [
             "TENANT",
             "APPLICATION",
+            "SERVICE_ACCOUNT",
             "CREDENTIAL",
+            "PRINCIPAL",
             "ENVIRONMENT",
             "PLATFORM_DEFAULT"
-          ]
+          ],
+          "description": "The level: the API-client chain TENANT → APPLICATION → SERVICE_ACCOUNT → CREDENTIAL (every configured parent is also an aggregate ceiling), the independent PRINCIPAL axis (only for a principal resolved in the caller's scope, `?principalId=`), the ENVIRONMENT telecom-spend policy. Never an identifier."
         },
         "ceiling": {
           "type": "integer",
@@ -313,7 +316,7 @@
         "remaining",
         "levels"
       ],
-      "description": "One limit: every configured level of the precedence chain (tenant → application → credential; the environment's telecom-spend policy for spend) with ceiling / current / remaining, and the BINDING level (least remaining) at the top level.",
+      "description": "One limit: every configured level — the API-client chain TENANT → APPLICATION → SERVICE_ACCOUNT → CREDENTIAL, the requested principal's PRINCIPAL axis, and the environment's telecom-spend policy for spend — with ceiling / current / remaining, and the BINDING level (least remaining) at the top level. No level carries an identifier.",
       "properties": {
         "limit": {
           "type": "string",
@@ -346,10 +349,13 @@
           "enum": [
             "TENANT",
             "APPLICATION",
+            "SERVICE_ACCOUNT",
             "CREDENTIAL",
+            "PRINCIPAL",
             "ENVIRONMENT",
             "PLATFORM_DEFAULT"
-          ]
+          ],
+          "description": "The binding level (least remaining)."
         },
         "ceiling": {
           "type": "integer",

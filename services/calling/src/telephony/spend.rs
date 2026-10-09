@@ -41,6 +41,10 @@ pub enum SpendDenial {
     ContactVelocity,
     TenantDailyLimit,
     TenantMonthlyLimit,
+    ServiceAccountDailyLimit,
+    ServiceAccountMonthlyLimit,
+    PrincipalDailyLimit,
+    PrincipalMonthlyLimit,
     ApplicationDailyLimit,
     ApplicationMonthlyLimit,
     CredentialDailyLimit,
@@ -62,6 +66,10 @@ impl SpendDenial {
             SpendDenial::ContactVelocity => "CONTACT_VELOCITY_LIMIT",
             SpendDenial::TenantDailyLimit => "TENANT_DAILY_SPEND_LIMIT",
             SpendDenial::TenantMonthlyLimit => "TENANT_MONTHLY_SPEND_LIMIT",
+            SpendDenial::ServiceAccountDailyLimit => "SERVICE_ACCOUNT_DAILY_SPEND_LIMIT",
+            SpendDenial::ServiceAccountMonthlyLimit => "SERVICE_ACCOUNT_MONTHLY_SPEND_LIMIT",
+            SpendDenial::PrincipalDailyLimit => "PRINCIPAL_DAILY_SPEND_LIMIT",
+            SpendDenial::PrincipalMonthlyLimit => "PRINCIPAL_MONTHLY_SPEND_LIMIT",
             SpendDenial::ApplicationDailyLimit => "APPLICATION_DAILY_SPEND_LIMIT",
             SpendDenial::ApplicationMonthlyLimit => "APPLICATION_MONTHLY_SPEND_LIMIT",
             SpendDenial::CredentialDailyLimit => "CREDENTIAL_DAILY_SPEND_LIMIT",
@@ -291,8 +299,11 @@ async fn reserve_checked<C: ConnectionTrait>(
     contact_reference: Option<Uuid>,
     now: DateTime<Utc>,
 ) -> Result<Result<Reservation, SpendDenial>, DbErr> {
-    // 1. Caps (locked first, in a fixed order — Part G §70 precedence): tenant, then
-    //    application, then credential.
+    // 1. Caps, locked first in ONE global order (Part G §70): tenant, application,
+    //    service account, credential, principal — then (2) the environment policy. A
+    //    missing row is not locked (no cap to share); every reservation that could
+    //    share a cap locks the same row in the same position, so no two reservations
+    //    can both consume the last headroom, and no lock cycle exists.
     let tenant_cap = Cap::find_by_statement(stmt(
         "SELECT telecom_spend_daily_limit_minor, telecom_spend_monthly_limit_minor \
          FROM platform_tenant_limits WHERE tenant_id = $1 FOR UPDATE",
@@ -307,10 +318,25 @@ async fn reserve_checked<C: ConnectionTrait>(
     ))
     .one(txn)
     .await?;
+    let service_account_cap = Cap::find_by_statement(stmt(
+        "SELECT telecom_spend_daily_limit_minor, telecom_spend_monthly_limit_minor \
+         FROM platform_service_account_limits WHERE service_account_id = $1 FOR UPDATE",
+        vec![call.created_by_service_account_id.into()],
+    ))
+    .one(txn)
+    .await?;
     let credential_cap = Cap::find_by_statement(stmt(
         "SELECT telecom_spend_daily_limit_minor, telecom_spend_monthly_limit_minor \
          FROM platform_credential_limits WHERE credential_id = $1 FOR UPDATE",
         vec![call.created_by_credential_id.into()],
+    ))
+    .one(txn)
+    .await?;
+    // The Call's trusted initiating principal (server-resolved at creation).
+    let principal_cap = Cap::find_by_statement(stmt(
+        "SELECT telecom_spend_daily_limit_minor, telecom_spend_monthly_limit_minor \
+         FROM platform_principal_limits WHERE principal_id = $1 FOR UPDATE",
+        vec![call.initiator_principal_id.into()],
     ))
     .one(txn)
     .await?;
@@ -390,12 +416,28 @@ async fn reserve_checked<C: ConnectionTrait>(
             LimitLevel::Application,
         ),
         (
+            &service_account_cap,
+            "service_account_id",
+            call.created_by_service_account_id,
+            SpendDenial::ServiceAccountDailyLimit,
+            SpendDenial::ServiceAccountMonthlyLimit,
+            LimitLevel::ServiceAccount,
+        ),
+        (
             &credential_cap,
             "credential_id",
             call.created_by_credential_id,
             SpendDenial::CredentialDailyLimit,
             SpendDenial::CredentialMonthlyLimit,
             LimitLevel::Credential,
+        ),
+        (
+            &principal_cap,
+            "principal_id",
+            call.initiator_principal_id,
+            SpendDenial::PrincipalDailyLimit,
+            SpendDenial::PrincipalMonthlyLimit,
+            LimitLevel::Principal,
         ),
     ] {
         let Some(cap) = cap else { continue };
@@ -521,6 +563,10 @@ pub async fn notify_refusal<C: ConnectionTrait>(
         SpendDenial::TenantMonthlyLimit => Some((LimitLevel::Tenant, false)),
         SpendDenial::ApplicationDailyLimit => Some((LimitLevel::Application, true)),
         SpendDenial::ApplicationMonthlyLimit => Some((LimitLevel::Application, false)),
+        SpendDenial::ServiceAccountDailyLimit => Some((LimitLevel::ServiceAccount, true)),
+        SpendDenial::ServiceAccountMonthlyLimit => Some((LimitLevel::ServiceAccount, false)),
+        SpendDenial::PrincipalDailyLimit => Some((LimitLevel::Principal, true)),
+        SpendDenial::PrincipalMonthlyLimit => Some((LimitLevel::Principal, false)),
         SpendDenial::CredentialDailyLimit => Some((LimitLevel::Credential, true)),
         SpendDenial::CredentialMonthlyLimit => Some((LimitLevel::Credential, false)),
         _ => None,
@@ -557,6 +603,18 @@ pub async fn notify_refusal<C: ConnectionTrait>(
                         "application_id",
                         "application_id",
                         call.application_id,
+                    ),
+                    LimitLevel::ServiceAccount => (
+                        "platform_service_account_limits",
+                        "service_account_id",
+                        "service_account_id",
+                        call.created_by_service_account_id,
+                    ),
+                    LimitLevel::Principal => (
+                        "platform_principal_limits",
+                        "principal_id",
+                        "principal_id",
+                        call.initiator_principal_id,
                     ),
                     _ => (
                         "platform_credential_limits",

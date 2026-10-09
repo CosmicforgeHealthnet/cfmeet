@@ -333,6 +333,16 @@ class RealRepository(unittest.TestCase):
         self.assertTrue({"enterprise_call_policies", "enterprise_departments",
                          "enterprise_department_members", "enterprise_admin_audit",
                          "calling_incidents"} <= calling)
+        # Part G section 70: the tenant, service-account and principal quota levels are
+        # Calling-owned platform limit tables (ADR 0028), beside the application /
+        # credential levels.
+        self.assertTrue({"platform_tenant_limits", "platform_application_limits",
+                         "platform_service_account_limits", "platform_credential_limits",
+                         "platform_principal_limits"} <= calling)
+        for limits_table in ("platform_service_account_limits", "platform_principal_limits"):
+            self.assertNotIn(limits_table, self.repo.tables["meeting-service"])
+            self.assertNotIn(limits_table, self.repo.tables["telephony"])
+            self.assertNotIn(limits_table, self.repo.tables["privacy-relay"])
         # Part G sections 67-68: customer webhooks (subscriptions, normalized events,
         # deliveries, attempts) are Calling-owned (ADR 0028).
         self.assertTrue({"webhook_subscriptions", "webhook_events", "webhook_deliveries",

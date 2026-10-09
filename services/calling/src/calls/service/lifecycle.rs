@@ -170,7 +170,24 @@ impl CallService {
         if CallScope::of_principal(initiator) != scope {
             return Err(CallError::NotFound);
         }
-        self.enforce_concurrent_call_limit(txn, &scope, creator.credential_id)
+        // Part G §70: the principal axis is evaluated for the SERVER-RESOLVED initiator
+        // only (resolved in the caller's own scope above); never for a raw identifier.
+        if let crate::platform::limits::RateDecision::Limited { retry_after_secs } =
+            crate::platform::limits::check_principal_rate(
+                &self.db,
+                self.now(),
+                (
+                    scope.tenant_id().as_uuid(),
+                    scope.application_id().as_uuid(),
+                    scope.environment_id().as_uuid(),
+                ),
+                initiator.id(),
+            )
+            .await?
+        {
+            return Err(CallError::RateLimited { retry_after_secs });
+        }
+        self.enforce_concurrent_call_limit(txn, &scope, creator, initiator.id())
             .await?;
 
         let at = self.now();
@@ -266,47 +283,90 @@ impl CallService {
         Ok((call, participant, event))
     }
 
-    /// Enforces the effective concurrent-call limits inside the creating transaction:
-    /// per credential (effective limit: most restrictive of tenant / application /
-    /// credential) and per application / tenant (aggregates, when configured).
-    /// Creations of one application are serialized by a transaction-scoped advisory lock
-    /// (preceded, when the tenant configures a ceiling, by the tenant's lock — always in
-    /// that order); only non-terminal Calls count. Crossing 80 % of a ceiling emits
-    /// `limit.warning` with the creation; a refusal emits `limit.exceeded`.
+    /// Enforces the concurrent-call limits inside the creating transaction (Part G §70):
+    /// the effective per-credential limit (most restrictive of tenant / application /
+    /// service account / credential), every configured aggregate ceiling (tenant,
+    /// application, service account) and the initiating principal's own ceiling.
+    ///
+    /// Lock order (global, deadlock-free): TENANT → APPLICATION → SERVICE_ACCOUNT →
+    /// PRINCIPAL, transaction-scoped advisory locks. The tenant, service-account and
+    /// principal locks are taken only when that level configures a ceiling; skipping a
+    /// lock never reorders the others. The application lock is always taken and also
+    /// serializes every credential of the application (a credential belongs to exactly
+    /// one service account of one application environment), so the credential level
+    /// needs no lock of its own. Counting happens after all locks, in the same
+    /// transaction as the insert: no check-then-insert gap. Only non-terminal Calls
+    /// count. A refusal names the broadest exhausted level (checked in lock order);
+    /// crossing 80 % of a ceiling emits `limit.warning` with the creation, a refusal
+    /// emits `limit.exceeded`.
     async fn enforce_concurrent_call_limit(
         &self,
         txn: &DatabaseTransaction,
         scope: &CallScope,
-        credential_id: crate::domain::CredentialId,
+        creator: &CallCreator,
+        principal_id: crate::domain::PrincipalId,
     ) -> CallResult<()> {
         use crate::webhooks::notices::{self, minute_of, LimitKind, LimitLevel, LimitNotice};
-        let tenant_capped = scalar_i64(
-            txn,
-            "SELECT count(*) FROM platform_tenant_limits \
-              WHERE tenant_id = $1 AND max_concurrent_communications IS NOT NULL",
-            vec![scope.tenant_id().as_uuid().into()],
+        let credential_id = creator.credential_id;
+        let service_account_id = creator.service_account_id;
+        let configured = |table: &'static str, key: &'static str, id: uuid::Uuid| async move {
+            let sql = format!(
+                "SELECT count(*) FROM {table} \
+                  WHERE {key} = $1 AND max_concurrent_communications IS NOT NULL"
+            );
+            scalar_i64(txn, &sql, vec![id.into()]).await.map(|n| n > 0)
+        };
+        let lock =
+            |key: String| async move { execute(txn, CREATION_LOCK_SQL, vec![key.into()]).await };
+        if configured(
+            "platform_tenant_limits",
+            "tenant_id",
+            scope.tenant_id().as_uuid(),
         )
         .await?
-            > 0;
-        if tenant_capped {
-            execute(
-                txn,
-                CREATION_LOCK_SQL,
-                vec![format!("cfmeet.calling.active-calls.tenant:{}", scope.tenant_id()).into()],
-            )
+        {
+            lock(format!(
+                "cfmeet.calling.active-calls.tenant:{}",
+                scope.tenant_id()
+            ))
             .await?;
         }
-        execute(
-            txn,
-            CREATION_LOCK_SQL,
-            vec![format!("cfmeet.calling.active-calls:{}", scope.application_id()).into()],
-        )
+        lock(format!(
+            "cfmeet.calling.active-calls:{}",
+            scope.application_id()
+        ))
         .await?;
+        if configured(
+            "platform_service_account_limits",
+            "service_account_id",
+            service_account_id.as_uuid(),
+        )
+        .await?
+        {
+            lock(format!(
+                "cfmeet.calling.active-calls.service-account:{service_account_id}"
+            ))
+            .await?;
+        }
+        if configured(
+            "platform_principal_limits",
+            "principal_id",
+            principal_id.as_uuid(),
+        )
+        .await?
+        {
+            lock(format!(
+                "cfmeet.calling.active-calls.principal:{principal_id}"
+            ))
+            .await?;
+        }
         let limits = concurrent_communication_limits(
             txn,
             scope.tenant_id(),
             scope.application_id(),
+            service_account_id,
             credential_id,
+            principal_id,
             self.limit_defaults,
         )
         .await?;
@@ -317,13 +377,17 @@ impl CallService {
             );
             scalar_i64(txn, &sql, vec![subject.into()]).await
         };
-        let mut checks = vec![(
-            LimitLevel::Credential,
-            "credential",
-            credential_id.as_uuid(),
-            active("created_by_credential_id", credential_id.as_uuid()).await?,
-            limits.per_credential,
-        )];
+        // Broad to narrow (the lock order); the principal axis last.
+        let mut checks = Vec::new();
+        if let Some(limit) = limits.tenant {
+            checks.push((
+                LimitLevel::Tenant,
+                "tenant",
+                scope.tenant_id().as_uuid(),
+                active("tenant_id", scope.tenant_id().as_uuid()).await?,
+                limit,
+            ));
+        }
         if let Some(limit) = limits.application {
             checks.push((
                 LimitLevel::Application,
@@ -333,12 +397,39 @@ impl CallService {
                 limit,
             ));
         }
-        if let Some(limit) = limits.tenant {
+        if let Some(limit) = limits.service_account {
             checks.push((
-                LimitLevel::Tenant,
-                "tenant",
-                scope.tenant_id().as_uuid(),
-                active("tenant_id", scope.tenant_id().as_uuid()).await?,
+                LimitLevel::ServiceAccount,
+                "service_account",
+                service_account_id.as_uuid(),
+                active(
+                    "created_by_service_account_id",
+                    service_account_id.as_uuid(),
+                )
+                .await?,
+                limit,
+            ));
+        }
+        checks.push((
+            LimitLevel::Credential,
+            "credential",
+            credential_id.as_uuid(),
+            active("created_by_credential_id", credential_id.as_uuid()).await?,
+            limits.per_credential,
+        ));
+        if let Some(limit) = limits.principal {
+            // Every non-terminal Call the principal initiated or participates in, whoever
+            // created it (any credential, service account or device).
+            let sql = format!(
+                "SELECT count(*) FROM calls c WHERE c.current_state NOT IN {TERMINAL_STATES_SQL} \
+                   AND (c.initiator_principal_id = $1 OR EXISTS (SELECT 1 FROM call_participants p \
+                        WHERE p.call_id = c.id AND p.principal_id = $1))"
+            );
+            checks.push((
+                LimitLevel::Principal,
+                "principal",
+                principal_id.as_uuid(),
+                scalar_i64(txn, &sql, vec![principal_id.as_uuid().into()]).await?,
                 limit,
             ));
         }

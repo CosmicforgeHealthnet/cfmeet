@@ -21,11 +21,11 @@ use uuid::Uuid;
 
 use crate::{
     calls::{command::CallScope, service::TERMINAL_STATES_SQL},
-    domain::SharedClock,
+    domain::{PrincipalId, SharedClock},
     error::CallingError,
     platform::{
         context::PlatformAuthContext,
-        limits::{self, LimitDefaults, LimitPolicyResolver},
+        limits::{self, LimitDefaults, LimitPolicyResolver, LimitValues},
     },
     telephony::spend,
 };
@@ -338,26 +338,57 @@ impl UsageService {
             .unwrap_or(0))
     }
 
-    /// The authenticated credential's limit status.
-    pub async fn limits(&self, ctx: &PlatformAuthContext) -> Result<LimitsView, CallingError> {
+    /// The authenticated credential's limit status: every configured level of the
+    /// API-client chain (TENANT → APPLICATION → SERVICE_ACCOUNT → CREDENTIAL; the
+    /// environment's spend policy for spend) and, when `principal` is given — a principal
+    /// ALREADY resolved in the caller's own scope — that principal's own levels.
+    pub async fn limits(
+        &self,
+        ctx: &PlatformAuthContext,
+        principal: Option<PrincipalId>,
+    ) -> Result<LimitsView, CallingError> {
         let now = self.clock.now();
-        let (tenant, application, credential) = limits::load_levels(
+        let levels = limits::load_levels(
             &self.db,
             ctx.tenant_id(),
             ctx.application_id(),
+            ctx.service_account_id(),
             ctx.credential_id(),
         )
         .await
         .map_err(db_err)?;
+        let principal_values = match principal {
+            Some(p) => Some((
+                p.as_uuid(),
+                limits::principal_level(&self.db, p).await.map_err(db_err)?,
+            )),
+            None => None,
+        };
         let effective = LimitPolicyResolver::new(self.db.clone(), self.defaults)
             .effective_for(ctx)
             .await
             .map_err(|_| CallingError::Internal)?;
-        let (t, a, c) = (
-            ctx.tenant_id().as_uuid(),
-            ctx.application_id().as_uuid(),
-            ctx.credential_id().as_uuid(),
-        );
+        // (scope code, configured values, rate subject, calls column, spend column, id)
+        let chain: Vec<(&'static str, LimitValues, &'static str, Uuid)> = vec![
+            (
+                "TENANT",
+                levels.tenant,
+                "tenant_id",
+                ctx.tenant_id().as_uuid(),
+            ),
+            (
+                "APPLICATION",
+                levels.application,
+                "application_id",
+                ctx.application_id().as_uuid(),
+            ),
+            (
+                "SERVICE_ACCOUNT",
+                levels.service_account,
+                "service_account_id",
+                ctx.service_account_id().as_uuid(),
+            ),
+        ];
 
         // Request rate (fixed one-minute windows).
         let window = now.duration_trunc(Duration::minutes(1)).unwrap_or(now);
@@ -369,24 +400,19 @@ impl UsageService {
             )
         };
         let mut rate = Vec::new();
-        if let Some(l) = tenant.requests_per_minute {
-            rate.push(LimitLevelView::new(
-                "TENANT",
-                l.into(),
-                rate_count("TENANT", t).await?,
-            ));
-        }
-        if let Some(l) = application.requests_per_minute {
-            rate.push(LimitLevelView::new(
-                "APPLICATION",
-                l.into(),
-                rate_count("APPLICATION", a).await?,
-            ));
+        for (scope, values, _, id) in &chain {
+            if let Some(l) = values.requests_per_minute {
+                rate.push(LimitLevelView::new(
+                    scope,
+                    l.into(),
+                    rate_count(scope, *id).await?,
+                ));
+            }
         }
         rate.push(LimitLevelView::new(
             "CREDENTIAL",
             effective.requests_per_minute.value,
-            rate_count("CREDENTIAL", c).await?,
+            rate_count("CREDENTIAL", ctx.credential_id().as_uuid()).await?,
         ));
 
         // Concurrent Calls (non-terminal Calls).
@@ -397,25 +423,25 @@ impl UsageService {
             );
             self.count(&sql, vec![subject.into()]).await
         };
+        let calls_column = |scope: &str| match scope {
+            "TENANT" => "tenant_id",
+            "APPLICATION" => "application_id",
+            _ => "created_by_service_account_id",
+        };
         let mut concurrent = Vec::new();
-        if let Some(l) = tenant.max_concurrent_communications {
-            concurrent.push(LimitLevelView::new(
-                "TENANT",
-                l.into(),
-                active("tenant_id", t).await?,
-            ));
-        }
-        if let Some(l) = application.max_concurrent_communications {
-            concurrent.push(LimitLevelView::new(
-                "APPLICATION",
-                l.into(),
-                active("application_id", a).await?,
-            ));
+        for (scope, values, _, id) in &chain {
+            if let Some(l) = values.max_concurrent_communications {
+                concurrent.push(LimitLevelView::new(
+                    scope,
+                    l.into(),
+                    active(calls_column(scope), *id).await?,
+                ));
+            }
         }
         concurrent.push(LimitLevelView::new(
             "CREDENTIAL",
             effective.max_concurrent_communications.value,
-            active("created_by_credential_id", c).await?,
+            active("created_by_credential_id", ctx.credential_id().as_uuid()).await?,
         ));
 
         // Telecom spend (reserved + settled, minor units), per UTC day and month.
@@ -433,11 +459,17 @@ impl UsageService {
             .unwrap_or_else(|| effective.telecom_spend_currency.clone());
         let mut day = vec![LimitLevelView::new("ENVIRONMENT", env_day, totals.day)];
         let mut month = vec![LimitLevelView::new("ENVIRONMENT", env_month, totals.month)];
-        for (scope, values, column, subject) in [
-            ("TENANT", tenant, "tenant_id", t),
-            ("APPLICATION", application, "application_id", a),
-            ("CREDENTIAL", credential, "credential_id", c),
-        ] {
+        let mut spend_levels = chain.clone();
+        spend_levels.push((
+            "CREDENTIAL",
+            levels.credential,
+            "credential_id",
+            ctx.credential_id().as_uuid(),
+        ));
+        if let Some((id, values)) = principal_values {
+            spend_levels.push(("PRINCIPAL", values, "principal_id", id));
+        }
+        for (scope, values, column, subject) in spend_levels {
             if values.telecom_spend_daily_limit_minor.is_none()
                 && values.telecom_spend_monthly_limit_minor.is_none()
             {
@@ -451,6 +483,29 @@ impl UsageService {
             }
             if let Some(l) = values.telecom_spend_monthly_limit_minor {
                 month.push(LimitLevelView::new(scope, l, used.month));
+            }
+        }
+
+        // The principal axis (rate of its principal-scoped operations, its Calls).
+        if let Some((id, values)) = principal_values {
+            if let Some(l) = values.requests_per_minute {
+                rate.push(LimitLevelView::new(
+                    "PRINCIPAL",
+                    l.into(),
+                    rate_count("PRINCIPAL", id).await?,
+                ));
+            }
+            if let Some(l) = values.max_concurrent_communications {
+                let sql = format!(
+                    "SELECT count(*) FROM calls c WHERE c.current_state NOT IN {TERMINAL_STATES_SQL} \
+                       AND (c.initiator_principal_id = $1 OR EXISTS (SELECT 1 FROM call_participants p \
+                            WHERE p.call_id = c.id AND p.principal_id = $1))"
+                );
+                concurrent.push(LimitLevelView::new(
+                    "PRINCIPAL",
+                    l.into(),
+                    self.count(&sql, vec![id.into()]).await?,
+                ));
             }
         }
         let next_day = spend::day_start(now) + Duration::days(1);

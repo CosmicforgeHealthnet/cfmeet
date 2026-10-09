@@ -1,10 +1,11 @@
 //! Part G §70: `limit.warning` / `limit.exceeded` (ADR 0028).
 //!
 //! A notice says which limit (`REQUEST_RATE`, `CONCURRENT_CALLS`, `TELECOM_SPEND_DAILY`,
-//! `TELECOM_SPEND_MONTHLY`), at which level of the precedence chain (`TENANT`,
-//! `APPLICATION`, `CREDENTIAL`, `ENVIRONMENT`), over which window, and the numbers
+//! `TELECOM_SPEND_MONTHLY`), at which level (`TENANT`, `APPLICATION`, `SERVICE_ACCOUNT`,
+//! `CREDENTIAL`, `PRINCIPAL`, `ENVIRONMENT`), over which window, and the numbers
 //! (`current` / `ceiling`; a warning also carries its `threshold` percentage). Nothing
-//! else: no principal, no destination, no provider data.
+//! else: the subject's identifier (which service account, credential or principal) is
+//! never part of the payload or of a metric label — only of the private dedupe key.
 //!
 //! Notices are deduplicated per (kind, level, subject, window, receiving application
 //! environment): a burst of refused requests in one minute is ONE `limit.exceeded`, a
@@ -57,7 +58,9 @@ impl LimitKind {
 pub enum LimitLevel {
     Tenant,
     Application,
+    ServiceAccount,
     Credential,
+    Principal,
     Environment,
 }
 
@@ -66,7 +69,9 @@ impl LimitLevel {
         match self {
             LimitLevel::Tenant => "TENANT",
             LimitLevel::Application => "APPLICATION",
+            LimitLevel::ServiceAccount => "SERVICE_ACCOUNT",
             LimitLevel::Credential => "CREDENTIAL",
+            LimitLevel::Principal => "PRINCIPAL",
             LimitLevel::Environment => "ENVIRONMENT",
         }
     }

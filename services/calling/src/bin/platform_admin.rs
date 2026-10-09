@@ -495,6 +495,22 @@ enum LimitsCmd {
         #[command(flatten)]
         limits: LimitArgs,
     },
+    /// Replace the service-account-level limit policy (omitted = not configured): an
+    /// aggregate ceiling across every credential of the service account.
+    SetServiceAccount {
+        #[command(flatten)]
+        service_account: ServiceAccountPath,
+        #[command(flatten)]
+        limits: LimitArgs,
+    },
+    /// Replace a principal's own limit policy (omitted = not configured), shared by
+    /// every credential acting for the principal.
+    SetPrincipal {
+        #[command(flatten)]
+        principal: PrincipalRef,
+        #[command(flatten)]
+        limits: LimitArgs,
+    },
     /// Replace the credential-level limit policy (omitted = not configured).
     SetCredential {
         #[command(flatten)]
@@ -878,6 +894,17 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                 let a = admin.application(&application).await?;
                 print(&p.set_application_limits(a.id, limits.into()).await?)
             }
+            LimitsCmd::SetServiceAccount {
+                service_account,
+                limits,
+            } => {
+                let sa = admin.service_account(&service_account).await?;
+                print(&p.set_service_account_limits(sa.id, limits.into()).await?)
+            }
+            LimitsCmd::SetPrincipal { principal, limits } => print(
+                &p.set_principal_limits(PrincipalId::from_uuid(principal.principal), limits.into())
+                    .await?,
+            ),
             LimitsCmd::SetCredential { credential, limits } => {
                 let id = admin.credential_id(&credential).await?;
                 print(&p.set_credential_limits(id, limits.into()).await?)

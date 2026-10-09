@@ -43,6 +43,9 @@ pub enum CallError {
     /// The environment may not produce real public-network telecom effects.
     #[error("live telecom is not allowed in this environment")]
     LiveTelecomNotAllowed,
+    /// A request-rate ceiling of the operation's principal is reached (Part G §70).
+    #[error("request rate limit reached")]
+    RateLimited { retry_after_secs: u64 },
     /// The effective concurrent-call limit is reached.
     #[error("concurrent call limit reached ({level})")]
     ConcurrentCallLimitExceeded { level: &'static str, limit: i64 },
@@ -121,6 +124,7 @@ impl CallError {
             }
             CallError::LiveTelecomNotAllowed => "LIVE_TELECOM_NOT_ALLOWED",
             CallError::ConcurrentCallLimitExceeded { .. } => "CONCURRENT_CALL_LIMIT_EXCEEDED",
+            CallError::RateLimited { .. } => "RATE_LIMITED",
             CallError::InvalidState(_) => "CALL_RESOURCE_STATE_CONFLICT",
             CallError::Conflict(_) => "CONFLICT",
             CallError::Validation(_) | CallError::FailureCategoryNotAllowed(_) => {
@@ -162,7 +166,9 @@ impl CallError {
             CallError::AuthorizationRequired
             | CallError::AuthorizationDenied
             | CallError::LiveTelecomNotAllowed => StatusCode::FORBIDDEN,
-            CallError::ConcurrentCallLimitExceeded { .. } => StatusCode::TOO_MANY_REQUESTS,
+            CallError::ConcurrentCallLimitExceeded { .. } | CallError::RateLimited { .. } => {
+                StatusCode::TOO_MANY_REQUESTS
+            }
             CallError::Validation(_) | CallError::FailureCategoryNotAllowed(_) => {
                 StatusCode::BAD_REQUEST
             }
@@ -212,6 +218,11 @@ impl From<CallError> for CallingError {
     fn from(err: CallError) -> Self {
         let code = match &err {
             CallError::NotFound => return CallingError::NotFound,
+            CallError::RateLimited { retry_after_secs } => {
+                return CallingError::RateLimited {
+                    retry_after_secs: *retry_after_secs,
+                }
+            }
             CallError::Validation(message) => return CallingError::Validation(message),
             CallError::FailureCategoryNotAllowed(_) => {
                 return CallingError::Validation("The failure category is not allowed.")

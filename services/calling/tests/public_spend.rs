@@ -457,3 +457,149 @@ async fn spend_reservation_contention_is_serialized_and_measured() {
         61
     );
 }
+
+/// Reserves one leg per (call model, leg) concurrently; every reservation holds its
+/// transaction open before committing, so a check-then-spend gap would overshoot.
+async fn race(
+    x: &World,
+    models: &[calls::Model],
+    per_model: usize,
+) -> Vec<Result<(), SpendDenial>> {
+    let mut handles = Vec::new();
+    for model in models {
+        for leg in x.legs(model, per_model).await {
+            let conn = x.w.h().conn().clone();
+            let call = model.clone();
+            handles.push(tokio::spawn(async move {
+                let txn = conn.begin().await.unwrap();
+                let r =
+                    spend::reserve_in(&txn, &call, leg, Some(Uuid::new_v4()), chrono::Utc::now())
+                        .await
+                        .unwrap();
+                tokio::time::sleep(Duration::from_millis(60)).await;
+                txn.commit().await.unwrap();
+                r.map(|_| ())
+            }));
+        }
+    }
+    let mut out = Vec::new();
+    for h in handles {
+        out.push(h.await.unwrap());
+    }
+    out
+}
+
+/// Another service account (and credential) of the world's application environment.
+async fn other_service_account(x: &World, name: &str) -> (Uuid, Uuid) {
+    let h = x.w.h();
+    let env = x.w.w.consumer.env(EnvironmentKind::Production).id;
+    let sa = h
+        .platform
+        .create_service_account(
+            env,
+            calling::platform::service_accounts::NewServiceAccount {
+                name: name.into(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap();
+    let c = h
+        .issue(sa.id, &[calling::platform::scopes::names::CALLS_WRITE])
+        .await;
+    (sa.id.as_uuid(), c.credential.id.as_uuid())
+}
+
+/// Part G §70: a service-account spend ceiling is shared by ALL of its credentials.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn service_account_spend_ceiling_is_shared_by_its_credentials() {
+    let Some(x) = world().await else { return };
+    let call = x.call("sa-spend").await; // its first leg already holds one allowance
+    let sa = x.w.w.consumer.sa(EnvironmentKind::Production);
+    let second =
+        x.w.h()
+            .issue(sa, &[calling::platform::scopes::names::CALLS_WRITE])
+            .await;
+    x.w.h()
+        .platform
+        .set_service_account_limits(
+            sa,
+            calling::platform::limits::LimitValues {
+                telecom_spend_daily_limit_minor: Some(4_000),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut via_second = call.clone();
+    via_second.created_by_credential_id = second.credential.id.as_uuid();
+    let results = race(&x, &[call.clone(), via_second], 4).await;
+    assert_eq!(
+        results.iter().filter(|r| r.is_ok()).count(),
+        3,
+        "{results:?}"
+    );
+    assert!(results
+        .iter()
+        .filter_map(|r| r.as_ref().err())
+        .all(|d| *d == SpendDenial::ServiceAccountDailyLimit));
+    assert_eq!(
+        scalar_i64(
+            x.w.h().conn(),
+            &format!(
+                "SELECT COALESCE(SUM(amount_minor), 0)::bigint FROM call_spend_reservations \
+                 WHERE service_account_id = '{}' AND status = 'RESERVED'",
+                sa.as_uuid()
+            )
+        )
+        .await,
+        4_000,
+        "never above the shared ceiling"
+    );
+    // Another service account of the same environment keeps its own allowance.
+    let (other_sa, other_c) = other_service_account(&x, "other").await;
+    let mut other = call.clone();
+    other.created_by_service_account_id = other_sa;
+    other.created_by_credential_id = other_c;
+    let results = race(&x, &[other], 2).await;
+    assert!(results.iter().all(|r| r.is_ok()), "{results:?}");
+}
+
+/// Part G §70: a principal spend ceiling holds across every service account and
+/// credential acting for that principal; the per-hour velocity guard is separate.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn principal_spend_ceiling_holds_across_call_paths() {
+    let Some(x) = world().await else { return };
+    let call = x.call("p-spend").await; // one allowance already reserved for P
+    x.w.h()
+        .platform
+        .set_principal_limits(
+            calling::domain::PrincipalId::from_uuid(call.initiator_principal_id),
+            calling::platform::limits::LimitValues {
+                telecom_spend_daily_limit_minor: Some(3_000),
+                telecom_spend_monthly_limit_minor: Some(50_000),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let (other_sa, other_c) = other_service_account(&x, "second-path").await;
+    let mut via_other = call.clone();
+    via_other.created_by_service_account_id = other_sa;
+    via_other.created_by_credential_id = other_c;
+    let results = race(&x, &[call.clone(), via_other], 3).await;
+    assert_eq!(
+        results.iter().filter(|r| r.is_ok()).count(),
+        2,
+        "{results:?}"
+    );
+    assert!(results
+        .iter()
+        .filter_map(|r| r.as_ref().err())
+        .all(|d| *d == SpendDenial::PrincipalDailyLimit));
+    // Another principal is unaffected (only shared parents could stop it).
+    let mut other_principal = call.clone();
+    other_principal.initiator_principal_id = x.w.w.recipient.id().as_uuid();
+    let results = race(&x, &[other_principal], 2).await;
+    assert!(results.iter().all(|r| r.is_ok()), "{results:?}");
+}

@@ -39,6 +39,7 @@ mod m20261009_000029_call_history;
 mod m20261009_000030_enterprise_operations;
 mod m20261010_000031_platform_events_webhooks;
 mod m20261010_000032_usage_and_limits;
+mod m20261010_000033_service_account_and_principal_limits;
 
 /// Name of the table recording which Calling migrations have been applied.
 pub const MIGRATION_TABLE: &str = "calling_seaql_migrations";
@@ -81,6 +82,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261009_000030_enterprise_operations::Migration),
             Box::new(m20261010_000031_platform_events_webhooks::Migration),
             Box::new(m20261010_000032_usage_and_limits::Migration),
+            Box::new(m20261010_000033_service_account_and_principal_limits::Migration),
         ]
     }
 

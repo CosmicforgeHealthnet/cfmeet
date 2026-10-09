@@ -1,5 +1,7 @@
 //! `GET /v1/usage` and `GET /v1/limits` (Part G §69 / §70). Both need `usage.read`; the
-//! scope is the authenticated credential's application environment only.
+//! scope is the authenticated credential's application environment only. `GET /v1/limits`
+//! additionally reports a principal's own levels for `?principalId=` (needs
+//! `principals.read`; resolved in the caller's scope, else 404).
 
 use axum::{
     extract::{rejection::QueryRejection, Query, State},
@@ -13,9 +15,14 @@ use chrono::{DateTime, Utc};
 use super::{UsageFilter, RESOURCE_CLASSES};
 use crate::{
     calls::{app::http::respond, command::CallScope},
+    domain::PrincipalId,
     enterprise::{cursor, http::QueryParams},
     error::CallingError,
-    platform::{context::PlatformAuthContext, scopes::names},
+    platform::{
+        context::PlatformAuthContext,
+        principals::{PrincipalReference, PrincipalResolutionError},
+        scopes::names,
+    },
     state::AppState,
 };
 
@@ -135,7 +142,31 @@ async fn get_limits(
     query: Result<Query<Vec<(String, String)>>, QueryRejection>,
 ) -> Result<Response, CallingError> {
     ctx.require_scope(names::USAGE_READ)?;
-    QueryParams::parse(query, &[])?;
-    let view = state.usage.limits(&ctx).await?;
+    // Only a principal may be named — tenant, application, service account and
+    // credential always come from the authenticated credential (unknown parameters: 400).
+    let q = QueryParams::parse(query, &["principalId"])?;
+    let principal = match q.get("principalId") {
+        None => None,
+        Some(raw) => {
+            // A principal's limits reveal its activity: the caller must also be allowed
+            // to read principals, and the principal must resolve in the caller's own
+            // scope (another scope's principal is indistinguishable from none: 404).
+            ctx.require_scope(names::PRINCIPALS_READ)?;
+            let id = uuid::Uuid::parse_str(raw)
+                .map_err(|_| CallingError::Validation("principalId must be a UUID."))?;
+            let resolved = state
+                .principals
+                .resolve(&ctx, &PrincipalReference::Id(PrincipalId::from_uuid(id)))
+                .await
+                .map_err(|e| match e {
+                    PrincipalResolutionError::Unavailable { .. } => {
+                        CallingError::ServiceUnavailable
+                    }
+                    _ => CallingError::NotFound,
+                })?;
+            Some(resolved.id())
+        }
+    };
+    let view = state.usage.limits(&ctx, principal).await?;
     Ok(respond(StatusCode::OK, view, false))
 }
