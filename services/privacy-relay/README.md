@@ -86,7 +86,7 @@ Active-call enforcement goes the other way: Privacy Relay calls Calling's
 | `privacy_relay_sessions` (+ `_participants`, `_channels`, `_directions`) | Sessions; containment trigger keeps validity inside the context |
 | `relay_authorization_decisions` | Every AUTHORIZED / DENIED decision with versions and reason |
 | `relay_audit_events` | Append-only, gap-free per context |
-| `privacy_relay_outbox` | Platform event envelope (`cfmeet.privacy-relay.event`) |
+| `privacy_relay_outbox` | Platform event envelope (`cfmeet.privacy-relay.event`); published to Calling's `POST /internal/v1/platform/events` with a lease, bounded retries, `DEAD_LETTER` and operator replay (Part G, ADR 0028) |
 | `privacy_relay_commands` | Idempotency (fingerprint + response) |
 | `privacy_relay_enforcement_jobs` | Durable enforcement (PENDING → APPLIED), retried with backoff min(2ⁿ, 300) s |
 

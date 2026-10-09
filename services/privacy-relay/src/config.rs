@@ -14,7 +14,7 @@
 //! | `CF_SERVICE_TRUST_BUNDLE_FILE` | yes | Privacy Relay's trust bundle |
 //! | `CF_SERVICE_TOKEN_TTL_SECONDS` | no | 10–300 (default 120) |
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | 100–30000 (default 5000) |
-//! | `CALLING_INTERNAL_BASE_URL` | no | Calling's internal API (active-call enforcement) |
+//! | `CALLING_INTERNAL_BASE_URL` | no | Calling's internal API (active-call enforcement, platform event publication) |
 //!
 //! | `RELAY_NUMBER_POOL_ENABLED` | no | temporary relay-number assignment kill switch (default `false`) |
 //! | `RELAY_NUMBER_COOLDOWN_SECONDS` | no | quarantine of a released relay number, 3600–7776000 (default 259200 = 72 h; zero is never accepted) |
@@ -23,8 +23,9 @@
 //! | `CONTACT_FINGERPRINT_KEYRING_FILE` | with the vault | HMAC fingerprint keyring (separate secret file) |
 //! | `CONTACT_DELEGATION_TRUST_BUNDLE_FILE` | with the vault | which issuers' Contact Vault access tokens are accepted |
 //!
-//! Without `CALLING_INTERNAL_BASE_URL` enforcement jobs stay durably PENDING (authority is
-//! still revoked locally; nothing is falsely reported as applied). With
+//! Without `CALLING_INTERNAL_BASE_URL` enforcement jobs and outbox events stay durably
+//! PENDING (authority is still revoked locally; nothing is falsely reported as applied or
+//! published). With
 //! `CONTACT_VAULT_ENABLED=true` and any Contact Vault file missing or invalid the service
 //! refuses to start (no plaintext fallback, no generated key).
 

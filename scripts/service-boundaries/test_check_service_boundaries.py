@@ -333,7 +333,11 @@ class RealRepository(unittest.TestCase):
         self.assertTrue({"enterprise_call_policies", "enterprise_departments",
                          "enterprise_department_members", "enterprise_admin_audit",
                          "calling_incidents"} <= calling)
-        self.assertTrue(all(t.startswith(("platform_", "enterprise_", "voicemail_"))
+        # Part G sections 67-68: customer webhooks (subscriptions, normalized events,
+        # deliveries, attempts) are Calling-owned (ADR 0028).
+        self.assertTrue({"webhook_subscriptions", "webhook_events", "webhook_deliveries",
+                         "webhook_delivery_attempts"} <= calling)
+        self.assertTrue(all(t.startswith(("platform_", "enterprise_", "voicemail_", "webhook_"))
                             or t in call_domain or t.startswith("call_recording")
                             or t == "calling_incidents"
                             for t in calling), calling)

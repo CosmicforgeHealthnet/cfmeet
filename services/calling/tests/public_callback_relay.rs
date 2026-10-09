@@ -409,3 +409,39 @@ async fn concurrent_identical_callback_requests_create_one_call_and_one_paid_leg
         1
     );
 }
+
+/// Part G §65: the callback's idempotency key binds its payload — the same key with a
+/// different callback is a conflict that never dials, reserves or creates anything.
+#[tokio::test]
+async fn a_reused_key_with_a_different_callback_is_a_conflict_and_never_dials() {
+    let Some(x) = world(true).await else { return };
+    let first = x.request("cb-same-key").await;
+    assert_eq!(first.status, StatusCode::CREATED, "{}", first.text);
+    let different =
+        x.w.post_with(
+            "/v1/calls",
+            json!({
+                "kind": "VOICE",
+                "callbackRequested": true,
+                "initiatorPrincipalId": x.w.w.initiator.id(),
+                "initiatorContactReference": x.mine,
+                "targetContactReference": x.theirs,
+                "privacyRelaySessionId": Uuid::new_v4(),
+            }),
+            &[("idempotency-key", "cb-same-key")],
+        )
+        .await;
+    assert_eq!(different.status, StatusCode::CONFLICT, "{}", different.text);
+    assert_eq!(different.json["error"]["code"], "IDEMPOTENCY_CONFLICT");
+    // The replay of the ORIGINAL payload still returns the original Call.
+    let replay = x.request("cb-same-key").await;
+    assert_eq!(replay.json["call"]["callId"], first.json["call"]["callId"]);
+    assert_eq!(x.telephony.originates().len(), 1, "one paid leg dialed");
+    for (sql, n) in [
+        ("SELECT count(*) FROM calls", 1),
+        // The one Call's two legs (reserved together at creation).
+        ("SELECT count(*) FROM call_spend_reservations", 2),
+    ] {
+        assert_eq!(scalar_i64(x.w.h().conn(), sql).await, n, "{sql}");
+    }
+}

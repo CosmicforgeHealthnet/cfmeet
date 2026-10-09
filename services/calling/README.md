@@ -35,11 +35,12 @@ Provider room / dialog / carrier / request identifiers are never Call identities
 | **Part D §26–§30** Privacy Relay ingress (`/v1/privacy-relay/...`), `PRIVACY_RELAY_V1` protected calls and transfers (fail closed), `POST /internal/v1/privacy-relay/enforcement` | **Implemented** (ADR 0010; the business authority is `services/privacy-relay`) |
 | **Part E §37–§51** Routing Engine and route plans, public-network calls executed by `services/telephony` (ContactReference parties, durable command outbox, normalized events, bridges, spend reservations, failover) | **Implemented** (ADRs 0013–0017). **Real lawful telecom interconnect certification remains an external blocker (ADR 0016): no PSTN result is claimed** |
 | **Part F §52–§62** Enterprise calling and continuity on the ONE canonical Call | **Implemented** (ADRs 0018–0027; summary below) |
+| **Part G §63–§70** Durable event publication, customer webhooks, `call.route_changed`, usage facts and `GET /v1/usage`, tenant → application → credential limits, `GET /v1/limits`, limit notices | **Implemented** (ADR 0028; summary below) |
 
 **Deferred (later sections / services):** push delivery through a push vendor (a
-transport-neutral push-ready payload is produced), customer webhooks and outbox
-publishing, quality metrics from providers that do not offer them, Numbering, billing,
-and the Part F items listed below.
+transport-neutral push-ready payload is produced), a message-broker transport for
+platform events, quality metrics from providers that do not offer them, Numbering,
+billing / invoicing / pricing, and the Part F items listed below.
 
 HTTP surface (contract:
 [`packages/contracts/calling/http/v1.openapi.json`](../../packages/contracts/calling/http/v1.openapi.json),
@@ -170,14 +171,17 @@ the mutation. The outbox row is a `cfmeet.platform.event-envelope` (event type
 [`cfmeet.calling.call-lifecycle-event`](../../packages/contracts/calling/events/call-lifecycle/v1.schema.json).
 The database refuses `UPDATE` / `DELETE` / `TRUNCATE` of events, sequence gaps, events
 that misdescribe the Call, a new Call version without its state event and an event
-without its outbox row. Nothing is published yet; a future publisher consumes `PENDING`
-rows.
+without its outbox row. The Part G publisher (ADR 0028) claims `PENDING` rows with a
+lease, hands them to the broker-neutral `EventTransport` (today: projection into customer
+webhooks) and marks them `PUBLISHED`, or `DEAD_LETTER` after bounded retries (operator
+replay returns them to `PENDING`).
 
 ### Concurrent-call limit
 
-Creating a Call takes a transaction-scoped advisory lock per application and counts
-non-terminal Calls against the effective per-credential limit and, when configured, the
-application-wide limit. Terminal Calls stop counting.
+Creating a Call takes a transaction-scoped advisory lock per application (preceded by the
+tenant's lock when the tenant configures a ceiling) and counts non-terminal Calls against
+the effective per-credential limit and, when configured, the application-wide and
+tenant-wide limits. Terminal Calls stop counting.
 
 ### Read API
 
@@ -300,6 +304,28 @@ drives a real Asterisk edge, SIPp desk phones, the real Telephony binary and an
 S3-compatible store; it certifies internal enterprise SIP only. Results:
 [Part F certification report](../../docs/architecture/part-f-certification.md).
 
+## Platform events, webhooks, usage and limits (Part G §63–§70)
+
+* **Durable events** — the outbox publisher (lease, bounded retry, `DEAD_LETTER`, replay)
+  runs in the service loop with the webhook delivery worker; Privacy Relay pushes its own
+  outbox to `POST /internal/v1/platform/events` (`platform-event.publish`).
+* **Customer webhooks** — `/v1/webhooks` (create / list / get / update / delete /
+  rotate-secret, `webhooks.read` / `webhooks.manage`), `/v1/webhooks/{id}/deliveries`,
+  `/v1/webhook-deliveries/{id}/replay`. Events are the public catalog
+  ([`platform/webhooks`](../../packages/contracts/platform/webhooks/v1.schema.json)),
+  projected from committed domain events, signed `CF-Webhook-Signature: v1=…`
+  (HMAC-SHA256 over `v1:{timestamp}:{delivery id}:{body}`), retried with backoff,
+  dead-lettered and replayable; endpoints are https-only and private / rebinding
+  addresses are refused at connection time. The signing secret is shown once.
+* **Usage** — `GET /v1/usage` (`usage.read`): final facts (application media,
+  public-network legs with KNOWN / ESTIMATED / UNKNOWN cost evidence, voicemail /
+  recording artifacts); filters `from`, `to`, `usageType`, `resourceClass`; keyset paging.
+  Not a bill ([`platform/usage`](../../packages/contracts/platform/usage/v1.schema.json)).
+* **Limits** — see *Limits*; `GET /v1/limits` (`usage.read`).
+* **Configuration** — `CALLING_WEBHOOK_SECRET_KEY` (32 bytes, base64, from the secret
+  manager; without it webhook creation is refused) and
+  `CALLING_WEBHOOK_ALLOW_PRIVATE_ENDPOINTS` (honoured only when `CF_RUNTIME_ENVIRONMENT=local`).
+
 ## Privacy Relay integration (Part D §26–§30)
 
 Privacy Relay (`services/privacy-relay`, [ADR 0010](../../docs/decisions/0010-communication-context-and-privacy-relay-session-architecture.md))
@@ -416,15 +442,18 @@ be opaque UUID handles (for the future Contact Vault).
 
 ## Limits
 
-Application- and credential-level limits (requests per minute, concurrent
+Tenant-, application- and credential-level limits (requests per minute, concurrent
 communications, daily / monthly telecom spend in minor units of the tenant's billing
-currency) are set by operators only. The effective policy takes the stricter value where
-both levels configure a limit, otherwise the configured one, otherwise the platform
-default. Telecom spend defaults to zero and is always zero where live telecom is not
-allowed. The request-rate limit is enforced (shared PostgreSQL one-minute windows, per
-credential and per application) and the concurrent-communication limit is enforced when a
-Call is created (see *Concurrent-call limit*); telecom spend is resolved for the future
-telephony operations that consume it.
+currency) are set by operators only (`platform_admin limits set-tenant | set-application |
+set-credential`). The effective policy takes the most restrictive configured value
+(tenant → application → credential), otherwise the platform default; a configured tenant
+or application level is also an aggregate ceiling. Telecom spend defaults to zero and is
+always zero where live telecom is not allowed. The request-rate limit is enforced (shared
+PostgreSQL one-minute windows, per credential, application and tenant), the
+concurrent-communication limit when a Call is created (see *Concurrent-call limit*) and
+telecom spend when a public leg is reserved. `GET /v1/limits` shows every level and the
+binding one; `limit.warning` / `limit.exceeded` webhooks are deduplicated per window
+(ADR 0028).
 
 ## Configuration
 
@@ -556,4 +585,5 @@ The image runs as a non-root user and contains `calling`, `calling-migration` an
 * [ADR 0010 — Communication Context and Privacy Relay Session architecture](../../docs/decisions/0010-communication-context-and-privacy-relay-session-architecture.md)
 * [ADR 0013 — Routing Engine and route plans](../../docs/decisions/0013-routing-engine-and-route-plans.md) … [ADR 0017 — Provider failover](../../docs/decisions/0017-provider-failover.md) (Part E)
 * [ADR 0018 — Enterprise calling architecture](../../docs/decisions/0018-enterprise-calling-architecture.md) … [ADR 0026 — Enterprise operations](../../docs/decisions/0026-enterprise-operations-events-incidents-metrics.md), [ADR 0027 — RTC call-audio capture](../../docs/decisions/0027-rtc-call-audio-capture-livekit-egress.md) (Part F)
+* [ADR 0028 — Platform API, events, webhooks, usage and limits](../../docs/decisions/0028-platform-api-events-webhooks-usage-and-limits.md) (Part G)
 * [Service data ownership](../../docs/architecture/service-data-ownership.md)
