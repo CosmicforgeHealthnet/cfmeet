@@ -543,7 +543,7 @@ async fn limit_notices_are_emitted_once_per_window() {
             }
         ));
     }
-    let exceeded = notices(&w, "limit.exceeded", "CONCURRENT_CALLS").await;
+    let exceeded = settled(|| notices(&w, "limit.exceeded", "CONCURRENT_CALLS")).await;
     assert_eq!(exceeded.len(), 1, "{exceeded:?}");
     assert_eq!(
         exceeded[0]["data"],
@@ -573,4 +573,19 @@ async fn limit_notices_are_emitted_once_per_window() {
             );
         }
     }
+}
+
+/// Refusal notices are emitted by a detached task (the refused transaction rolls back
+/// first): wait until they are stored, bounded, then let any duplicate attempt settle.
+async fn settled<F, Fut>(read: F) -> Vec<Value>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Vec<Value>>,
+{
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while read().await.is_empty() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    read().await
 }

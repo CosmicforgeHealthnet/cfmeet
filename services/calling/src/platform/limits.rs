@@ -723,16 +723,19 @@ fn judge(
 /// Part G §70: the request-rate ceiling of a principal-scoped operation (a Call created
 /// for a server-resolved initiator). Counted only when the principal configures a
 /// ceiling; every credential / service account acting for the principal shares the
-/// window. `scope` = (tenant, application, environment) receiving the notices.
+/// window. Runs on the caller's connection — the creating transaction — so it never
+/// needs a second pool connection: the increment commits with the creation (a refused
+/// or failed creation does not consume the window; the window row lock serializes the
+/// principal's concurrent creations). Returns the decision and the notices for the
+/// caller to emit (warnings with the creation, a refusal's notice detached).
 pub(crate) async fn check_principal_rate<C: ConnectionTrait>(
     db: &C,
     now: DateTime<Utc>,
-    scope: (Uuid, Uuid, Uuid),
     principal_id: PrincipalId,
-) -> Result<RateDecision, DbErr> {
-    use crate::webhooks::notices::{self, LimitLevel};
+) -> Result<(RateDecision, Vec<crate::webhooks::notices::LimitNotice>), DbErr> {
+    use crate::webhooks::notices::LimitLevel;
     let Some(ceiling) = rpm(&principal_level(db, principal_id).await?) else {
-        return Ok(RateDecision::Allowed);
+        return Ok((RateDecision::Allowed, Vec::new()));
     };
     let window_start = window_of(now);
     let count = WindowCount::find_by_statement(Statement::from_sql_and_values(
@@ -757,14 +760,16 @@ pub(crate) async fn check_principal_rate<C: ConnectionTrait>(
         window_start,
         &mut found,
     );
-    notices::emit(db, now, scope, &found).await;
     Ok(if limited {
         tracing::info!(principal_id = %principal_id, "principal request rate limit reached");
-        RateDecision::Limited {
-            retry_after_secs: retry_after(window_start, now),
-        }
+        (
+            RateDecision::Limited {
+                retry_after_secs: retry_after(window_start, now),
+            },
+            found,
+        )
     } else {
-        RateDecision::Allowed
+        (RateDecision::Allowed, found)
     })
 }
 

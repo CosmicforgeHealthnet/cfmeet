@@ -189,6 +189,21 @@ pub fn minute_of(now: DateTime<Utc>) -> DateTime<Utc> {
     now.duration_trunc(Duration::minutes(1)).unwrap_or(now)
 }
 
+/// Emits the notices from their own task, on their own connection: for a refusal whose
+/// transaction is about to roll back. The caller never waits for (or holds a second pool
+/// connection for) the emission — a refused burst cannot starve the pool.
+pub fn emit_detached(
+    db: sea_orm::DatabaseConnection,
+    now: DateTime<Utc>,
+    scope: (Uuid, Uuid, Uuid),
+    notices: Vec<LimitNotice>,
+) {
+    if notices.is_empty() {
+        return;
+    }
+    tokio::spawn(async move { emit(&db, now, scope, &notices).await });
+}
+
 /// Emits the notices to the subscriptions of the application environment `scope`
 /// (tenant, application, environment) — on `db` (a transaction makes them atomic with
 /// the change that crossed the threshold). Errors are logged, never returned.

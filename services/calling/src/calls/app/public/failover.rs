@@ -232,7 +232,13 @@ impl AppCallService {
             Ok(r) => r,
             Err(denial) => {
                 sp.rollback().await?;
-                spend::notify_refusal(self.db(), call, denial, now).await;
+                // The outer transaction is still open: never hold a second connection.
+                {
+                    let (db, call) = (self.db().clone(), call.clone());
+                    tokio::spawn(
+                        async move { spend::notify_refusal(&db, &call, denial, now).await },
+                    );
+                }
                 tracing::info!(call_id = %call.id, reason = denial.as_str(), "failover refused by the spend policy");
                 return Ok(false);
             }

@@ -172,21 +172,25 @@ impl CallService {
         }
         // Part G §70: the principal axis is evaluated for the SERVER-RESOLVED initiator
         // only (resolved in the caller's own scope above); never for a raw identifier.
-        if let crate::platform::limits::RateDecision::Limited { retry_after_secs } =
-            crate::platform::limits::check_principal_rate(
-                &self.db,
+        let notice_scope = (
+            scope.tenant_id().as_uuid(),
+            scope.application_id().as_uuid(),
+            scope.environment_id().as_uuid(),
+        );
+        let (decision, rate_notices) =
+            crate::platform::limits::check_principal_rate(txn, self.now(), initiator.id()).await?;
+        if let crate::platform::limits::RateDecision::Limited { retry_after_secs } = decision {
+            // The creating transaction rolls back: the notice is emitted on its own.
+            crate::webhooks::notices::emit_detached(
+                self.db.clone(),
                 self.now(),
-                (
-                    scope.tenant_id().as_uuid(),
-                    scope.application_id().as_uuid(),
-                    scope.environment_id().as_uuid(),
-                ),
-                initiator.id(),
-            )
-            .await?
-        {
+                notice_scope,
+                rate_notices,
+            );
             return Err(CallError::RateLimited { retry_after_secs });
         }
+        // Atomic with the creation.
+        crate::webhooks::notices::emit(txn, self.now(), notice_scope, &rate_notices).await;
         self.enforce_concurrent_call_limit(txn, &scope, creator, initiator.id())
             .await?;
 
@@ -449,12 +453,13 @@ impl CallService {
                     limit,
                     "concurrent call limit reached"
                 );
-                // The creating transaction rolls back: the notice is emitted on its own.
-                notices::emit(
-                    &self.db,
+                // The creating transaction rolls back: the notice is emitted on its own
+                // task and connection (never a second connection held by this one).
+                notices::emit_detached(
+                    self.db.clone(),
                     now,
                     notice_scope,
-                    &[LimitNotice::exceeded(
+                    vec![LimitNotice::exceeded(
                         LimitKind::ConcurrentCalls,
                         level,
                         subject,
@@ -462,8 +467,7 @@ impl CallService {
                         limit,
                         minute_of(now),
                     )],
-                )
-                .await;
+                );
                 return Err(CallError::ConcurrentCallLimitExceeded { level: name, limit });
             }
         }

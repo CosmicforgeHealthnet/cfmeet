@@ -311,7 +311,7 @@ async fn principal_rate_is_shared_across_credentials_and_service_accounts() {
     cancel(&w, &a1, &other).await;
     let warnings = notices(&w, "limit.warning", "REQUEST_RATE", "PRINCIPAL").await;
     assert_eq!(warnings.len(), 1, "{warnings:?}");
-    let exceeded = notices(&w, "limit.exceeded", "REQUEST_RATE", "PRINCIPAL").await;
+    let exceeded = settled(|| notices(&w, "limit.exceeded", "REQUEST_RATE", "PRINCIPAL")).await;
     assert_eq!(exceeded.len(), 1, "{exceeded:?}");
     assert_eq!(exceeded[0]["data"]["current"], 4);
     assert_no_identifiers_in_notices(&w, &[w.initiator.id().as_uuid(), a1.credential]).await;
@@ -681,4 +681,19 @@ async fn limits_api_reports_service_account_and_principal_levels_safely() {
         assert_eq!(r.status, StatusCode::BAD_REQUEST, "{param}: {}", r.text);
     }
     let _ = PrincipalId::from_uuid(principal);
+}
+
+/// Refusal notices are emitted by a detached task (the refused transaction rolls back
+/// first): wait until they are stored, bounded, then let any duplicate attempt settle.
+async fn settled<F, Fut>(read: F) -> Vec<Value>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Vec<Value>>,
+{
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while read().await.is_empty() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    read().await
 }
