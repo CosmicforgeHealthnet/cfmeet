@@ -72,6 +72,7 @@ packages/object-storage/   neutral protected object storage (S3 SigV4 + memory b
 | 8 | `voicemail_mailboxes`, `voicemail_messages` |
 | 9 | `call_recording_policies`, `call_recording_authorizations`, `call_recording_consents`, `call_recordings`, `call_recording_access_audit` (ADR 0024) |
 | 10 | `call_participants.call_created_at` (trigger-stamped, immutable), `idx_call_participants_history`, `idx_enterprise_routing_steps_destination` — history is derived, never stored (ADR 0025) |
+| 11 | `calling_incidents` (Calling's own deduplicated operator incidents); `call_events` gains `ENTERPRISE_ROUTING_STEP` (every routing decision through the outbox) — ADR 0026 |
 
 Polymorphic destinations (`EXTENSION`, `PRINCIPAL`, `RING_GROUP`, `QUEUE`, `IVR`,
 `VOICEMAIL`, `SCHEDULE`, `PUBLIC_CONTACT`) are `(type, id)` pairs validated by one
@@ -131,19 +132,30 @@ Calling decides; Telephony executes provider-neutral commands:
 Calling uploads artifacts to protected object storage; Telephony never holds storage
 credentials.
 
-## 7. Flags (default `false`; kill switches stop NEW effects only)
+## 7. Operations (ADR 0026)
+
+Every enterprise routing decision is a durable `ENTERPRISE_ROUTING_STEP` Call event
+(outbox, same transaction as the evidence); `calling_incidents` records stuck queue
+entries, queue assignment conflicts, IVR routing corruption, voicemail / recording
+artifact failures and repeated loop blocks (deduplicated while open); bounded metrics
+include the queue-depth gauge and the missed-call counter. Races, failure injection and
+load are certified by `enterprise_operations`, `enterprise_security`, `enterprise_load`
+and the race tests of each suite.
+
+## 8. Flags (default `false`; kill switches stop NEW effects only)
 
 `ENTERPRISE_CALLING_ENABLED`, `VOICEMAIL_ENABLED`, `CALL_RECORDING_ENABLED`. Never
 blocked: call termination, disabling extensions / forwarding, finalizing captured
 artifacts, deleting recordings / voicemail, retention cleanup.
 
-## 8. Scopes
+## 9. Scopes
 
 `enterprise.config.read`, `enterprise.config.write`, `enterprise.calls.use`,
-`enterprise.voicemail.read`, `enterprise.voicemail.manage`, `enterprise.recording.manage`
+`enterprise.voicemail.read`, `enterprise.voicemail.manage`, `enterprise.recording.read`,
+`enterprise.recording.manage`
 — registered, never granted implicitly.
 
-## 9. Certification plan
+## 10. Certification plan
 
 | Area | Evidence |
 |---|---|

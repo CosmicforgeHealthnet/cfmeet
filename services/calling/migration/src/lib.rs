@@ -36,6 +36,7 @@ mod m20261009_000026_enterprise_hours_forwarding;
 mod m20261009_000027_voicemail;
 mod m20261009_000028_call_recording;
 mod m20261009_000029_call_history;
+mod m20261009_000030_enterprise_operations;
 
 /// Name of the table recording which Calling migrations have been applied.
 pub const MIGRATION_TABLE: &str = "calling_seaql_migrations";
@@ -75,6 +76,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261009_000027_voicemail::Migration),
             Box::new(m20261009_000028_call_recording::Migration),
             Box::new(m20261009_000029_call_history::Migration),
+            Box::new(m20261009_000030_enterprise_operations::Migration),
         ]
     }
 

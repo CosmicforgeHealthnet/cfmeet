@@ -177,6 +177,7 @@ impl AppCallService {
         let now = self.calls.now();
         let Some(version_id) = flow.active_version_id else {
             record_step(
+                &self.calls,
                 txn,
                 call,
                 "NO_ROUTE",
@@ -238,6 +239,7 @@ impl AppCallService {
         )
         .await?;
         record_step(
+            &self.calls,
             txn,
             &call,
             "IVR_ENTER",
@@ -294,6 +296,21 @@ impl AppCallService {
             }
             cursor.steps += 1;
             let Some(node) = graph.node(&cursor.node) else {
+                // A pinned, validated version can never name a missing node: corruption.
+                crate::calls::app::incidents::raise(
+                    txn,
+                    &crate::calls::app::incidents::Incident::new(
+                        crate::calls::app::incidents::IncidentCategory::IvrRoutingCorruption,
+                        crate::calls::app::incidents::IncidentSeverity::High,
+                        scope_of(call),
+                        crate::calls::app::incidents::IncidentResource::IvrSession,
+                        session.id,
+                    )
+                    .call(call.id)
+                    .evidence(serde_json::json!({ "flowVersionId": session.flow_version_id })),
+                    now,
+                )
+                .await;
                 break Outcome::Exhausted;
             };
             match node {
@@ -376,6 +393,7 @@ impl AppCallService {
             }
             Outcome::Route(dest) => {
                 record_step(
+                    &self.calls,
                     txn,
                     call,
                     "IVR_ROUTE",
@@ -390,6 +408,7 @@ impl AppCallService {
                     &[("result", "ROUTED"), ("route_type", dest.kind.as_str())],
                 );
                 let action = router::resolve(
+                    &self.calls,
                     txn,
                     &self.principals,
                     scope_of(call),
@@ -408,6 +427,7 @@ impl AppCallService {
                     &[("result", "HANGUP"), ("route_type", "NONE")],
                 );
                 record_step(
+                    &self.calls,
                     txn,
                     call,
                     "IVR_HANGUP",
@@ -427,6 +447,7 @@ impl AppCallService {
                 );
                 tracing::warn!(call_id = %call.id, "IVR step budget exhausted; failing safe");
                 record_step(
+                    &self.calls,
                     txn,
                     call,
                     "NO_ROUTE",

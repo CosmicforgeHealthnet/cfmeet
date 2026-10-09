@@ -1188,6 +1188,20 @@ impl AppCallService {
                 &[("result", "FAILED")],
             );
             tracing::warn!(%recording_id, "call recording capture failed");
+            crate::calls::app::incidents::raise(
+                self.db(),
+                &crate::calls::app::incidents::Incident::new(
+                    crate::calls::app::incidents::IncidentCategory::RecordingArtifactFailure,
+                    crate::calls::app::incidents::IncidentSeverity::Medium,
+                    scope_of(&call),
+                    crate::calls::app::incidents::IncidentResource::CallRecording,
+                    recording_id,
+                )
+                .call(call.id)
+                .evidence(json!({ "failureCode": code })),
+                now,
+            )
+            .await;
         }
         Ok(())
     }

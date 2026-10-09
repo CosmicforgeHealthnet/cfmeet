@@ -46,7 +46,8 @@
         "call.ivr_waiting",
         "call.ivr_input",
         "call.recording_started",
-        "call.recording_stopped"
+        "call.recording_stopped",
+        "call.voicemail_started"
       ]
     },
     "SignalInvitation": {

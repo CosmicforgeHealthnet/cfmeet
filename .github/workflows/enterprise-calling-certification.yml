@@ -135,3 +135,61 @@ jobs:
           for f in /tmp/cfmeet-ent-cert-*/console.log /tmp/cfmeet-ent-sipp-*/*.log /tmp/cf-ent-cert-*/telephony.log; do
             [ -f "$f" ] && { echo "== $f"; tail -n 200 "$f"; }
           done || true
+
+  enterprise-races:
+    # §224: the high-risk Part F races and recovery paths, five repetitions each, plus the
+    # load suite's burst invariants. A single failure fails the job (no flaky acceptance).
+    name: Enterprise races and burst invariants (5 repetitions)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    defaults:
+      run:
+        working-directory: services/calling
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/calling -> target
+          key: enterprise-races
+
+      - name: Build the test binaries
+        run: cargo test --locked --no-run --test enterprise_ring_groups --test enterprise_queues --test enterprise_transfer --test enterprise_voicemail --test enterprise_recording --test enterprise_hours_forwarding --test call_history --test enterprise_load
+
+      - name: Five repetitions of the high-risk tests
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            echo "::group::repetition $i"
+            cargo test --locked --test enterprise_ring_groups concurrent_member_answers_have_exactly_one_winner
+            cargo test --locked --test enterprise_queues concurrent_dispatchers_never_double_offer
+            cargo test --locked --test enterprise_queues abandon_and_answer_race_is_consistent
+            cargo test --locked --test enterprise_transfer transfer_races_leave_one_owner
+            cargo test --locked --test enterprise_voicemail concurrent_finalization_stores_once
+            cargo test --locked --test enterprise_voicemail delete_racing_retention_deletes_once
+            cargo test --locked --test enterprise_recording concurrent_starts_record_once
+            cargo test --locked --test enterprise_recording stop_racing_the_call_end_stops_once
+            cargo test --locked --test enterprise_hours_forwarding schedule_changes_during_route_selection_are_consistent
+            cargo test --locked --test call_history a_missed_call_survives_push_and_realtime_outage
+            cargo test --locked --test call_history one_answered_device_answers_for_the_logical_participant
+            echo "::endgroup::"
+          done
+
+      - name: Burst invariants and measured throughput
+        run: |
+          set -euo pipefail
+          cargo test --locked --test enterprise_load -- --nocapture --test-threads=1 2>&1 | tee "$RUNNER_TEMP/load.log"
+          grep -q "test result: ok. 4 passed" "$RUNNER_TEMP/load.log"
+          grep -o "LOAD .*" "$RUNNER_TEMP/load.log"

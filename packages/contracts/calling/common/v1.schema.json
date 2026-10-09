@@ -71,7 +71,7 @@
       "enum": ["MOBILE", "WEB", "DESKTOP", "SERVER", "NETWORK"]
     },
     "CallEventType": {
-      "description": "Facts the call domain records. CALL_REQUESTED and CALL_STATE_CHANGED are lifecycle events (they carry states); the others are facts about the Call's children: participants, sessions, routes, legs, attempts, quality, usage, ring offers (invitations), transfers and the Call's media resource. Media facts never carry provider identifiers. Part F: VOICEMAIL_RECEIVED (a mailbox took the Call), VOICEMAIL_READY (the message is stored in protected object storage), VOICEMAIL_DELETED (its object was removed); RECORDING_STARTED (an authorized recording began), RECORDING_STOPPED (with its reason), RECORDING_READY, RECORDING_FAILED, RECORDING_DELETED. They carry only opaque ids, bounded reasons and durations — never an object key, URL or audio.",
+      "description": "Facts the call domain records. CALL_REQUESTED and CALL_STATE_CHANGED are lifecycle events (they carry states); the others are facts about the Call's children: participants, sessions, routes, legs, attempts, quality, usage, ring offers (invitations), transfers and the Call's media resource. Media facts never carry provider identifiers. Part F: VOICEMAIL_RECEIVED (a mailbox took the Call), VOICEMAIL_READY (the message is stored in protected object storage), VOICEMAIL_DELETED (its object was removed); RECORDING_STARTED (an authorized recording began), RECORDING_STOPPED (with its reason), RECORDING_READY, RECORDING_FAILED, RECORDING_DELETED. They carry only opaque ids, bounded reasons and durations — never an object key, URL or audio. ENTERPRISE_ROUTING_STEP records each enterprise routing decision of the Call (step number, decision, reason, destination type and — except for a public contact — the enterprise destination id), in the same transaction as the routing evidence: queue entered / offered / assigned / abandoned / overflowed, ring-group steps, IVR results, schedule routes, forwarding and voicemail.",
       "type": "string",
       "enum": [
         "CALL_REQUESTED",
@@ -119,7 +119,8 @@
         "RECORDING_STOPPED",
         "RECORDING_READY",
         "RECORDING_FAILED",
-        "RECORDING_DELETED"
+        "RECORDING_DELETED",
+        "ENTERPRISE_ROUTING_STEP"
       ]
     },
     "CallInvitationPurpose": {

@@ -75,6 +75,7 @@ const CALL_TABLES: &[&str] = &[
     "call_telephony_events",
     "call_transfers",
     "call_usage_records",
+    "calling_incidents",
     "calling_outbox_events",
     "calls",
 ];
@@ -707,6 +708,7 @@ async fn no_privacy_relay_telephony_or_meeting_service_tables_exist() {
         || t.starts_with("call_")
         || t == "calls"
         || t == "calling_outbox_events"
+        || t == "calling_incidents"
         || t.starts_with("enterprise_")
         || t.starts_with("voicemail_")
         || t == MIGRATION_TABLE));

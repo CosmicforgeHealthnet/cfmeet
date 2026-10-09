@@ -1,4 +1,4 @@
-//! Bounded operational counters for public-network calling (Part E §192–§193).
+//! Bounded operational counters, gauges and histograms (Part E §192–§193, Part F §165).
 //!
 //! Rendered in the Prometheus text format on an optional SEPARATE listener
 //! (`CALLING_METRICS_ADDRESS`), never on the customer API. Label values are
@@ -24,7 +24,30 @@ fn counters() -> std::sync::MutexGuard<'static, BTreeMap<Key, u64>> {
 
 /// Adds one to a counter.
 pub fn inc(name: &'static str, labels: &[(&'static str, &'static str)]) {
-    *counters().entry((name, labels.to_vec())).or_default() += 1;
+    add(name, labels, 1);
+}
+
+/// Adds `n` to a counter.
+pub fn add(name: &'static str, labels: &[(&'static str, &'static str)], n: u64) {
+    if n > 0 {
+        *counters().entry((name, labels.to_vec())).or_default() += n;
+    }
+}
+
+static GAUGES: LazyLock<Mutex<BTreeMap<Key, i64>>> = LazyLock::new(Mutex::default);
+
+fn gauges() -> std::sync::MutexGuard<'static, BTreeMap<Key, i64>> {
+    GAUGES.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Sets a gauge (a sampled level, e.g. the number of waiting queue entries).
+pub fn set_gauge(name: &'static str, labels: &[(&'static str, &'static str)], value: i64) {
+    gauges().insert((name, labels.to_vec()), value);
+}
+
+/// The current value of a gauge (tests).
+pub fn gauge(name: &'static str, labels: &[(&'static str, &'static str)]) -> Option<i64> {
+    gauges().get(&(name, labels.to_vec())).copied()
 }
 
 /// The current value of a counter (tests).
@@ -82,9 +105,22 @@ pub fn observations(name: &'static str, labels: &[(&'static str, &'static str)])
         .unwrap_or(0)
 }
 
-/// The Prometheus text exposition of every counter and histogram.
+/// The Prometheus text exposition of every counter, gauge and histogram.
 pub fn render() -> String {
     let mut out = String::new();
+    let mut last = "";
+    for ((name, labels), value) in gauges().iter() {
+        if *name != last {
+            let _ = writeln!(out, "# TYPE {name} gauge");
+            last = name;
+        }
+        let labels: Vec<String> = labels.iter().map(|(k, v)| format!("{k}=\"{v}\"")).collect();
+        if labels.is_empty() {
+            let _ = writeln!(out, "{name} {value}");
+        } else {
+            let _ = writeln!(out, "{name}{{{}}} {value}", labels.join(","));
+        }
+    }
     let mut last = "";
     for ((name, labels), value) in counters().iter() {
         if *name != last {

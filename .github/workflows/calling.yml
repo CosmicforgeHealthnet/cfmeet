@@ -218,7 +218,7 @@ jobs:
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND NOT ( \
                tablename LIKE 'platform\_%' OR tablename LIKE 'call\_%' OR tablename IN ('calls', \
-               'calling_outbox_events', 'calling_seaql_migrations') OR tablename LIKE 'enterprise\_%' \
+               'calling_outbox_events', 'calling_seaql_migrations', 'calling_incidents') OR tablename LIKE 'enterprise\_%' \
                OR tablename LIKE 'voicemail\_%')")" = "0"
 
       - name: Service starts against the migrated database and refuses unsafe configuration

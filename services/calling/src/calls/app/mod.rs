@@ -20,6 +20,7 @@ mod create;
 pub mod enterprise;
 pub mod history;
 pub mod http;
+pub mod incidents;
 pub mod media;
 mod privacy;
 pub mod public;

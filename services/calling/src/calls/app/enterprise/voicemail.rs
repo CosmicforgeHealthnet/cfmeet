@@ -198,7 +198,17 @@ impl AppCallService {
     ) -> CallResult<Rung> {
         let now = self.calls.now();
         let refuse = |reason: &'static str| async move {
-            record_step(txn, call, "NO_ROUTE", Some(destination), reason, None, now).await?;
+            record_step(
+                &self.calls,
+                txn,
+                call,
+                "NO_ROUTE",
+                Some(destination),
+                reason,
+                None,
+                now,
+            )
+            .await?;
             crate::metrics::inc(
                 "calling_enterprise_voicemail_total",
                 &[("result", "REFUSED")],
@@ -255,6 +265,7 @@ impl AppCallService {
         )
         .await?;
         record_step(
+            &self.calls,
             txn,
             call,
             "VOICEMAIL",
@@ -344,6 +355,28 @@ impl AppCallService {
         {
             if let Err(error) = self.capture_failed(message.id, code).await {
                 tracing::warn!(%call_id, %error, "voicemail capture failure not recorded; the worker retries");
+            }
+            return;
+        }
+        // The caller's endpoints learn that they are now leaving a message.
+        if let Ok(Some(call)) = calls::Entity::find_by_id(call_id).one(self.db()).await {
+            let mut pending = PendingSignals::default();
+            let mut data = serde_json::Map::new();
+            data.insert("maxSeconds".into(), json!(max.max(1)));
+            let correlation = system_cmd(&call).correlation_id().as_str().to_string();
+            match self
+                .initiator_signal(
+                    self.db(),
+                    &mut pending,
+                    SignalType::VoicemailStarted,
+                    &call,
+                    &correlation,
+                    data,
+                )
+                .await
+            {
+                Ok(()) => self.publish(pending).await,
+                Err(error) => tracing::warn!(%call_id, %error, "voicemail signal not built"),
             }
         }
     }
@@ -583,6 +616,20 @@ impl AppCallService {
                 &[("result", "FAILED")],
             );
             tracing::warn!(message_id = %capture_id, "voicemail capture failed");
+            crate::calls::app::incidents::raise(
+                self.db(),
+                &crate::calls::app::incidents::Incident::new(
+                    crate::calls::app::incidents::IncidentCategory::VoicemailFinalizationFailure,
+                    crate::calls::app::incidents::IncidentSeverity::Medium,
+                    scope_of(&call),
+                    crate::calls::app::incidents::IncidentResource::VoicemailMessage,
+                    capture_id,
+                )
+                .call(call.id)
+                .evidence(json!({ "failureCode": code })),
+                now,
+            )
+            .await;
         }
         Ok(())
     }

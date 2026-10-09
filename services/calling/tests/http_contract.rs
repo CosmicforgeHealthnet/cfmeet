@@ -1211,12 +1211,16 @@ async fn every_outbox_row_is_a_valid_envelope_with_a_valid_lifecycle_payload() {
         );
         types.insert(event_type.to_string());
     }
-    // Part F voicemail / recording events are produced (and validated against these same
-    // contracts) by the enterprise voicemail / recording suites.
+    // Part F voicemail / recording / enterprise routing events are produced (and validated
+    // against these same contracts) by the enterprise suites.
     let all: BTreeSet<String> = CallEventType::ALL
         .iter()
         .map(|t| t.as_str().to_string())
-        .filter(|t| !t.starts_with("VOICEMAIL_") && !t.starts_with("RECORDING_"))
+        .filter(|t| {
+            !t.starts_with("VOICEMAIL_")
+                && !t.starts_with("RECORDING_")
+                && !t.starts_with("ENTERPRISE_")
+        })
         .collect();
     assert_eq!(types, all, "every event type was produced and validated");
 }

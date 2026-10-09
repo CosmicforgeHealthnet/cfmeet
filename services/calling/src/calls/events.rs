@@ -79,6 +79,7 @@ text_enum!(
         RecordingReady = "RECORDING_READY",
         RecordingFailed = "RECORDING_FAILED",
         RecordingDeleted = "RECORDING_DELETED",
+        EnterpriseRoutingStep = "ENTERPRISE_ROUTING_STEP",
     }
 );
 

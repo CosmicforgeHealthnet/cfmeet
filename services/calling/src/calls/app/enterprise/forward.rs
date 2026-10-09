@@ -78,6 +78,7 @@ impl AppCallService {
         let now = self.calls.now();
         if call.origin != "APPLICATION" {
             record_step(
+                &self.calls,
                 txn,
                 call,
                 "NO_ROUTE",
@@ -101,6 +102,7 @@ impl AppCallService {
         )
         .await?;
         record_step(
+            &self.calls,
             txn,
             call,
             "FORWARD_PUBLIC",
@@ -482,6 +484,7 @@ impl AppCallService {
         )
         .await?;
         record_step(
+            &self.calls,
             &txn,
             &call,
             "FORWARD_PUBLIC",
@@ -530,6 +533,7 @@ impl AppCallService {
             &[("result", "REFUSED")],
         );
         record_step(
+            &self.calls,
             &txn,
             &call,
             "NO_ROUTE",
@@ -585,6 +589,7 @@ impl AppCallService {
         )
         .await?;
         record_step(
+            &self.calls,
             txn,
             call,
             "FORWARD_PUBLIC",

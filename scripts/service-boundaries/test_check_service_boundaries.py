@@ -328,11 +328,14 @@ class RealRepository(unittest.TestCase):
         }
         self.assertTrue(call_domain <= calling)
         # Part F sections 52-62: enterprise configuration and continuity are Calling-owned
-        # (ADR 0018) and live under the enterprise_ / voicemail_ / call_recording prefixes.
+        # (ADR 0018) and live under the enterprise_ / voicemail_ / call_recording prefixes;
+        # calling_incidents is Calling's own operational incident record (ADR 0026).
         self.assertTrue({"enterprise_call_policies", "enterprise_departments",
-                         "enterprise_department_members", "enterprise_admin_audit"} <= calling)
+                         "enterprise_department_members", "enterprise_admin_audit",
+                         "calling_incidents"} <= calling)
         self.assertTrue(all(t.startswith(("platform_", "enterprise_", "voicemail_"))
                             or t in call_domain or t.startswith("call_recording")
+                            or t == "calling_incidents"
                             for t in calling), calling)
         # No second Call authority.
         self.assertFalse(calling & {"enterprise_calls", "pbx_calls", "voicemail_calls", "ivr_calls"})

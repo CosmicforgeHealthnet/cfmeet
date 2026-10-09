@@ -437,6 +437,26 @@ impl CallService {
             .await?;
         if plan.to.is_terminal() {
             closed = self.close_subordinates_in(txn, cmd, &call).await?;
+            // Recipients that were offered the Call and never answered, declined or lost
+            // it to a colleague: the missed-call derivation of ADR 0025, counted once.
+            let missed = scalar_i64(
+                txn,
+                "SELECT count(*) FROM call_participants p WHERE p.call_id = $1 \
+                   AND p.role = 'RECIPIENT' \
+                   AND EXISTS (SELECT 1 FROM call_invitations i WHERE i.participant_id = p.id) \
+                   AND NOT EXISTS (SELECT 1 FROM call_invitations i WHERE i.participant_id = p.id \
+                         AND i.status IN ('ACCEPTED', 'DECLINED', 'ANSWERED_ELSEWHERE')) \
+                   AND NOT EXISTS (SELECT 1 FROM call_sessions s \
+                         JOIN call_session_intervals v ON v.session_id = s.id \
+                        WHERE s.participant_id = p.id)",
+                vec![row.id.into()],
+            )
+            .await?;
+            crate::metrics::add(
+                "calling_missed_calls_total",
+                &[("call_kind", call.call_kind.as_str())],
+                missed.max(0) as u64,
+            );
         }
         tracing::info!(
             call_id = %call.id,

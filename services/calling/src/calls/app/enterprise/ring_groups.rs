@@ -233,6 +233,7 @@ impl AppCallService {
         let context = context_of(txn, call.id).await?.unwrap_or(context.clone());
         if invitations.is_empty() {
             record_step(
+                &self.calls,
                 txn,
                 call,
                 "RING_GROUP_EMPTY",
@@ -248,6 +249,7 @@ impl AppCallService {
         }
         let call = self.mark_ringing(txn, cmd, call, leg).await?;
         record_step(
+            &self.calls,
             txn,
             &call,
             match group.strategy() {
@@ -292,6 +294,7 @@ impl AppCallService {
             return Ok((call, Vec::new()));
         };
         record_step(
+            &self.calls,
             txn,
             call,
             "FALLBACK",
@@ -303,6 +306,7 @@ impl AppCallService {
         .await?;
         let context = context_of(txn, call.id).await?.unwrap_or(context.clone());
         let action = router::resolve(
+            &self.calls,
             txn,
             &self.principals,
             scope_of(call),
@@ -380,6 +384,7 @@ impl AppCallService {
                         )
                         .await?;
                         record_step(
+                            &self.calls,
                             txn,
                             call,
                             "RING_GROUP_MEMBER",
@@ -433,6 +438,7 @@ impl AppCallService {
             .await
             .map_err(super::enterprise_error)?;
         let Some(action) = router::resolve_forward(
+            &self.calls,
             txn,
             &self.principals,
             scope,
@@ -454,6 +460,7 @@ impl AppCallService {
             // A forward that would loop / exceed the budget: the ordinary outcome
             // (NO_ANSWER / DECLINED) applies, with the evidence.
             record_step(
+                &self.calls,
                 txn,
                 call,
                 "NO_ROUTE",

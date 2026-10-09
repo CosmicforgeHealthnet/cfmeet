@@ -36,7 +36,7 @@ use super::{
 use crate::{
     calls::{
         app::{scope_of, system_cmd, AppCallService, PendingSignals},
-        command::CallCommandContext,
+        command::{CallCommandContext, CallScope},
         errors::CallResult,
         kinds::{InvitationPurpose, InvitationStatus, InvitationTerminalReason},
         state::CallState,
@@ -59,6 +59,8 @@ type Rung = (calls::Model, Vec<call_invitations::Model>);
 const DISPATCH_BATCH: u64 = 25;
 /// Waiting callers that receive a position update per change.
 const POSITION_SIGNAL_LIMIT: i64 = 50;
+/// An active entry this long past its deadline was not processed: a stuck entry.
+const STUCK_AFTER_SECONDS: i64 = 120;
 
 #[derive(Debug, Clone, FromQueryResult)]
 pub(crate) struct EntryRow {
@@ -192,6 +194,7 @@ impl AppCallService {
             .map_err(super::enterprise_error)?;
         if waiting >= queue.capacity as i64 {
             record_step(
+                &self.calls,
                 txn,
                 call,
                 "QUEUE_FULL",
@@ -241,6 +244,7 @@ impl AppCallService {
         .await?;
         let call = self.mark_ringing(txn, cmd, call, leg).await?;
         record_step(
+            &self.calls,
             txn,
             &call,
             "QUEUE_ENTER",
@@ -293,11 +297,22 @@ impl AppCallService {
             ],
         );
         if let Some(overflow) = queue.overflow() {
-            record_step(txn, call, "OVERFLOW", Some(overflow), reason, None, now).await?;
+            record_step(
+                &self.calls,
+                txn,
+                call,
+                "OVERFLOW",
+                Some(overflow),
+                reason,
+                None,
+                now,
+            )
+            .await?;
             let context = context_of(txn, call.id)
                 .await?
                 .ok_or(crate::calls::errors::CallError::NotFound)?;
             let action = router::resolve(
+                &self.calls,
                 txn,
                 &self.principals,
                 scope_of(call),
@@ -334,7 +349,7 @@ impl AppCallService {
             )
             .await?;
         }
-        record_step(txn, &call, "ENDED", None, outcome, None, now).await?;
+        record_step(&self.calls, txn, &call, "ENDED", None, outcome, None, now).await?;
         Ok((call, Vec::new()))
     }
 
@@ -399,6 +414,7 @@ impl AppCallService {
         )
         .await?;
         record_step(
+            &self.calls,
             txn,
             &call,
             "QUEUE_WAIT",
@@ -432,6 +448,24 @@ impl AppCallService {
                 &[("outcome", "ACCEPTED")],
             );
             exit_metrics(&entry, "ANSWERED", now);
+        } else if let Some(call) = calls::Entity::find_by_id(entry.call_id).one(txn).await? {
+            // An admitted answer for an entry that already left the queue (timed out,
+            // overflowed, abandoned or assigned): never a second owner — but an operator
+            // must see it.
+            crate::calls::app::incidents::raise(
+                txn,
+                &crate::calls::app::incidents::Incident::new(
+                    crate::calls::app::incidents::IncidentCategory::QueueAssignmentConflict,
+                    crate::calls::app::incidents::IncidentSeverity::High,
+                    scope_of(&call),
+                    crate::calls::app::incidents::IncidentResource::QueueEntry,
+                    entry.id,
+                )
+                .call(entry.call_id)
+                .evidence(serde_json::json!({ "entryState": entry.state })),
+                now,
+            )
+            .await;
         }
         Ok(())
     }
@@ -504,6 +538,51 @@ impl AppCallService {
             if self.settle_orphaned_entry(id).await? {
                 finished += 1;
             }
+        }
+        // Queue depth: every waiting / offering entry (a sampled, label-free level).
+        let depth = crate::calls::service::scalar_i64(
+            self.db(),
+            "SELECT count(*) FROM enterprise_queue_entries WHERE state IN ('WAITING', 'OFFERING')",
+            Vec::new(),
+        )
+        .await?;
+        crate::metrics::set_gauge("calling_enterprise_queue_depth", &[], depth);
+        // Entries still active well past their deadline were not processed (a failing or
+        // long-locked Call): stuck — one open incident each.
+        let stuck = self
+            .db()
+            .query_all(stmt(
+                "SELECT id, call_id, tenant_id, application_id, environment_id, state \
+                   FROM enterprise_queue_entries \
+                  WHERE state IN ('WAITING', 'OFFERING') AND deadline_at <= $1 \
+                  ORDER BY deadline_at LIMIT $2",
+                vec![
+                    (now - chrono::Duration::seconds(STUCK_AFTER_SECONDS)).into(),
+                    (limit as i64).into(),
+                ],
+            ))
+            .await?;
+        for row in stuck {
+            let scope = CallScope::from_parts(
+                crate::domain::TenantId::from_uuid(row.try_get_by_index(2)?),
+                crate::domain::ApplicationId::from_uuid(row.try_get_by_index(3)?),
+                crate::domain::EnvironmentId::from_uuid(row.try_get_by_index(4)?),
+            );
+            let state: String = row.try_get_by_index(5)?;
+            crate::calls::app::incidents::raise(
+                self.db(),
+                &crate::calls::app::incidents::Incident::new(
+                    crate::calls::app::incidents::IncidentCategory::StuckQueueEntry,
+                    crate::calls::app::incidents::IncidentSeverity::High,
+                    scope,
+                    crate::calls::app::incidents::IncidentResource::QueueEntry,
+                    row.try_get_by_index(0)?,
+                )
+                .call(row.try_get_by_index(1)?)
+                .evidence(serde_json::json!({ "entryState": state })),
+                now,
+            )
+            .await;
         }
         let queues = self
             .db()
@@ -588,6 +667,7 @@ impl AppCallService {
         exit_entry(&txn, entry.id, state, None, now).await?;
         exit_metrics(&entry, state, now);
         record_step(
+            &self.calls,
             &txn,
             &call,
             "QUEUE_TIMEOUT",
@@ -991,6 +1071,7 @@ impl AppCallService {
         )
         .await?;
         record_step(
+            &self.calls,
             txn,
             call,
             "QUEUE_OFFER",

@@ -19,8 +19,11 @@ use sea_orm::DatabaseTransaction;
 use uuid::Uuid;
 
 use super::{exec, record_step_of, ContextRow};
+use crate::calls::app::incidents::{
+    Incident, IncidentCategory, IncidentResource, IncidentSeverity,
+};
 use crate::{
-    calls::{command::CallScope, errors::CallResult},
+    calls::{command::CallScope, errors::CallResult, service::CallService},
     domain::PrincipalId,
     enterprise::{
         destinations::{Destination, DestinationType},
@@ -77,6 +80,7 @@ pub(crate) enum RouteAction {
 
 /// The visited set / hop count being built during one resolution.
 struct Walk<'a> {
+    calls: &'a CallService,
     txn: &'a DatabaseTransaction,
     scope: CallScope,
     context: &'a ContextRow,
@@ -88,6 +92,7 @@ struct Walk<'a> {
 
 impl<'a> Walk<'a> {
     fn new(
+        calls: &'a CallService,
         txn: &'a DatabaseTransaction,
         scope: CallScope,
         policy: &EffectivePolicy,
@@ -95,6 +100,7 @@ impl<'a> Walk<'a> {
         at: DateTime<Utc>,
     ) -> Self {
         Self {
+            calls,
             txn,
             scope,
             context,
@@ -157,6 +163,22 @@ impl<'a> Walk<'a> {
             &[("reason", reason)],
         );
         tracing::warn!(call_id = %self.context.call_id, reason, "enterprise routing loop blocked");
+        // A loop that keeps being blocked is configuration an operator must fix: one open
+        // incident per destination, its occurrences counting the repeats.
+        crate::calls::app::incidents::raise(
+            self.txn,
+            &Incident::new(
+                IncidentCategory::ForwardingLoopRepeated,
+                IncidentSeverity::Medium,
+                self.scope,
+                IncidentResource::Destination,
+                at.id,
+            )
+            .call(self.context.call_id)
+            .evidence(serde_json::json!({ "reason": reason, "destinationType": at.kind.as_str() })),
+            self.at,
+        )
+        .await;
         Ok(RouteAction::NoRoute {
             reason,
             destination: Some(at),
@@ -170,6 +192,7 @@ impl<'a> Walk<'a> {
         reason: &'static str,
     ) -> CallResult<()> {
         record_step_of(
+            self.calls,
             self.txn,
             self.context.call_id,
             self.scope,
@@ -185,7 +208,9 @@ impl<'a> Walk<'a> {
 
 /// Resolves `destination` for the Call of `context`, inside the caller's transaction
 /// (restart- and concurrency-safe: the Call row is locked).
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn resolve(
+    calls: &CallService,
     txn: &DatabaseTransaction,
     principals: &PrincipalResolver,
     scope: CallScope,
@@ -194,7 +219,7 @@ pub(crate) async fn resolve(
     destination: Destination,
     at: DateTime<Utc>,
 ) -> CallResult<RouteAction> {
-    let mut walk = Walk::new(txn, scope, policy, context, at);
+    let mut walk = Walk::new(calls, txn, scope, policy, context, at);
     walk_to(&mut walk, principals, policy, destination).await
 }
 
@@ -203,6 +228,7 @@ pub(crate) async fn resolve(
 /// (the ordinary outcome applies).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn resolve_forward(
+    calls: &CallService,
     txn: &DatabaseTransaction,
     principals: &PrincipalResolver,
     scope: CallScope,
@@ -224,7 +250,7 @@ pub(crate) async fn resolve_forward(
     let Some(target) = rule.destination() else {
         return Ok(None);
     };
-    let mut walk = Walk::new(txn, scope, policy, context, at);
+    let mut walk = Walk::new(calls, txn, scope, policy, context, at);
     // The principal was rung (it is in the visited set); forwarding from it is one hop.
     if walk.hops + 1 > walk.max_hops {
         let from = Destination::new(DestinationType::Principal, principal);

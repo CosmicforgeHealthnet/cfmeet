@@ -243,6 +243,7 @@ impl AppCallService {
             return Ok(());
         }
         record_step(
+            &self.calls,
             txn,
             call,
             "TRANSFER",

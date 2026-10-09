@@ -806,6 +806,24 @@ async fn storage_failure_is_recoverable_and_captures_can_fail() {
     );
     assert_eq!(e.a.state(call).await.0, CallState::NoAnswer);
     assert_eq!(vm.outcome(call).await, "ENDED:NO_ANSWER");
+    // Each failed message is an operator incident (one per message, restricted evidence).
+    assert_eq!(
+        e.count(&format!(
+            "SELECT count(*) FROM calling_incidents WHERE category = 'VOICEMAIL_FINALIZATION_FAILURE' \
+             AND resource_type = 'VOICEMAIL_MESSAGE' AND resource_id = '{message}' AND status = 'OPEN' \
+             AND restricted_evidence->>'failureCode' = 'CAPTURE_START_FAILED'"
+        ))
+        .await,
+        1
+    );
+    assert!(
+        e.count(
+            "SELECT count(*) FROM calling_incidents WHERE category = 'VOICEMAIL_FINALIZATION_FAILURE' \
+             AND restricted_evidence->>'failureCode' = 'CAPTURE_LOST'"
+        )
+        .await
+            >= 1
+    );
 }
 
 /// Retrieval is authorized FIRST: the owner (on whose behalf the application asks) or a
@@ -1318,4 +1336,96 @@ async fn capture_endpoint_authorization() {
     let r = send(e.h().peers.telephony.clone(), failed).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     assert_eq!(vm.message_state(message).await, "READY:");
+}
+
+/// §189: the same capture delivered twice concurrently — one stored object, READY once,
+/// one VOICEMAIL_READY event.
+#[tokio::test]
+async fn concurrent_finalization_stores_once() {
+    let Some(vm) = Vm::new().await else {
+        return;
+    };
+    let e = &vm.e;
+    let caller = desk(e, "caller").await;
+    let (_member, _mailbox) = member_with_mailbox(&vm, "4900").await;
+    for round in 0..3 {
+        let (call, message) = unanswered(&vm, &caller, "4900").await;
+        let audio = wav(800);
+        let (a, b) = tokio::join!(
+            vm.deliver(message, call, &audio),
+            vm.deliver(message, call, &audio)
+        );
+        let outcomes = [a.unwrap(), b.unwrap()];
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|o| **o == CaptureDelivery::Stored)
+                .count(),
+            1,
+            "round {round}: {outcomes:?}"
+        );
+        assert_eq!(vm.message_state(message).await, "READY:");
+        assert_eq!(
+            vm.events(call)
+                .await
+                .iter()
+                .filter(|t| *t == "VOICEMAIL_READY")
+                .count(),
+            1
+        );
+    }
+    assert_eq!(vm.store.len(), 3, "one object per message");
+}
+
+/// §189: an owner's delete racing the retention worker — one deletion, one object
+/// removal, the message ends DELETED with one reason.
+#[tokio::test]
+async fn delete_racing_retention_deletes_once() {
+    let Some(vm) = Vm::new().await else {
+        return;
+    };
+    let e = &vm.e;
+    let caller = desk(e, "caller").await;
+    let (member, _mailbox) = member_with_mailbox(&vm, "4950").await;
+    let owner = member.principal.id();
+    let (call, message) = unanswered(&vm, &caller, "4950").await;
+    vm.deliver(message, call, &wav(600)).await.unwrap();
+    assert_eq!(vm.store.len(), 1);
+    let path = format!("/v1/enterprise/voicemail/messages/{message}");
+    let version = vm.manage(Method::GET, &path, None).await.json["version"]
+        .as_i64()
+        .unwrap();
+    e.h()
+        .clock
+        .advance(chrono::Duration::days(30) + chrono::Duration::seconds(1));
+    let delete_path = format!("{path}?expectedVersion={version}&principalId={owner}");
+    let (r, _) = tokio::join!(vm.manage(Method::DELETE, &delete_path, None), vm.tick());
+    // Either the owner won (200 DELETING) or retention did first (409 / version moved).
+    assert!(
+        r.status == StatusCode::OK || r.status == StatusCode::CONFLICT,
+        "{}",
+        r.text
+    );
+    e.h().clock.advance(chrono::Duration::seconds(5));
+    vm.tick().await;
+    vm.tick().await;
+    assert_eq!(vm.message_state(message).await, "DELETED:");
+    assert!(vm.store.is_empty());
+    assert_eq!(
+        vm.events(call)
+            .await
+            .iter()
+            .filter(|t| *t == "VOICEMAIL_DELETED")
+            .count(),
+        1
+    );
+    let reasons = strings(
+        e.h().conn(),
+        &format!("SELECT delete_reason FROM voicemail_messages WHERE id = '{message}'"),
+    )
+    .await;
+    assert!(
+        reasons == ["USER"] || reasons == ["RETENTION"] || reasons == ["ADMIN"],
+        "{reasons:?}"
+    );
 }

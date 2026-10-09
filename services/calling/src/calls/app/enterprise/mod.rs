@@ -27,7 +27,7 @@ mod voicemail;
 
 pub use ivr::IvrInputSource;
 pub use recording::{RecordingActor, RecordingConsentView, StartOutcome};
-pub use sip::{EnterpriseDialogOffer, EnterpriseKeypad};
+pub use sip::{EnterpriseDialogOffer, EnterpriseKeypad, OfferScope};
 pub use transfer::{ResolvedTransferTarget, TransferTarget};
 pub use voicemail::{
     CallMediaCapture, CaptureDelivery, CapturePurpose, CaptureRequest, CapturedMedia,
@@ -202,9 +202,12 @@ pub(crate) async fn strings_in<C: ConnectionTrait>(
         .collect()
 }
 
-/// Appends one routing-evidence step.
-pub(crate) async fn record_step<C: ConnectionTrait>(
-    db: &C,
+/// Appends one routing-evidence step and its durable ENTERPRISE_ROUTING_STEP Call event
+/// (transactional outbox, same transaction).
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn record_step(
+    calls: &crate::calls::service::CallService,
+    txn: &DatabaseTransaction,
     call: &calls::Model,
     decision: &'static str,
     destination: Option<Destination>,
@@ -213,7 +216,8 @@ pub(crate) async fn record_step<C: ConnectionTrait>(
     at: chrono::DateTime<chrono::Utc>,
 ) -> CallResult<()> {
     record_step_of(
-        db,
+        calls,
+        txn,
         call.id,
         super::scope_of(call),
         decision,
@@ -227,8 +231,9 @@ pub(crate) async fn record_step<C: ConnectionTrait>(
 
 /// [`record_step`] by Call id and scope (the router, which holds no Call model).
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn record_step_of<C: ConnectionTrait>(
-    db: &C,
+pub(crate) async fn record_step_of(
+    calls: &crate::calls::service::CallService,
+    txn: &DatabaseTransaction,
     call_id: Uuid,
     scope: CallScope,
     decision: &'static str,
@@ -237,12 +242,12 @@ pub(crate) async fn record_step_of<C: ConnectionTrait>(
     answer_group: Option<Uuid>,
     at: chrono::DateTime<chrono::Utc>,
 ) -> CallResult<()> {
-    exec(
-        db,
+    let step: i64 = crate::calls::service::scalar_i64(
+        txn,
         "INSERT INTO enterprise_routing_steps (call_id, step_number, tenant_id, application_id, \
          environment_id, decision, destination_type, destination_id, reason, answer_group_id, \
          decided_at) SELECT $1, COALESCE(MAX(step_number), 0) + 1, $2, $3, $4, $5, $6, $7, $8, $9, $10 \
-         FROM enterprise_routing_steps WHERE call_id = $1",
+         FROM enterprise_routing_steps WHERE call_id = $1 RETURNING step_number::bigint",
         vec![
             call_id.into(),
             scope.tenant_id().as_uuid().into(),
@@ -257,6 +262,40 @@ pub(crate) async fn record_step_of<C: ConnectionTrait>(
         ],
     )
     .await?;
+    let call = calls::Entity::find_by_id(call_id)
+        .one(txn)
+        .await?
+        .ok_or(CallError::NotFound)?;
+    let mut fields = vec![
+        (
+            "step_number",
+            crate::calls::attributes::SafeValue::Integer(step),
+        ),
+        ("decision", crate::calls::service::text(decision)),
+        ("reason", crate::calls::service::text(reason)),
+    ];
+    if let Some(d) = destination {
+        fields.push((
+            "destination_type",
+            crate::calls::service::text(d.kind.as_str()),
+        ));
+        // A public contact is an opaque ContactReference: never repeated in an event.
+        if d.kind != DestinationType::PublicContact {
+            fields.push(("destination_id", crate::calls::service::text(d.id)));
+        }
+    }
+    calls
+        .append_event(
+            txn,
+            &super::system_cmd(&call),
+            &call,
+            crate::calls::service::EventDraft::fact(
+                crate::calls::events::CallEventType::EnterpriseRoutingStep,
+                crate::calls::service::data(fields)?,
+            ),
+            at,
+        )
+        .await?;
     crate::metrics::inc(
         "calling_enterprise_routing_decisions_total",
         &[("decision", decision), ("reason", reason)],
@@ -453,6 +492,7 @@ impl AppCallService {
         .await?;
         let call = self.locked(&txn, &call).await?;
         record_step(
+            &self.calls,
             &txn,
             &call,
             "ENTER",
@@ -703,6 +743,7 @@ impl AppCallService {
             .map_err(enterprise_error)?;
         let now = self.calls.now();
         let action = router::resolve(
+            &self.calls,
             txn,
             &self.principals,
             scope,
@@ -723,6 +764,7 @@ impl AppCallService {
             // fallback): fail safe instead of leaving the Call DIALING.
             let context = context_of(txn, call.id).await?.unwrap_or(context);
             record_step(
+                &self.calls,
                 txn,
                 &call,
                 "NO_ROUTE",
@@ -799,6 +841,7 @@ impl AppCallService {
                     // The principal's UNAVAILABLE forwarding, if any, takes the SAME Call.
                     let fresh = context_of(txn, call.id).await?.unwrap_or(context.clone());
                     if let Some(action) = router::resolve_forward(
+                        &self.calls,
                         txn,
                         &self.principals,
                         super::scope_of(call),
@@ -817,8 +860,17 @@ impl AppCallService {
                                 reason,
                                 destination,
                             } => {
-                                record_step(txn, call, "NO_ROUTE", destination, reason, None, now)
-                                    .await?;
+                                record_step(
+                                    &self.calls,
+                                    txn,
+                                    call,
+                                    "NO_ROUTE",
+                                    destination,
+                                    reason,
+                                    None,
+                                    now,
+                                )
+                                .await?;
                             }
                             action => {
                                 let fresh = context_of(txn, call.id).await?.unwrap_or(fresh);
@@ -830,6 +882,7 @@ impl AppCallService {
                         }
                     }
                     record_step(
+                        &self.calls,
                         txn,
                         call,
                         "NO_ROUTE",
@@ -865,6 +918,7 @@ impl AppCallService {
                     .await?;
                 let call = self.mark_ringing(txn, cmd, call, leg).await?;
                 record_step(
+                    &self.calls,
                     txn,
                     &call,
                     "RING_PRINCIPAL",
@@ -923,7 +977,17 @@ impl AppCallService {
                 reason,
                 destination,
             } => {
-                record_step(txn, call, "NO_ROUTE", destination, reason, None, now).await?;
+                record_step(
+                    &self.calls,
+                    txn,
+                    call,
+                    "NO_ROUTE",
+                    destination,
+                    reason,
+                    None,
+                    now,
+                )
+                .await?;
                 let category = if reason == "TARGET_UNAVAILABLE" {
                     FailureCategory::TargetUnavailable
                 } else {
@@ -1015,6 +1079,7 @@ impl AppCallService {
         )
         .await?;
         record_step(
+            &self.calls,
             txn,
             call,
             "ANSWERED",
@@ -1055,7 +1120,7 @@ impl AppCallService {
             now,
         )
         .await?;
-        record_step(txn, call, "ENDED", None, outcome, None, now).await?;
+        record_step(&self.calls, txn, call, "ENDED", None, outcome, None, now).await?;
         Ok(())
     }
 
@@ -1155,7 +1220,7 @@ impl AppCallService {
             now,
         )
         .await?;
-        record_step(txn, call, "ENDED", None, outcome, None, now).await?;
+        record_step(&self.calls, txn, call, "ENDED", None, outcome, None, now).await?;
         crate::metrics::inc(
             "calling_enterprise_call_outcomes_total",
             &[("outcome", outcome)],

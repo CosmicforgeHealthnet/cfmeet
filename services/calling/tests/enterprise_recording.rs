@@ -1016,6 +1016,20 @@ async fn stops_revocation_deadlines_and_failures() {
         "RECORDING_STARTED".to_string(),
         "RECORDING_FAILED".to_string()
     ]));
+    // A recording artifact that could not be produced is an operator incident.
+    let recording = r.json["recording"]["recordingId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        e.count(&format!(
+            "SELECT count(*) FROM calling_incidents WHERE category = 'RECORDING_ARTIFACT_FAILURE' \
+             AND resource_type = 'CALL_RECORDING' AND resource_id = '{recording}' \
+             AND call_id = '{call}' AND status = 'OPEN'"
+        ))
+        .await,
+        1
+    );
 }
 
 /// AUTO_WHEN_AUTHORIZED records by itself only once the evidence is there; MANUAL never
@@ -1158,4 +1172,132 @@ async fn kill_switch_never_blocks_stop_finalize_or_delete() {
     let r = rec.start(call, None).await;
     assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
     assert_eq!(rec.last_reason(call).await, "DENIED:RECORDING_DISABLED");
+}
+
+/// §189: concurrent starts of the same Call's recording — one recording, one capture, one
+/// ALLOWED decision; every caller learns the same recording.
+#[tokio::test]
+async fn concurrent_starts_record_once() {
+    let Some(rec) = Rec::new().await else {
+        return;
+    };
+    let e = &rec.e;
+    let caller = rec.desk("caller").await;
+    let callee = rec.desk("callee").await;
+    e.extension("4270", "ENTERPRISE_MEMBER", callee.principal.id())
+        .await;
+    rec.policy("MANUAL_ALLOWED", false, "NONE", 600).await;
+    for round in 0..3 {
+        let call = rec.connected(&caller, "4270", &callee).await;
+        let (a, b, c) = tokio::join!(
+            rec.start(call, None),
+            rec.start(call, None),
+            rec.start(call, Some(caller.principal.id().as_uuid()))
+        );
+        let mut ids = Vec::new();
+        for r in [&a, &b, &c] {
+            assert!(
+                r.status == StatusCode::CREATED || r.status == StatusCode::OK,
+                "round {round}: {}",
+                r.text
+            );
+            ids.push(recording_id(r));
+        }
+        ids.dedup();
+        assert_eq!(
+            ids.len(),
+            1,
+            "round {round}: one recording for every caller"
+        );
+        assert_eq!(
+            [&a, &b, &c]
+                .iter()
+                .filter(|r| r.status == StatusCode::CREATED)
+                .count(),
+            1,
+            "round {round}: exactly one start"
+        );
+        assert_eq!(
+            e.count(&format!(
+                "SELECT count(*) FROM call_recordings WHERE call_id = '{call}'"
+            ))
+            .await,
+            1
+        );
+        assert_eq!(
+            e.count(&format!(
+                "SELECT count(*) FROM call_recording_authorizations \
+                  WHERE call_id = '{call}' AND decision = 'ALLOWED'"
+            ))
+            .await,
+            1
+        );
+        assert_eq!(
+            rec.capture
+                .started()
+                .iter()
+                .filter(|s| s.call_id == call)
+                .count(),
+            1
+        );
+        let (_, v) = e.a.state(call).await;
+        e.a.command(call, "end", v).await;
+    }
+}
+
+/// §189: an explicit stop racing the Call's end — one stop, one reason, one
+/// RECORDING_STOPPED event, one final artifact.
+#[tokio::test]
+async fn stop_racing_the_call_end_stops_once() {
+    let Some(rec) = Rec::new().await else {
+        return;
+    };
+    let e = &rec.e;
+    let caller = rec.desk("caller").await;
+    let callee = rec.desk("callee").await;
+    e.extension("4280", "ENTERPRISE_MEMBER", callee.principal.id())
+        .await;
+    rec.policy("MANUAL_ALLOWED", false, "NONE", 600).await;
+    for round in 0..3 {
+        let call = rec.connected(&caller, "4280", &callee).await;
+        let r = rec.start(call, None).await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        let recording = recording_id(&r);
+        let (_, v) = e.a.state(call).await;
+        let stop_path = format!("/v1/calls/{call}/recordings/{recording}/stop");
+        let (stop, end) = tokio::join!(
+            rec.manage(Method::POST, &stop_path, Some(json!({}))),
+            e.a.command(call, "end", v)
+        );
+        assert!(stop.status.is_success(), "round {round}: {}", stop.text);
+        assert!(end.status.is_success(), "round {round}: {}", end.text);
+        rec.tick().await;
+        let state = rec.recording_state(recording).await;
+        assert!(
+            state == "STOPPING:EXPLICIT:" || state == "STOPPING:CALL_ENDED:",
+            "round {round}: {state}"
+        );
+        rec.deliver(recording, call, &wav(1500)).await;
+        rec.deliver(recording, call, &wav(1500)).await;
+        rec.tick().await;
+        assert!(rec.recording_state(recording).await.starts_with("READY:"));
+        let events = rec.events(call).await;
+        for kind in ["RECORDING_STARTED", "RECORDING_STOPPED", "RECORDING_READY"] {
+            assert_eq!(
+                events.iter().filter(|e| *e == kind).count(),
+                1,
+                "round {round}: {events:?}"
+            );
+        }
+        assert_eq!(
+            rec.capture
+                .stopped()
+                .iter()
+                .filter(|id| **id == recording)
+                .count(),
+            1,
+            "round {round}: one capture stop"
+        );
+    }
+    assert_eq!(rec.store.len(), 3, "one artifact per recording");
 }

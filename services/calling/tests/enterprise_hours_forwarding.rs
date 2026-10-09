@@ -1227,3 +1227,73 @@ async fn ivr_branches_through_business_hours() {
         1
     );
 }
+
+/// §189: the schedule changes while Calls are being routed through it, at a window
+/// boundary — every Call is routed by ONE evaluation (its recorded OPEN / CLOSED step
+/// matches the member it rings), never a mix, never two members.
+#[tokio::test]
+async fn schedule_changes_during_route_selection_are_consistent() {
+    let Some(e) = EnterpriseWorld::new().await else {
+        return;
+    };
+    let caller = desk(&e, "caller").await;
+    let day = desk(&e, "day").await;
+    let night = desk(&e, "night").await;
+    let body = |windows: Value| {
+        json!({ "name": "Boundary", "timezone": "Africa/Lagos",
+                "openDestination": dest("ENTERPRISE_MEMBER", day.principal.id()),
+                "closedDestination": dest("ENTERPRISE_MEMBER", night.principal.id()),
+                "weeklyWindows": windows })
+    };
+    let (s, h) = hours(&e, body(weekdays("09:00", "17:00"))).await;
+    assert_eq!(s, StatusCode::CREATED, "{h}");
+    let id = id_of(&h, "businessHoursId");
+    e.extension("6300", "SCHEDULE", id).await;
+    for round in 0..4 {
+        // One microsecond before 17:00 Lagos: open, while an administrator closes it.
+        e.h().clock.set(at("2031-03-05T15:59:59.999999Z"));
+        let version = e
+            .admin(
+                Method::GET,
+                &format!("/v1/enterprise/business-hours/{id}"),
+                None,
+            )
+            .await
+            .json["version"]
+            .as_i64()
+            .unwrap();
+        let mut replace = body(if round % 2 == 0 {
+            json!([])
+        } else {
+            weekdays("09:00", "17:00")
+        });
+        replace["expectedVersion"] = json!(version);
+        let path = format!("/v1/enterprise/business-hours/{id}");
+        let (a, b, change) = tokio::join!(
+            dial(&e, &caller, "6300"),
+            dial(&e, &caller, "6300"),
+            e.admin(Method::PUT, &path, Some(replace))
+        );
+        assert_eq!(change.status, StatusCode::OK, "{}", change.text);
+        for call in [a, b] {
+            let (to_day, to_night) = (rings(&e, call, &day).await, rings(&e, call, &night).await);
+            assert!(to_day ^ to_night, "round {round}: exactly one member rings");
+            let s = steps(&e, call).await;
+            let expected = if to_day {
+                "SCHEDULE:OPEN"
+            } else {
+                "SCHEDULE:CLOSED"
+            };
+            assert!(s.contains(&expected.to_string()), "round {round}: {s:?}");
+            assert_eq!(
+                s.iter().filter(|x| x.starts_with("SCHEDULE:")).count(),
+                1,
+                "round {round}: {s:?}"
+            );
+        }
+        // The boundary itself: 17:00 Lagos is closed whatever the race left behind.
+        e.h().clock.set(at("2031-03-05T16:00:00Z"));
+        let after = dial(&e, &caller, "6300").await;
+        assert!(rings(&e, after, &night).await && !rings(&e, after, &day).await);
+    }
+}

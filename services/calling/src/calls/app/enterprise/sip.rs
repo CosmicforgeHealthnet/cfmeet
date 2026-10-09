@@ -270,6 +270,7 @@ impl AppCallService {
         .await?;
         let call = self.locked(&txn, &call).await?;
         record_step(
+            &self.calls,
             &txn,
             &call,
             "ENTER",

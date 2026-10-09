@@ -54,6 +54,9 @@ pub enum SignalType {
     RecordingStarted,
     /// Part F: the Call's recording stopped (data: recordingId).
     RecordingStopped,
+    /// Part F: a mailbox took the Call; the caller is now leaving a message (data:
+    /// maxSeconds). Never the mailbox owner or a message id.
+    VoicemailStarted,
 }
 
 impl SignalType {
@@ -83,6 +86,7 @@ impl SignalType {
         SignalType::IvrInput,
         SignalType::RecordingStarted,
         SignalType::RecordingStopped,
+        SignalType::VoicemailStarted,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -112,6 +116,7 @@ impl SignalType {
             SignalType::IvrInput => "call.ivr_input",
             SignalType::RecordingStarted => "call.recording_started",
             SignalType::RecordingStopped => "call.recording_stopped",
+            SignalType::VoicemailStarted => "call.voicemail_started",
         }
     }
 }
