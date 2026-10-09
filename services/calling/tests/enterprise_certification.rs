@@ -272,6 +272,34 @@ async fn org_isolation_certification() {
             .or(r.json["recording"]["state"].as_str());
         assert_eq!(state, Some(expected), "{path}: {}", r.text);
     }
+    // Part G §69: one artifact usage fact each (duration and stored size), and a
+    // repeated capture delivery adds nothing.
+    for (artifact, call) in [(message, vm_call), (recording, rec_call)] {
+        e.h()
+            .state
+            .app
+            .deliver_capture(artifact, call, media(&wav(1500)))
+            .await
+            .unwrap();
+    }
+    for (call, usage_type) in [
+        (vm_call, "VOICEMAIL_ARTIFACT"),
+        (rec_call, "RECORDING_ARTIFACT"),
+    ] {
+        assert_eq!(
+            common::scalar_i64(
+                e.h().conn(),
+                &format!(
+                    "SELECT count(*) FROM call_usage_records WHERE call_id = '{call}' \
+                       AND usage_type = '{usage_type}' AND size_bytes > 0 AND quantity > 0 \
+                       AND finalized_at IS NOT NULL AND cost_status IS NULL"
+                ),
+            )
+            .await,
+            1,
+            "{usage_type}"
+        );
+    }
     let versions = |ids: Vec<(&'static str, Uuid)>| {
         let e = &e;
         let token = b_all.secret.expose_once().to_string();

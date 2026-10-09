@@ -494,6 +494,7 @@ impl AppCallService {
             Ok(r) => r,
             Err(denial) => {
                 txn.rollback().await?;
+                spend::notify_refusal(self.db(), &call, denial, now).await;
                 tracing::info!(
                     reason = denial.as_str(),
                     "telecom spend reservation refused"

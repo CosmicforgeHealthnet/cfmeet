@@ -101,6 +101,12 @@ const ALLOWED_KEYS: &[(&str, &str, bool)] = &[
     ("session_id", "sessionId", false),
     ("session_version", "sessionVersion", true),
     ("session_status", "sessionStatus", false),
+    ("limit", "limit", false),
+    ("scope", "scope", false),
+    ("window", "window", false),
+    ("threshold", "threshold", true),
+    ("current", "current", true),
+    ("ceiling", "ceiling", true),
 ];
 
 fn is_code(s: &str) -> bool {

@@ -9160,6 +9160,179 @@
           }
         }
       }
+    },
+    "/v1/usage": {
+      "get": {
+        "operationId": "listUsage",
+        "summary": "List usage facts",
+        "description": "Final consumption facts of the authenticated application environment (Part G §69), oldest first by recording time, keyset-paginated. A ledger, not a bill: public-network legs carry cost evidence (KNOWN / ESTIMATED / UNKNOWN — an UNKNOWN cost has no amount). Never a provider identifier, telephone number, SIP URI or object key.",
+        "security": [
+          {
+            "platformCredential": [
+              "usage.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "usage.read",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "description": "Recorded at or after this instant (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "Recorded before this instant (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "usageType",
+            "in": "query",
+            "required": false,
+            "description": "Only this usage type.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "CALL_CONNECTED_TIME",
+                "PARTICIPANT_CONNECTED_TIME",
+                "SESSION_CONNECTED_TIME",
+                "LEG_CONNECTED_TIME",
+                "VOICEMAIL_ARTIFACT",
+                "RECORDING_ARTIFACT"
+              ]
+            }
+          },
+          {
+            "name": "resourceClass",
+            "in": "query",
+            "required": false,
+            "description": "Only this resource class.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "APP_MEDIA",
+                "PUBLIC_NETWORK",
+                "STORAGE"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1-100, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of usage facts.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform/usage/v1.schema.json#/$defs/UsageList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/InsufficientScope"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/limits": {
+      "get": {
+        "operationId": "getLimits",
+        "summary": "Get limit status",
+        "description": "The authenticated credential's limits (Part G §70): request rate, concurrent calls and telecom spend (daily / monthly), each with every configured level of the tenant → application → credential precedence chain (and the environment's telecom-spend policy) and the binding level — the one with the least remaining headroom. Most restrictive wins.",
+        "security": [
+          {
+            "platformCredential": [
+              "usage.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "usage.read",
+        "responses": {
+          "200": {
+            "description": "Limit status.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform/usage/v1.schema.json#/$defs/Limits"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/InsufficientScope"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
     }
   },
   "components": {

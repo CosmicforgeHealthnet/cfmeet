@@ -114,8 +114,10 @@ const ENTERPRISE_TABLES: &[&str] = &[
     "call_recordings",
 ];
 
-/// Part G §68: customer webhooks (Calling-owned, ADR 0028).
-const WEBHOOK_TABLES: &[&str] = &[
+/// Part G (ADR 0028): customer webhooks (§68) and the tenant level of the limit policy
+/// (§70) — added after the call domain, so a call-domain rollback removes them.
+const PART_G_TABLES: &[&str] = &[
+    "platform_tenant_limits",
     "webhook_deliveries",
     "webhook_delivery_attempts",
     "webhook_events",
@@ -141,7 +143,7 @@ async fn migrations_apply_roll_back_and_reapply_on_a_clean_database() {
         .iter()
         .chain(CALL_TABLES)
         .chain(ENTERPRISE_TABLES)
-        .chain(WEBHOOK_TABLES)
+        .chain(PART_G_TABLES)
         .map(|s| s.to_string())
         .collect();
     expected.push(MIGRATION_TABLE.to_string());
@@ -255,6 +257,7 @@ async fn required_constraints_and_guards_exist() {
         "fk_platform_principals_service_account",
         "fk_platform_application_limits_application",
         "fk_platform_credential_limits_credential",
+        "fk_platform_tenant_limits_tenant",
         // Status / enum checks
         "ck_platform_tenants_classification",
         "ck_platform_tenants_status",

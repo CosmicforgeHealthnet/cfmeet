@@ -339,8 +339,14 @@ async fn a_protected_caller_reaches_a_protected_callee_through_one_call() {
             leg_event("USAGE_FINALIZED", call, leg, t, None, seq),
             leg == leg_a,
         );
-        u["usage"] = json!({ "connectedDurationMs": 30_000, "billableSeconds": 30, "costMinor": 300,
-                             "costKnown": true, "currency": "NGN", "destinationCountry": "NG" });
+        // The second leg's provider reported no cost: UNKNOWN, never zero.
+        u["usage"] = if leg == leg_a {
+            json!({ "connectedDurationMs": 30_000, "billableSeconds": 30, "costMinor": 300,
+                    "costKnown": true, "currency": "NGN", "destinationCountry": "NG" })
+        } else {
+            json!({ "connectedDurationMs": 30_000, "billableSeconds": 30, "costKnown": false,
+                    "destinationCountry": "NG" })
+        };
         assert_eq!(x.event(u).await, "APPLIED");
     }
     assert_eq!(
@@ -351,6 +357,31 @@ async fn a_protected_caller_reaches_a_protected_callee_through_one_call() {
         .await,
         2
     );
+    // Part G §69: one usage fact per leg, each with its own cost evidence.
+    for (leg, evidence) in [
+        (
+            leg_a,
+            "cost_status = 'KNOWN' AND cost_minor = 300 AND cost_currency = 'NGN'",
+        ),
+        (
+            leg_b,
+            "cost_status = 'UNKNOWN' AND cost_minor IS NULL AND cost_currency IS NULL",
+        ),
+    ] {
+        assert_eq!(
+            scalar_i64(
+                x.w.h().conn(),
+                &format!(
+                    "SELECT count(*) FROM call_usage_records WHERE call_id = '{call}' AND leg_id = '{leg}' \
+                       AND usage_type = 'LEG_CONNECTED_TIME' AND billable_seconds = 30 \
+                       AND destination_country = 'NG' AND {evidence}"
+                ),
+            )
+            .await,
+            1,
+            "{evidence}"
+        );
+    }
     // One Call, two public legs.
     assert_eq!(
         scalar_i64(

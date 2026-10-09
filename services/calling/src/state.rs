@@ -82,6 +82,7 @@ pub struct AppState {
     /// Enterprise calling configuration (Part F).
     pub enterprise: Arc<EnterpriseService>,
     pub webhooks: Arc<crate::webhooks::WebhookService>,
+    pub usage: Arc<crate::usage::UsageService>,
 }
 
 impl AppState {
@@ -158,6 +159,11 @@ impl AppState {
             contact_delegation: runtime.contact_delegation,
             enterprise,
             webhooks,
+            usage: Arc::new(crate::usage::UsageService::new(
+                db.clone(),
+                clock.clone(),
+                limit_defaults,
+            )),
             clock,
             db,
         }

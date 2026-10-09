@@ -48,6 +48,7 @@ pub fn public_api() -> Router<AppState> {
         .merge(crate::privacy_relay::http::routes())
         .merge(crate::enterprise::http::routes())
         .merge(crate::webhooks::http::routes())
+        .merge(crate::usage::http::routes())
 }
 
 /// Internal routes (service authentication): Privacy Relay's active-call enforcement.

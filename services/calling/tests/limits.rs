@@ -324,7 +324,8 @@ async fn rejected_authentication_is_not_counted_and_old_windows_are_pruned() {
         .unwrap()
         - Duration::minutes(5);
     let pruned = h.state.rate_limiter.prune(cutoff).await.unwrap();
-    assert_eq!(pruned, 2);
+    // One window per subject: credential, application and tenant (Part G §70).
+    assert_eq!(pruned, 3);
     assert_eq!(
         common::scalar_i64(
             h.conn(),

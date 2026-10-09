@@ -1114,6 +1114,19 @@ impl AppCallService {
                 now,
             )
             .await?;
+        self.calls
+            .record_artifact_usage_in(
+                &txn,
+                &system_cmd(&call),
+                &call,
+                crate::calls::service::ArtifactUsageFact {
+                    usage_type: crate::calls::kinds::UsageType::RecordingArtifact,
+                    artifact_id: recording_id,
+                    duration_ms: i64::from(media.duration_ms),
+                    size_bytes: stored.size as i64,
+                },
+            )
+            .await?;
         txn.commit().await?;
         crate::metrics::inc(
             "calling_enterprise_capture_deliveries_total",

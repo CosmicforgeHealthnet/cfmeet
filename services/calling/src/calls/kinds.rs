@@ -329,6 +329,8 @@ text_enum!(
         ParticipantConnectedTime = "PARTICIPANT_CONNECTED_TIME",
         SessionConnectedTime = "SESSION_CONNECTED_TIME",
         LegConnectedTime = "LEG_CONNECTED_TIME",
+        VoicemailArtifact = "VOICEMAIL_ARTIFACT",
+        RecordingArtifact = "RECORDING_ARTIFACT",
     }
 );
 

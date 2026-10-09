@@ -380,6 +380,7 @@ impl AppCallService {
                 }
                 Err(denial) => {
                     txn.rollback().await?;
+                    spend::notify_refusal(self.db(), &call, denial, now).await;
                     return Err(CallError::TelecomSpendLimitExceeded(denial.as_str()));
                 }
             }

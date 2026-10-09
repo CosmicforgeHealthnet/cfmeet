@@ -19,6 +19,7 @@
 pub mod catalog;
 pub mod http;
 pub mod ingest;
+pub mod notices;
 pub mod worker;
 
 use std::{sync::Arc, time::Duration};
@@ -805,66 +806,92 @@ impl WebhookService {
         correlation_id: Option<&str>,
         event: &catalog::PublicEvent,
     ) -> WebhookResult<usize> {
-        let now = self.now();
-        let event_id = format!("whe_{}", Uuid::new_v4().simple());
-        let mut body = serde_json::json!({
-            "id": event_id,
-            "type": event.event_type,
-            "apiVersion": "v1",
-            "occurredAt": ts(occurred_at),
-            "data": Value::Object(event.data.clone()),
-        });
-        if let Some(c) = correlation_id.filter(|c| {
-            c.len() <= 64
-                && c.bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-        }) {
-            body["correlationId"] = Value::String(c.to_string());
-        }
-        db.execute(stmt(
-            "INSERT INTO webhook_events (id, event_id, source_event_id, producer, event_type, \
-               tenant_id, application_id, environment_id, occurred_at, body, created_at) \
-             SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11 \
-              WHERE EXISTS (SELECT 1 FROM webhook_subscriptions s WHERE s.tenant_id = $6 \
-                              AND s.application_id = $7 AND s.environment_id = $8 \
-                              AND s.status = 'ACTIVE' AND $5 = ANY (s.event_types)) \
-             ON CONFLICT (producer, source_event_id) DO NOTHING",
-            vec![
-                Uuid::new_v4().into(),
-                event_id.into(),
-                source_event_id.into(),
-                producer.into(),
-                event.event_type.into(),
-                scope.0.into(),
-                scope.1.into(),
-                scope.2.into(),
-                occurred_at.into(),
-                body.into(),
-                now.into(),
-            ],
+        ingest_public_event(
+            db,
+            self.now(),
+            producer,
+            source_event_id,
+            scope,
+            occurred_at,
+            correlation_id,
+            event,
+        )
+        .await
+    }
+}
+
+/// Stores one public event (deduplicated on `(producer, source_event_id)`) when at least
+/// one ACTIVE subscription of its scope wants its type, and fans it out to one delivery
+/// per such subscription — inside the caller's transaction or connection.
+#[allow(clippy::too_many_arguments)]
+pub async fn ingest_public_event<C: ConnectionTrait>(
+    db: &C,
+    now: DateTime<Utc>,
+    producer: &str,
+    source_event_id: &str,
+    scope: (Uuid, Uuid, Uuid),
+    occurred_at: DateTime<Utc>,
+    correlation_id: Option<&str>,
+    event: &catalog::PublicEvent,
+) -> WebhookResult<usize> {
+    let event_id = format!("whe_{}", Uuid::new_v4().simple());
+    let mut body = serde_json::json!({
+        "id": event_id,
+        "type": event.event_type,
+        "apiVersion": "v1",
+        "occurredAt": ts(occurred_at),
+        "data": Value::Object(event.data.clone()),
+    });
+    if let Some(c) = correlation_id.filter(|c| {
+        c.len() <= 64
+            && c.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    }) {
+        body["correlationId"] = Value::String(c.to_string());
+    }
+    db.execute(stmt(
+        "INSERT INTO webhook_events (id, event_id, source_event_id, producer, event_type, \
+           tenant_id, application_id, environment_id, occurred_at, body, created_at) \
+         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11 \
+          WHERE EXISTS (SELECT 1 FROM webhook_subscriptions s WHERE s.tenant_id = $6 \
+                          AND s.application_id = $7 AND s.environment_id = $8 \
+                          AND s.status = 'ACTIVE' AND $5 = ANY (s.event_types)) \
+         ON CONFLICT (producer, source_event_id) DO NOTHING",
+        vec![
+            Uuid::new_v4().into(),
+            event_id.into(),
+            source_event_id.into(),
+            producer.into(),
+            event.event_type.into(),
+            scope.0.into(),
+            scope.1.into(),
+            scope.2.into(),
+            occurred_at.into(),
+            body.into(),
+            now.into(),
+        ],
+    ))
+    .await
+    .db()?;
+    let fanned = db
+        .execute(stmt(
+            "INSERT INTO webhook_deliveries (id, webhook_event_id, subscription_id, tenant_id, \
+               application_id, environment_id, status, attempt_count, next_attempt_at, \
+               created_at, updated_at) \
+             SELECT gen_random_uuid(), e.id, s.id, s.tenant_id, s.application_id, s.environment_id, \
+                    'PENDING', 0, $3, $3, $3 \
+               FROM webhook_events e JOIN webhook_subscriptions s \
+                 ON s.tenant_id = e.tenant_id AND s.application_id = e.application_id \
+                AND s.environment_id = e.environment_id \
+              WHERE e.producer = $1 AND e.source_event_id = $2 AND s.status = 'ACTIVE' \
+                AND e.event_type = ANY (s.event_types) \
+             ON CONFLICT (subscription_id, webhook_event_id) WHERE replay_of IS NULL DO NOTHING",
+            vec![producer.into(), source_event_id.into(), now.into()],
         ))
         .await
-        .db()?;
-        let fanned = db
-            .execute(stmt(
-                "INSERT INTO webhook_deliveries (id, webhook_event_id, subscription_id, tenant_id, \
-                   application_id, environment_id, status, attempt_count, next_attempt_at, \
-                   created_at, updated_at) \
-                 SELECT gen_random_uuid(), e.id, s.id, s.tenant_id, s.application_id, s.environment_id, \
-                        'PENDING', 0, $3, $3, $3 \
-                   FROM webhook_events e JOIN webhook_subscriptions s \
-                     ON s.tenant_id = e.tenant_id AND s.application_id = e.application_id \
-                    AND s.environment_id = e.environment_id \
-                  WHERE e.producer = $1 AND e.source_event_id = $2 AND s.status = 'ACTIVE' \
-                    AND e.event_type = ANY (s.event_types) \
-                 ON CONFLICT (subscription_id, webhook_event_id) WHERE replay_of IS NULL DO NOTHING",
-                vec![producer.into(), source_event_id.into(), now.into()],
-            ))
-            .await
-            .db()?
-            .rows_affected();
-        Ok(fanned as usize)
-    }
+        .db()?
+        .rows_affected();
+    Ok(fanned as usize)
 }
 
 /// Keyset page with `limit` (one extra row fetched to know whether more exist).

@@ -481,6 +481,13 @@ impl From<LimitArgs> for LimitValues {
 
 #[derive(Subcommand)]
 enum LimitsCmd {
+    /// Replace the tenant-level limit policy (omitted = not configured).
+    SetTenant {
+        #[command(flatten)]
+        tenant: TenantPath,
+        #[command(flatten)]
+        limits: LimitArgs,
+    },
     /// Replace the application-level limit policy (omitted = not configured).
     SetApplication {
         #[command(flatten)]
@@ -860,6 +867,10 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
             ),
         },
         Command::Limits(cmd) => match cmd {
+            LimitsCmd::SetTenant { tenant, limits } => {
+                let t = admin.tenant(&tenant).await?;
+                print(&p.set_tenant_limits(t.id, limits.into()).await?)
+            }
             LimitsCmd::SetApplication {
                 application,
                 limits,

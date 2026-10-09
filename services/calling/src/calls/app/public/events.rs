@@ -23,7 +23,7 @@ use crate::{
         errors::{CallError, CallResult},
         ids::{CallAttemptId, CallLegId, CallSessionId},
         kinds::{AttemptOutcome, FailureCategory, LegKind, LegState, SessionState},
-        service::{attempt_of, leg_of},
+        service::{attempt_of, leg_of, LegCost, LegUsageFact},
         state::CallState,
         transitions::{CallAction, ConnectedEvidence},
     },
@@ -370,6 +370,27 @@ impl AppCallService {
                         self.calls.now(),
                     )
                     .await?;
+                    // Part G §69: the leg's usage fact (once per leg; a repeated or late
+                    // provider usage event changes nothing). Cost evidence keeps its
+                    // status: an unknown cost is UNKNOWN, never zero.
+                    self.calls
+                        .record_leg_usage_in(
+                            txn,
+                            &cmd,
+                            call,
+                            &LegUsageFact {
+                                leg_id: leg.id,
+                                connected_ms: usage.connected_duration_ms,
+                                billable_seconds: usage.billable_seconds,
+                                destination_country: usage.destination_country.clone(),
+                                cost: LegCost::from_evidence(
+                                    usage.cost_minor,
+                                    usage.cost_known,
+                                    usage.currency.as_deref(),
+                                ),
+                            },
+                        )
+                        .await?;
                 }
                 Ok(EventDisposition::Applied)
             }

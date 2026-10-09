@@ -170,7 +170,7 @@ impl CallService {
         if CallScope::of_principal(initiator) != scope {
             return Err(CallError::NotFound);
         }
-        self.enforce_concurrent_call_limit(txn, scope.application_id(), creator.credential_id)
+        self.enforce_concurrent_call_limit(txn, &scope, creator.credential_id)
             .await?;
 
         let at = self.now();
@@ -267,71 +267,131 @@ impl CallService {
     }
 
     /// Enforces the effective concurrent-call limits inside the creating transaction:
-    /// per credential (effective limit) and per application (aggregate, when configured).
-    /// Creations of one application are serialized by a transaction-scoped advisory lock;
-    /// only non-terminal Calls count.
+    /// per credential (effective limit: most restrictive of tenant / application /
+    /// credential) and per application / tenant (aggregates, when configured).
+    /// Creations of one application are serialized by a transaction-scoped advisory lock
+    /// (preceded, when the tenant configures a ceiling, by the tenant's lock — always in
+    /// that order); only non-terminal Calls count. Crossing 80 % of a ceiling emits
+    /// `limit.warning` with the creation; a refusal emits `limit.exceeded`.
     async fn enforce_concurrent_call_limit(
         &self,
         txn: &DatabaseTransaction,
-        application_id: crate::domain::ApplicationId,
+        scope: &CallScope,
         credential_id: crate::domain::CredentialId,
     ) -> CallResult<()> {
+        use crate::webhooks::notices::{self, minute_of, LimitKind, LimitLevel, LimitNotice};
+        let tenant_capped = scalar_i64(
+            txn,
+            "SELECT count(*) FROM platform_tenant_limits \
+              WHERE tenant_id = $1 AND max_concurrent_communications IS NOT NULL",
+            vec![scope.tenant_id().as_uuid().into()],
+        )
+        .await?
+            > 0;
+        if tenant_capped {
+            execute(
+                txn,
+                CREATION_LOCK_SQL,
+                vec![format!("cfmeet.calling.active-calls.tenant:{}", scope.tenant_id()).into()],
+            )
+            .await?;
+        }
         execute(
             txn,
             CREATION_LOCK_SQL,
-            vec![format!("cfmeet.calling.active-calls:{}", application_id).into()],
+            vec![format!("cfmeet.calling.active-calls:{}", scope.application_id()).into()],
         )
         .await?;
-        let (per_credential, application) = concurrent_communication_limits(
+        let limits = concurrent_communication_limits(
             txn,
-            application_id,
+            scope.tenant_id(),
+            scope.application_id(),
             credential_id,
             self.limit_defaults,
         )
         .await?;
-        let by_credential = scalar_i64(
-            txn,
-            &format!(
-                "SELECT count(*) FROM calls WHERE created_by_credential_id = $1 \
+        let active = |column: &'static str, subject: uuid::Uuid| async move {
+            let sql = format!(
+                "SELECT count(*) FROM calls WHERE {column} = $1 \
                  AND current_state NOT IN {TERMINAL_STATES_SQL}"
-            ),
-            vec![credential_id.as_uuid().into()],
-        )
-        .await?;
-        if by_credential >= per_credential {
-            tracing::info!(
-                credential_id = %credential_id,
-                application_id = %application_id,
-                limit = per_credential,
-                "concurrent call limit reached (credential)"
             );
-            return Err(CallError::ConcurrentCallLimitExceeded {
-                level: "credential",
-                limit: per_credential,
-            });
+            scalar_i64(txn, &sql, vec![subject.into()]).await
+        };
+        let mut checks = vec![(
+            LimitLevel::Credential,
+            "credential",
+            credential_id.as_uuid(),
+            active("created_by_credential_id", credential_id.as_uuid()).await?,
+            limits.per_credential,
+        )];
+        if let Some(limit) = limits.application {
+            checks.push((
+                LimitLevel::Application,
+                "application",
+                scope.application_id().as_uuid(),
+                active("application_id", scope.application_id().as_uuid()).await?,
+                limit,
+            ));
         }
-        if let Some(limit) = application {
-            let by_application = scalar_i64(
-                txn,
-                &format!(
-                    "SELECT count(*) FROM calls WHERE application_id = $1 \
-                     AND current_state NOT IN {TERMINAL_STATES_SQL}"
-                ),
-                vec![application_id.as_uuid().into()],
-            )
-            .await?;
-            if by_application >= limit {
+        if let Some(limit) = limits.tenant {
+            checks.push((
+                LimitLevel::Tenant,
+                "tenant",
+                scope.tenant_id().as_uuid(),
+                active("tenant_id", scope.tenant_id().as_uuid()).await?,
+                limit,
+            ));
+        }
+        let now = self.now();
+        let notice_scope = (
+            scope.tenant_id().as_uuid(),
+            scope.application_id().as_uuid(),
+            scope.environment_id().as_uuid(),
+        );
+        for &(level, name, subject, current, limit) in &checks {
+            if current >= limit {
                 tracing::info!(
-                    application_id = %application_id,
+                    tenant_id = %scope.tenant_id(),
+                    application_id = %scope.application_id(),
+                    credential_id = %credential_id,
+                    level = name,
                     limit,
-                    "concurrent call limit reached (application)"
+                    "concurrent call limit reached"
                 );
-                return Err(CallError::ConcurrentCallLimitExceeded {
-                    level: "application",
-                    limit,
-                });
+                // The creating transaction rolls back: the notice is emitted on its own.
+                notices::emit(
+                    &self.db,
+                    now,
+                    notice_scope,
+                    &[LimitNotice::exceeded(
+                        LimitKind::ConcurrentCalls,
+                        level,
+                        subject,
+                        current + 1,
+                        limit,
+                        minute_of(now),
+                    )],
+                )
+                .await;
+                return Err(CallError::ConcurrentCallLimitExceeded { level: name, limit });
             }
         }
+        let warnings: Vec<LimitNotice> = checks
+            .iter()
+            .filter_map(|&(level, _, subject, current, limit)| {
+                LimitNotice::warning_if_crossed(
+                    LimitKind::ConcurrentCalls,
+                    level,
+                    subject,
+                    current,
+                    current + 1,
+                    limit,
+                    minute_of(now),
+                )
+            })
+            .collect();
+        // Atomic with the creation: no warning for a creation that did not happen.
+        notices::emit(txn, now, notice_scope, &warnings).await;
         Ok(())
     }
 

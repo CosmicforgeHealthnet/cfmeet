@@ -607,6 +607,19 @@ impl AppCallService {
                 now,
             )
             .await?;
+        self.calls
+            .record_artifact_usage_in(
+                &txn,
+                &cmd,
+                &call,
+                crate::calls::service::ArtifactUsageFact {
+                    usage_type: crate::calls::kinds::UsageType::VoicemailArtifact,
+                    artifact_id: capture_id,
+                    duration_ms: i64::from(media.duration_ms),
+                    size_bytes: stored.size as i64,
+                },
+            )
+            .await?;
         let (call, pending) = self
             .end_voicemail_call_in(&txn, &cmd, &call, "VOICEMAIL")
             .await?;

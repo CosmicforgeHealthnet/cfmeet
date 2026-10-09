@@ -24,6 +24,8 @@
 //! = no public paid leg (fail closed).
 
 use chrono::{DateTime, Datelike, Duration, TimeZone, Utc};
+
+use crate::webhooks::notices::{self, LimitKind, LimitLevel, LimitNotice};
 use sea_orm::{ConnectionTrait, DbBackend, DbErr, FromQueryResult, Statement};
 use uuid::Uuid;
 
@@ -37,6 +39,8 @@ pub enum SpendDenial {
     Concurrency,
     Velocity,
     ContactVelocity,
+    TenantDailyLimit,
+    TenantMonthlyLimit,
     ApplicationDailyLimit,
     ApplicationMonthlyLimit,
     CredentialDailyLimit,
@@ -56,6 +60,8 @@ impl SpendDenial {
             SpendDenial::Concurrency => "CONCURRENT_PUBLIC_LEG_LIMIT",
             SpendDenial::Velocity => "ORIGINATION_VELOCITY_LIMIT",
             SpendDenial::ContactVelocity => "CONTACT_VELOCITY_LIMIT",
+            SpendDenial::TenantDailyLimit => "TENANT_DAILY_SPEND_LIMIT",
+            SpendDenial::TenantMonthlyLimit => "TENANT_MONTHLY_SPEND_LIMIT",
             SpendDenial::ApplicationDailyLimit => "APPLICATION_DAILY_SPEND_LIMIT",
             SpendDenial::ApplicationMonthlyLimit => "APPLICATION_MONTHLY_SPEND_LIMIT",
             SpendDenial::CredentialDailyLimit => "CREDENTIAL_DAILY_SPEND_LIMIT",
@@ -102,24 +108,24 @@ pub struct SpendScope {
 }
 
 #[derive(Debug, FromQueryResult)]
-struct Totals {
-    day: i64,
-    month: i64,
-    open: i64,
-    minute: i64,
+pub(crate) struct Totals {
+    pub day: i64,
+    pub month: i64,
+    pub open: i64,
+    pub minute: i64,
 }
 
 fn stmt(sql: &str, values: Vec<sea_orm::Value>) -> Statement {
     Statement::from_sql_and_values(DbBackend::Postgres, sql, values)
 }
 
-fn day_start(now: DateTime<Utc>) -> DateTime<Utc> {
+pub(crate) fn day_start(now: DateTime<Utc>) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(now.year(), now.month(), now.day(), 0, 0, 0)
         .single()
         .unwrap_or(now)
 }
 
-fn month_start(now: DateTime<Utc>) -> DateTime<Utc> {
+pub(crate) fn month_start(now: DateTime<Utc>) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(now.year(), now.month(), 1, 0, 0, 0)
         .single()
         .unwrap_or(now)
@@ -129,7 +135,7 @@ const POLICY_COLUMNS: &str = "currency, leg_allowance_minor, max_leg_seconds, da
     monthly_limit_minor, max_concurrent_legs, max_originations_per_minute, max_per_party_per_hour, \
     max_per_principal_per_hour, max_per_service_account_per_hour, max_per_context_per_hour, enabled";
 
-async fn totals<C: ConnectionTrait>(
+pub(crate) async fn totals<C: ConnectionTrait>(
     db: &C,
     environment_id: Uuid,
     now: DateTime<Utc>,
@@ -200,13 +206,13 @@ struct Cap {
 }
 
 #[derive(Debug, FromQueryResult)]
-struct Spent {
-    day: i64,
-    month: i64,
+pub(crate) struct Spent {
+    pub day: i64,
+    pub month: i64,
 }
 
 /// Day / month spend of the reservations matching `filter` (`column = $1`).
-async fn spent<C: ConnectionTrait>(
+pub(crate) async fn spent<C: ConnectionTrait>(
     db: &C,
     column: &str,
     subject: Uuid,
@@ -285,7 +291,15 @@ async fn reserve_checked<C: ConnectionTrait>(
     contact_reference: Option<Uuid>,
     now: DateTime<Utc>,
 ) -> Result<Result<Reservation, SpendDenial>, DbErr> {
-    // 1. Part B caps (locked first, in a fixed order): application, then credential.
+    // 1. Caps (locked first, in a fixed order — Part G §70 precedence): tenant, then
+    //    application, then credential.
+    let tenant_cap = Cap::find_by_statement(stmt(
+        "SELECT telecom_spend_daily_limit_minor, telecom_spend_monthly_limit_minor \
+         FROM platform_tenant_limits WHERE tenant_id = $1 FOR UPDATE",
+        vec![call.tenant_id.into()],
+    ))
+    .one(txn)
+    .await?;
     let app_cap = Cap::find_by_statement(stmt(
         "SELECT telecom_spend_daily_limit_minor, telecom_spend_monthly_limit_minor \
          FROM platform_application_limits WHERE application_id = $1 FOR UPDATE",
@@ -323,13 +337,57 @@ async fn reserve_checked<C: ConnectionTrait>(
     if t.month + allowance > p.monthly_limit_minor {
         return Ok(Err(SpendDenial::MonthlyLimit));
     }
-    for (cap, column, subject, day_denial, month_denial) in [
+    // Warnings this reservation would cause (emitted only if it is made).
+    let mut warnings = Vec::new();
+    let mut warn = |level, subject, used: &Spent, day: Option<i64>, month: Option<i64>| {
+        for (kind, before, limit, window) in [
+            (LimitKind::TelecomSpendDaily, used.day, day, day_start(now)),
+            (
+                LimitKind::TelecomSpendMonthly,
+                used.month,
+                month,
+                month_start(now),
+            ),
+        ] {
+            if let Some(limit) = limit {
+                warnings.extend(LimitNotice::warning_if_crossed(
+                    kind,
+                    level,
+                    subject,
+                    before,
+                    before + allowance,
+                    limit,
+                    window,
+                ));
+            }
+        }
+    };
+    warn(
+        LimitLevel::Environment,
+        call.environment_id,
+        &Spent {
+            day: t.day,
+            month: t.month,
+        },
+        Some(p.daily_limit_minor),
+        Some(p.monthly_limit_minor),
+    );
+    for (cap, column, subject, day_denial, month_denial, level) in [
+        (
+            &tenant_cap,
+            "tenant_id",
+            call.tenant_id,
+            SpendDenial::TenantDailyLimit,
+            SpendDenial::TenantMonthlyLimit,
+            LimitLevel::Tenant,
+        ),
         (
             &app_cap,
             "application_id",
             call.application_id,
             SpendDenial::ApplicationDailyLimit,
             SpendDenial::ApplicationMonthlyLimit,
+            LimitLevel::Application,
         ),
         (
             &credential_cap,
@@ -337,6 +395,7 @@ async fn reserve_checked<C: ConnectionTrait>(
             call.created_by_credential_id,
             SpendDenial::CredentialDailyLimit,
             SpendDenial::CredentialMonthlyLimit,
+            LimitLevel::Credential,
         ),
     ] {
         let Some(cap) = cap else { continue };
@@ -358,6 +417,13 @@ async fn reserve_checked<C: ConnectionTrait>(
         {
             return Ok(Err(month_denial));
         }
+        warn(
+            level,
+            subject,
+            &used,
+            cap.telecom_spend_daily_limit_minor,
+            cap.telecom_spend_monthly_limit_minor,
+        );
     }
     if t.open >= i64::from(p.max_concurrent_legs) {
         return Ok(Err(SpendDenial::Concurrency));
@@ -425,12 +491,132 @@ async fn reserve_checked<C: ConnectionTrait>(
     ))
     .await?;
     tracing::info!(reservation_id = %id, call_id = %call.id, call_leg_id = %call_leg_id, amount_minor = allowance, "telecom spend reserved");
+    // Atomic with the reservation (Part G §70).
+    notices::emit(txn, now, scope_of(call), &warnings).await;
     Ok(Ok(Reservation {
         id,
         amount_minor: allowance,
         currency: p.currency,
         max_duration_seconds: p.max_leg_seconds,
     }))
+}
+
+fn scope_of(call: &crate::models::calls::Model) -> (Uuid, Uuid, Uuid) {
+    (call.tenant_id, call.application_id, call.environment_id)
+}
+
+/// Part G §70: `limit.exceeded` for a refused reservation (the reserving transaction
+/// rolled back; `db` is a separate connection). Only spend ceilings are limits in this
+/// sense — velocity and concurrency guards of the spend policy are not reported here.
+pub async fn notify_refusal<C: ConnectionTrait>(
+    db: &C,
+    call: &crate::models::calls::Model,
+    denial: SpendDenial,
+    now: DateTime<Utc>,
+) {
+    let target = match denial {
+        SpendDenial::DailyLimit => Some((LimitLevel::Environment, true)),
+        SpendDenial::MonthlyLimit => Some((LimitLevel::Environment, false)),
+        SpendDenial::TenantDailyLimit => Some((LimitLevel::Tenant, true)),
+        SpendDenial::TenantMonthlyLimit => Some((LimitLevel::Tenant, false)),
+        SpendDenial::ApplicationDailyLimit => Some((LimitLevel::Application, true)),
+        SpendDenial::ApplicationMonthlyLimit => Some((LimitLevel::Application, false)),
+        SpendDenial::CredentialDailyLimit => Some((LimitLevel::Credential, true)),
+        SpendDenial::CredentialMonthlyLimit => Some((LimitLevel::Credential, false)),
+        _ => None,
+    };
+    let Some((level, daily)) = target else {
+        return;
+    };
+    let figures = async {
+        let (used, cap, subject) = match level {
+            LimitLevel::Environment => {
+                let Some(p) = policy(db, call.environment_id).await? else {
+                    return Ok(None);
+                };
+                let t = totals(db, call.environment_id, now).await?;
+                (
+                    Spent {
+                        day: t.day,
+                        month: t.month,
+                    },
+                    (Some(p.daily_limit_minor), Some(p.monthly_limit_minor)),
+                    call.environment_id,
+                )
+            }
+            _ => {
+                let (table, key, column, subject) = match level {
+                    LimitLevel::Tenant => (
+                        "platform_tenant_limits",
+                        "tenant_id",
+                        "tenant_id",
+                        call.tenant_id,
+                    ),
+                    LimitLevel::Application => (
+                        "platform_application_limits",
+                        "application_id",
+                        "application_id",
+                        call.application_id,
+                    ),
+                    _ => (
+                        "platform_credential_limits",
+                        "credential_id",
+                        "credential_id",
+                        call.created_by_credential_id,
+                    ),
+                };
+                let Some(cap) = Cap::find_by_statement(stmt(
+                    &format!(
+                        "SELECT telecom_spend_daily_limit_minor, telecom_spend_monthly_limit_minor \
+                         FROM {table} WHERE {key} = $1"
+                    ),
+                    vec![subject.into()],
+                ))
+                .one(db)
+                .await?
+                else {
+                    return Ok(None);
+                };
+                (
+                    spent(db, column, subject, now).await?,
+                    (
+                        cap.telecom_spend_daily_limit_minor,
+                        cap.telecom_spend_monthly_limit_minor,
+                    ),
+                    subject,
+                )
+            }
+        };
+        Ok::<_, DbErr>(Some((used, cap, subject)))
+    };
+    let Ok(Some((used, (day_cap, month_cap), subject))) = figures.await else {
+        return;
+    };
+    let (kind, current, ceiling, window) = if daily {
+        (
+            LimitKind::TelecomSpendDaily,
+            used.day,
+            day_cap,
+            day_start(now),
+        )
+    } else {
+        (
+            LimitKind::TelecomSpendMonthly,
+            used.month,
+            month_cap,
+            month_start(now),
+        )
+    };
+    let Some(ceiling) = ceiling else { return };
+    notices::emit(
+        db,
+        now,
+        scope_of(call),
+        &[LimitNotice::exceeded(
+            kind, level, subject, current, ceiling, window,
+        )],
+    )
+    .await;
 }
 
 /// The reservation of a leg.

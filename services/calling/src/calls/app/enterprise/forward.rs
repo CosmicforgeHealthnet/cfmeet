@@ -450,6 +450,7 @@ impl AppCallService {
             Ok(r) => r,
             Err(denial) => {
                 txn.rollback().await?;
+                spend::notify_refusal(self.db(), &call, denial, now).await;
                 return Ok(Err(Refused(denial.as_str())));
             }
         };

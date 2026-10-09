@@ -356,7 +356,11 @@ impl CallService {
             UsageType::CallConnectedTime => true,
             UsageType::ParticipantConnectedTime => new.participant_id.is_some(),
             UsageType::SessionConnectedTime => new.session_id.is_some(),
-            UsageType::LegConnectedTime => new.leg_id.is_some(),
+            // Artifact and public-network leg facts (with their cost evidence) are
+            // recorded by their own writers only.
+            UsageType::LegConnectedTime
+            | UsageType::VoicemailArtifact
+            | UsageType::RecordingArtifact => false,
         };
         if !subject_ok || new.quantity < 0 {
             return Err(CallError::Validation(
@@ -460,12 +464,287 @@ impl CallService {
                 CallEventType::CallUsageFinalized,
                 data(vec![
                     ("usage_record_id", text(record.id)),
+                    ("usage_type", text(record.usage_type)),
                     ("quantity", SafeValue::Integer(record.quantity)),
+                    ("unit", text(record.unit)),
                 ])?,
             ),
             at.max(call.updated_at),
         )
         .await?;
         Ok((record.into(), true))
+    }
+}
+
+/// The cost evidence of a public-network leg (Part G §69): KNOWN (provider-reported),
+/// ESTIMATED (an estimate only) or UNKNOWN (no amount — never zero).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LegCost {
+    Known { minor: i64, currency: String },
+    Estimated { minor: i64, currency: String },
+    Unknown,
+}
+
+impl LegCost {
+    /// From Telephony's usage fact: a provider-confirmed amount is KNOWN, an amount the
+    /// provider did not confirm is ESTIMATED, no amount (or no currency) is UNKNOWN.
+    pub fn from_evidence(minor: Option<i64>, known: bool, currency: Option<&str>) -> Self {
+        let currency = currency
+            .filter(|c| c.len() == 3 && c.bytes().all(|b| b.is_ascii_uppercase()))
+            .map(str::to_string);
+        match (minor.filter(|m| *m >= 0), currency) {
+            (Some(minor), Some(currency)) if known => LegCost::Known { minor, currency },
+            (Some(minor), Some(currency)) => LegCost::Estimated { minor, currency },
+            _ => LegCost::Unknown,
+        }
+    }
+
+    fn columns(&self) -> (&'static str, Option<i64>, Option<String>) {
+        match self {
+            LegCost::Known { minor, currency } => ("KNOWN", Some(*minor), Some(currency.clone())),
+            LegCost::Estimated { minor, currency } => {
+                ("ESTIMATED", Some(*minor), Some(currency.clone()))
+            }
+            LegCost::Unknown => ("UNKNOWN", None, None),
+        }
+    }
+}
+
+/// One public-network leg's consumption fact.
+#[derive(Debug, Clone)]
+pub struct LegUsageFact {
+    pub leg_id: uuid::Uuid,
+    pub connected_ms: i64,
+    pub billable_seconds: i64,
+    pub destination_country: Option<String>,
+    pub cost: LegCost,
+}
+
+/// One stored voicemail message / call recording's consumption fact.
+#[derive(Debug, Clone, Copy)]
+pub struct ArtifactUsageFact {
+    pub usage_type: UsageType,
+    pub artifact_id: uuid::Uuid,
+    pub duration_ms: i64,
+    pub size_bytes: i64,
+}
+
+/// The leg columns of a public-network fact.
+struct LegColumns<'a> {
+    leg_id: uuid::Uuid,
+    route_class: Option<String>,
+    country: Option<String>,
+    billable_seconds: i64,
+    cost: &'a LegCost,
+}
+
+/// A FINAL fact as written by [`CallService::record_final_fact_in`].
+struct FinalFact<'a> {
+    key: String,
+    usage_type: UsageType,
+    quantity: i64,
+    leg: Option<LegColumns<'a>>,
+    size_bytes: Option<i64>,
+}
+
+impl CallService {
+    /// Records a FINAL usage fact with the Call's event (inside the caller's transaction).
+    /// Idempotent on its key: returns false (and changes nothing) when already recorded.
+    async fn record_final_fact_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        fact: FinalFact<'_>,
+    ) -> CallResult<bool> {
+        use sea_orm::{ConnectionTrait, DbBackend, Statement};
+        let FinalFact {
+            key,
+            usage_type,
+            quantity,
+            leg,
+            size_bytes,
+        } = fact;
+        let at = self.now().max(call.updated_at);
+        let id = CallUsageRecordId::generate().as_uuid();
+        let (leg_id, route_class, country, billable, cost) = match leg {
+            Some(l) => (
+                Some(l.leg_id),
+                l.route_class,
+                l.country,
+                Some(l.billable_seconds.clamp(0, i64::from(i32::MAX)) as i32),
+                Some(l.cost.columns()),
+            ),
+            None => (None, None, None, None, None),
+        };
+        let inserted = txn
+            .execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "INSERT INTO call_usage_records (id, call_id, leg_id, tenant_id, application_id, \
+                   environment_id, usage_type, quantity, unit, idempotency_key, finalized_at, \
+                   route_class, destination_country, billable_seconds, cost_status, cost_minor, \
+                   cost_currency, size_bytes, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'MILLISECONDS', $9, $10, $11, $12, $13, \
+                         $14, $15, $16, $17, $10, $10) \
+                 ON CONFLICT (call_id, idempotency_key) DO NOTHING",
+                vec![
+                    id.into(),
+                    call.id.into(),
+                    leg_id.into(),
+                    call.tenant_id.into(),
+                    call.application_id.into(),
+                    call.environment_id.into(),
+                    usage_type.as_str().into(),
+                    quantity.max(0).into(),
+                    key.into(),
+                    at.into(),
+                    route_class.into(),
+                    country.into(),
+                    billable.into(),
+                    cost.as_ref().map(|c| c.0).into(),
+                    cost.as_ref().and_then(|c| c.1).into(),
+                    cost.and_then(|c| c.2).into(),
+                    size_bytes.into(),
+                ],
+            ))
+            .await?
+            .rows_affected();
+        if inserted == 0 {
+            return Ok(false);
+        }
+        self.append_event(
+            txn,
+            cmd,
+            call,
+            EventDraft::fact(
+                CallEventType::CallUsageFinalized,
+                data(vec![
+                    ("usage_record_id", text(id)),
+                    ("usage_type", text(usage_type)),
+                    ("quantity", SafeValue::Integer(quantity.max(0))),
+                    ("unit", text(UsageUnit::Milliseconds)),
+                ])?,
+            ),
+            at,
+        )
+        .await?;
+        crate::metrics::inc(
+            "calling_usage_facts_total",
+            &[("usage_type", usage_type.as_str())],
+        );
+        Ok(true)
+    }
+
+    /// Part G §69: a public-network leg's usage (each leg separately — a callback's two
+    /// legs are two facts of ONE Call). A late or repeated provider usage event changes
+    /// nothing (one fact per leg).
+    pub(crate) async fn record_leg_usage_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        fact: &LegUsageFact,
+    ) -> CallResult<bool> {
+        use sea_orm::{ConnectionTrait, DbBackend, Statement};
+        let route_class: Option<String> = txn
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT COALESCE(r.routing_class, r.route_class) FROM call_legs l \
+                   JOIN call_routes r ON r.id = l.route_id \
+                  WHERE l.id = $1 AND l.call_id = $2",
+                vec![fact.leg_id.into(), call.id.into()],
+            ))
+            .await?
+            .map(|r| r.try_get_by_index::<String>(0))
+            .transpose()?;
+        let country = fact
+            .destination_country
+            .as_deref()
+            .filter(|c| c.len() == 2 && c.bytes().all(|b| b.is_ascii_uppercase()))
+            .map(str::to_string);
+        self.record_final_fact_in(
+            txn,
+            cmd,
+            call,
+            FinalFact {
+                key: format!("leg-usage:{}", fact.leg_id.simple()),
+                usage_type: UsageType::LegConnectedTime,
+                quantity: fact.connected_ms,
+                leg: Some(LegColumns {
+                    leg_id: fact.leg_id,
+                    route_class,
+                    country,
+                    billable_seconds: fact.billable_seconds,
+                    cost: &fact.cost,
+                }),
+                size_bytes: None,
+            },
+        )
+        .await
+    }
+
+    /// Part G §69: a voicemail message / call recording artifact (duration and stored
+    /// size), once per artifact.
+    pub(crate) async fn record_artifact_usage_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        fact: ArtifactUsageFact,
+    ) -> CallResult<bool> {
+        let prefix = match fact.usage_type {
+            UsageType::VoicemailArtifact => "voicemail-artifact",
+            UsageType::RecordingArtifact => "recording-artifact",
+            _ => return Err(CallError::Validation("not an artifact usage type")),
+        };
+        self.record_final_fact_in(
+            txn,
+            cmd,
+            call,
+            FinalFact {
+                key: format!("{prefix}:{}", fact.artifact_id.simple()),
+                usage_type: fact.usage_type,
+                quantity: fact.duration_ms,
+                leg: None,
+                size_bytes: Some(fact.size_bytes.max(0)),
+            },
+        )
+        .await
+    }
+}
+
+#[cfg(test)]
+mod usage_fact_tests {
+    use super::LegCost;
+
+    #[test]
+    fn cost_evidence_is_never_invented() {
+        assert_eq!(
+            LegCost::from_evidence(Some(240), true, Some("NGN")),
+            LegCost::Known {
+                minor: 240,
+                currency: "NGN".into()
+            }
+        );
+        assert_eq!(
+            LegCost::from_evidence(Some(240), false, Some("NGN")),
+            LegCost::Estimated {
+                minor: 240,
+                currency: "NGN".into()
+            }
+        );
+        // No amount, no currency, a negative or malformed figure: UNKNOWN (never zero).
+        for (minor, known, currency) in [
+            (None, true, Some("NGN")),
+            (Some(240), true, None),
+            (Some(-1), true, Some("NGN")),
+            (Some(240), true, Some("naira")),
+            (None, false, None),
+        ] {
+            assert_eq!(
+                LegCost::from_evidence(minor, known, currency),
+                LegCost::Unknown
+            );
+        }
     }
 }

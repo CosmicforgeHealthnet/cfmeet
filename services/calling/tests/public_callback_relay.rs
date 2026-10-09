@@ -265,6 +265,42 @@ async fn the_requester_is_called_first_then_the_callee_then_both_are_bridged() {
         .await,
         2
     );
+    // Part G §69: one usage fact per leg (both legs of the callback, one Call), with the
+    // route class, country, billable seconds and KNOWN cost evidence.
+    let leg_facts = format!(
+        "SELECT count(*) FROM call_usage_records WHERE call_id = '{call}' \
+           AND usage_type = 'LEG_CONNECTED_TIME' AND finalized_at IS NOT NULL \
+           AND quantity = 60000 AND route_class = 'CALLBACK_RELAY' AND destination_country = 'NG' \
+           AND billable_seconds = 60 AND cost_status = 'KNOWN' AND cost_minor = 600 \
+           AND cost_currency = 'NGN'"
+    );
+    assert_eq!(scalar_i64(x.w.h().conn(), &leg_facts).await, 2);
+    // A late / repeated provider usage event (new event id, other figures) never adds
+    // or changes a fact.
+    let mut late = cb(leg_event("USAGE_FINALIZED", call, leg_a, ta, None, 5));
+    late["usage"] = json!({ "connectedDurationMs": 90_000, "billableSeconds": 90, "costMinor": 999,
+                            "costKnown": true, "currency": "NGN", "destinationCountry": "NG" });
+    x.event(late).await;
+    assert_eq!(scalar_i64(x.w.h().conn(), &leg_facts).await, 2);
+    assert_eq!(
+        scalar_i64(
+            x.w.h().conn(),
+            &format!("SELECT count(*) FROM call_usage_records WHERE call_id = '{call}' AND usage_type = 'LEG_CONNECTED_TIME'"),
+        )
+        .await,
+        2
+    );
+    assert_eq!(
+        scalar_i64(
+            x.w.h().conn(),
+            &format!(
+                "SELECT count(*) FROM call_events WHERE call_id = '{call}' \
+                   AND event_type = 'CALL_USAGE_FINALIZED' AND payload::text LIKE '%LEG_CONNECTED_TIME%'"
+            ),
+        )
+        .await,
+        2
+    );
 }
 
 #[tokio::test]
