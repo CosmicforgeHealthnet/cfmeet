@@ -346,7 +346,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # The context is filtered by services/calling/Dockerfile.dockerignore to
-      # packages/service-auth and services/calling only.
+      # packages/service-auth, packages/object-storage and services/calling only.
       - name: docker build
         working-directory: .
         run: docker build -f services/calling/Dockerfile -t cfmeet-calling:ci .

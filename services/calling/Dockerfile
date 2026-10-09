@@ -1,10 +1,11 @@
 # CF Meet Calling service. Build context: the REPOSITORY ROOT (the service depends on
-# the shared packages/service-auth crate):
+# the shared packages/service-auth and packages/object-storage crates):
 #
 #   docker build -f services/calling/Dockerfile -t cfmeet-calling .
 #
-# Only packages/service-auth and services/calling enter the build context
-# (services/calling/Dockerfile.dockerignore); no other service's source is copied.
+# Only packages/service-auth, packages/object-storage and services/calling enter the
+# build context (services/calling/Dockerfile.dockerignore); no other service's source is
+# copied.
 #
 # The image contains the service (`calling`), its migration runner (`calling-migration`)
 # and the operational CLI (`platform_admin`). Configuration — DATABASE_URL,
@@ -14,6 +15,7 @@
 FROM rust:1-bookworm AS builder
 WORKDIR /src
 COPY packages/service-auth packages/service-auth
+COPY packages/object-storage packages/object-storage
 COPY services/calling services/calling
 WORKDIR /src/services/calling
 RUN cargo build --release --locked -p calling-migration --bin calling-migration \

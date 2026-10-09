@@ -1397,9 +1397,27 @@ async fn voicemail_scenario(
             .await,
         "MEDIA_ACCESS,MARK_READ,DELETE"
     );
+    // History (§62): the desk caller's canonical history holds the Call, answered by the
+    // mailbox (enterprise outcome VOICEMAIL), never a raw number or object key.
+    let r = stack
+        .e
+        .a
+        .get(&format!("/v1/calls?principalId={}&limit=10", stack.caller))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let entry = r.json["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["callId"] == call.to_string())
+        .cloned()
+        .expect("the voicemail Call is in the caller's history");
+    assert_eq!(entry["participation"]["direction"], "OUTBOUND");
+    assert_eq!(entry["enterprise"]["outcome"], "VOICEMAIL");
+    assert!(!r.text.contains("voicemail/") && !r.text.contains("sip:"));
     println!(
         "enterprise SIP voicemail certified: IVR -> mailbox, real edge capture ({duration} ms), \
-         protected upload, READY, authorized retrieval, read, deletion"
+         protected upload, READY, authorized retrieval, read, deletion, history"
     );
 }
 

@@ -788,7 +788,27 @@ async fn enterprise_extension_call(cert: &Cert) {
             .await["ok"],
         true
     );
-    println!("enterprise extension call certified: 1001 -> 1002 over ENTERPRISE_INTERNAL with real media");
+    // Correct history for both logical participants (§62, derived from Call evidence).
+    for (who, direction) in [(alice.id(), "OUTBOUND"), (bob.id(), "INBOUND")] {
+        let r = cert
+            .a
+            .get(&format!("/v1/calls?principalId={who}&limit=5"))
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        let entry = r.json["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["callId"] == call.to_string())
+            .cloned()
+            .expect("the call is in the participant's history");
+        assert_eq!(entry["participation"]["direction"], direction);
+        assert_eq!(entry["participation"]["outcome"], "ANSWERED");
+        assert_eq!(entry["participation"]["missed"], false);
+        assert_eq!(entry["enterprise"]["entryExtension"], "1002");
+        assert!(entry["durationMs"].as_i64().unwrap() >= 5_000, "{entry}");
+    }
+    println!("enterprise extension call certified: 1001 -> 1002 over ENTERPRISE_INTERNAL with real media and history");
     a.quit().await;
     b.quit().await;
 }

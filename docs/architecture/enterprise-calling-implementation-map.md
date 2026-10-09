@@ -163,3 +163,5 @@ artifacts, deleting recordings / voicemail, retention cleanup.
 | IVR, voicemail, recording capture, SIP internal leg | real Asterisk + SIPp (DTMF RFC 4733, RTP), real Telephony + Calling |
 | Object storage | S3-compatible server (MinIO in CI; moto locally) with SigV4 |
 | Public forwarding | Part E simulated adapter only — real carrier certification remains the Part E blocker |
+
+Results: [Part F certification report](part-f-certification.md).

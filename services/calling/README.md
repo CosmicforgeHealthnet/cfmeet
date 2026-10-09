@@ -6,7 +6,7 @@ shares no source, models, migrations or database with the Meeting Service.
 
 ## What is implemented
 
-**Part B §7–§14 (platform trust foundation), Part C §15–§19 (Calling core), Part C §20–§25 (application calling) and Calling's side of Part D §26–§30 (Privacy Relay ingress, protected calls, active-call enforcement).** The
+**Part B §7–§14 (platform trust foundation), Part C §15–§19 (Calling core), Part C §20–§25 (application calling), Calling's side of Part D §26–§30 (Privacy Relay ingress, protected calls, active-call enforcement), Calling's side of Part E §37–§51 (Routing Engine, public-network calls through Telephony) and Part F §52–§62 (enterprise calling and continuity — see [below](#enterprise-calling-part-f-5262)).** The
 service is the canonical authority for the **logical Call**: a CF Meet object with a CF
 Meet-generated UUID that stays the same whatever later executes it (application RTC,
 SIP, the public network, a relay, enterprise infrastructure, several legs or attempts).
@@ -33,14 +33,13 @@ Provider room / dialog / carrier / request identifiers are never Call identities
 | **§24** Calling media provider boundary: `CallMediaProvider` trait + capabilities, LiveKit adapter with its own config, media connection gateway (DB admission of every connection, edge-sealed credentials, refreshed-token re-sealing), signed callbacks as evidence only, dedupe, reconciliation, real-LiveKit certification incl. refreshed-token re-entry | **Implemented** (ADR 0007) |
 | **§25** Call control: accept, decline, cancel, end (ENDING → ENDED on cleanup evidence), hold / resume enforced at the provider, application transfer on the same Call with failure recovery, `expectedVersion`, `Idempotency-Key`, available actions | **Implemented** (ADR 0009) |
 | **Part D §26–§30** Privacy Relay ingress (`/v1/privacy-relay/...`), `PRIVACY_RELAY_V1` protected calls and transfers (fail closed), `POST /internal/v1/privacy-relay/enforcement` | **Implemented** (ADR 0010; the business authority is `services/privacy-relay`) |
-| Telecom-spend limits | Resolved; enforced by future telephony operations |
+| **Part E §37–§51** Routing Engine and route plans, public-network calls executed by `services/telephony` (ContactReference parties, durable command outbox, normalized events, bridges, spend reservations, failover) | **Implemented** (ADRs 0013–0017). **Real lawful telecom interconnect certification remains an external blocker (ADR 0016): no PSTN result is claimed** |
+| **Part F §52–§62** Enterprise calling and continuity on the ONE canonical Call | **Implemented** (ADRs 0018–0026; summary below) |
 
-**Deferred (later sections / services):** a general routing engine and network
-failover, the call policy engine beyond `APP_DIRECT_V1`, push delivery through a push
-vendor (a transport-neutral push-ready payload is produced), customer webhooks and
-outbox publishing, recording, quality metrics from providers that do not offer them,
-Contact Vault, relay numbers, Telephony (SIP / public network, carrier adapters),
-Numbering, enterprise calling and billing.
+**Deferred (later sections / services):** push delivery through a push vendor (a
+transport-neutral push-ready payload is produced), customer webhooks and outbox
+publishing, quality metrics from providers that do not offer them, Numbering, billing,
+and the Part F items listed below.
 
 HTTP surface (contract:
 [`packages/contracts/calling/http/v1.openapi.json`](../../packages/contracts/calling/http/v1.openapi.json),
@@ -254,6 +253,44 @@ media generation, admission and removal.
 | `CALLING_MEDIA_RECONCILE_INTERVAL_SECONDS` | 15 (2–300) | Media reconciliation interval |
 
 Invalid or partial media / signaling configuration stops the service at startup (exit 2).
+
+## Enterprise calling (Part F §52–§62)
+
+Enterprise calling lives in this service (`src/enterprise/` configuration,
+`src/calls/app/enterprise/` runtime): an enterprise call is an ordinary canonical Call
+routed over `ENTERPRISE_INTERNAL`. There is no PBX service, no second Call model and no
+Meeting Service dependency; Telephony only executes edge primitives.
+
+| Section | What | Decision |
+|---|---|---|
+| §52–§53 | Typed enterprise call policy, departments, admin audit, enterprise scopes, kill switches; Tenant is the organization boundary | ADR 0018 |
+| §54 | Extensions (scoped namespace), extension-to-extension Calls, enterprise SIP desk devices offered by Telephony | ADR 0018, 0020 |
+| §55 | Ring groups: SIMULTANEOUS / ORDERED, group single winner, bounded fan-out, fallback | ADR 0019 |
+| §56 | Queues: FIFO, authoritative positions, one offer per entry / agent, timeouts, overflow, abandonment | ADR 0019 |
+| §57 | Declarative versioned IVR (keys never stored or logged), built-in prompts, RTC keypad and SIP DTMF | ADR 0020 |
+| §58 | Business hours (IANA zones, DST, exceptions), typed forwarding, loop / hop protection; public forwarding only through every Part E gate | ADR 0021 |
+| §59 | Hold / resume / transfer to enterprise targets on the same Call | ADR 0022 |
+| §60 | Voicemail: mailboxes, edge / RTC capture, protected object storage (`packages/object-storage`), READY, authorized signed retrieval, read state, deletion, retention | ADR 0023 |
+| §61 | Call recording: separate policy, server-issued notice, per-participant consent, immutable decisions, bridge capture, protected artifacts, audited access | ADR 0024 |
+| §62 | Missed calls and history derived per logical participant from Call evidence; `GET /v1/calls?principalId=`, `GET /v1/calling/history` | ADR 0025 |
+| cross-cutting | Durable `ENTERPRISE_ROUTING_STEP` outbox events, `calling_incidents`, bounded metrics, races, failure injection, load | ADR 0026 |
+
+Kill switches (default off, stop NEW effects only — never termination, cleanup,
+finalization, deletion or retention): `ENTERPRISE_CALLING_ENABLED`, `VOICEMAIL_ENABLED`,
+`CALL_RECORDING_ENABLED`. Scopes: `enterprise.config.read|write`, `enterprise.calls.use`,
+`enterprise.voicemail.read|manage`, `enterprise.recording.read|manage` — never implied by
+`calls.*`.
+
+**Not offered / pending (recorded, never faked):** public forwarding to a real carrier
+and real PSTN results (Part E external blocker); transfer of an established Call to a
+public contact; an RTC media-capture adapter (application-only Calls are refused voicemail
+/ recording capture rather than faked); keypad consent from SIP desk phones (policies that
+need it deny recording); recordings longer than 24 minutes (single delivery bound).
+Real-stack certification (`tests/enterprise_sip_certification.rs`, workflow
+[`enterprise-calling-certification.yml`](../../.github/workflows/enterprise-calling-certification.yml))
+drives a real Asterisk edge, SIPp desk phones, the real Telephony binary and an
+S3-compatible store; it certifies internal enterprise SIP only. Results:
+[Part F certification report](../../docs/architecture/part-f-certification.md).
 
 ## Privacy Relay integration (Part D §26–§30)
 
@@ -470,6 +507,15 @@ relay, outages) and `privacy_relay_e2e` (against the real `privacy-relay` binary
 its own database; skipped unless `PRIVACY_RELAY_BIN` / `PRIVACY_RELAY_MIGRATION_BIN`
 are set — `make privacy-relay-integration`, CI job `calling-e2e` in
 [`.github/workflows/privacy-relay.yml`](../../.github/workflows/privacy-relay.yml)).
+Part E: `routing_engine`, `public_*`, `telephony_e2e`. Part F: `enterprise_foundation`,
+`enterprise_extensions`, `enterprise_ring_groups`, `enterprise_queues`, `enterprise_ivr`,
+`enterprise_hours_forwarding`, `enterprise_transfer`, `enterprise_voicemail`,
+`enterprise_recording`, `call_history`, `enterprise_operations` (outbox events,
+incidents, metrics, failure injection), `enterprise_security` (scope matrix, contract
+scans), `enterprise_load` (measured throughput with burst invariants; scale with
+`ENTERPRISE_LOAD_SCALE`), `enterprise_certification` (§212 organization isolation) and the real-stack `enterprise_sip_certification` (skipped
+unless `ENTERPRISE_SIP_CERT_REQUIRED=1` and the Telephony binaries / Asterisk / SIPp are
+present).
 
 Real-provider certification (`rtc_certification`) runs against a real LiveKit server and
 real WebRTC clients (`tests/rtc/rtc_client.py`); it is skipped unless the
@@ -500,4 +546,6 @@ The image runs as a non-root user and contains `calling`, `calling-migration` an
 * [ADR 0008 — Endpoints, ringing and answer arbitration](../../docs/decisions/0008-calling-endpoints-ringing-and-answer-arbitration.md)
 * [ADR 0009 — Call control, idempotency and transfer](../../docs/decisions/0009-calling-call-control-idempotency-and-transfer.md)
 * [ADR 0010 — Communication Context and Privacy Relay Session architecture](../../docs/decisions/0010-communication-context-and-privacy-relay-session-architecture.md)
+* [ADR 0013 — Routing Engine and route plans](../../docs/decisions/0013-routing-engine-and-route-plans.md) … [ADR 0017 — Provider failover](../../docs/decisions/0017-provider-failover.md) (Part E)
+* [ADR 0018 — Enterprise calling architecture](../../docs/decisions/0018-enterprise-calling-architecture.md) … [ADR 0026 — Enterprise operations](../../docs/decisions/0026-enterprise-operations-events-incidents-metrics.md) (Part F)
 * [Service data ownership](../../docs/architecture/service-data-ownership.md)

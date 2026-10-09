@@ -1,7 +1,8 @@
 # Build-context filter for services/calling/Dockerfile (context: repository root).
-# Everything is excluded except the two directories the image is built from.
+# Everything is excluded except the directories the image is built from.
 *
 !packages/service-auth
+!packages/object-storage
 !services/calling
 
 # Never send build output, local configuration or key material.
