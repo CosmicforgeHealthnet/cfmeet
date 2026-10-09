@@ -364,25 +364,23 @@ async fn service_account_concurrency_ceiling_holds_across_its_credentials() {
                 (create(&w, &a, &w.initiator).await, a)
             }));
         }
-        let mut created = Vec::new();
+        let (mut created, mut levels) = (Vec::new(), Vec::new());
         for h in handles {
             match h.await.unwrap() {
                 (Ok(c), a) => created.push((c, a)),
-                (
-                    Err(CallError::ConcurrentCallLimitExceeded {
-                        level: "service_account",
-                        limit: 2,
-                    }),
-                    _,
-                ) => {}
+                (Err(CallError::ConcurrentCallLimitExceeded { level, .. }), _) => {
+                    levels.push(level)
+                }
                 (Err(other), _) => panic!("round {round}: {other:?}"),
             }
         }
+        // The aggregate across BOTH credentials, whichever refusal fired.
         assert_eq!(
             created.len(),
             2,
             "round {round}: the service-account ceiling"
         );
+        assert!(levels.iter().all(|l| *l == "service_account"), "{levels:?}");
         for (c, a) in &created {
             cancel(&w, a, c).await;
         }
