@@ -119,7 +119,8 @@ impl AppState {
             )
             .with_push(runtime.push)
             .with_privacy_relay(runtime.privacy_relay.clone())
-            .with_public_network(runtime.public_network),
+            .with_public_network(runtime.public_network)
+            .with_enterprise_flags(runtime.enterprise_flags),
         );
         Self {
             authenticator: Arc::new(CredentialAuthenticator::new(

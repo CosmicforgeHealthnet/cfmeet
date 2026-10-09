@@ -54,10 +54,10 @@ impl RoutingClass {
         )
     }
 
-    /// Whether CF Meet executes the class (ENTERPRISE_INTERNAL is a representable
-    /// foundation; its behaviour belongs to Part F).
+    /// Whether CF Meet executes the class. Every class is executable since Part F made
+    /// ENTERPRISE_INTERNAL (internal-only enterprise calls, no public leg) executable.
     pub fn is_executable(&self) -> bool {
-        !matches!(self, RoutingClass::EnterpriseInternal)
+        true
     }
 
     /// The Privacy Relay communication route that authorizes this class, if any.

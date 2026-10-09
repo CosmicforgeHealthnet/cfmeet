@@ -110,6 +110,9 @@ jobs:
             echo "::error::the refreshed-token re-entry certification did not run ($rounds rounds)"; exit 1
           fi
           grep '^refreshed-token re-entry' "$RUNNER_TEMP/cert.log"
+          # Part F: the enterprise scenarios must have run with real media (and passed above).
+          grep -q '^enterprise extension call certified' "$RUNNER_TEMP/cert.log" \
+            || { echo "::error::the enterprise extension certification did not run"; exit 1; }
           grep -q 'test real_livekit_certification ... ok' "$RUNNER_TEMP/cert.log"
 
       - name: LiveKit logs

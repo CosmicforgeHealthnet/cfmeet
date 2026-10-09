@@ -356,6 +356,10 @@ impl AppCallService {
                 }
             }
         }
+        if answered {
+            self.enterprise_on_answer_in(&txn, &call, participant.principal_id)
+                .await?;
+        }
         let body = accept_body(&call, &invitation, answered);
         if let Some(key) = key {
             self.calls

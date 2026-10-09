@@ -70,6 +70,26 @@ impl EnterpriseWorld {
         Some(Self::around(a).await)
     }
 
+    /// A world whose deployment runs with explicit enterprise kill switches.
+    pub async fn with_flags(flags: calling::enterprise::EnterpriseFlags) -> Option<Self> {
+        use std::sync::Arc;
+        let db = Arc::new(super::TestDb::new().await?);
+        let media = Arc::new(super::fake_media::FakeMediaProvider::default());
+        let bus = Arc::new(calling::signaling::InMemorySignalBus::new());
+        let mut runtime = super::test_runtime(Some(media.clone()), bus.clone());
+        runtime.enterprise_flags = flags;
+        let h = Harness::with_runtime(
+            db,
+            super::TEST_PEPPER,
+            calling::domain::ManualClock::new(super::t0()),
+            media,
+            bus,
+            runtime,
+        );
+        let w = super::calls::CallWorld::in_harness(h, "acme", EnvironmentKind::Production).await;
+        Some(Self::around(AppWorld { w }).await)
+    }
+
     pub async fn around(a: AppWorld) -> Self {
         let kind = a.w.kind;
         allow_enterprise_scopes(&a.w.h, &a.w.consumer).await;
@@ -201,4 +221,95 @@ pub fn conforms(def: &str, value: &Value) {
         &format!("calling/enterprise/v1.schema.json#/$defs/{def}"),
         value,
     );
+}
+
+impl EnterpriseWorld {
+    pub fn caller_token(&self) -> &str {
+        self.caller.secret.expose_once()
+    }
+
+    /// Registers an ENTERPRISE_MEMBER principal of this world's environment.
+    pub async fn member(
+        &self,
+        reference: &str,
+    ) -> calling::platform::principals::ResolvedPrincipal {
+        let (view, _) = self
+            .h()
+            .platform
+            .register_principal(
+                self.a.w.consumer.env(self.a.w.kind).id,
+                calling::platform::principals::NewPrincipal::External {
+                    kind: calling::domain::PrincipalKind::EnterpriseMember,
+                    external_reference: reference.to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        self.h()
+            .state
+            .principals
+            .resolve(
+                &self.a.w.ctx,
+                &calling::platform::principals::PrincipalReference::Id(view.id),
+            )
+            .await
+            .unwrap()
+    }
+
+    /// An extension `number` routing to `destination` (type, id).
+    pub async fn extension(&self, number: &str, kind: &str, id: impl std::fmt::Display) -> Value {
+        self.create(
+            "/v1/enterprise/extensions",
+            json!({
+                "extensionNumber": number,
+                "displayLabel": format!("Extension {number}"),
+                "destination": { "type": kind, "id": id.to_string() },
+            }),
+        )
+        .await
+    }
+
+    /// `POST /v1/calls` to `extension` as the enterprise caller.
+    pub async fn call_extension(
+        &self,
+        kind: &str,
+        initiator: &calling::platform::principals::ResolvedPrincipal,
+        from: &super::app::Device,
+        extension: &str,
+        key: &str,
+    ) -> TestResponse {
+        self.h()
+            .request_with(
+                Method::POST,
+                "/v1/calls",
+                Some(self.caller_token()),
+                Some(json!({
+                    "kind": kind,
+                    "initiatorPrincipalId": initiator.id(),
+                    "initiatorEndpointId": from.endpoint,
+                    "targetExtension": extension,
+                })),
+                &[("idempotency-key", key)],
+            )
+            .await
+    }
+
+    /// One integer of SQL against the Calling database.
+    pub async fn count(&self, sql: &str) -> i64 {
+        super::scalar_i64(self.h().conn(), sql).await
+    }
+}
+
+/// Text rows of a query.
+pub async fn strings(conn: &sea_orm::DatabaseConnection, sql: &str) -> Vec<String> {
+    use sea_orm::ConnectionTrait;
+    conn.query_all(sea_orm::Statement::from_string(
+        sea_orm::DbBackend::Postgres,
+        sql.to_string(),
+    ))
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|r| r.try_get_by_index::<String>(0).unwrap())
+    .collect()
 }

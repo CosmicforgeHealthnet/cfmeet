@@ -1,0 +1,8 @@
+{
+  "extensionNumber": "1001",
+  "displayLabel": "x",
+  "destination": {
+    "type": "PHONE",
+    "number": "+2348012345678"
+  }
+}

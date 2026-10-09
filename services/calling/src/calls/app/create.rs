@@ -555,7 +555,7 @@ impl AppCallService {
             .into_iter()
             .filter(|i| i.status.is_live())
             .count();
-        Ok(json!({
+        let mut body = json!({
             "call": summary(call),
             "initiatorParticipantId": initiator.id,
             "initiatorSessionId": session.map(|s| s.id),
@@ -565,7 +565,9 @@ impl AppCallService {
                 "role": p.role.as_str(),
             })).collect::<Vec<_>>(),
             "liveInvitationCount": live,
-        }))
+        });
+        super::enterprise::create_block(self.enterprise_view(db, call.id).await?, &mut body);
+        Ok(body)
     }
 
     /// ROUTING → DIALING → RINGING once the provider confirmed the Call's media resource:
@@ -723,6 +725,21 @@ impl AppCallService {
             if participant.role == ParticipantRole::Initiator {
                 self.calls.authorize_session_media_in(&txn, session).await?;
             }
+        }
+        // An enterprise Call rings what its enterprise destination resolves to (the
+        // router: principal, ring group, queue, IVR, voicemail, forwarding).
+        if let Some((call, invitations)) =
+            self.enterprise_first_ring(&txn, &cmd, &call, &leg).await?
+        {
+            super::enterprise::complete_create(self, &txn, &call).await?;
+            let mut pending = PendingSignals::default();
+            let correlation = cmd.correlation_id().as_str().to_string();
+            self.enterprise_ring_signals(&txn, &mut pending, &call, &invitations, &correlation)
+                .await?;
+            txn.commit().await?;
+            self.publish(pending).await;
+            tracing::info!(call_id = %call.id, invitations = invitations.len(), call_state = %call.current_state, "enterprise call routed");
+            return Ok(());
         }
         // A public-network Call does not ring application endpoints: Telephony dials
         // its public party (the ORIGINATE is dispatched once the Call is DIALING).

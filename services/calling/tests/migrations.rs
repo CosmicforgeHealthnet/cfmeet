@@ -81,9 +81,12 @@ const CALL_TABLES: &[&str] = &[
 /// Part F enterprise calling and continuity (Calling-owned, ADR 0018).
 const ENTERPRISE_TABLES: &[&str] = &[
     "enterprise_admin_audit",
+    "enterprise_call_contexts",
     "enterprise_call_policies",
     "enterprise_department_members",
     "enterprise_departments",
+    "enterprise_extensions",
+    "enterprise_routing_steps",
 ];
 
 /// Derived from the migrator itself (never a brittle hand-maintained count).

@@ -36,6 +36,21 @@
     },
     {
       "$ref": "#/$defs/AuditRecordList"
+    },
+    {
+      "$ref": "#/$defs/CreateExtensionRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdateExtensionRequest"
+    },
+    {
+      "$ref": "#/$defs/Extension"
+    },
+    {
+      "$ref": "#/$defs/ExtensionList"
+    },
+    {
+      "$ref": "#/$defs/EnterpriseCallContext"
     }
   ],
   "$defs": {
@@ -661,6 +676,279 @@
             "null"
           ],
           "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "DestinationType": {
+      "description": "Kinds of enterprise destination. PUBLIC_CONTACT is an opaque Privacy Relay ContactReference (forwarding only), never a telephone number.",
+      "type": "string",
+      "enum": [
+        "ENTERPRISE_MEMBER",
+        "PRINCIPAL",
+        "EXTENSION",
+        "RING_GROUP",
+        "QUEUE",
+        "IVR",
+        "VOICEMAIL",
+        "SCHEDULE",
+        "PUBLIC_CONTACT"
+      ]
+    },
+    "Destination": {
+      "description": "A typed destination: an ACTIVE resource of the SAME tenant / application / environment (a foreign or unknown one is 404).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "id"
+      ],
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/DestinationType"
+        },
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "ExtensionNumber": {
+      "description": "An internal short code — never a public telephone number: 2-6 digits, or a lower-case word (letters, digits, '-') starting with a letter. Matched case-insensitively.",
+      "type": "string",
+      "pattern": "^([0-9]{2,6}|[A-Za-z][A-Za-z0-9-]{1,31})$"
+    },
+    "CreateExtensionRequest": {
+      "description": "Body of POST /v1/enterprise/extensions. The number must match the governing policy's format, be unused and unambiguous (numeric extensions are never prefixes of each other) in the namespace (the credential's scope).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "extensionNumber",
+        "displayLabel",
+        "destination"
+      ],
+      "properties": {
+        "extensionNumber": {
+          "$ref": "#/$defs/ExtensionNumber"
+        },
+        "displayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "destination": {
+          "$ref": "#/$defs/Destination"
+        },
+        "policyId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "UpdateExtensionRequest": {
+      "description": "Body of PATCH /v1/enterprise/extensions/{extension_id}; policyId null = the environment default.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "extensionNumber": {
+          "$ref": "#/$defs/ExtensionNumber"
+        },
+        "displayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "destination": {
+          "$ref": "#/$defs/Destination"
+        },
+        "policyId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Extension": {
+      "description": "An enterprise extension.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "extensionId",
+        "extensionNumber",
+        "displayLabel",
+        "destination",
+        "policyId",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "extensionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "extensionNumber": {
+          "$ref": "#/$defs/ExtensionNumber"
+        },
+        "displayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "destination": {
+          "$ref": "#/$defs/Destination"
+        },
+        "policyId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "ExtensionList": {
+      "description": "A page of extensions.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "extensions",
+        "nextCursor"
+      ],
+      "properties": {
+        "extensions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Extension"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "EnterpriseCallContext": {
+      "description": "The safe enterprise context of a Call (create result and call history): the dialled extension's number and label as they were when the Call was placed (a snapshot that survives renumbering and offboarding), the policy version relied on, the routing phase, the current destination kind and the enterprise outcome. No member, device, provider or contact data.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "extensionId",
+        "extensionNumber",
+        "extensionLabel",
+        "policyVersion",
+        "phase",
+        "destinationType",
+        "outcome"
+      ],
+      "properties": {
+        "extensionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "extensionNumber": {
+          "$ref": "#/$defs/ExtensionNumber"
+        },
+        "extensionLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "policyVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "phase": {
+          "description": "Routing phase.",
+          "type": "string",
+          "enum": [
+            "ROUTING",
+            "RINGING",
+            "RING_GROUP",
+            "QUEUED",
+            "IVR",
+            "VOICEMAIL",
+            "FORWARDED",
+            "ANSWERED",
+            "ENDED"
+          ]
+        },
+        "destinationType": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DestinationType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "ANSWERED",
+            "VOICEMAIL",
+            "NO_ANSWER",
+            "DECLINED",
+            "ABANDONED",
+            "FAILED",
+            "FORWARDED_PUBLIC",
+            null
+          ]
         }
       }
     }

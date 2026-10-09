@@ -154,6 +154,11 @@ struct CreateCallBody {
     /// (PRIVACY_RELAY_V1) and fails closed if that authority is unavailable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     privacy_relay_session_id: Option<Uuid>,
+    /// An enterprise extension number (Part F §54): resolved in the credential's scope
+    /// and routed by enterprise configuration (ENTERPRISE_INTERNAL). Requires
+    /// `enterprise.calls.use`; excludes every other target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target_extension: Option<String>,
 }
 
 async fn create_call(
@@ -175,6 +180,40 @@ async fn create_call(
         .map(DisplayName::parse)
         .transpose()
         .map_err(|_| CallingError::Validation("initiatorDisplayName is invalid."))?;
+    if let Some(extension) = &body.target_extension {
+        ctx.require_scope(names::ENTERPRISE_CALLS_USE)?;
+        let (true, false, None, None, None, Some(endpoint)) = (
+            body.target_principal_ids.is_empty(),
+            body.callback_requested,
+            body.target_contact_reference,
+            body.privacy_relay_session_id,
+            body.initiator_contact_reference,
+            body.initiator_endpoint_id,
+        ) else {
+            return Err(CallingError::Validation(
+                "targetExtension requires initiatorEndpointId and excludes every other target.",
+            ));
+        };
+        if extension.is_empty() || extension.len() > 32 {
+            return Err(CallingError::Validation("targetExtension is invalid."));
+        }
+        let created = state
+            .app
+            .create_enterprise_call(
+                &ctx,
+                crate::calls::app::enterprise::CreateEnterpriseCall {
+                    kind: body.kind,
+                    initiator: PrincipalId::from_uuid(body.initiator_principal_id),
+                    initiator_endpoint: CallEndpointId::from_uuid(endpoint),
+                    extension: extension.clone(),
+                    initiator_display_name: display,
+                    key,
+                },
+            )
+            .await?;
+        let status = StatusCode::from_u16(created.status).unwrap_or(StatusCode::CREATED);
+        return Ok(respond(status, created.body, created.replayed));
+    }
     if body.callback_requested {
         let (true, None, Some(initiator_contact), Some(target_contact), Some(session)) = (
             body.target_principal_ids.is_empty(),

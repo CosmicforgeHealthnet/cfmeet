@@ -359,12 +359,36 @@ async fn telephone_endpoints_store_only_opaque_references() {
          AND (column_name ILIKE '%phone%' OR column_name ILIKE '%e164%' OR column_name ILIKE '%msisdn%' \
               OR column_name ILIKE '%number%' OR column_name ILIKE '%contact%') \
          AND NOT (data_type = 'integer' AND (table_name, column_name) IN \
-              (('call_session_intervals', 'interval_number'), ('call_attempts', 'attempt_number'))) \
+              (('call_session_intervals', 'interval_number'), ('call_attempts', 'attempt_number'), \
+               ('enterprise_routing_steps', 'step_number'))) \
+         AND NOT (data_type = 'character varying' AND (table_name, column_name) IN \
+              (('enterprise_extensions', 'extension_number'), \
+               ('enterprise_call_contexts', 'entry_extension_number'))) \
          AND NOT (data_type = 'uuid' AND column_name = 'contact_reference' \
               AND table_name IN ('call_public_parties', 'call_spend_reservations'))",
     )
     .await;
     assert_eq!(phone_columns, 0);
+    // Part F extension numbers are internal short codes, never telephone numbers: the
+    // database confines them to 2-6 digits or a lower-case word.
+    for (table, column) in [
+        ("enterprise_extensions", "extension_number"),
+        ("enterprise_call_contexts", "entry_extension_number"),
+    ] {
+        let guarded = scalar_i64(
+            h.conn(),
+            &format!(
+                "SELECT count(*) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid \
+                 WHERE t.relname = '{table}' AND c.contype = 'c' \
+                 AND pg_get_constraintdef(c.oid) LIKE '%{column}%[0-9]{{2,6}}%'"
+            ),
+        )
+        .await;
+        assert_eq!(
+            guarded, 1,
+            "{table}.{column} is not confined to short codes"
+        );
+    }
 }
 
 #[tokio::test]

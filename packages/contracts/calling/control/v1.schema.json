@@ -125,6 +125,10 @@
               }
             }
           ]
+        },
+        "targetExtension": {
+          "description": "Part F: an enterprise extension number (an internal short code, never a telephone number) resolved in the credential's scope and routed by enterprise configuration over ENTERPRISE_INTERNAL (no public leg, no spend). Requires enterprise.calls.use and initiatorEndpointId; excludes every other target. An unknown number is 404; a policy refusal 403 CALL_NOT_AUTHORIZED; enterprise calling disabled 422 CAPABILITY_UNAVAILABLE.",
+          "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/ExtensionNumber"
         }
       },
       "oneOf": [
@@ -148,6 +152,11 @@
               {
                 "required": [
                   "initiatorContactReference"
+                ]
+              },
+              {
+                "required": [
+                  "targetExtension"
                 ]
               }
             ]
@@ -174,6 +183,11 @@
               {
                 "required": [
                   "initiatorContactReference"
+                ]
+              },
+              {
+                "required": [
+                  "targetExtension"
                 ]
               }
             ]
@@ -202,6 +216,46 @@
                 "required": [
                   "targetPrincipalIds"
                 ]
+              },
+              {
+                "required": [
+                  "targetExtension"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "initiatorEndpointId",
+            "targetExtension"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "targetPrincipalIds"
+                ]
+              },
+              {
+                "required": [
+                  "targetContactReference"
+                ]
+              },
+              {
+                "required": [
+                  "callbackRequested"
+                ]
+              },
+              {
+                "required": [
+                  "initiatorContactReference"
+                ]
+              },
+              {
+                "required": [
+                  "privacyRelaySessionId"
+                ]
               }
             ]
           }
@@ -229,7 +283,7 @@
       }
     },
     "CreateCallResult": {
-      "description": "Response of POST /v1/calls (201; replays return the same body with Idempotent-Replayed: true). The call is normally RINGING with one live offer per eligible target endpoint; it can still be ROUTING while the media resource is being prepared (the reconciler resumes it), or already FAILED (ROUTING when no target has an eligible endpoint, MEDIA when the resource could not be prepared in time).",
+      "description": "Response of POST /v1/calls (201; replays return the same body with Idempotent-Replayed: true). The call is normally RINGING with one live offer per eligible target endpoint; it can still be ROUTING while the media resource is being prepared (the reconciler resumes it), or already FAILED (ROUTING when no target has an eligible endpoint, MEDIA when the resource could not be prepared in time). Part F: an enterprise Call (targetExtension) additionally carries its enterprise context; while it waits in a queue or IVR it may list only the initiator.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -258,7 +312,7 @@
         },
         "participants": {
           "type": "array",
-          "minItems": 2,
+          "minItems": 1,
           "items": {
             "$ref": "#/$defs/CreatedParticipant"
           }
@@ -266,6 +320,10 @@
         "liveInvitationCount": {
           "type": "integer",
           "minimum": 0
+        },
+        "enterprise": {
+          "description": "Present for an enterprise Call only: its safe enterprise context.",
+          "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/EnterpriseCallContext"
         }
       }
     },

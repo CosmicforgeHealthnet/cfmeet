@@ -79,10 +79,12 @@ pub const ROUTING_POLICY_VERSION: &str = "ROUTING_POLICY_V1";
 pub const MAX_FAILOVER_ATTEMPTS: u8 = 3;
 
 impl Default for RoutingPolicy {
-    /// Restrictive default: application RTC (and the enterprise foundation) only.
+    /// Restrictive default: application RTC and internal-only enterprise calls
+    /// (ENTERPRISE_INTERNAL: no public leg, no spend). Every paid class needs an explicit
+    /// policy.
     fn default() -> Self {
         Self {
-            allowed_route_classes: vec![RoutingClass::AppRtc],
+            allowed_route_classes: vec![RoutingClass::AppRtc, RoutingClass::EnterpriseInternal],
             app_first: true,
             customer_may_select_public_route: false,
             public_calling_enabled: false,

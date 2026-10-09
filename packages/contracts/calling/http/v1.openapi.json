@@ -2856,6 +2856,378 @@
           }
         }
       }
+    },
+    "/v1/enterprise/extensions": {
+      "post": {
+        "operationId": "createExtension",
+        "summary": "Create an extension",
+        "description": "Requires enterprise.config.write and the MANAGE_ROUTING capability of the organization's baseline policy (403 ENTERPRISE_POLICY_DENIED). The number is normalized to lower case and must match the governing policy's format; a used or ambiguous number is 409 CONFLICT. The destination must be an ACTIVE principal / enterprise member of the same scope (404 otherwise); a raw public number is never accepted. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/CreateExtensionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The extension (version 1).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/Extension"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listExtensions",
+        "summary": "List extensions",
+        "description": "Requires enterprise.config.read.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1-100, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Only resources in this status.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ACTIVE",
+                "DISABLED"
+              ]
+            }
+          },
+          {
+            "name": "destinationType",
+            "in": "query",
+            "required": false,
+            "description": "Only extensions routing to this destination type.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of extensions.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/ExtensionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/extensions/{extension_id}": {
+      "get": {
+        "operationId": "getExtension",
+        "summary": "Get an extension",
+        "description": "Requires enterprise.config.read.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.read",
+        "parameters": [
+          {
+            "name": "extension_id",
+            "in": "path",
+            "required": true,
+            "description": "Extension id (an extension of another scope is 404).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The extension.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/Extension"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateExtension",
+        "summary": "Change an extension",
+        "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Renumbering re-checks uniqueness and ambiguity. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "parameters": [
+          {
+            "name": "extension_id",
+            "in": "path",
+            "required": true,
+            "description": "Extension id (an extension of another scope is 404).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/UpdateExtensionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The changed extension.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/Extension"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "disableExtension",
+        "summary": "Disable (offboard) an extension",
+        "description": "Requires enterprise.config.write and expectedVersion. Future routing stops; the extension and every historical Call's reference and number snapshot remain. Never blocked by a kill switch or capability. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "parameters": [
+          {
+            "name": "extension_id",
+            "in": "path",
+            "required": true,
+            "description": "Extension id (an extension of another scope is 404).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expectedVersion",
+            "in": "query",
+            "required": true,
+            "description": "The version the change was decided on (409 VERSION_CONFLICT otherwise).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The disabled extension.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/Extension"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
     }
   },
   "components": {

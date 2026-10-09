@@ -21,6 +21,8 @@ use uuid::Uuid;
 
 use super::{
     departments::{DepartmentChange, DepartmentMember, DepartmentRole, NewDepartment},
+    destinations::{Destination, DestinationType},
+    extensions::{ExtensionChange, ExtensionFilter, NewExtension},
     policy::{NewPolicy, PolicyChange, PolicyRules, ResourceStatus},
     AdminActor, PageRequest,
 };
@@ -63,6 +65,16 @@ pub fn routes() -> Router<AppState> {
             put(replace_department_members),
         )
         .route("/v1/enterprise/audit", get(list_audit))
+        .route(
+            "/v1/enterprise/extensions",
+            get(list_extensions).post(create_extension),
+        )
+        .route(
+            "/v1/enterprise/extensions/:extension_id",
+            get(get_extension)
+                .patch(update_extension)
+                .delete(disable_extension),
+        )
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
 }
 
@@ -460,4 +472,135 @@ async fn list_audit(
         )
         .await?;
     Ok(ok(page))
+}
+
+// ---------------------------------------------------------------------------
+// Extensions (§54)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateExtensionBody {
+    extension_number: String,
+    display_label: String,
+    destination: Destination,
+    #[serde(default)]
+    policy_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UpdateExtensionBody {
+    expected_version: i64,
+    #[serde(default)]
+    extension_number: Option<String>,
+    #[serde(default)]
+    display_label: Option<String>,
+    #[serde(default)]
+    destination: Option<Destination>,
+    /// Present (even `null`) = replace the named policy (`null`: the environment default).
+    #[serde(default, with = "double_option")]
+    policy_id: Option<Option<Uuid>>,
+}
+
+async fn create_extension(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    body: Result<Json<CreateExtensionBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .create_extension(
+            &AdminActor::of(&ctx),
+            NewExtension {
+                extension_number: body.extension_number,
+                display_label: body.display_label,
+                destination: body.destination,
+                policy_id: body.policy_id,
+            },
+        )
+        .await?;
+    Ok(created(view))
+}
+
+async fn list_extensions(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let q = QueryParams::parse(query, &["limit", "cursor", "status", "destinationType"])?;
+    let filter = ExtensionFilter {
+        status: q.status()?,
+        destination_type: q
+            .get("destinationType")
+            .map(|v| {
+                DestinationType::parse(v).ok_or(CallingError::Validation(
+                    "The destination type filter is invalid.",
+                ))
+            })
+            .transpose()?,
+    };
+    let page = state
+        .enterprise
+        .list_extensions(CallScope::of_platform(&ctx), &filter, &q.page()?)
+        .await?;
+    Ok(ok(page))
+}
+
+async fn get_extension(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let view = state
+        .enterprise
+        .get_extension(CallScope::of_platform(&ctx), uuid_path(&id)?)
+        .await?;
+    Ok(ok(view))
+}
+
+async fn update_extension(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    body: Result<Json<UpdateExtensionBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .update_extension(
+            &AdminActor::of(&ctx),
+            id,
+            body.expected_version,
+            ExtensionChange {
+                extension_number: body.extension_number,
+                display_label: body.display_label,
+                destination: body.destination,
+                policy_id: body.policy_id,
+            },
+        )
+        .await?;
+    Ok(ok(view))
+}
+
+async fn disable_extension(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let q = QueryParams::parse(query, &["expectedVersion"])?;
+    let view = state
+        .enterprise
+        .disable_extension(&AdminActor::of(&ctx), id, q.expected_version()?)
+        .await?;
+    Ok(ok(view))
 }

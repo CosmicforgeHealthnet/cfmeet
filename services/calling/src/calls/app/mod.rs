@@ -17,6 +17,7 @@
 
 mod control;
 mod create;
+pub mod enterprise;
 pub mod http;
 pub mod media;
 mod privacy;
@@ -158,6 +159,8 @@ pub struct AppCallService {
     privacy: Arc<dyn PrivacyRelayAuthority>,
     public: public::PublicNetwork,
     config: AppCallingConfig,
+    /// Enterprise kill switches (Part F).
+    pub(crate) enterprise_flags: crate::enterprise::EnterpriseFlags,
 }
 
 impl AppCallService {
@@ -181,7 +184,14 @@ impl AppCallService {
             privacy: Arc::new(UnconfiguredPrivacyRelay),
             public: public::PublicNetwork::default(),
             config,
+            enterprise_flags: crate::enterprise::EnterpriseFlags::default(),
         }
+    }
+
+    /// Uses `flags` as the enterprise kill switches (default: all off).
+    pub fn with_enterprise_flags(mut self, flags: crate::enterprise::EnterpriseFlags) -> Self {
+        self.enterprise_flags = flags;
+        self
     }
 
     /// Uses `privacy` as the Privacy Relay authority of protected calls (default:

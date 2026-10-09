@@ -852,7 +852,7 @@ mod tests {
     }
 
     #[test]
-    fn enterprise_internal_is_representable_but_not_executable_yet() {
+    fn enterprise_internal_is_executable_unpaid_and_policy_gated() {
         let mut i = inputs();
         i.source = EndpointClass::Enterprise;
         i.destinations = vec![DestinationFacts {
@@ -861,13 +861,30 @@ mod tests {
             contact: None,
         }];
         assert_eq!(
-            select(&public_policy(), &i, now()).denial(),
-            Some(RouteDenial::NotExecutable)
-        );
-        assert_eq!(
             classify(&public_policy(), &i),
             Ok(RoutingClass::EnterpriseInternal)
         );
+        // A policy without the class denies it.
+        let app_only = RoutingPolicy {
+            allowed_route_classes: vec![RoutingClass::AppRtc],
+            ..RoutingPolicy::default()
+        };
+        assert_eq!(
+            select(&app_only, &i, now()).denial(),
+            Some(RouteDenial::RouteClassNotAllowed)
+        );
+        assert!(select(&public_policy(), &i, now()).plan().is_some());
+        // The restrictive default allows it: no public leg, no candidate route, no spend.
+        let plan = select(&RoutingPolicy::default(), &i, now())
+            .plan()
+            .cloned()
+            .expect("internal enterprise route");
+        assert_eq!(plan.route_class, RoutingClass::EnterpriseInternal);
+        assert!(!plan.public_network_required);
+        assert!(plan.candidate_routes.is_empty());
+        assert!(plan.protected_contact_refs.is_empty());
+        assert!(plan.expires_at.is_none());
+        assert_eq!(plan.failover.max_attempts, 1);
     }
 
     fn pstn_inputs() -> RouteInputs {

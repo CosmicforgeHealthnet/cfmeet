@@ -399,6 +399,26 @@ pub(crate) async fn effective_policy<C: ConnectionTrait>(
     })
 }
 
+/// Refuses an administrative operation the organization's baseline policy does not
+/// grant (second key after the credential scope).
+pub(crate) async fn require_capability<C: ConnectionTrait>(
+    db: &C,
+    scope: CallScope,
+    capability: AdminCapability,
+) -> EnterpriseResult<()> {
+    if effective_policy(db, scope, None)
+        .await?
+        .rules
+        .grants(capability)
+    {
+        Ok(())
+    } else {
+        Err(EnterpriseError::PolicyDenied(
+            "the enterprise policy does not grant this administrative capability",
+        ))
+    }
+}
+
 fn rule_values(rules: &PolicyRules) -> Vec<sea_orm::Value> {
     vec![
         rules.internal_calling_enabled.into(),
@@ -665,6 +685,12 @@ impl EnterpriseService {
         check_version(expected_version, row.version)?;
         if row.status == "DISABLED" {
             return Err(EnterpriseError::Conflict("the policy is already disabled"));
+        }
+        // An extension naming this policy would silently change policy.
+        if super::extensions::policy_in_use(&txn, actor.scope, id).await? {
+            return Err(EnterpriseError::Conflict(
+                "the policy is still named by an active extension",
+            ));
         }
         let now = self.now();
         exec(

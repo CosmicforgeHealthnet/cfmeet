@@ -190,7 +190,8 @@ jobs:
           # Part F (ADR 0018): the enterprise foundation exists, and there is no second
           # Call authority.
           for t in enterprise_call_policies enterprise_departments enterprise_department_members \
-                   enterprise_admin_audit; do
+                   enterprise_admin_audit enterprise_extensions enterprise_call_contexts \
+                   enterprise_routing_steps; do
             test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
               "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename = '$t'")" = "1" \
               || { echo "::error::missing enterprise table $t"; exit 1; }

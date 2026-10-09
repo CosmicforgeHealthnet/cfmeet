@@ -329,6 +329,7 @@ async fn real_livekit_certification() {
     adapter_contract(&cert).await;
     forged_and_duplicate_callbacks(&cert).await;
     voice_call(&cert).await;
+    enterprise_extension_call(&cert).await;
     video_call_and_removal(&cert).await;
     for round in 0..3 {
         refreshed_privileged_token_cannot_reenter(&cert, round).await;
@@ -615,6 +616,176 @@ async fn voice_call(cert: &Cert) {
     assert!(usage
         .iter()
         .any(|u| u.usage_type.as_str() == "CALL_CONNECTED_TIME" && u.quantity > 0));
+    a.quit().await;
+    b.quit().await;
+}
+
+/// Part F §35 / §200 / §206: Extension 1001 → Extension 1002 over ENTERPRISE_INTERNAL
+/// with REAL internal media (no public leg), held and resumed at the provider, ended.
+async fn enterprise_extension_call(cert: &Cert) {
+    use calling::platform::scopes::names;
+    let h = cert.a.h();
+    common::enterprise::allow_enterprise_scopes(h, &cert.a.w.consumer).await;
+    let admin = common::enterprise::credential(
+        h,
+        &cert.a.w.consumer,
+        cert.a.w.kind,
+        &[
+            names::ENTERPRISE_CONFIG_READ,
+            names::ENTERPRISE_CONFIG_WRITE,
+        ],
+    )
+    .await;
+    let caller_token = common::enterprise::credential(
+        h,
+        &cert.a.w.consumer,
+        cert.a.w.kind,
+        &[
+            names::CALLS_READ,
+            names::CALLS_WRITE,
+            names::ENTERPRISE_CALLS_USE,
+        ],
+    )
+    .await;
+    let member = |reference: &'static str| async move {
+        let (view, _) = h
+            .platform
+            .register_principal(
+                cert.a.w.consumer.env(cert.a.w.kind).id,
+                calling::platform::principals::NewPrincipal::External {
+                    kind: calling::domain::PrincipalKind::EnterpriseMember,
+                    external_reference: reference.to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        h.state
+            .principals
+            .resolve(
+                &cert.a.w.ctx,
+                &calling::platform::principals::PrincipalReference::Id(view.id),
+            )
+            .await
+            .unwrap()
+    };
+    let alice = member("ent-alice").await;
+    let bob = member("ent-bob").await;
+    for (number, who) in [("1001", &alice), ("1002", &bob)] {
+        let r = h
+            .request(
+                axum::http::Method::POST,
+                "/v1/enterprise/extensions",
+                Some(admin.secret.expose_once()),
+                Some(json!({ "extensionNumber": number, "displayLabel": number,
+                              "destination": { "type": "ENTERPRISE_MEMBER", "id": who.id() } })),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    }
+    let alice_desk = cert.a.device(&alice, "ent-alice-desk").await;
+    let bob_desk = cert.a.device(&bob, "ent-bob-desk").await;
+    let r = h
+        .request_with(
+            axum::http::Method::POST,
+            "/v1/calls",
+            Some(caller_token.secret.expose_once()),
+            Some(json!({ "kind": "VOICE", "initiatorPrincipalId": alice.id(),
+                         "initiatorEndpointId": alice_desk.endpoint, "targetExtension": "1002" })),
+            &[("idempotency-key", "ent-cert-1")],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    assert_eq!(r.json["call"]["state"], "RINGING");
+    let call: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+    let invitation = cert
+        .a
+        .invitation_for(call, bob_desk.endpoint)
+        .await
+        .unwrap();
+    let (_, version) = cert.a.state(call).await;
+    let r = cert.a.accept(call, invitation, &bob_desk, version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let s1 = cert.a.session_on(call, alice_desk.endpoint).await.unwrap();
+    let s2 = cert.a.session_on(call, bob_desk.endpoint).await.unwrap();
+    let c1 = cert.credential(call, s1).await;
+    let c2 = cert.credential(call, s2).await;
+    let mut a = RtcClient::spawn(&cert.cfg).await;
+    let mut b = RtcClient::spawn(&cert.cfg).await;
+    assert_eq!(
+        a.connect(c1["url"].as_str().unwrap(), c1["token"].as_str().unwrap())
+            .await["ok"],
+        true
+    );
+    assert_eq!(
+        b.connect(c2["url"].as_str().unwrap(), c2["token"].as_str().unwrap())
+            .await["ok"],
+        true
+    );
+    eventually(
+        15,
+        "enterprise call CONNECTED on verified evidence",
+        || async { cert.state(call).await == CallState::Connected },
+    )
+    .await;
+    for client in [&mut a, &mut b] {
+        assert_eq!(
+            client
+                .cmd(json!({ "cmd": "wait_permission", "publish": true, "timeout": 10 }))
+                .await["ok"],
+            true
+        );
+        assert_eq!(
+            client
+                .cmd(json!({ "cmd": "publish", "kind": "audio" }))
+                .await["ok"],
+            true
+        );
+    }
+    let heard = b
+        .cmd(json!({ "cmd": "wait_subscribed", "count": 1, "timeout": 15 }))
+        .await;
+    assert_eq!(heard["ok"], true, "real internal media flows: {heard}");
+    // Hold / resume of the enterprise call, enforced at the provider (§206).
+    let (_, version) = cert.a.state(call).await;
+    let r = cert.a.command(call, "hold", version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(cert.state(call).await, CallState::Held);
+    assert_eq!(
+        a.cmd(json!({ "cmd": "wait_permission", "publish": false, "timeout": 10 }))
+            .await["ok"],
+        true
+    );
+    let (_, version) = cert.a.state(call).await;
+    let r = cert.a.command(call, "resume", version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(cert.state(call).await, CallState::Connected);
+    assert_eq!(
+        a.cmd(json!({ "cmd": "wait_permission", "publish": true, "timeout": 10 }))
+            .await["ok"],
+        true
+    );
+    // No public network anywhere in this Call.
+    let public: i64 = common::scalar_i64(
+        h.conn(),
+        &format!(
+            "SELECT (SELECT count(*) FROM call_telephony_commands WHERE call_id = '{call}') + \
+             (SELECT count(*) FROM call_public_parties WHERE call_id = '{call}') + \
+             (SELECT count(*) FROM call_routes WHERE call_id = '{call}' AND routing_class <> 'ENTERPRISE_INTERNAL')"
+        ),
+    )
+    .await;
+    assert_eq!(public, 0);
+    h.clock.advance(chrono::Duration::seconds(5));
+    let (_, version) = cert.a.state(call).await;
+    let r = cert.a.command(call, "end", version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(cert.state(call).await, CallState::Ended);
+    assert_eq!(
+        a.cmd(json!({ "cmd": "wait_disconnected", "timeout": 10 }))
+            .await["ok"],
+        true
+    );
+    println!("enterprise extension call certified: 1001 -> 1002 over ENTERPRISE_INTERNAL with real media");
     a.quit().await;
     b.quit().await;
 }
