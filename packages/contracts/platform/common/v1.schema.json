@@ -95,7 +95,8 @@
         "telephony-inbound.offer",
         "telephony-leg.media",
         "telephony-enterprise.offer",
-        "telephony-capture.deliver"
+        "telephony-capture.deliver",
+        "platform-event.publish"
       ]
     }
   }

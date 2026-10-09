@@ -339,6 +339,7 @@ text_enum!(UsageUnit {
 text_enum!(OutboxStatus {
     Pending = "PENDING",
     Published = "PUBLISHED",
+    DeadLetter = "DEAD_LETTER",
 });
 
 impl FailureCategory {

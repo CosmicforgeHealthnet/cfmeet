@@ -67,7 +67,7 @@
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Frames of an endpoint's realtime signaling channel: call signals (call.incoming ... call.invitation_expired) derived from committed state and sent after commit, with event id, call id, version / sequence, target endpoint and principal, safe state, issue time, offer expiry, correlation id and a bounded payload; and the channel control frames. No telephone numbers, provider ids, credentials or tokens. Part F: call.queued and call.queue_position (to the caller of a queued enterprise Call; data queueId, position). call.ivr_waiting / call.ivr_input (to the caller of a Call in an IVR; never the key pressed). Part F: call.recording_started (the server-issued recording notice) and call.recording_stopped. Part F: call.voicemail_started (the caller is now leaving a message)."
+      "description": "Frames of an endpoint's realtime signaling channel: call signals (call.incoming ... call.invitation_expired) derived from committed state and sent after commit, with event id, call id, version / sequence, target endpoint and principal, safe state, issue time, offer expiry, correlation id and a bounded payload; and the channel control frames. No telephone numbers, provider ids, credentials or tokens. Part F: call.queued and call.queue_position (to the caller of a queued enterprise Call; data queueId, position). call.ivr_waiting / call.ivr_input (to the caller of a Call in an IVR; never the key pressed). Part F: call.recording_started (the server-issued recording notice) and call.recording_stopped. Part F: call.voicemail_started (the caller is now leaving a message). Part G: call.route_changed (a public leg failed over to another route on the same Call; data failover only)."
     },
     {
       "id": "cfmeet.calling.push-invitation",
@@ -167,6 +167,17 @@
       "lifecycle": "stable",
       "authority": "contract-first",
       "description": "Envelope for durable cross-service events. Payload contracts are registered separately by the producing service (Calling: cfmeet.calling.call-lifecycle-event; Privacy Relay: cfmeet.privacy-relay.event)."
+    },
+    {
+      "id": "cfmeet.platform.webhooks",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "platform/webhooks/v1.schema.json",
+      "owner": "platform",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Customer webhooks (Part G §68): application-scoped subscriptions (create / list / get / update / delete / rotate-secret), the safe subscription view (the signing secret is returned only on create / rotation), delivery records with dead-letter visibility and manual replay, and the normalized, signed event body (public catalog projected from committed domain events; never a provider or internal payload). Served by Calling's platform ingress."
     },
     {
       "id": "cfmeet.privacy-relay.http-api",

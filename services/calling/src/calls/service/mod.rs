@@ -257,6 +257,8 @@ impl CallService {
             attempt_count: Set(0),
             next_attempt_at: Set(created_at),
             published_at: Set(None),
+            lease_until: Set(None),
+            last_error_code: Set(None),
             created_at: Set(created_at),
             updated_at: Set(created_at),
         })

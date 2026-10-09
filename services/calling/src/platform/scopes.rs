@@ -67,6 +67,13 @@ pub mod names {
     pub const ENTERPRISE_RECORDING_MANAGE: &str = "enterprise.recording.manage";
     /// Read call-recording metadata and request authorized media access (audited).
     pub const ENTERPRISE_RECORDING_READ: &str = "enterprise.recording.read";
+    /// Read customer webhook subscriptions and their delivery history (Part G §68).
+    pub const WEBHOOKS_READ: &str = "webhooks.read";
+    /// Create, change, delete customer webhook subscriptions, rotate their signing secret
+    /// and replay deliveries (Part G §68).
+    pub const WEBHOOKS_MANAGE: &str = "webhooks.manage";
+    /// Read the application's usage facts and effective limits (Part G §69 / §70).
+    pub const USAGE_READ: &str = "usage.read";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -179,6 +186,21 @@ const STANDARD_SCOPES: &[ScopeDefinition] = &[
     ScopeDefinition {
         name: names::ENTERPRISE_RECORDING_READ,
         description: "Read call-recording metadata and request short-lived, audited media access",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::WEBHOOKS_READ,
+        description: "Read the application's customer webhook subscriptions and delivery history",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::WEBHOOKS_MANAGE,
+        description: "Create, change and delete customer webhook subscriptions, rotate signing secrets and replay deliveries",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::USAGE_READ,
+        description: "Read the application's usage facts (consumption, not billing) and effective limits",
         trust: ScopeTrust::Standard,
     },
     ScopeDefinition {

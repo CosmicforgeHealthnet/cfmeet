@@ -330,6 +330,7 @@ dependencies = [
  "calling-migration",
  "cf-object-storage",
  "cf-service-auth",
+ "cf-webhooks",
  "chrono",
  "chrono-tz",
  "clap",
@@ -409,6 +410,22 @@ dependencies = [
  "url",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "cf-webhooks"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "hex",
+ "hmac",
+ "rand 0.8.8",
+ "reqwest",
+ "ring",
+ "sha2",
+ "thiserror 2.0.21",
+ "tokio",
+ "url",
 ]
 
 [[package]]

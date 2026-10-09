@@ -317,6 +317,7 @@ pub fn service_auth_fixture_targeting(
                     &[
                         "operational-callback.deliver",
                         "communication-authority.enforce",
+                        "platform-event.publish",
                     ],
                 ),
                 (
@@ -476,6 +477,7 @@ pub fn test_runtime(
         enterprise_flags: calling::enterprise::EnterpriseFlags::ALL_ON,
         artifacts: Arc::new(cf_object_storage::MemoryObjectStore::new()),
         capture: Arc::new(calling::calls::app::enterprise::UnavailableCapture),
+        webhooks: calling::webhooks::WebhookSettings::default(),
     }
 }
 

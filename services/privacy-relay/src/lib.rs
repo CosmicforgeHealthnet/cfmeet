@@ -27,6 +27,7 @@ pub mod context;
 pub(crate) mod db;
 pub mod enforcement;
 pub mod error;
+pub mod events;
 pub mod internal;
 pub mod middleware;
 pub mod models;

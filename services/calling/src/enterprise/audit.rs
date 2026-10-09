@@ -35,6 +35,7 @@ text_enum!(
         Recording = "RECORDING",
         SipDevice = "SIP_DEVICE",
         PublicContact = "PUBLIC_CONTACT",
+        WebhookSubscription = "WEBHOOK_SUBSCRIPTION",
     }
 );
 
@@ -53,6 +54,8 @@ text_enum!(
         Delete = "DELETE",
         RetentionDelete = "RETENTION_DELETE",
         MediaAccess = "MEDIA_ACCESS",
+        RotateSecret = "ROTATE_SECRET",
+        Replay = "REPLAY",
     }
 );
 

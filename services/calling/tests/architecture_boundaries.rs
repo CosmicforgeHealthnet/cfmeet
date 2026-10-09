@@ -111,6 +111,8 @@ fn is_calling_table(name: &str) -> bool {
         // Part F: enterprise configuration / continuity is Calling-owned (ADR 0018).
         || name.starts_with("enterprise_")
         || name.starts_with("voicemail_")
+        // Part G §68: customer webhooks are served by Calling's platform ingress (ADR 0028).
+        || name.starts_with("webhook_")
 }
 
 /// Code with the contents of string literals removed (identifiers, types and syntax

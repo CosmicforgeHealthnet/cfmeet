@@ -47,7 +47,8 @@
         "call.ivr_input",
         "call.recording_started",
         "call.recording_stopped",
-        "call.voicemail_started"
+        "call.voicemail_started",
+        "call.route_changed"
       ]
     },
     "SignalInvitation": {

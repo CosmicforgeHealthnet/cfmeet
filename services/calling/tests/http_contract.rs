@@ -211,6 +211,7 @@ fn contract_paths_equal_the_registered_routes() {
         // Internal routers are nested under /internal/v1 by routes::app.
         let prefix = if path.ends_with("src/privacy_relay/enforcement.rs")
             || path.ends_with("src/telephony/http.rs")
+            || path.ends_with("src/webhooks/ingest.rs")
         {
             "/internal/v1"
         } else {
@@ -568,6 +569,7 @@ fn every_operation_declares_its_authentication() {
                     "/internal/v1/telephony/enterprise-calls"
                     | "/internal/v1/telephony/enterprise-keypad" => "telephony-enterprise.offer",
                     "/internal/v1/telephony/captures" => "telephony-capture.deliver",
+                    "/internal/v1/platform/events" => "platform-event.publish",
                     _ => "communication-authority.enforce",
                 };
                 assert_eq!(
@@ -695,10 +697,11 @@ fn every_operation_declares_its_authentication() {
     }
     let paths: Vec<&String> = documented["paths"].as_object().unwrap().keys().collect();
     assert!(paths.iter().all(|p| !p.ends_with("/state")), "{paths:?}");
-    // Calls have no generic mutation: PATCH / PUT exist only for versioned enterprise
-    // CONFIGURATION resources (Part F §20), never for a Call or its state.
+    // Calls have no generic mutation: PATCH / PUT exist only for versioned CONFIGURATION
+    // resources — enterprise configuration (Part F §20) and customer webhook
+    // subscriptions (Part G §68) — never for a Call or its state.
     for (path, item) in documented["paths"].as_object().unwrap() {
-        if path.starts_with("/v1/enterprise/") {
+        if path.starts_with("/v1/enterprise/") || path.starts_with("/v1/webhooks/") {
             continue;
         }
         assert!(
@@ -720,6 +723,17 @@ fn enterprise_scope(path: &str, method: &str) -> Option<&'static str> {
         } else {
             names::ENTERPRISE_RECORDING_MANAGE
         });
+    }
+    // Part G §68 / §69 / §70: webhooks, usage and limits have their own scopes.
+    if path.starts_with("/v1/webhook") {
+        return Some(if method == "get" {
+            names::WEBHOOKS_READ
+        } else {
+            names::WEBHOOKS_MANAGE
+        });
+    }
+    if path == "/v1/usage" || path == "/v1/limits" {
+        return Some(names::USAGE_READ);
     }
     if !path.starts_with("/v1/enterprise/") {
         return None;

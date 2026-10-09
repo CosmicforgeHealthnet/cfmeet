@@ -47,6 +47,7 @@ pub fn public_api() -> Router<AppState> {
         .merge(crate::endpoints::http::routes())
         .merge(crate::privacy_relay::http::routes())
         .merge(crate::enterprise::http::routes())
+        .merge(crate::webhooks::http::routes())
 }
 
 /// Internal routes (service authentication): Privacy Relay's active-call enforcement.
@@ -54,6 +55,7 @@ pub fn public_api() -> Router<AppState> {
 pub fn internal_api() -> Router<AppState> {
     crate::privacy_relay::enforcement::internal_routes()
         .merge(crate::telephony::http::internal_routes())
+        .merge(crate::webhooks::ingest::internal_routes())
 }
 
 /// Builds the service router.

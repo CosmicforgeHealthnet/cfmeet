@@ -130,6 +130,15 @@ async fn main() -> anyhow::Result<()> {
         FeatureFlag::new(config.relay_number_pool_enabled),
         config.relay_number_cooldown,
     );
+    // Committed domain events are published to Calling's platform-event ingress (Part G
+    // §67) when Calling is configured; otherwise they stay PENDING in the outbox.
+    let relay = if settings.calling_base_url.is_some() {
+        relay.with_event_publisher(Arc::new(privacy_relay::events::HttpEventPublisher::new(
+            service_auth.client().clone(),
+        )))
+    } else {
+        relay
+    };
     tracing::info!(
         relay_number_pool_enabled = config.relay_number_pool_enabled,
         relay_number_cooldown_seconds = config.relay_number_cooldown.as_secs(),

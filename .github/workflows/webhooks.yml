@@ -1,0 +1,49 @@
+name: Webhooks package
+
+# packages/webhooks (cf-webhooks, ADR 0028): provider-neutral customer webhook
+# primitives — HMAC-SHA256 signing / verification with a timestamp window, the SSRF
+# endpoint policy re-checked at connection time (DNS-rebinding test with a real local
+# listener), retry classification / bounded jittered backoff, AEAD-sealed secrets.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "packages/webhooks/**"
+      - ".github/workflows/webhooks.yml"
+  pull_request:
+    paths:
+      - "packages/webhooks/**"
+      - ".github/workflows/webhooks.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: webhooks-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+defaults:
+  run:
+    working-directory: packages/webhooks
+
+jobs:
+  test:
+    name: fmt / clippy / test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/webhooks -> target
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: cargo test
+        run: cargo test --locked

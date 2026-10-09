@@ -19,6 +19,7 @@ mod m20261008_000008_contact_verification_and_resolution;
 mod m20261008_000009_relay_number_inventory;
 mod m20261008_000010_relay_number_assignments;
 mod m20261008_000011_relay_inbound_resolutions;
+mod m20261010_000012_relay_outbox_publication;
 
 /// Name of the table recording which Privacy Relay migrations have been applied.
 pub const MIGRATION_TABLE: &str = "privacy_relay_seaql_migrations";
@@ -40,6 +41,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261008_000009_relay_number_inventory::Migration),
             Box::new(m20261008_000010_relay_number_assignments::Migration),
             Box::new(m20261008_000011_relay_inbound_resolutions::Migration),
+            Box::new(m20261010_000012_relay_outbox_publication::Migration),
         ]
     }
 

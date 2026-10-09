@@ -39,6 +39,8 @@ pub struct RelayService {
     pub(crate) contact_feature: FeatureFlag,
     /// RELAY_NUMBER_POOL_ENABLED + cooldown (§34).
     pub(crate) relay_numbers: crate::relay_numbers::RelayNumberPoolSettings,
+    /// Durable event publication transport (Part G §67).
+    pub(crate) events: Arc<dyn crate::events::EventPublisher>,
 }
 
 /// Result of a mutation: HTTP status, body and whether it replays an earlier execution.
@@ -66,7 +68,14 @@ impl RelayService {
             worker_id: format!("privacy-relay-{}", Uuid::new_v4().simple()),
             contact_feature: FeatureFlag::new(false),
             relay_numbers: Default::default(),
+            events: Arc::new(crate::events::NoEventPublisher),
         }
+    }
+
+    /// The transport committed outbox events are published through (Part G §67).
+    pub fn with_event_publisher(mut self, events: Arc<dyn crate::events::EventPublisher>) -> Self {
+        self.events = events;
+        self
     }
 
     /// Shares the Contact Vault kill switch with this service.

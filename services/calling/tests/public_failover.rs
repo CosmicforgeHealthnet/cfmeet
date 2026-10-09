@@ -205,6 +205,8 @@ fn provider_failure(
 async fn a_definite_provider_failure_fails_over_to_a_new_attempt() {
     let Some(x) = world(1).await else { return };
     let (call, leg_a, attempt_a, ta) = x.dialing("fo-1").await;
+    let mut caller_signals =
+        calling::signaling::RealtimeSignalBus::subscribe(x.w.h().bus.as_ref(), x.caller.endpoint);
     assert_eq!(
         x.event(provider_failure(
             call, leg_a, ta, attempt_a, "NETWORK", "FAILED"
@@ -212,6 +214,18 @@ async fn a_definite_provider_failure_fails_over_to_a_new_attempt() {
         .await,
         "APPLIED"
     );
+    // Part G §66: the caller learns the route changed on the SAME Call (no provider,
+    // route or number detail). (Frames on the socket are contract-checked in `signaling`.)
+    let mut route_changed = None;
+    while let Some(signal) = caller_signals.try_recv() {
+        if signal["type"] == "call.route_changed" {
+            route_changed = Some(signal);
+        }
+    }
+    let signal = route_changed.expect("call.route_changed signal");
+    assert_eq!(signal["callId"], json!(call));
+    assert_eq!(signal["data"], json!({ "failover": true }));
+    assert!(!signal.to_string().contains("ng-a") && !signal.to_string().contains("ng-b"));
     // The Call keeps dialing; a NEW leg / attempt / reservation / ORIGINATE exists.
     assert_eq!(x.w.state(call).await.0, CallState::Dialing);
     let (leg_b, attempt_b) = x.current(call).await;

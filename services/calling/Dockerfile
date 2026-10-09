@@ -1,9 +1,10 @@
 # CF Meet Calling service. Build context: the REPOSITORY ROOT (the service depends on
-# the shared packages/service-auth and packages/object-storage crates):
+# the shared packages/service-auth, packages/object-storage and packages/webhooks crates):
 #
 #   docker build -f services/calling/Dockerfile -t cfmeet-calling .
 #
-# Only packages/service-auth, packages/object-storage and services/calling enter the
+# Only packages/service-auth, packages/object-storage, packages/webhooks and
+# services/calling enter the
 # build context (services/calling/Dockerfile.dockerignore); no other service's source is
 # copied.
 #
@@ -16,6 +17,7 @@ FROM rust:1-bookworm AS builder
 WORKDIR /src
 COPY packages/service-auth packages/service-auth
 COPY packages/object-storage packages/object-storage
+COPY packages/webhooks packages/webhooks
 COPY services/calling services/calling
 WORKDIR /src/services/calling
 RUN cargo build --release --locked -p calling-migration --bin calling-migration \

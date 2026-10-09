@@ -567,6 +567,20 @@ impl AppCallService {
                         .failover_in(txn, &call_now, &leg, attempt.as_ref())
                         .await?
                     {
+                        // Part G §66: participants learn the route changed (same Call).
+                        let mut data = serde_json::Map::new();
+                        data.insert("failover".into(), serde_json::json!(true));
+                        let correlation =
+                            system_cmd(&call_now).correlation_id().as_str().to_string();
+                        self.call_signal(
+                            txn,
+                            pending,
+                            SignalType::RouteChanged,
+                            &call_now,
+                            &correlation,
+                            data,
+                        )
+                        .await?;
                         after.dispatch = true;
                         return Ok(EventDisposition::Applied);
                     }

@@ -52,6 +52,7 @@ pub struct CallingRuntime {
     pub artifacts: Arc<dyn cf_object_storage::ObjectStore>,
     /// Application (RTC) call media capture (Part F; default: unavailable).
     pub capture: Arc<dyn crate::calls::app::enterprise::CallMediaCapture>,
+    pub webhooks: crate::webhooks::WebhookSettings,
 }
 
 #[derive(Clone)]
@@ -80,6 +81,7 @@ pub struct AppState {
     pub contact_delegation: Option<Arc<cf_service_auth::ContactDelegationSigner>>,
     /// Enterprise calling configuration (Part F).
     pub enterprise: Arc<EnterpriseService>,
+    pub webhooks: Arc<crate::webhooks::WebhookService>,
 }
 
 impl AppState {
@@ -106,6 +108,11 @@ impl AppState {
             PresenceWindow::default(),
         ));
         let media_gateway = runtime.media_gateway.clone();
+        let webhooks = Arc::new(crate::webhooks::WebhookService::new(
+            db.clone(),
+            clock.clone(),
+            runtime.webhooks.clone(),
+        ));
         let enterprise = Arc::new(
             EnterpriseService::new(db.clone(), clock.clone(), runtime.enterprise_flags)
                 .with_artifacts(runtime.artifacts.clone()),
@@ -150,6 +157,7 @@ impl AppState {
             privacy_relay: runtime.privacy_relay,
             contact_delegation: runtime.contact_delegation,
             enterprise,
+            webhooks,
             clock,
             db,
         }

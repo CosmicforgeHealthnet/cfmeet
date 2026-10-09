@@ -182,7 +182,7 @@ jobs:
           ./target/debug/privacy-relay-migration reset
           ./target/debug/privacy-relay-migration up
           q() { psql -h 127.0.0.1 -U postgres -d privacy_relay_migration_smoke -tAc "$1"; }
-          test "$(q "SELECT count(*) FROM privacy_relay_seaql_migrations")" = "11"
+          test "$(q "SELECT count(*) FROM privacy_relay_seaql_migrations")" = "12"
           test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'privacy_relay_seaql_migrations'")" = "22"
           # Contact-shaped columns exist only where they belong: the vault's ciphertext and
           # fingerprints, and CF Meet's own PUBLIC relay numbers in the relay inventory.

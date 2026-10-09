@@ -40,6 +40,7 @@ pub struct SweepReport {
     pub relay_assignments_expired: usize,
     pub relay_cooldowns_completed: usize,
     pub relay_drains_completed: usize,
+    pub events_published: usize,
 }
 
 #[derive(Debug, sea_orm::FromQueryResult)]
@@ -254,6 +255,8 @@ impl RelayService {
             relay_assignments_expired: self.expire_relay_assignments(100).await?,
             relay_cooldowns_completed: self.complete_relay_cooldowns(100).await?,
             relay_drains_completed: self.complete_relay_drains(100).await?,
+            // Durable event publication (never gated by a flag).
+            events_published: self.publish_outbox(200).await?,
         })
     }
 

@@ -1,0 +1,6 @@
+{
+  "url": "https://10.0.0.5/hook",
+  "eventTypes": [
+    "call.ended"
+  ]
+}

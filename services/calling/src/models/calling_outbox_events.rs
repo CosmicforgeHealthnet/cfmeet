@@ -22,6 +22,8 @@ pub struct Model {
     pub attempt_count: i32,
     pub next_attempt_at: DateTimeUtc,
     pub published_at: Option<DateTimeUtc>,
+    pub lease_until: Option<DateTimeUtc>,
+    pub last_error_code: Option<String>,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

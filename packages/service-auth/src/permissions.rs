@@ -111,6 +111,11 @@ pub enum InternalPermission {
     /// (Part F §105–§110).
     #[serde(rename = "telephony-capture.deliver")]
     CallsTelephonyCaptureDeliver,
+    /// Privacy Relay -> Calling: publish a committed Privacy Relay domain event (the
+    /// platform envelope from its transactional outbox) for normalized customer webhooks
+    /// (Part G §67 / §68). Calling projects it; nothing is forwarded verbatim.
+    #[serde(rename = "platform-event.publish")]
+    PlatformEventPublish,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -319,6 +324,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: true,
         description: "Deliver an edge media capture (voicemail / recording audio with integrity metadata) or report its failure",
     },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformEventPublish,
+        name: "platform-event.publish",
+        receiver: services::CALLING,
+        grantable_to: &[services::PRIVACY_RELAY],
+        sensitive: false,
+        description: "Publish a committed Privacy Relay domain event (platform envelope) for normalized customer webhooks",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -350,6 +363,7 @@ impl InternalPermission {
         InternalPermission::TelephonyLegMedia,
         InternalPermission::CallsTelephonyEnterpriseOffer,
         InternalPermission::CallsTelephonyCaptureDeliver,
+        InternalPermission::PlatformEventPublish,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {

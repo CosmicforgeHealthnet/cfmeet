@@ -3,6 +3,7 @@
 *
 !packages/service-auth
 !packages/object-storage
+!packages/webhooks
 !services/calling
 
 # Never send build output, local configuration or key material.

@@ -114,6 +114,14 @@ const ENTERPRISE_TABLES: &[&str] = &[
     "call_recordings",
 ];
 
+/// Part G §68: customer webhooks (Calling-owned, ADR 0028).
+const WEBHOOK_TABLES: &[&str] = &[
+    "webhook_deliveries",
+    "webhook_delivery_attempts",
+    "webhook_events",
+    "webhook_subscriptions",
+];
+
 /// Derived from the migrator itself (never a brittle hand-maintained count).
 fn migrations() -> usize {
     <calling_migration::Migrator as MigratorTrait>::migrations().len()
@@ -133,6 +141,7 @@ async fn migrations_apply_roll_back_and_reapply_on_a_clean_database() {
         .iter()
         .chain(CALL_TABLES)
         .chain(ENTERPRISE_TABLES)
+        .chain(WEBHOOK_TABLES)
         .map(|s| s.to_string())
         .collect();
     expected.push(MIGRATION_TABLE.to_string());
@@ -644,7 +653,7 @@ async fn call_domain_columns_hold_no_contact_secret_or_provider_data() {
     let ordinal_types = strings(
         &db.conn,
         "SELECT data_type::text FROM information_schema.columns \
-         WHERE column_name IN ('interval_number', 'attempt_number')",
+         WHERE column_name IN ('interval_number', 'attempt_number') AND table_name LIKE 'call\\_%'",
     )
     .await;
     assert_eq!(ordinal_types, ["integer", "integer"]);
@@ -711,6 +720,7 @@ async fn no_privacy_relay_telephony_or_meeting_service_tables_exist() {
         || t == "calling_incidents"
         || t.starts_with("enterprise_")
         || t.starts_with("voicemail_")
+        || t.starts_with("webhook_")
         || t == MIGRATION_TABLE));
     // No second Call authority (Part F, ADR 0018).
     for duplicate in [

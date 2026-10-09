@@ -246,6 +246,23 @@ async fn main() -> anyhow::Result<()> {
         "application call-audio capture configured"
     );
 
+    // Customer webhooks (Part G §68): the signing-secret sealing key comes from the secret
+    // manager; without it the webhook API answers CAPABILITY_UNAVAILABLE (fail closed).
+    let webhook_settings = match calling::webhooks::WebhookSettings::from_lookup(
+        &lookup,
+        service_auth.signer().runtime_environment().as_str() == "local",
+    ) {
+        Ok(settings) => settings,
+        Err(err) => {
+            tracing::error!(error = %err, "webhook configuration error");
+            std::process::exit(2);
+        }
+    };
+    tracing::info!(
+        webhooks_available = webhook_settings.secret_box.is_some(),
+        "customer webhooks configured"
+    );
+
     let clock: SharedClock = Arc::new(SystemClock);
     let state = AppState::new(
         db,
@@ -269,6 +286,7 @@ async fn main() -> anyhow::Result<()> {
             enterprise_flags,
             artifacts,
             capture,
+            webhooks: webhook_settings,
         },
     );
 
@@ -276,6 +294,23 @@ async fn main() -> anyhow::Result<()> {
     // SKIP LOCKED leases make the sweeps multi-instance safe).
     let workers = (*state.app).clone();
     tokio::spawn(workers.run_workers(Duration::from_secs(1), Duration::from_secs(2)));
+
+    // Durable event publication and customer webhook delivery (SKIP LOCKED + leases:
+    // multi-instance safe; never blocked by a kill switch).
+    let webhooks = (*state.webhooks).clone();
+    tokio::spawn(async move {
+        let transport = calling::webhooks::worker::LocalWebhookTransport::new(webhooks.clone());
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            interval.tick().await;
+            if let Err(error) = webhooks.publish_outbox_once(&transport, 200).await {
+                tracing::warn!(%error, "outbox publication pass failed; retried");
+            }
+            if let Err(error) = webhooks.deliver_due_once(50).await {
+                tracing::warn!(%error, "webhook delivery pass failed; retried");
+            }
+        }
+    });
 
     let pruner = state.rate_limiter.clone();
     tokio::spawn(async move {

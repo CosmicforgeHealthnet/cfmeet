@@ -57,6 +57,9 @@ pub enum SignalType {
     /// Part F: a mailbox took the Call; the caller is now leaving a message (data:
     /// maxSeconds). Never the mailbox owner or a message id.
     VoicemailStarted,
+    /// The Call's public route changed (a failover to another interconnect on the SAME
+    /// Call); no provider, route or number detail is carried.
+    RouteChanged,
 }
 
 impl SignalType {
@@ -87,6 +90,7 @@ impl SignalType {
         SignalType::RecordingStarted,
         SignalType::RecordingStopped,
         SignalType::VoicemailStarted,
+        SignalType::RouteChanged,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -117,6 +121,7 @@ impl SignalType {
             SignalType::RecordingStarted => "call.recording_started",
             SignalType::RecordingStopped => "call.recording_stopped",
             SignalType::VoicemailStarted => "call.voicemail_started",
+            SignalType::RouteChanged => "call.route_changed",
         }
     }
 }

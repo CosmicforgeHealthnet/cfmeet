@@ -57,7 +57,8 @@ async fn up_down_up_creates_exactly_the_privacy_relay_tables() {
             "SELECT count(*) FROM privacy_relay_seaql_migrations"
         )
         .await,
-        11
+        // Part G §67 adds the outbox publication state (000012).
+        12
     );
     Migrator::down(&db.conn, None).await.unwrap();
     assert_eq!(tables(&db.conn).await, ["privacy_relay_seaql_migrations"]);

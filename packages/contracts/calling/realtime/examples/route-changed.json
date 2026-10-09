@@ -1,0 +1,20 @@
+{
+  "schema": "cfmeet.calling.realtime-signal",
+  "schemaVersion": 1,
+  "eventId": "sig_00000000000000000000000000034401",
+  "type": "call.route_changed",
+  "callId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e6f7",
+  "callKind": "VOICE",
+  "callState": "DIALING",
+  "callVersion": 5,
+  "sequence": 12,
+  "issuedAt": "2026-10-07T09:00:00.130Z",
+  "correlationId": "corr_33333333333333333333333333333333",
+  "data": {
+    "failover": true
+  },
+  "target": {
+    "endpointId": "f6f6f6f6-0707-4818-9929-3a3a3a3a3a3a",
+    "principalId": "66666666-7777-4888-9999-aaaaaaaaaaaa"
+  }
+}
