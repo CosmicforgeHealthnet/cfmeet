@@ -23,6 +23,7 @@ Commands:
 """
 
 import asyncio
+import math
 import base64
 import json
 import logging
@@ -113,11 +114,21 @@ class Client:
             opts = rtc.TrackPublishOptions()
             opts.source = rtc.TrackSource.SOURCE_MICROPHONE
 
-            async def feed():
+            # A 440 Hz tone (one second = 100 frames of 10 ms, an exact number of
+            # cycles), so a capture of this microphone is verifiably not silence.
+            tone = []
+            for f in range(100):
                 frame = rtc.AudioFrame.create(48000, 1, 480)
+                for i in range(480):
+                    frame.data[i] = int(6000 * math.sin(2 * math.pi * 440 * (f * 480 + i) / 48000))
+                tone.append(frame)
+
+            async def feed():
+                n = 0
                 while True:
-                    await source.capture_frame(frame)
-                    await asyncio.sleep(0.01)
+                    await source.capture_frame(tone[n % 100])
+                    n += 1
+                    await asyncio.sleep(0.005)
         else:
             source = rtc.VideoSource(64, 64)
             track = rtc.LocalVideoTrack.create_video_track("cert-cam", source)

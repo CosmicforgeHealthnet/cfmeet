@@ -489,6 +489,19 @@ async fn no_answer_records_a_message_on_the_same_call() {
     assert_eq!(started[0].capture_id, message);
     assert_eq!(started[0].call_id, call);
     assert_eq!(started[0].max_duration_seconds, 120);
+    // The authorized media scope: exactly the caller's own live sessions.
+    let caller_sessions = strings(
+        e.h().conn(),
+        &format!(
+            "SELECT s.media_identity FROM call_sessions s JOIN call_participants p \
+               ON p.id = s.participant_id WHERE s.call_id = '{call}' \
+                AND p.principal_id = '{}' AND s.ended_at IS NULL ORDER BY s.created_at, s.id",
+            caller.principal.id()
+        ),
+    )
+    .await;
+    assert!(!caller_sessions.is_empty());
+    assert_eq!(started[0].sources, caller_sessions);
     // Media access before READY is refused.
     let r = vm
         .manage(

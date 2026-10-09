@@ -12,7 +12,14 @@
 //!   started with `infra/livekit/livekit.calling-cert.yaml`;
 //! * `CALLING_RTC_CERT_PYTHON` — a Python with the `livekit` RTC SDK;
 //! * `CALLING_RTC_CERT_WEBHOOK_PORT` (default 18089) — where LiveKit delivers webhooks;
-//! * `CALLING_RTC_CERT_REQUIRED=1` turns a missing configuration into a failure (CI).
+//! * `CALLING_RTC_CERT_REQUIRED=1` turns a missing configuration into a failure (CI);
+//! * application capture through REAL LiveKit Egress (§60 RTC voicemail, §61 RTC call
+//!   recording): `CALLING_RTC_CERT_EGRESS_S3_ENDPOINT`, `…_S3_BUCKET`, `…_S3_ACCESS_KEY`,
+//!   `…_S3_SECRET_KEY` (the private test bucket the Egress worker started with
+//!   `infra/livekit/egress/egress.calling-cert.yaml` uploads to; LiveKit started with
+//!   `infra/livekit/egress/livekit.calling-egress-cert.yaml`), `ffprobe` / `ffmpeg` on the
+//!   PATH to verify the captured audio; `CALLING_RTC_CERT_EGRESS_REQUIRED=1` makes them
+//!   mandatory.
 //!
 //! Without configuration the suite prints SKIPPED (never a silent pass).
 
@@ -57,6 +64,8 @@ struct CertConfig {
     port: u16,
     /// Per-run media-edge key (never known to LiveKit).
     edge_key: String,
+    /// The protected test bucket of the Egress capture scenarios.
+    egress: Option<cf_object_storage::S3Config>,
 }
 
 impl CertConfig {
@@ -86,6 +95,7 @@ fn config() -> Option<CertConfig> {
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(18089),
             edge_key: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
+            egress: egress_config(),
         }),
         _ => {
             assert!(
@@ -93,6 +103,37 @@ fn config() -> Option<CertConfig> {
                 "CALLING_RTC_CERT_REQUIRED=1 but the LiveKit certification configuration is incomplete"
             );
             eprintln!("SKIPPED: RTC certification (CALLING_RTC_CERT_* not configured)");
+            None
+        }
+    }
+}
+
+fn egress_config() -> Option<cf_object_storage::S3Config> {
+    let get = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    match (
+        get("CALLING_RTC_CERT_EGRESS_S3_ENDPOINT"),
+        get("CALLING_RTC_CERT_EGRESS_S3_BUCKET"),
+        get("CALLING_RTC_CERT_EGRESS_S3_ACCESS_KEY"),
+        get("CALLING_RTC_CERT_EGRESS_S3_SECRET_KEY"),
+    ) {
+        (Some(endpoint), Some(bucket), Some(access_key), Some(secret_key)) => {
+            Some(cf_object_storage::S3Config {
+                endpoint,
+                public_endpoint: None,
+                region: get("CALLING_RTC_CERT_EGRESS_S3_REGION")
+                    .unwrap_or_else(|| "us-east-1".to_string()),
+                bucket,
+                access_key,
+                secret_key,
+                path_style: true,
+                server_side_encryption: None,
+            })
+        }
+        _ => {
+            assert!(
+                std::env::var("CALLING_RTC_CERT_EGRESS_REQUIRED").as_deref() != Ok("1"),
+                "CALLING_RTC_CERT_EGRESS_REQUIRED=1 but the Egress capture configuration is incomplete"
+            );
             None
         }
     }
@@ -211,6 +252,8 @@ struct Cert {
     cfg: CertConfig,
     a: AppWorld,
     lk: Arc<LiveKitAdapter>,
+    /// The protected artifact store when the Egress capture scenarios run.
+    store: Option<Arc<cf_object_storage::S3ObjectStore>>,
 }
 
 impl Cert {
@@ -221,6 +264,28 @@ impl Cert {
         let mut runtime = test_runtime(Some(lk.clone()), bus.clone());
         // Every client media connection passes Calling's admission gateway.
         runtime.media_gateway = Some(Arc::new(LiveKitGateway::new(lk.clone())));
+        // Application capture: the REAL LiveKit Egress adapter over the protected bucket.
+        let store = match &cfg.egress {
+            Some(config) => {
+                let store = Arc::new(
+                    cf_object_storage::S3ObjectStore::new(config.clone())
+                        .expect("egress test bucket"),
+                );
+                store.ensure_bucket().await.expect("egress test bucket");
+                runtime.artifacts = store.clone();
+                runtime.capture =
+                    Arc::new(calling::media::livekit_egress::LiveKitEgressCapture::new(
+                        lk.clone(),
+                        store.clone(),
+                        &calling::media::livekit_egress::CaptureSettings {
+                            egress: true,
+                            staging_prefix: "capture-staging".to_string(),
+                        },
+                    ));
+                Some(store)
+            }
+            None => None,
+        };
         let h = Harness::with_runtime(
             db,
             TEST_PEPPER,
@@ -243,6 +308,7 @@ impl Cert {
             cfg,
             a: AppWorld { w },
             lk,
+            store,
         })
     }
 
@@ -333,6 +399,12 @@ async fn real_livekit_certification() {
     enterprise_ring_groups(&cert).await;
     enterprise_queue(&cert).await;
     enterprise_transfer(&cert).await;
+    if cert.store.is_some() {
+        rtc_voicemail_through_egress(&cert).await;
+        rtc_recording_through_egress(&cert).await;
+    } else {
+        eprintln!("SKIPPED: RTC Egress capture (CALLING_RTC_CERT_EGRESS_* not configured)");
+    }
     video_call_and_removal(&cert).await;
     for round in 0..3 {
         refreshed_privileged_token_cannot_reenter(&cert, round).await;
@@ -2009,4 +2081,762 @@ async fn unknown_participant_quarantine(cert: &Cert) {
     let (_, version) = cert.a.state(call).await;
     cert.a.command(call, "end", version).await;
     client.quit().await;
+}
+
+// ---------------------------------------------------------------------------
+// Part F §60 / §61: application (RTC) capture through REAL LiveKit Egress
+// ---------------------------------------------------------------------------
+
+async fn enterprise_member(
+    cert: &Cert,
+    reference: &str,
+) -> calling::platform::principals::ResolvedPrincipal {
+    let h = cert.a.h();
+    let (view, _) = h
+        .platform
+        .register_principal(
+            cert.a.w.consumer.env(cert.a.w.kind).id,
+            calling::platform::principals::NewPrincipal::External {
+                kind: calling::domain::PrincipalKind::EnterpriseMember,
+                external_reference: reference.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    h.state
+        .principals
+        .resolve(
+            &cert.a.w.ctx,
+            &calling::platform::principals::PrincipalReference::Id(view.id),
+        )
+        .await
+        .unwrap()
+}
+
+async fn scoped(
+    cert: &Cert,
+    scopes: &[&'static str],
+) -> calling::platform::credentials::IssuedCredential {
+    common::enterprise::credential(cert.a.h(), &cert.a.w.consumer, cert.a.w.kind, scopes).await
+}
+
+async fn send(
+    cert: &Cert,
+    token: &calling::platform::credentials::IssuedCredential,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+) -> common::TestResponse {
+    cert.a
+        .h()
+        .request(method, path, Some(token.secret.expose_once()), body)
+        .await
+}
+
+async fn tick(cert: &Cert) {
+    cert.a.h().state.app.expire_due(100).await.unwrap();
+}
+
+async fn one(cert: &Cert, sql: String) -> String {
+    common::enterprise::strings(cert.a.h().conn(), &sql)
+        .await
+        .pop()
+        .unwrap_or_default()
+}
+
+/// The captured artifact is real audio: an Ogg / Opus file with ONLY audio streams and a
+/// signal (the clients publish a 440 Hz tone), verified by ffprobe / ffmpeg.
+fn verify_captured_audio(bytes: &[u8], what: &str) {
+    assert!(bytes.starts_with(b"OggS"), "{what}: an Ogg container");
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("rtc-captures");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join(format!("{what}-{}.ogg", Uuid::new_v4().simple()));
+    std::fs::write(&file, bytes).unwrap();
+    let probe = std::process::Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_type,codec_name",
+        ])
+        .args(["-show_entries", "format=duration", "-of", "default=nw=1"])
+        .arg(&file)
+        .output()
+        .expect("ffprobe on the PATH");
+    let out = String::from_utf8_lossy(&probe.stdout).to_string();
+    assert!(out.contains("codec_name=opus"), "{what}: {out}");
+    assert!(out.contains("codec_type=audio"), "{what}: {out}");
+    assert!(
+        !out.contains("codec_type=video"),
+        "{what}: audio only: {out}"
+    );
+    let duration: f64 = out
+        .lines()
+        .find_map(|l| l.strip_prefix("duration="))
+        .and_then(|d| d.parse().ok())
+        .unwrap_or(0.0);
+    assert!(duration >= 2.0, "{what}: {duration}s captured");
+    let vol = std::process::Command::new("ffmpeg")
+        .args(["-nostats", "-i"])
+        .arg(&file)
+        .args(["-af", "volumedetect", "-f", "null", "-"])
+        .output()
+        .expect("ffmpeg on the PATH");
+    let err = String::from_utf8_lossy(&vol.stderr);
+    let max: f64 = err
+        .lines()
+        .find_map(|l| l.split("max_volume:").nth(1))
+        .and_then(|v| v.trim().trim_end_matches("dB").trim().parse().ok())
+        .expect("volumedetect output");
+    assert!(
+        max > -40.0,
+        "{what}: captured audio is not silence ({max} dB)"
+    );
+    println!("{what}: opus/ogg, audio only, {duration:.1}s, max {max} dB");
+}
+
+/// §60 RTC voicemail: an enterprise application caller dials an extension, nobody
+/// answers, the Call routes to the member's mailbox, LiveKit Egress captures ONLY the
+/// caller's real WebRTC microphone track, the protected artifact is finalized through
+/// Calling's storage path, the message is READY, linked to the Call and the caller's /
+/// owner's history; retrieval is authorized, mark-read and deletion work.
+async fn rtc_voicemail_through_egress(cert: &Cert) {
+    use calling::{enterprise::policy::AdminCapability, platform::scopes::names};
+    let h = cert.a.h();
+    let store = cert.store.clone().unwrap();
+    h.state
+        .enterprise
+        .operator_set_capabilities(
+            cert.a.w.scope(),
+            vec![
+                AdminCapability::ManageRouting,
+                AdminCapability::ManageVoicemail,
+                AdminCapability::ManageRecording,
+            ],
+        )
+        .await
+        .unwrap();
+    let admin = scoped(
+        cert,
+        &[
+            names::ENTERPRISE_CONFIG_READ,
+            names::ENTERPRISE_CONFIG_WRITE,
+        ],
+    )
+    .await;
+    let vm_admin = scoped(
+        cert,
+        &[
+            names::ENTERPRISE_VOICEMAIL_READ,
+            names::ENTERPRISE_VOICEMAIL_MANAGE,
+        ],
+    )
+    .await;
+    let vm_reader = scoped(cert, &[names::ENTERPRISE_VOICEMAIL_READ]).await;
+    let caller_token = scoped(
+        cert,
+        &[
+            names::CALLS_READ,
+            names::CALLS_WRITE,
+            names::ENTERPRISE_CALLS_USE,
+        ],
+    )
+    .await;
+    let carol = enterprise_member(cert, "ent-vm-carol").await;
+    let dave = enterprise_member(cert, "ent-vm-dave").await;
+    let r = send(
+        cert,
+        &vm_admin,
+        Method::POST,
+        "/v1/enterprise/voicemail/mailboxes",
+        Some(json!({ "owner": { "type": "PRINCIPAL", "id": dave.id() },
+                     "displayLabel": "Dave", "maxMessageSeconds": 60, "retentionDays": 30 })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let mailbox = r.json["mailboxId"].as_str().unwrap().to_string();
+    let r = send(
+        cert,
+        &admin,
+        Method::POST,
+        "/v1/enterprise/forwarding-rules",
+        Some(json!({ "principalId": dave.id(), "condition": "NO_ANSWER",
+                     "destination": { "type": "VOICEMAIL", "id": mailbox } })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let r = send(
+        cert,
+        &admin,
+        Method::POST,
+        "/v1/enterprise/extensions",
+        Some(json!({ "extensionNumber": "1301", "displayLabel": "Dave",
+                     "destination": { "type": "ENTERPRISE_MEMBER", "id": dave.id() } })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let carol_desk = cert.a.device(&carol, "ent-vm-carol-desk").await;
+    let dave_desk = cert.a.device(&dave, "ent-vm-dave-desk").await;
+    let r = h
+        .request_with(
+            Method::POST,
+            "/v1/calls",
+            Some(caller_token.secret.expose_once()),
+            Some(json!({ "kind": "VOICE", "initiatorPrincipalId": carol.id(),
+                         "initiatorEndpointId": carol_desk.endpoint, "targetExtension": "1301" })),
+            &[("idempotency-key", "ent-vm-cert-1")],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let call: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+    assert!(cert
+        .a
+        .invitation_for(call, dave_desk.endpoint)
+        .await
+        .is_some());
+    // The caller is in the Call's media with a real microphone (a 440 Hz tone).
+    let s1 = cert.a.session_on(call, carol_desk.endpoint).await.unwrap();
+    let c1 = cert.credential(call, s1).await;
+    let mut a = RtcClient::spawn(&cert.cfg).await;
+    assert_eq!(
+        a.connect(c1["url"].as_str().unwrap(), c1["token"].as_str().unwrap())
+            .await["ok"],
+        true
+    );
+    assert_eq!(
+        a.cmd(json!({ "cmd": "wait_permission", "publish": true, "timeout": 10 }))
+            .await["ok"],
+        true
+    );
+    assert_eq!(
+        a.cmd(json!({ "cmd": "publish", "kind": "audio" })).await["ok"],
+        true
+    );
+    // Nobody answers: the offer expires and the router reaches the mailbox.
+    h.clock.advance(chrono::Duration::seconds(46));
+    tick(cert).await;
+    let message: Uuid = one(
+        cert,
+        format!("SELECT id::text FROM voicemail_messages WHERE call_id = '{call}'"),
+    )
+    .await
+    .parse()
+    .expect("the Call reached voicemail");
+    assert_eq!(
+        one(cert, format!("SELECT state || ':' || capture_source FROM voicemail_messages WHERE id = '{message}'")).await,
+        "RECORDING:APPLICATION"
+    );
+    assert_eq!(cert.state(call).await, CallState::Ringing);
+    // The caller leaves a message (real audio through the real Egress), then hangs up.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let (_, version) = cert.a.state(call).await;
+    let r = cert.a.command(call, "cancel", version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    eventually(90, "voicemail READY through Egress", || async {
+        tick(cert).await;
+        one(
+            cert,
+            format!("SELECT state FROM voicemail_messages WHERE id = '{message}'"),
+        )
+        .await
+            == "READY"
+    })
+    .await;
+    let row = one(
+        cert,
+        format!(
+            "SELECT content_type || '|' || size_bytes || '|' || duration_ms || '|' || sha256 || '|' \
+                    || object_key FROM voicemail_messages WHERE id = '{message}'"
+        ),
+    )
+    .await;
+    let parts: Vec<&str> = row.split('|').collect();
+    assert_eq!(parts[0], "audio/ogg", "{row}");
+    assert!(parts[2].parse::<i64>().unwrap() >= 3_000, "{row}");
+    let (sha, key) = (parts[3].to_string(), parts[4].to_string());
+    // The canonical protected object exists; the Egress staging object was released.
+    use cf_object_storage::ObjectStore;
+    assert!(store.head(&key).await.unwrap().is_some());
+    let staging = format!("capture-staging/{}.ogg", message.simple());
+    assert!(
+        store.head(&staging).await.unwrap().is_none(),
+        "staging released"
+    );
+    // History: the caller sees the voicemail outcome; only the mailbox owner the link.
+    let r = cert
+        .a
+        .get(&format!("/v1/calls?principalId={}&limit=5", carol.id()))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let entry = r.json["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["callId"] == call.to_string())
+        .cloned()
+        .expect("caller history");
+    assert_eq!(entry["enterprise"]["outcome"], "VOICEMAIL", "{entry}");
+    assert!(entry["voicemail"].is_null(), "{entry}");
+    let r = cert
+        .a
+        .get(&format!("/v1/calls?principalId={}&limit=5", dave.id()))
+        .await;
+    let entry = r.json["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["callId"] == call.to_string())
+        .cloned()
+        .expect("owner history");
+    assert_eq!(
+        entry["voicemail"]["messageId"],
+        message.to_string(),
+        "{entry}"
+    );
+    assert_eq!(entry["participation"]["missed"], true, "{entry}");
+    // Authorized retrieval by the owner: the audio is the caller's real tone.
+    let path = format!("/v1/enterprise/voicemail/messages/{message}");
+    let r = send(
+        cert,
+        &vm_reader,
+        Method::POST,
+        &format!("{path}/media-access"),
+        Some(json!({ "principalId": dave.id() })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let url = r.json["url"].as_str().unwrap();
+    // A short-lived signed read of the canonical protected object, never the staging one.
+    assert!(
+        !url.contains("capture-staging") && url.contains(".ogg"),
+        "{url}"
+    );
+    let bytes = reqwest::get(url)
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap()
+        .to_vec();
+    assert_eq!(cf_object_storage::sha256_hex(&bytes), sha);
+    verify_captured_audio(&bytes, "rtc-voicemail");
+    // Not the owner / another tenant: 404.
+    let r = send(
+        cert,
+        &vm_reader,
+        Method::POST,
+        &format!("{path}/media-access"),
+        Some(json!({ "principalId": carol.id() })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    let other = h
+        .consumer(
+            "egress-cert-other",
+            calling::domain::TenantClassification::External,
+        )
+        .await;
+    common::enterprise::allow_enterprise_scopes(h, &other).await;
+    let other = common::enterprise::credential(
+        h,
+        &other,
+        cert.a.w.kind,
+        &[
+            names::ENTERPRISE_VOICEMAIL_READ,
+            names::ENTERPRISE_VOICEMAIL_MANAGE,
+        ],
+    )
+    .await;
+    for (method, p, body) in [
+        (Method::GET, path.clone(), None),
+        (
+            Method::POST,
+            format!("{path}/media-access"),
+            Some(json!({})),
+        ),
+    ] {
+        let r = send(cert, &other, method, &p, body).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{p}: {}", r.text);
+    }
+    // Mark READ, then delete: the protected object is removed.
+    let version = send(cert, &vm_admin, Method::GET, &path, None).await.json["version"]
+        .as_i64()
+        .unwrap();
+    let r = send(
+        cert,
+        &vm_admin,
+        Method::PUT,
+        &format!("{path}/read-state"),
+        Some(json!({ "expectedVersion": version, "readState": "READ", "principalId": dave.id() })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["readState"], "READ");
+    let version = r.json["version"].as_i64().unwrap();
+    let r = send(
+        cert,
+        &vm_admin,
+        Method::DELETE,
+        &format!("{path}?expectedVersion={version}&principalId={}", dave.id()),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    tick(cert).await;
+    assert_eq!(
+        one(
+            cert,
+            format!("SELECT state FROM voicemail_messages WHERE id = '{message}'")
+        )
+        .await,
+        "DELETED"
+    );
+    assert!(
+        store.head(&key).await.unwrap().is_none(),
+        "artifact deleted"
+    );
+    println!("RTC voicemail certified: real WebRTC caller audio -> LiveKit Egress (caller track only) -> protected store -> READY -> history -> authorized retrieval -> READ -> deleted");
+    a.quit().await;
+}
+
+/// §61 RTC call recording: a CONNECTED enterprise Call with two real WebRTC participants;
+/// recording is denied without consent, starts only once notice / consent evidence
+/// exists, LiveKit Egress captures the mixed call audio (audio only), the artifact is
+/// READY, retrievable by a participant (audited), 404 across tenants; a recording active
+/// at Call end stops and finalizes exactly once; retention deletion removes the object.
+async fn rtc_recording_through_egress(cert: &Cert) {
+    use calling::platform::scopes::names;
+    let h = cert.a.h();
+    let store = cert.store.clone().unwrap();
+    let admin = scoped(
+        cert,
+        &[
+            names::ENTERPRISE_CONFIG_READ,
+            names::ENTERPRISE_CONFIG_WRITE,
+        ],
+    )
+    .await;
+    let rec_admin = scoped(
+        cert,
+        &[
+            names::ENTERPRISE_CONFIG_READ,
+            names::ENTERPRISE_RECORDING_READ,
+            names::ENTERPRISE_RECORDING_MANAGE,
+        ],
+    )
+    .await;
+    let rec_reader = scoped(cert, &[names::ENTERPRISE_RECORDING_READ]).await;
+    let caller_token = scoped(
+        cert,
+        &[
+            names::CALLS_READ,
+            names::CALLS_WRITE,
+            names::ENTERPRISE_CALLS_USE,
+        ],
+    )
+    .await;
+    let r = send(cert, &rec_admin, Method::POST, "/v1/enterprise/recording-policies",
+        Some(json!({ "name": "RTC certification", "mode": "MANUAL_ALLOWED", "noticeRequired": true,
+                     "consentParticipants": "ALL_PARTICIPANTS", "jurisdictionRef": "NG-NDPA-2023/v2",
+                     "retentionDays": 30, "maxRecordingSeconds": 600, "isDefault": true }))).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let erin = enterprise_member(cert, "ent-rec-erin").await;
+    let frank = enterprise_member(cert, "ent-rec-frank").await;
+    let r = send(
+        cert,
+        &admin,
+        Method::POST,
+        "/v1/enterprise/extensions",
+        Some(json!({ "extensionNumber": "1311", "displayLabel": "Frank",
+                     "destination": { "type": "ENTERPRISE_MEMBER", "id": frank.id() } })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let erin_desk = cert.a.device(&erin, "ent-rec-erin-desk").await;
+    let frank_desk = cert.a.device(&frank, "ent-rec-frank-desk").await;
+    let r = h
+        .request_with(
+            Method::POST,
+            "/v1/calls",
+            Some(caller_token.secret.expose_once()),
+            Some(json!({ "kind": "VOICE", "initiatorPrincipalId": erin.id(),
+                         "initiatorEndpointId": erin_desk.endpoint, "targetExtension": "1311" })),
+            &[("idempotency-key", "ent-rec-cert-1")],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let call: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+    let invitation = cert
+        .a
+        .invitation_for(call, frank_desk.endpoint)
+        .await
+        .unwrap();
+    let (_, version) = cert.a.state(call).await;
+    let r = cert.a.accept(call, invitation, &frank_desk, version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let s1 = cert.a.session_on(call, erin_desk.endpoint).await.unwrap();
+    let s2 = cert.a.session_on(call, frank_desk.endpoint).await.unwrap();
+    let (c1, c2) = (
+        cert.credential(call, s1).await,
+        cert.credential(call, s2).await,
+    );
+    let mut a = RtcClient::spawn(&cert.cfg).await;
+    let mut b = RtcClient::spawn(&cert.cfg).await;
+    for (client, c) in [(&mut a, &c1), (&mut b, &c2)] {
+        assert_eq!(
+            client
+                .connect(c["url"].as_str().unwrap(), c["token"].as_str().unwrap())
+                .await["ok"],
+            true
+        );
+    }
+    eventually(15, "recording call CONNECTED", || async {
+        cert.state(call).await == CallState::Connected
+    })
+    .await;
+    for client in [&mut a, &mut b] {
+        assert_eq!(
+            client
+                .cmd(json!({ "cmd": "wait_permission", "publish": true, "timeout": 10 }))
+                .await["ok"],
+            true
+        );
+        assert_eq!(
+            client
+                .cmd(json!({ "cmd": "publish", "kind": "audio" }))
+                .await["ok"],
+            true
+        );
+    }
+    // The Call works without any recording.
+    for client in [&mut a, &mut b] {
+        let heard = client
+            .cmd(json!({ "cmd": "wait_subscribed", "count": 1, "timeout": 15 }))
+            .await;
+        assert_eq!(heard["ok"], true, "{heard}");
+    }
+    let start = || async {
+        send(
+            cert,
+            &rec_admin,
+            Method::POST,
+            &format!("/v1/calls/{call}/recordings"),
+            Some(json!({ "principalId": erin.id() })),
+        )
+        .await
+    };
+    // Without consent: DENIED, nothing captured.
+    let r = start().await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    assert_eq!(
+        one(
+            cert,
+            format!("SELECT count(*)::text FROM call_recordings WHERE call_id = '{call}'")
+        )
+        .await,
+        "0"
+    );
+    assert_eq!(
+        one(
+            cert,
+            format!(
+                "SELECT decision || ':' || reason FROM call_recording_authorizations \
+                            WHERE call_id = '{call}' ORDER BY seq DESC LIMIT 1"
+            )
+        )
+        .await,
+        "DENIED:CONSENT_MISSING"
+    );
+    // Each participant consents through their own endpoint; recording starts.
+    for desk in [&erin_desk, &frank_desk] {
+        let r = send(
+            cert,
+            &caller_token,
+            Method::POST,
+            &format!("/v1/calls/{call}/recording-consent"),
+            Some(json!({ "endpointId": desk.endpoint, "decision": "GRANTED" })),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    }
+    let r = start().await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let recording: Uuid = r.json["recording"]["recordingId"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(one(cert, format!("SELECT state || ':' || capture_source FROM call_recordings WHERE id = '{recording}'")).await,
+               "RECORDING:APPLICATION");
+    let notice = one(
+        cert,
+        format!(
+            "SELECT notice_evidence::text FROM call_recording_authorizations \
+                                    WHERE call_id = '{call}' AND decision = 'ALLOWED'"
+        ),
+    )
+    .await;
+    assert!(notice.contains("true"), "notice evidence: {notice}");
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let r = send(
+        cert,
+        &rec_admin,
+        Method::POST,
+        &format!("/v1/calls/{call}/recordings/{recording}/stop"),
+        Some(json!({ "principalId": erin.id() })),
+    )
+    .await;
+    assert!(r.status.is_success(), "{}", r.text);
+    eventually(90, "recording READY through Egress", || async {
+        tick(cert).await;
+        one(
+            cert,
+            format!("SELECT state FROM call_recordings WHERE id = '{recording}'"),
+        )
+        .await
+            == "READY"
+    })
+    .await;
+    let row = one(
+        cert,
+        format!(
+            "SELECT content_type || '|' || sha256 || '|' || object_key \
+                                 FROM call_recordings WHERE id = '{recording}'"
+        ),
+    )
+    .await;
+    let parts: Vec<&str> = row.split('|').collect();
+    assert_eq!(parts[0], "audio/ogg", "{row}");
+    let (sha, key) = (parts[1].to_string(), parts[2].to_string());
+    use cf_object_storage::ObjectStore;
+    assert!(store
+        .head(&format!("capture-staging/{}.ogg", recording.simple()))
+        .await
+        .unwrap()
+        .is_none());
+    // A participant retrieves it (audited); the mixed audio is real.
+    let path = format!("/v1/enterprise/recordings/{recording}");
+    let r = send(
+        cert,
+        &rec_reader,
+        Method::POST,
+        &format!("{path}/media-access"),
+        Some(json!({ "principalId": frank.id() })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let bytes = reqwest::get(r.json["url"].as_str().unwrap())
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap()
+        .to_vec();
+    assert_eq!(cf_object_storage::sha256_hex(&bytes), sha);
+    verify_captured_audio(&bytes, "rtc-recording");
+    let other = h
+        .consumer(
+            "egress-cert-rec-other",
+            calling::domain::TenantClassification::External,
+        )
+        .await;
+    common::enterprise::allow_enterprise_scopes(h, &other).await;
+    let other = common::enterprise::credential(
+        h,
+        &other,
+        cert.a.w.kind,
+        &[
+            names::ENTERPRISE_RECORDING_READ,
+            names::ENTERPRISE_RECORDING_MANAGE,
+        ],
+    )
+    .await;
+    for (method, p, body) in [
+        (Method::GET, path.clone(), None),
+        (
+            Method::POST,
+            format!("{path}/media-access"),
+            Some(json!({})),
+        ),
+    ] {
+        let r = send(cert, &other, method, &p, body).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{p}: {}", r.text);
+    }
+    assert_eq!(
+        one(
+            cert,
+            format!(
+                "SELECT string_agg(operation || ':' || outcome, ',' ORDER BY seq) \
+                           FROM call_recording_access_audit WHERE recording_id = '{recording}' \
+                            AND operation = 'MEDIA_ACCESS'"
+            )
+        )
+        .await,
+        "MEDIA_ACCESS:GRANTED"
+    );
+    // A second recording still running when the Call ends: stopped and finalized once.
+    let r = start().await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let second: Uuid = r.json["recording"]["recordingId"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_ne!(second, recording);
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    let (_, version) = cert.a.state(call).await;
+    let r = cert.a.command(call, "end", version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    eventually(90, "recording active at Call end finalized", || async {
+        tick(cert).await;
+        one(
+            cert,
+            format!("SELECT state FROM call_recordings WHERE id = '{second}'"),
+        )
+        .await
+            == "READY"
+    })
+    .await;
+    tick(cert).await;
+    assert_eq!(
+        one(
+            cert,
+            format!("SELECT stop_reason FROM call_recordings WHERE id = '{second}'")
+        )
+        .await,
+        "CALL_ENDED"
+    );
+    for kind in ["RECORDING_STOPPED", "RECORDING_READY"] {
+        assert_eq!(
+            one(
+                cert,
+                format!(
+                    "SELECT count(*)::text FROM call_events WHERE call_id = '{call}' \
+                               AND event_type = '{kind}' AND payload::text LIKE '%{second}%'"
+                )
+            )
+            .await,
+            "1",
+            "{kind} once"
+        );
+    }
+    // Retention: once the retention period passes the object is deleted.
+    h.clock.advance(chrono::Duration::days(31));
+    tick(cert).await;
+    tick(cert).await;
+    assert_eq!(
+        one(
+            cert,
+            format!("SELECT state FROM call_recordings WHERE id = '{recording}'")
+        )
+        .await,
+        "DELETED"
+    );
+    assert!(
+        store.head(&key).await.unwrap().is_none(),
+        "retention removed the artifact"
+    );
+    println!("RTC recording certified: consent-gated, LiveKit Egress mixed audio (audio only) -> protected store -> READY -> audited participant retrieval -> stop-at-call-end once -> retention");
+    a.quit().await;
+    b.quit().await;
 }

@@ -49,6 +49,12 @@ async fn protected_objects_on_a_real_s3_compatible_server() {
     let meta = store.head(&key).await.unwrap().unwrap();
     assert_eq!(meta.size, bytes.len() as u64);
     assert_eq!(meta.content_type.as_deref(), Some("audio/wav"));
+    // A bounded server-side read: whole object, or refused beyond the bound.
+    assert_eq!(store.get(&key, 1024).await.unwrap(), Some(bytes.clone()));
+    assert!(matches!(
+        store.get(&key, bytes.len() - 1).await,
+        Err(cf_object_storage::StorageError::Integrity)
+    ));
 
     let read = store
         .signed_read(&key, Duration::from_secs(60), chrono::Utc::now())
@@ -78,4 +84,5 @@ async fn protected_objects_on_a_real_s3_compatible_server() {
     store.delete(&key).await.unwrap();
     store.delete(&key).await.unwrap();
     assert!(store.head(&key).await.unwrap().is_none());
+    assert_eq!(store.get(&key, 1024).await.unwrap(), None);
 }
