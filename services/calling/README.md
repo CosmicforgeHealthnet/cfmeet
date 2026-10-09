@@ -35,7 +35,7 @@ Provider room / dialog / carrier / request identifiers are never Call identities
 | **Part D §26–§30** Privacy Relay ingress (`/v1/privacy-relay/...`), `PRIVACY_RELAY_V1` protected calls and transfers (fail closed), `POST /internal/v1/privacy-relay/enforcement` | **Implemented** (ADR 0010; the business authority is `services/privacy-relay`) |
 | **Part E §37–§51** Routing Engine and route plans, public-network calls executed by `services/telephony` (ContactReference parties, durable command outbox, normalized events, bridges, spend reservations, failover) | **Implemented** (ADRs 0013–0017). **Real lawful telecom interconnect certification remains an external blocker (ADR 0016): no PSTN result is claimed** |
 | **Part F §52–§62** Enterprise calling and continuity on the ONE canonical Call | **Implemented** (ADRs 0018–0027; summary below) |
-| **Part G §63–§70** Durable event publication, customer webhooks, `call.route_changed`, usage facts and `GET /v1/usage`, tenant → application → credential limits, `GET /v1/limits`, limit notices | **Implemented** (ADR 0028; summary below) |
+| **Part G §63–§70** Durable event publication, customer webhooks, `call.route_changed`, usage facts and `GET /v1/usage`, tenant → application → service account → credential limits and the principal axis, `GET /v1/limits`, limit notices | **Implemented** (ADR 0028; summary below) |
 
 **Deferred (later sections / services):** push delivery through a push vendor (a
 transport-neutral push-ready payload is produced), a message-broker transport for
@@ -178,10 +178,12 @@ replay returns them to `PENDING`).
 
 ### Concurrent-call limit
 
-Creating a Call takes a transaction-scoped advisory lock per application (preceded by the
-tenant's lock when the tenant configures a ceiling) and counts non-terminal Calls against
-the effective per-credential limit and, when configured, the application-wide and
-tenant-wide limits. Terminal Calls stop counting.
+Creating a Call takes transaction-scoped advisory locks in one global order — tenant (when
+it configures a ceiling), application (always; it also serializes the application's
+credentials), service account and principal (each when configured) — and counts
+non-terminal Calls against the effective per-credential limit and every configured
+aggregate (tenant, application, service account) and the initiating principal's own
+ceiling. Terminal Calls stop counting.
 
 ### Read API
 
@@ -442,18 +444,29 @@ be opaque UUID handles (for the future Contact Vault).
 
 ## Limits
 
-Tenant-, application- and credential-level limits (requests per minute, concurrent
-communications, daily / monthly telecom spend in minor units of the tenant's billing
-currency) are set by operators only (`platform_admin limits set-tenant | set-application |
-set-credential`). The effective policy takes the most restrictive configured value
-(tenant → application → credential), otherwise the platform default; a configured tenant
-or application level is also an aggregate ceiling. Telecom spend defaults to zero and is
-always zero where live telecom is not allowed. The request-rate limit is enforced (shared
-PostgreSQL one-minute windows, per credential, application and tenant), the
-concurrent-communication limit when a Call is created (see *Concurrent-call limit*) and
-telecom spend when a public leg is reserved. `GET /v1/limits` shows every level and the
-binding one; `limit.warning` / `limit.exceeded` webhooks are deduplicated per window
-(ADR 0028).
+Limits (requests per minute, concurrent communications, daily / monthly telecom spend in
+minor units of the tenant's billing currency) are set by operators only
+(`platform_admin limits set-tenant | set-application | set-service-account |
+set-credential | set-principal`). Two axes (ADR 0028 §70):
+
+* **API-client chain** TENANT → APPLICATION → SERVICE_ACCOUNT → CREDENTIAL — the effective
+  per-credential value is the most restrictive configured one, otherwise the platform
+  default; every configured parent is also an aggregate ceiling (a service-account
+  ceiling across all of its credentials, …).
+* **PRINCIPAL** — an independent ceiling of a server-resolved principal, shared by every
+  credential, service account and device acting for it.
+
+An operation must satisfy every applicable ceiling (plus the environment's spend
+policy); the broadest exhausted level is reported. Telecom spend defaults to zero and is
+always zero where live telecom is not allowed. Enforcement: request rate in shared
+PostgreSQL one-minute windows (tenant, application, service account and credential per
+request; principal per Call created for that initiator); concurrent Calls at creation
+(advisory locks tenant → application → service account → principal); telecom spend when a
+public leg is reserved (cap rows locked tenant → application → service account →
+credential → principal → environment policy). `GET /v1/limits` shows every level and the
+binding one (`?principalId=` adds a principal of the caller's own scope, with
+`principals.read`); `limit.warning` / `limit.exceeded` webhooks are deduplicated per
+window and never carry an identifier.
 
 ## Configuration
 

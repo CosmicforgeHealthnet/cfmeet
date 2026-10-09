@@ -142,36 +142,104 @@ LISTEN/NOTIFY fan-out, with Calls and invitations as the source of truth.
 
 ### §70 Limits
 
-* **Precedence:** tenant → application → credential (`platform_tenant_limits` is new;
-  NULL means not configured). The most restrictive configured value wins; on a tie, the
-  more specific level is named. With no configured level, the platform default applies.
-  Each configured tenant or application level is **also** an aggregate ceiling across
-  everything beneath it. Telecom spend additionally obeys the environment's spend
-  policy, and is zero where live telecom is not allowed. Per-principal, service-account,
-  context and destination velocity remain spend-policy guards.
-* **Race safety:**
-  * **Request rate:** atomic upserts of shared one-minute counters, per credential,
-    application and tenant. The limiter fails closed (503).
-  * **Concurrent Calls:** creation takes the tenant's advisory lock (only when a tenant
-    ceiling is configured), then the application's, always in that order. The last slot
-    goes to exactly one creator.
-  * **Spend:** reservation row-locks the tenant cap, then the application cap, then the
-    credential cap, then the environment policy. Headroom is never shared by two
-    reservations.
+> **Amendment (closure, 2026-10-09).** The first Part G cut implemented
+> tenant → application → credential only and named the existing per-principal /
+> per-service-account *velocity* guards as the remaining levels. That was not
+> sufficient: velocity guards are risk controls, not configurable quotas. The closure
+> commit added configurable SERVICE_ACCOUNT and PRINCIPAL quota levels for all three
+> limits (migration 000033). The model below is the final one.
+
+* **Levels.** Operators configure (never request input) `platform_tenant_limits`,
+  `platform_application_limits`, `platform_service_account_limits`,
+  `platform_credential_limits` and `platform_principal_limits`, each with
+  `requests_per_minute`, `max_concurrent_communications`,
+  `telecom_spend_daily_limit_minor` and `telecom_spend_monthly_limit_minor` (NULL = not
+  configured; CHECK ≥ 0, rate > 0). Service-account and principal rows reference
+  Calling's own authorities with ownership-consistent composite keys. Configuration:
+  `platform_admin limits set-tenant | set-application | set-service-account |
+  set-credential | set-principal`, each logged as a structured operator event (the same
+  audit trail as the earlier levels); no customer API can write a limit.
+* **API-client chain.** TENANT → APPLICATION → SERVICE_ACCOUNT → CREDENTIAL. The
+  effective per-credential value is the most restrictive configured value of the chain
+  (on a tie the more specific level is named), else the platform default. **Every
+  configured parent is also an aggregate ceiling** across everything beneath it: a
+  service-account ceiling applies across all of that service account's credentials,
+  an application ceiling across all of its service accounts, a tenant ceiling across
+  all of its applications.
+* **Principal axis.** PRINCIPAL is not a child of a credential. It is an independent
+  communication-subject ceiling, evaluated only when the operation has a principal
+  resolved by the server in the caller's own scope (a raw principal id is never
+  trusted). It is shared by every credential, service account, endpoint and creation
+  path acting for that principal. An operation must satisfy **all** applicable
+  ceilings: tenant, application, service account, credential, principal, and the
+  environment spend policy for spend. The first exhausted applicable ceiling denies.
+* **Deterministic reporting.** Checks run broad to narrow (tenant, application, service
+  account, credential, principal), so when several ceilings are exhausted at once the
+  broadest is reported (`level` in `CONCURRENT_CALL_LIMIT_EXCEEDED`, the spend reason
+  code, the notice `scope`). With nested ceilings, the most restrictive one is reached
+  first and is therefore the one reported.
+* **Request rate.**
+  * Every authenticated request increments, in ONE atomic upsert, its credential,
+    service-account, application and tenant one-minute windows. A request is refused
+    (429 `RATE_LIMITED`) when any configured aggregate or the effective per-credential
+    limit is exceeded.
+  * The principal window is counted for every Call created for that initiator,
+    through any credential or service account, when the principal configures a rate.
+    Principal rate is defined over principal-scoped operations (Call creation). An
+    authenticated request without a communication principal has no principal rate,
+    and none is invented.
+  * The counters are atomic, with no read-then-write. The limiter fails closed (503).
+* **Concurrent Calls.**
+  * Lock order is global and deadlock-free: transaction-scoped advisory locks
+    **TENANT → APPLICATION → SERVICE_ACCOUNT → PRINCIPAL**. The tenant, service-account
+    and principal locks are taken only when that level configures a ceiling; skipping
+    one never reorders the rest.
+  * The application lock is always taken. It also serializes every credential, since a
+    credential belongs to one service account of one application environment, so the
+    credential level needs no lock of its own.
+  * Counting runs after the locks, in the creating transaction, with no
+    check-then-insert gap. Only non-terminal Calls count. The service account counts
+    `created_by_service_account_id`; the principal counts every non-terminal Call it
+    initiated or participates in.
+  * Only the initiator is checked at creation. Refusing a Call because its *target*
+    is busy would let one principal exhaust another's allowance.
+* **Spend.**
+  * The Part E reservation row-locks the caps in ONE order: tenant, application,
+    service account (the Call's trusted `created_by_service_account_id`), credential,
+    principal (the Call's trusted `initiator_principal_id`), then the environment
+    policy. Every reservation that could share a cap locks the same row in the same
+    position, so headroom cannot be spent twice.
+  * New reason codes: `SERVICE_ACCOUNT_DAILY_SPEND_LIMIT`,
+    `SERVICE_ACCOUNT_MONTHLY_SPEND_LIMIT`, `PRINCIPAL_DAILY_SPEND_LIMIT` and
+    `PRINCIPAL_MONTHLY_SPEND_LIMIT` (beside the tenant / application / credential ones).
+  * The per-principal / service-account / context / destination **velocity** guards
+    stay. They are risk controls, not quotas.
+  * All Part E guarantees stay: one reservation per leg, no blind retry after an
+    UNKNOWN outcome, no duplicate origination. KNOWN / ESTIMATED / UNKNOWN cost
+    semantics are unchanged; an UNKNOWN cost never becomes 0.
 * **Errors** stay normalized: `RATE_LIMITED`, `CONCURRENT_CALL_LIMIT_EXCEEDED`,
-  `TELECOM_SPEND_LIMIT_EXCEEDED` (429), with bounded reason codes. Spend has new
-  `TENANT_DAILY_SPEND_LIMIT` and `TENANT_MONTHLY_SPEND_LIMIT` codes.
-* **Notices:** `limit.warning` fires when a change crosses 80 % of a ceiling;
-  `limit.exceeded` fires on refusal. The data is `limit`, `scope` (level), `window`,
-  `current`, `ceiling` and `threshold`. They are deduplicated per kind, level, subject,
-  receiving environment and window (minute / UTC day / UTC month), so a refused burst is
-  one notice. Warnings are emitted in the transaction that crossed the threshold.
-  Refusal notices are emitted on their own connection, because the refused transaction
-  rolls back. Notices are best-effort signals; the enforcement decision never depends on
-  them.
-* `GET /v1/limits` (`usage.read`) returns each limit with every configured level
-  (ceiling / current / remaining), the binding level (least remaining) and the reset
-  time.
+  `TELECOM_SPEND_LIMIT_EXCEEDED` (429), with bounded reason codes.
+* **Notices.**
+  * `limit.warning` fires when a change crosses 80 % of a ceiling; `limit.exceeded`
+    fires on refusal.
+  * They cover every level: `scope` is `TENANT`, `APPLICATION`, `SERVICE_ACCOUNT`,
+    `CREDENTIAL`, `PRINCIPAL` or `ENVIRONMENT`. The data is `limit`, `scope`, `window`,
+    `current`, `ceiling` and `threshold`.
+  * Notices are deduplicated per event kind, limit, level, subject, receiving
+    environment and window (minute / UTC day / UTC month). The subject's identifier
+    exists only inside that private dedupe hash, never in the payload or a metric
+    label.
+  * Warnings are emitted in the transaction that crossed the threshold. Refusal
+    notices are emitted on their own connection, because the refused transaction
+    rolls back. Notices are best-effort; enforcement never depends on them.
+* **`GET /v1/limits`** (`usage.read`) returns each limit with every configured level of
+  the chain (and the ENVIRONMENT spend policy), as ceiling / current / remaining, plus
+  the binding level (least remaining) and the reset time.
+  * `?principalId=` adds the principal's own PRINCIPAL levels. It needs
+    `principals.read`, and the principal must resolve in the caller's own scope;
+    otherwise 404, indistinguishable from none.
+  * Tenant, application, service account and credential are never parameters (400) and
+    no level carries an identifier.
 
 ## Consequences
 
@@ -180,8 +248,10 @@ LISTEN/NOTIFY fan-out, with Calls and invitations as the source of truth.
   platform through them.
 * There is still exactly one outbox per service and one usage ledger. No new service was
   created for webhooks (Calling hosts the platform ingress).
-* A configured tenant concurrency ceiling serializes Call creation per tenant (a cost
-  accepted only when the operator configures one). The tenant request counter is one row
-  per tenant per minute.
+* A configured tenant concurrency ceiling serializes Call creation per tenant, and a
+  configured service-account / principal ceiling serializes that subject's creations: a
+  cost accepted only when the operator configures one. Each request writes four rate
+  counters (tenant, application, service account, credential), one row per subject per
+  minute.
 * Billing, invoices, pricing, a broker deployment and a developer portal remain out of
   scope. **Real lawful telecom interconnect certification remains pending (ADR 0016).**
