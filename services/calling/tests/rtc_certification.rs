@@ -330,6 +330,7 @@ async fn real_livekit_certification() {
     forged_and_duplicate_callbacks(&cert).await;
     voice_call(&cert).await;
     enterprise_extension_call(&cert).await;
+    enterprise_ring_groups(&cert).await;
     video_call_and_removal(&cert).await;
     for round in 0..3 {
         refreshed_privileged_token_cannot_reenter(&cert, round).await;
@@ -788,6 +789,184 @@ async fn enterprise_extension_call(cert: &Cert) {
     println!("enterprise extension call certified: 1001 -> 1002 over ENTERPRISE_INTERNAL with real media");
     a.quit().await;
     b.quit().await;
+}
+
+/// Part F §201 / §202: a SIMULTANEOUS group (two members ring, one wins with real media,
+/// the other is answered-elsewhere) and an ORDERED group (member 1 does not answer, member
+/// 2 rings and answers) — each ONE logical Call.
+async fn enterprise_ring_groups(cert: &Cert) {
+    use calling::platform::scopes::names;
+    let h = cert.a.h();
+    let admin = common::enterprise::credential(
+        h,
+        &cert.a.w.consumer,
+        cert.a.w.kind,
+        &[
+            names::ENTERPRISE_CONFIG_READ,
+            names::ENTERPRISE_CONFIG_WRITE,
+        ],
+    )
+    .await;
+    let caller_token = common::enterprise::credential(
+        h,
+        &cert.a.w.consumer,
+        cert.a.w.kind,
+        &[
+            names::CALLS_READ,
+            names::CALLS_WRITE,
+            names::ENTERPRISE_CALLS_USE,
+        ],
+    )
+    .await;
+    let admin_post = |path: String, body: Value| {
+        let token = admin.secret.expose_once().to_string();
+        async move {
+            let r = h
+                .request(axum::http::Method::POST, &path, Some(&token), Some(body))
+                .await;
+            assert!(r.status.is_success(), "{path}: {}", r.text);
+            r.json
+        }
+    };
+    let member = |reference: String| async move {
+        let (view, _) = h
+            .platform
+            .register_principal(
+                cert.a.w.consumer.env(cert.a.w.kind).id,
+                calling::platform::principals::NewPrincipal::External {
+                    kind: calling::domain::PrincipalKind::EnterpriseMember,
+                    external_reference: reference,
+                },
+            )
+            .await
+            .unwrap();
+        h.state
+            .principals
+            .resolve(
+                &cert.a.w.ctx,
+                &calling::platform::principals::PrincipalReference::Id(view.id),
+            )
+            .await
+            .unwrap()
+    };
+    let caller = member("rg-caller".into()).await;
+    let m1 = member("rg-m1".into()).await;
+    let m2 = member("rg-m2".into()).await;
+    let caller_desk = cert.a.device(&caller, "rg-caller-desk").await;
+    let d1 = cert.a.device(&m1, "rg-m1-desk").await;
+    let d2 = cert.a.device(&m2, "rg-m2-desk").await;
+    for (strategy, number) in [("SIMULTANEOUS", "4000"), ("ORDERED", "4001")] {
+        let group = admin_post(
+            "/v1/enterprise/ring-groups".into(),
+            json!({ "name": format!("Cert {strategy}"), "strategy": strategy,
+                    "memberRingSeconds": 10, "groupTimeoutSeconds": 40 }),
+        )
+        .await;
+        let gid = group["ringGroupId"].as_str().unwrap().to_string();
+        let r = h
+            .request(
+                axum::http::Method::PUT,
+                &format!("/v1/enterprise/ring-groups/{gid}/members"),
+                Some(admin.secret.expose_once()),
+                Some(json!({ "expectedVersion": 1, "members": [
+                    { "type": "ENTERPRISE_MEMBER", "id": m1.id() },
+                    { "type": "ENTERPRISE_MEMBER", "id": m2.id() } ] })),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        admin_post(
+            "/v1/enterprise/extensions".into(),
+            json!({ "extensionNumber": number, "displayLabel": strategy,
+                    "destination": { "type": "RING_GROUP", "id": gid } }),
+        )
+        .await;
+        let r = h
+            .request_with(
+                axum::http::Method::POST,
+                "/v1/calls",
+                Some(caller_token.secret.expose_once()),
+                Some(json!({ "kind": "VOICE", "initiatorPrincipalId": caller.id(),
+                             "initiatorEndpointId": caller_desk.endpoint, "targetExtension": number })),
+                &[("idempotency-key", &format!("rg-cert-{number}"))],
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        let call: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+        if strategy == "SIMULTANEOUS" {
+            assert_eq!(r.json["liveInvitationCount"], 2);
+        } else {
+            // Member 1 rings alone and does not answer; server time moves to member 2.
+            assert_eq!(r.json["liveInvitationCount"], 1);
+            assert!(cert.a.invitation_for(call, d1.endpoint).await.is_some());
+            h.clock.advance(chrono::Duration::seconds(11));
+            h.state.app.expire_due(100).await.unwrap();
+        }
+        let invitation = cert.a.invitation_for(call, d2.endpoint).await.unwrap();
+        let (_, version) = cert.a.state(call).await;
+        let r = cert.a.accept(call, invitation, &d2, version).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        if strategy == "SIMULTANEOUS" {
+            let view = cert.a.call_view(call).await;
+            assert!(view["invitations"].as_array().unwrap().iter().any(|i| {
+                i["endpointId"] == d1.endpoint.to_string() && i["status"] == "ANSWERED_ELSEWHERE"
+            }));
+        }
+        let s1 = cert.a.session_on(call, caller_desk.endpoint).await.unwrap();
+        let s2 = cert.a.session_on(call, d2.endpoint).await.unwrap();
+        let c1 = cert.credential(call, s1).await;
+        let c2 = cert.credential(call, s2).await;
+        let mut a = RtcClient::spawn(&cert.cfg).await;
+        let mut b = RtcClient::spawn(&cert.cfg).await;
+        assert_eq!(
+            a.connect(c1["url"].as_str().unwrap(), c1["token"].as_str().unwrap())
+                .await["ok"],
+            true
+        );
+        assert_eq!(
+            b.connect(c2["url"].as_str().unwrap(), c2["token"].as_str().unwrap())
+                .await["ok"],
+            true
+        );
+        eventually(15, "ring-group call CONNECTED", || async {
+            cert.state(call).await == CallState::Connected
+        })
+        .await;
+        for client in [&mut a, &mut b] {
+            assert_eq!(
+                client
+                    .cmd(json!({ "cmd": "wait_permission", "publish": true, "timeout": 10 }))
+                    .await["ok"],
+                true
+            );
+            assert_eq!(
+                client
+                    .cmd(json!({ "cmd": "publish", "kind": "audio" }))
+                    .await["ok"],
+                true
+            );
+        }
+        let heard = a
+            .cmd(json!({ "cmd": "wait_subscribed", "count": 1, "timeout": 15 }))
+            .await;
+        assert_eq!(
+            heard["ok"], true,
+            "real media with the winning member: {heard}"
+        );
+        assert_eq!(
+            cert.provider_identities(call).await.len(),
+            2,
+            "only the winner and the caller are in the media resource"
+        );
+        let (_, version) = cert.a.state(call).await;
+        let r = cert.a.command(call, "end", version).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        assert_eq!(cert.state(call).await, CallState::Ended);
+        println!(
+            "enterprise ring group certified: {strategy} with real media, one winner, one Call"
+        );
+        a.quit().await;
+        b.quit().await;
+    }
 }
 
 async fn video_call_and_removal(cert: &Cert) {

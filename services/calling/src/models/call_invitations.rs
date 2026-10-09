@@ -27,6 +27,8 @@ pub struct Model {
     pub cancelled_at: Option<DateTimeUtc>,
     pub finished_at: Option<DateTimeUtc>,
     pub terminal_reason: Option<InvitationTerminalReason>,
+    /// Ring-group / queue-offer group: at most one answering participant per group.
+    pub answer_group_id: Option<Uuid>,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

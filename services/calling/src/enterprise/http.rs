@@ -24,6 +24,7 @@ use super::{
     destinations::{Destination, DestinationType},
     extensions::{ExtensionChange, ExtensionFilter, NewExtension},
     policy::{NewPolicy, PolicyChange, PolicyRules, ResourceStatus},
+    ring_groups::{RingGroupChange, RingGroupSettings, RingStrategy},
     AdminActor, PageRequest,
 };
 use crate::{
@@ -68,6 +69,20 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/v1/enterprise/extensions",
             get(list_extensions).post(create_extension),
+        )
+        .route(
+            "/v1/enterprise/ring-groups",
+            get(list_ring_groups).post(create_ring_group),
+        )
+        .route(
+            "/v1/enterprise/ring-groups/:ring_group_id",
+            get(get_ring_group)
+                .patch(update_ring_group)
+                .delete(disable_ring_group),
+        )
+        .route(
+            "/v1/enterprise/ring-groups/:ring_group_id/members",
+            put(replace_ring_group_members),
         )
         .route(
             "/v1/enterprise/extensions/:extension_id",
@@ -601,6 +616,160 @@ async fn disable_extension(
     let view = state
         .enterprise
         .disable_extension(&AdminActor::of(&ctx), id, q.expected_version()?)
+        .await?;
+    Ok(ok(view))
+}
+
+// ---------------------------------------------------------------------------
+// Ring groups (§55)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateRingGroupBody {
+    name: String,
+    strategy: RingStrategy,
+    member_ring_seconds: i32,
+    group_timeout_seconds: i32,
+    #[serde(default)]
+    fallback: Option<Destination>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UpdateRingGroupBody {
+    expected_version: i64,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    strategy: Option<RingStrategy>,
+    #[serde(default)]
+    member_ring_seconds: Option<i32>,
+    #[serde(default)]
+    group_timeout_seconds: Option<i32>,
+    /// Present (even `null`) = replace the fallback (`null` removes it).
+    #[serde(default, with = "double_option")]
+    fallback: Option<Option<Destination>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReplaceRingGroupMembersBody {
+    expected_version: i64,
+    /// In ring order.
+    members: Vec<Destination>,
+}
+
+async fn create_ring_group(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    body: Result<Json<CreateRingGroupBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .create_ring_group(
+            &AdminActor::of(&ctx),
+            RingGroupSettings {
+                name: body.name,
+                strategy: body.strategy,
+                member_ring_seconds: body.member_ring_seconds,
+                group_timeout_seconds: body.group_timeout_seconds,
+                fallback: body.fallback,
+            },
+        )
+        .await?;
+    Ok(created(view))
+}
+
+async fn list_ring_groups(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let q = QueryParams::parse(query, &["limit", "cursor", "status"])?;
+    let page = state
+        .enterprise
+        .list_ring_groups(CallScope::of_platform(&ctx), q.status()?, &q.page()?)
+        .await?;
+    Ok(ok(page))
+}
+
+async fn get_ring_group(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let view = state
+        .enterprise
+        .get_ring_group(CallScope::of_platform(&ctx), uuid_path(&id)?)
+        .await?;
+    Ok(ok(view))
+}
+
+async fn update_ring_group(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    body: Result<Json<UpdateRingGroupBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .update_ring_group(
+            &AdminActor::of(&ctx),
+            id,
+            body.expected_version,
+            RingGroupChange {
+                name: body.name,
+                strategy: body.strategy,
+                member_ring_seconds: body.member_ring_seconds,
+                group_timeout_seconds: body.group_timeout_seconds,
+                fallback: body.fallback,
+            },
+        )
+        .await?;
+    Ok(ok(view))
+}
+
+async fn replace_ring_group_members(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    body: Result<Json<ReplaceRingGroupMembersBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .replace_ring_group_members(
+            &AdminActor::of(&ctx),
+            id,
+            body.expected_version,
+            body.members,
+        )
+        .await?;
+    Ok(ok(view))
+}
+
+async fn disable_ring_group(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let q = QueryParams::parse(query, &["expectedVersion"])?;
+    let view = state
+        .enterprise
+        .disable_ring_group(&AdminActor::of(&ctx), id, q.expected_version()?)
         .await?;
     Ok(ok(view))
 }

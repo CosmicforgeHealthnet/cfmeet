@@ -81,8 +81,8 @@ async fn extension_namespace_format_and_destinations() {
         ),
         (
             post("3003", "RING_GROUP", Uuid::new_v4()),
-            StatusCode::BAD_REQUEST,
-            "not yet a target",
+            StatusCode::NOT_FOUND,
+            "unknown group",
         ),
         (
             post("3003", "PUBLIC_CONTACT", Uuid::new_v4()),

@@ -87,6 +87,8 @@ pub struct RecoveredInvitation {
 /// What a finished ring round led to.
 pub(crate) enum RingOutcome {
     Unchanged,
+    /// Enterprise routing continued on the SAME Call (next ordered member, fallback).
+    Continued(calls::Model, Vec<call_invitations::Model>),
     /// The Call reached a terminal state (DECLINED / NO_ANSWER).
     CallEnded(calls::Model),
     /// A transfer failed and the Call was recovered (or is ending).
@@ -277,6 +279,10 @@ impl AppCallService {
         {
             return Err(CallError::AnsweredElsewhere);
         }
+        // Ring-group / queue offers: one answering participant per answer group.
+        let group_losers = self
+            .claim_answer_group_in(&txn, &cmd, &call, &invitation, participant.id)
+            .await?;
         let invitation = self
             .calls
             .finish_invitation_in(
@@ -398,7 +404,7 @@ impl AppCallService {
             )
             .await?;
         }
-        for loser in &losers {
+        for loser in losers.iter().chain(&group_losers) {
             self.invitation_signal(
                 &txn,
                 &mut pending,
@@ -563,6 +569,17 @@ impl AppCallService {
                 if round.is_empty() || round.iter().any(|i| i.status.is_live()) {
                     return Ok(RingOutcome::Unchanged);
                 }
+                // Enterprise routing first: the next ordered ring-group member or a
+                // fallback takes the SAME Call before any no-answer outcome.
+                if let Some((call, offers)) = self.enterprise_continue_in(txn, cmd, call).await? {
+                    if call.current_state.is_terminal() {
+                        return Ok(RingOutcome::CallEnded(call));
+                    }
+                    if !offers.is_empty() {
+                        return Ok(RingOutcome::Continued(call, offers));
+                    }
+                }
+                let call = &self.locked(txn, call).await?;
                 let action = if round.iter().all(|i| i.status == InvitationStatus::Declined) {
                     CallAction::Decline
                 } else {
@@ -573,6 +590,7 @@ impl AppCallService {
                     .transition_in(txn, cmd, call, call.version, action)
                     .await?
                     .call;
+                self.enterprise_ring_ended_in(txn, &call).await?;
                 Ok(RingOutcome::CallEnded(call))
             }
             CallState::Transferring => {
@@ -622,6 +640,24 @@ impl AppCallService {
     ) -> CallResult<calls::Model> {
         match outcome {
             RingOutcome::Unchanged => self.locked(txn, call).await,
+            RingOutcome::Continued(call, offers) => {
+                for offer in &offers {
+                    self.invitation_signal(
+                        txn,
+                        pending,
+                        SignalType::Incoming,
+                        &call,
+                        offer,
+                        correlation,
+                    )
+                    .await?;
+                }
+                if let Some(kind) = super::state_signal(call.current_state) {
+                    self.call_signal(txn, pending, kind, &call, correlation, Map::new())
+                        .await?;
+                }
+                Ok(call)
+            }
             RingOutcome::CallEnded(call) => {
                 if let Some(kind) = super::state_signal(call.current_state) {
                     self.call_signal(txn, pending, kind, &call, correlation, Map::new())

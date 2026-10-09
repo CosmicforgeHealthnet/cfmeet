@@ -51,6 +51,21 @@
     },
     {
       "$ref": "#/$defs/EnterpriseCallContext"
+    },
+    {
+      "$ref": "#/$defs/CreateRingGroupRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdateRingGroupRequest"
+    },
+    {
+      "$ref": "#/$defs/ReplaceRingGroupMembersRequest"
+    },
+    {
+      "$ref": "#/$defs/RingGroup"
+    },
+    {
+      "$ref": "#/$defs/RingGroupList"
     }
   ],
   "$defs": {
@@ -949,6 +964,250 @@
             "FORWARDED_PUBLIC",
             null
           ]
+        }
+      }
+    },
+    "RingStrategy": {
+      "description": "SIMULTANEOUS rings every eligible member at once (bounded by the policy's fan-out); ORDERED rings one member at a time for memberRingSeconds within groupTimeoutSeconds.",
+      "type": "string",
+      "enum": [
+        "SIMULTANEOUS",
+        "ORDERED"
+      ]
+    },
+    "CreateRingGroupRequest": {
+      "description": "Body of POST /v1/enterprise/ring-groups. fallback (EXTENSION, QUEUE or VOICEMAIL of the same scope) takes the SAME Call when no member answers.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "strategy",
+        "memberRingSeconds",
+        "groupTimeoutSeconds"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "strategy": {
+          "$ref": "#/$defs/RingStrategy"
+        },
+        "memberRingSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 120
+        },
+        "groupTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 600
+        },
+        "fallback": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "UpdateRingGroupRequest": {
+      "description": "Body of PATCH /v1/enterprise/ring-groups/{ring_group_id}; fallback null removes it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "strategy": {
+          "$ref": "#/$defs/RingStrategy"
+        },
+        "memberRingSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 120
+        },
+        "groupTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 600
+        },
+        "fallback": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ReplaceRingGroupMembersRequest": {
+      "description": "Body of PUT /v1/enterprise/ring-groups/{ring_group_id}/members: the members IN RING ORDER (at most 50, distinct). A member is a PRINCIPAL, ENTERPRISE_MEMBER or an EXTENSION that routes directly to a principal: groups never nest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "members"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Destination"
+          },
+          "maxItems": 50
+        }
+      }
+    },
+    "RingGroupMember": {
+      "description": "A member and its ring position.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position",
+        "member"
+      ],
+      "properties": {
+        "position": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "member": {
+          "$ref": "#/$defs/Destination"
+        }
+      }
+    },
+    "RingGroup": {
+      "description": "A ring group.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ringGroupId",
+        "name",
+        "strategy",
+        "memberRingSeconds",
+        "groupTimeoutSeconds",
+        "fallback",
+        "members",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "ringGroupId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "strategy": {
+          "$ref": "#/$defs/RingStrategy"
+        },
+        "memberRingSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 120
+        },
+        "groupTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 600
+        },
+        "fallback": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RingGroupMember"
+          },
+          "maxItems": 50
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "RingGroupList": {
+      "description": "A page of ring groups.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ringGroups",
+        "nextCursor"
+      ],
+      "properties": {
+        "ringGroups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RingGroup"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
         }
       }
     }

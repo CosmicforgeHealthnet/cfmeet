@@ -47,6 +47,7 @@ const PLATFORM_TABLES: &[&str] = &[
 /// The Calling-owned call domain (Part C §15–§25).
 const CALL_TABLES: &[&str] = &[
     "call_answer_claims",
+    "call_answer_group_claims",
     "call_attempts",
     "call_authorizations",
     "call_commands",
@@ -86,6 +87,8 @@ const ENTERPRISE_TABLES: &[&str] = &[
     "enterprise_department_members",
     "enterprise_departments",
     "enterprise_extensions",
+    "enterprise_ring_group_members",
+    "enterprise_ring_groups",
     "enterprise_routing_steps",
 ];
 

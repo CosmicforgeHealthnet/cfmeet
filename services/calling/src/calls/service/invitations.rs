@@ -46,6 +46,7 @@ impl CallService {
         purpose: InvitationPurpose,
         transfer_id: Option<Uuid>,
         ttl: Duration,
+        answer_group: Option<Uuid>,
     ) -> CallResult<Vec<call_invitations::Model>> {
         let mut out = Vec::with_capacity(endpoints.len());
         for endpoint in endpoints {
@@ -84,6 +85,7 @@ impl CallService {
                 cancelled_at: Set(None),
                 finished_at: Set(None),
                 terminal_reason: Set(None),
+                answer_group_id: Set(answer_group),
                 created_at: Set(at),
                 updated_at: Set(at),
             }
@@ -113,6 +115,9 @@ impl CallService {
             ];
             if let Some(transfer_id) = transfer_id {
                 details.push(("transfer_id", text(transfer_id)));
+            }
+            if let Some(group) = answer_group {
+                details.push(("answer_group_id", text(group)));
             }
             self.append_event(
                 txn,

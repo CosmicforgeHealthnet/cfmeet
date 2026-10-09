@@ -1,0 +1,6 @@
+{
+  "name": "Sales",
+  "strategy": "BROADCAST_EVERYONE",
+  "memberRingSeconds": 15,
+  "groupTimeoutSeconds": 60
+}

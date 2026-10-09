@@ -14,6 +14,7 @@ use crate::{
         destinations::{Destination, DestinationType},
         extensions,
         policy::EffectivePolicy,
+        ring_groups,
     },
     platform::principals::{PrincipalReference, PrincipalResolver, ResolvedPrincipal},
 };
@@ -24,6 +25,11 @@ pub(crate) enum RouteAction {
     /// Ring one principal's eligible endpoints.
     RingPrincipal {
         principal: ResolvedPrincipal,
+        destination: Destination,
+    },
+    /// Ring a ring group (simultaneous / ordered).
+    RingGroup {
+        group: ring_groups::RingGroupRow,
         destination: Destination,
     },
     /// Nothing can take the Call.
@@ -50,72 +56,74 @@ pub(crate) async fn resolve(
     let mut hops = context.hop_count;
     let mut current = destination;
     loop {
+        if current.kind.is_principal() {
+            persist(txn, context, &visited, hops, at).await?;
+            return Ok(
+                match principals
+                    .resolve_in(
+                        scope.tenant_id(),
+                        scope.application_id(),
+                        scope.environment_id(),
+                        &PrincipalReference::Id(PrincipalId::from_uuid(current.id)),
+                    )
+                    .await
+                {
+                    Ok(principal)
+                        if current.kind == DestinationType::Principal
+                            || principal.kind()
+                                == crate::domain::PrincipalKind::EnterpriseMember =>
+                    {
+                        RouteAction::RingPrincipal {
+                            principal,
+                            destination: current,
+                        }
+                    }
+                    _ => RouteAction::NoRoute {
+                        reason: "TARGET_UNAVAILABLE",
+                        destination: Some(current),
+                    },
+                },
+            );
+        }
+        // Every followed configuration node counts against the hop budget and is
+        // remembered: reaching one twice is a loop.
+        if visited.contains(&current.id) {
+            return blocked(txn, context, &visited, hops, "LOOP_BLOCKED", current, at).await;
+        }
+        if hops + 1 > max_hops {
+            return blocked(
+                txn,
+                context,
+                &visited,
+                hops,
+                "HOP_BUDGET_EXHAUSTED",
+                current,
+                at,
+            )
+            .await;
+        }
+        hops += 1;
+        visited.push(current.id);
         match current.kind {
             DestinationType::Extension => {
-                if visited.contains(&current.id) && current.id != context.entry_extension_id {
-                    return blocked(txn, context, &visited, hops, "LOOP_BLOCKED", current, at)
-                        .await;
-                }
-                if hops + 1 > max_hops {
-                    return blocked(
-                        txn,
-                        context,
-                        &visited,
-                        hops,
-                        "HOP_BUDGET_EXHAUSTED",
-                        current,
-                        at,
-                    )
-                    .await;
-                }
-                hops += 1;
-                if !visited.contains(&current.id) {
-                    visited.push(current.id);
-                }
-                let row = match extensions::extension_row(txn, scope, current.id, false).await {
-                    Ok(row) if row.status == "ACTIVE" => row,
-                    _ => {
-                        persist(txn, context, &visited, hops, at).await?;
-                        return Ok(RouteAction::NoRoute {
-                            reason: "DESTINATION_DISABLED",
-                            destination: Some(current),
-                        });
+                match extensions::extension_row(txn, scope, current.id, false).await {
+                    Ok(row) if row.status == "ACTIVE" => {
+                        current = row.destination().map_err(super::enterprise_error)?;
                     }
-                };
-                let next = row.destination().map_err(super::enterprise_error)?;
-                if next.kind == DestinationType::Extension && visited.contains(&next.id) {
-                    return blocked(txn, context, &visited, hops, "LOOP_BLOCKED", next, at).await;
+                    _ => return disabled(txn, context, &visited, hops, current, at).await,
                 }
-                current = next;
             }
-            DestinationType::Principal | DestinationType::EnterpriseMember => {
-                persist(txn, context, &visited, hops, at).await?;
-                return Ok(
-                    match principals
-                        .resolve_in(
-                            scope.tenant_id(),
-                            scope.application_id(),
-                            scope.environment_id(),
-                            &PrincipalReference::Id(PrincipalId::from_uuid(current.id)),
-                        )
-                        .await
-                    {
-                        Ok(principal)
-                            if current.kind == DestinationType::Principal
-                                || principal.kind()
-                                    == crate::domain::PrincipalKind::EnterpriseMember =>
-                        {
-                            RouteAction::RingPrincipal {
-                                principal,
-                                destination: current,
-                            }
-                        }
-                        _ => RouteAction::NoRoute {
-                            reason: "TARGET_UNAVAILABLE",
-                            destination: Some(current),
-                        },
-                    },
-                );
+            DestinationType::RingGroup => {
+                return match ring_groups::ring_group_row(txn, scope, current.id, false).await {
+                    Ok(group) if group.status == "ACTIVE" => {
+                        persist(txn, context, &visited, hops, at).await?;
+                        Ok(RouteAction::RingGroup {
+                            group,
+                            destination: current,
+                        })
+                    }
+                    _ => disabled(txn, context, &visited, hops, current, at).await,
+                };
             }
             _ => {
                 persist(txn, context, &visited, hops, at).await?;
@@ -126,6 +134,21 @@ pub(crate) async fn resolve(
             }
         }
     }
+}
+
+async fn disabled(
+    txn: &DatabaseTransaction,
+    context: &ContextRow,
+    visited: &[uuid::Uuid],
+    hops: i16,
+    destination: Destination,
+    at: DateTime<Utc>,
+) -> CallResult<RouteAction> {
+    persist(txn, context, visited, hops, at).await?;
+    Ok(RouteAction::NoRoute {
+        reason: "DESTINATION_DISABLED",
+        destination: Some(destination),
+    })
 }
 
 async fn persist(

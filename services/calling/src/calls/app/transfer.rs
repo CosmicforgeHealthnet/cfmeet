@@ -339,6 +339,7 @@ impl AppCallService {
                 InvitationPurpose::Transfer,
                 Some(transfer.id),
                 self.config.invitation_ttl,
+                None,
             )
             .await?;
         let call = self.locked(&txn, &call).await?;

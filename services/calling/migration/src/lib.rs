@@ -28,6 +28,7 @@ mod m20261008_000018_call_public_network;
 mod m20261008_000019_call_inbound_owners;
 mod m20261009_000020_enterprise_foundation;
 mod m20261009_000021_enterprise_extensions;
+mod m20261009_000022_enterprise_ring_groups;
 
 /// Name of the table recording which Calling migrations have been applied.
 pub const MIGRATION_TABLE: &str = "calling_seaql_migrations";
@@ -59,6 +60,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261008_000019_call_inbound_owners::Migration),
             Box::new(m20261009_000020_enterprise_foundation::Migration),
             Box::new(m20261009_000021_enterprise_extensions::Migration),
+            Box::new(m20261009_000022_enterprise_ring_groups::Migration),
         ]
     }
 

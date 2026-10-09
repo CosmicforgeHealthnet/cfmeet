@@ -113,6 +113,10 @@ jobs:
           # Part F: the enterprise scenarios must have run with real media (and passed above).
           grep -q '^enterprise extension call certified' "$RUNNER_TEMP/cert.log" \
             || { echo "::error::the enterprise extension certification did not run"; exit 1; }
+          for strategy in SIMULTANEOUS ORDERED; do
+            grep -q "^enterprise ring group certified: $strategy" "$RUNNER_TEMP/cert.log" \
+              || { echo "::error::the $strategy ring-group certification did not run"; exit 1; }
+          done
           grep -q 'test real_livekit_certification ... ok' "$RUNNER_TEMP/cert.log"
 
       - name: LiveKit logs

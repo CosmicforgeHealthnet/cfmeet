@@ -15,6 +15,7 @@
 //! snapshot, the policy version relied on, the current destination, the hop budget and the
 //! visited set; `enterprise_routing_steps` is the append-only routing evidence.
 
+mod ring_groups;
 mod router;
 
 use sea_orm::{
@@ -113,6 +114,10 @@ pub(crate) struct ContextRow {
     pub visited: Vec<Uuid>,
     pub answered_principal_id: Option<Uuid>,
     pub outcome: Option<String>,
+    pub ring_group_id: Option<Uuid>,
+    pub ring_cursor: Option<i16>,
+    pub answer_group_id: Option<Uuid>,
+    pub ring_deadline: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl ContextRow {
@@ -126,7 +131,8 @@ impl ContextRow {
 
 const CONTEXT_COLUMNS: &str = "call_id, entry_extension_id, entry_extension_number, entry_label, \
     policy_id, policy_version, phase, current_destination_type, current_destination_id, hop_count, \
-    max_hops, visited, answered_principal_id, outcome";
+    max_hops, visited, answered_principal_id, outcome, ring_group_id, ring_cursor, answer_group_id, \
+    ring_deadline";
 
 pub(crate) fn stmt(sql: &str, values: Vec<sea_orm::Value>) -> sea_orm::Statement {
     sea_orm::Statement::from_sql_and_values(sea_orm::DbBackend::Postgres, sql, values)
@@ -612,7 +618,7 @@ impl AppCallService {
         call: &calls::Model,
         leg: &call_legs::Model,
         context: &ContextRow,
-        _policy: &EffectivePolicy,
+        policy: &EffectivePolicy,
         action: RouteAction,
     ) -> CallResult<(calls::Model, Vec<crate::models::call_invitations::Model>)> {
         let now = self.calls.now();
@@ -669,6 +675,7 @@ impl AppCallService {
                         InvitationPurpose::Call,
                         None,
                         self.config.invitation_ttl,
+                        None,
                     )
                     .await?;
                 let call = self.mark_ringing(txn, cmd, call, leg).await?;
@@ -692,6 +699,21 @@ impl AppCallService {
                 )
                 .await?;
                 Ok((call, invitations))
+            }
+            RouteAction::RingGroup { group, destination } => {
+                // Boxed: a group's fallback may route to another group (bounded by the
+                // hop budget and the visited set).
+                Box::pin(self.start_ring_group(
+                    txn,
+                    cmd,
+                    call,
+                    leg,
+                    context,
+                    policy,
+                    group,
+                    destination,
+                ))
+                .await
             }
             RouteAction::NoRoute {
                 reason,
@@ -795,6 +817,38 @@ impl AppCallService {
             now,
         )
         .await?;
+        Ok(())
+    }
+
+    /// Records the enterprise outcome of a Call that just reached a terminal state
+    /// through the ordinary ring outcome (no answer / all declined).
+    pub(crate) async fn enterprise_ring_ended_in(
+        &self,
+        txn: &DatabaseTransaction,
+        call: &calls::Model,
+    ) -> CallResult<()> {
+        let Some(context) = context_of(txn, call.id).await? else {
+            return Ok(());
+        };
+        let outcome = match call.current_state {
+            crate::calls::state::CallState::Declined => "DECLINED",
+            crate::calls::state::CallState::NoAnswer => "NO_ANSWER",
+            _ => return Ok(()),
+        };
+        if context.outcome.is_some() {
+            return Ok(());
+        }
+        let now = self.calls.now();
+        update_context(
+            txn,
+            &context,
+            EnterprisePhase::Ended,
+            None,
+            Some(outcome),
+            now,
+        )
+        .await?;
+        record_step(txn, call, "ENDED", None, outcome, None, now).await?;
         Ok(())
     }
 

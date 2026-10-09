@@ -59,6 +59,7 @@ impl Destination {
 pub const EXTENSION_TARGETS: &[DestinationType] = &[
     DestinationType::EnterpriseMember,
     DestinationType::Principal,
+    DestinationType::RingGroup,
 ];
 
 /// Whether `dest` exists and is usable (ACTIVE) in `scope`.
@@ -78,6 +79,10 @@ pub(crate) async fn destination_active<C: ConnectionTrait>(
         }
         DestinationType::Extension => {
             "SELECT 1 FROM enterprise_extensions WHERE tenant_id = $1 AND application_id = $2 \
+             AND environment_id = $3 AND id = $4 AND status = 'ACTIVE'"
+        }
+        DestinationType::RingGroup => {
+            "SELECT 1 FROM enterprise_ring_groups WHERE tenant_id = $1 AND application_id = $2 \
              AND environment_id = $3 AND id = $4 AND status = 'ACTIVE'"
         }
         // Destination kinds whose configuration is not available in this deployment
