@@ -141,6 +141,13 @@ pub trait CallingPort: Send + Sync {
     async fn deliver_keypad(&self, _payload: &Value) -> Result<(), PortError> {
         Err(PortError::Unavailable)
     }
+
+    /// Part F: delivers a finished / failed edge media capture (base64 audio + integrity,
+    /// or a bounded failure). Unavailable (incl. Calling's 503 when its artifact storage
+    /// is down) is retried by the caller; Denied / NotFound are final.
+    async fn deliver_capture(&self, _report: &Value) -> Result<Value, PortError> {
+        Err(PortError::Unavailable)
+    }
 }
 
 /// Not configured: everything fails closed (protected origination never resolves a
@@ -401,5 +408,17 @@ impl CallingPort for HttpCalling {
             .await
             .map(|_| ())
             .map_err(port_error)
+    }
+
+    async fn deliver_capture(&self, report: &Value) -> Result<Value, PortError> {
+        let correlation_id = CorrelationId::generate();
+        let outbound = OutboundServiceRequest::continuing(ServiceId::calling(), &correlation_id);
+        let response = self
+            .auth
+            .client()
+            .post_json(&outbound, "/internal/v1/telephony/captures", report)
+            .await
+            .map_err(port_error)?;
+        response.json().map_err(|_| PortError::Unavailable)
     }
 }

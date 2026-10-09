@@ -327,6 +327,8 @@ pub fn service_auth_fixture_targeting(
                         "telephony-event.apply",
                         "telephony-reconciliation.apply",
                         "telephony-inbound.offer",
+                        "telephony-enterprise.offer",
+                        "telephony-capture.deliver",
                     ],
                 ),
             ],
@@ -472,6 +474,8 @@ pub fn test_runtime(
         contact_delegation: None,
         public_network: Default::default(),
         enterprise_flags: calling::enterprise::EnterpriseFlags::ALL_ON,
+        artifacts: Arc::new(cf_object_storage::MemoryObjectStore::new()),
+        capture: Arc::new(calling::calls::app::enterprise::UnavailableCapture),
     }
 }
 

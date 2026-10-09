@@ -339,6 +339,11 @@ pub struct FakeCalling {
     pub events: StdMutex<Vec<Value>>,
     pub offers: StdMutex<Vec<Value>>,
     pub offer_route_class: StdMutex<String>,
+    /// Part F: enterprise dialog offers and capture reports received.
+    pub enterprise_offers: StdMutex<Vec<Value>>,
+    pub captures: StdMutex<Vec<Value>>,
+    /// How the capture receiver answers: OK, UNAVAILABLE (503), DENIED (400), NOT_FOUND.
+    pub capture_mode: StdMutex<&'static str>,
 }
 
 impl FakeCalling {
@@ -348,7 +353,18 @@ impl FakeCalling {
             events: StdMutex::default(),
             offers: StdMutex::default(),
             offer_route_class: StdMutex::new("PSTN_TO_APP".into()),
+            enterprise_offers: StdMutex::default(),
+            captures: StdMutex::default(),
+            capture_mode: StdMutex::new("OK"),
         }
+    }
+
+    pub fn captures(&self) -> Vec<Value> {
+        self.captures.lock().unwrap().clone()
+    }
+
+    pub fn set_capture_mode(&self, mode: &'static str) {
+        *self.capture_mode.lock().unwrap() = mode;
     }
 
     pub fn set_available(&self, up: bool) {
@@ -387,6 +403,32 @@ impl CallingPort for FakeCalling {
             "callId": Uuid::new_v4(),
             "callLegId": Uuid::new_v4(),
             "routeClass": *self.offer_route_class.lock().unwrap(),
+        }))
+    }
+
+    async fn offer_enterprise(&self, offer: &Value) -> Result<Value, PortError> {
+        if !*self.available.lock().unwrap() {
+            return Err(PortError::Unavailable);
+        }
+        self.enterprise_offers.lock().unwrap().push(offer.clone());
+        Ok(json!({
+            "callId": Uuid::new_v4(),
+            "callLegId": Uuid::new_v4(),
+            "routeClass": "ENTERPRISE_INTERNAL",
+        }))
+    }
+
+    async fn deliver_capture(&self, report: &Value) -> Result<Value, PortError> {
+        match *self.capture_mode.lock().unwrap() {
+            "UNAVAILABLE" => return Err(PortError::Unavailable),
+            "DENIED" => return Err(PortError::Denied("VALIDATION_ERROR".into())),
+            "NOT_FOUND" => return Err(PortError::NotFound),
+            _ => {}
+        }
+        self.captures.lock().unwrap().push(report.clone());
+        Ok(json!({
+            "captureId": report["captureId"],
+            "status": if report["outcome"] == "COMPLETED" { "STORED" } else { "ACKNOWLEDGED" },
         }))
     }
 }

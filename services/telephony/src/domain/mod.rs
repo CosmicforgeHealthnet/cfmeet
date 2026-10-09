@@ -155,6 +155,7 @@ vocab!(CommandKind {
     QueryStatus = "QUERY_STATUS",
     Answer = "ANSWER",
     Prompt = "PROMPT",
+    Capture = "CAPTURE",
 });
 
 vocab!(CommandStatus {

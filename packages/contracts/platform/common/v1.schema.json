@@ -94,7 +94,8 @@
         "telephony-reconciliation.apply",
         "telephony-inbound.offer",
         "telephony-leg.media",
-        "telephony-enterprise.offer"
+        "telephony-enterprise.offer",
+        "telephony-capture.deliver"
       ]
     }
   }

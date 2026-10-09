@@ -8,11 +8,18 @@
 //! ENTERPRISE_INTERNAL, the edge answering it on Calling's command, built-in prompts
 //! played at the edge, a valid key routing to an extension, an invalid key with retry
 //! routing to a queue, a timeout with retry ending in the HANGUP node (the platform hangs
-//! up), an explicit hangup branch, and the caller hanging up (ABANDONED). No carrier, no
-//! public number: this certifies internal enterprise SIP, never real PSTN.
+//! up), an explicit hangup branch, and the caller hanging up (ABANDONED). Part F §60
+//! voicemail: an IVR key routes the SAME Call to a mailbox, the edge plays the greeting
+//! and records the caller's REAL audio (SIPp RTP) into its transient spool, Telephony
+//! delivers it to Calling, Calling stores it in a real S3-compatible private bucket
+//! (MinIO in CI), the message is READY and linked to the Call, authorized media access
+//! returns the same WAV through a short-lived signed URL, it is marked read, and deletion
+//! removes the object; the edge spool copy is gone. No carrier, no public number: this
+//! certifies internal enterprise SIP, never real PSTN.
 //!
 //! Requires `TELEPHONY_BIN`, `TELEPHONY_MIGRATION_BIN` (with `telephony-admin` next to
-//! them), `asterisk`, `sipp` and `TEST_DATABASE_URL`; prints SKIPPED otherwise — unless
+//! them), `asterisk`, `sipp`, `TEST_DATABASE_URL` and (voicemail) an S3-compatible
+//! endpoint in `ENTERPRISE_CERT_S3_ENDPOINT`; prints SKIPPED otherwise — unless
 //! `ENTERPRISE_SIP_CERT_REQUIRED=1` (CI), where anything missing FAILS.
 
 mod common;
@@ -117,7 +124,16 @@ impl Drop for Asterisk {
 impl Asterisk {
     fn start() -> Self {
         let run = std::env::temp_dir().join(format!("cfmeet-ent-cert-{}", Uuid::new_v4().simple()));
-        for d in ["etc", "varlib", "spool", "run", "log", "agi", "moh"] {
+        for d in [
+            "etc",
+            "varlib",
+            "spool",
+            "spool/recording",
+            "run",
+            "log",
+            "agi",
+            "moh",
+        ] {
             std::fs::create_dir_all(run.join(d)).unwrap();
         }
         let tone: Vec<u8> = (0..8000)
@@ -181,6 +197,31 @@ enum End {
     CallerHangsUp(u32),
     /// The platform hangs up (BYE from the edge) within `ms`.
     PlatformHangsUp(u32),
+    /// After `wait_ms` (a greeting) the desk phone speaks (7 s of real G.711 audio), then
+    /// hangs up after `ms`.
+    LeavesMessage { wait_ms: u32, ms: u32 },
+}
+
+/// The certification's S3-compatible private bucket (voicemail), if configured.
+fn cert_store() -> Option<cf_object_storage::S3ObjectStore> {
+    let Ok(endpoint) = std::env::var("ENTERPRISE_CERT_S3_ENDPOINT") else {
+        assert!(!required(), "ENTERPRISE_CERT_S3_ENDPOINT is required");
+        return None;
+    };
+    let var = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
+    Some(
+        cf_object_storage::S3ObjectStore::new(cf_object_storage::S3Config {
+            endpoint,
+            public_endpoint: None,
+            region: var("ENTERPRISE_CERT_S3_REGION", "us-east-1"),
+            bucket: var("ENTERPRISE_CERT_S3_BUCKET", "cfmeet-cert-voicemail"),
+            access_key: var("ENTERPRISE_CERT_S3_ACCESS_KEY", "testing"),
+            secret_key: var("ENTERPRISE_CERT_S3_SECRET_KEY", "testing"),
+            path_style: true,
+            server_side_encryption: std::env::var("ENTERPRISE_CERT_S3_SSE").ok(),
+        })
+        .unwrap(),
+    )
 }
 
 struct Sipp {
@@ -258,6 +299,9 @@ impl Sipp {
             ),
             End::PlatformHangsUp(ms) => format!(
                 "  <recv request=\"BYE\" timeout=\"{ms}\" />\n  <send><![CDATA[\nSIP/2.0 200 OK\n[last_Via:]\n[last_From:]\n[last_To:]\n[last_Call-ID:]\n[last_CSeq:]\nContent-Length: 0\n\n]]></send>\n"
+            ),
+            End::LeavesMessage { wait_ms, ms } => format!(
+                "  <pause milliseconds=\"{wait_ms}\" />\n  <nop><action><exec play_pcap_audio=\"/usr/share/sip-tester/g711a.pcap\" /></action></nop>\n  <pause milliseconds=\"{ms}\" />\n  <send retrans=\"500\"><![CDATA[\nBYE [next_url] SIP/2.0\nVia: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]\nFrom: <sip:ent-desk-1@[local_ip]:[local_port]>;tag=[pid]SIPpTag09[call_number]\nTo: <sip:[called]@[remote_ip]:[remote_port]>[peer_tag_param]\nCall-ID: [call_id]\nCSeq: 2 BYE\nContact: <sip:ent-desk-1@[local_ip]:[local_port]>\nMax-Forwards: 70\nContent-Length: 0\n\n]]></send>\n  <recv response=\"200\" />\n"
             ),
         };
         let template =
@@ -349,7 +393,12 @@ struct Stack {
     pump: Arc<AtomicBool>,
     caller: Uuid,
     member: Device,
+    member_principal: Uuid,
     flow: Uuid,
+    /// Voicemail (None: no S3-compatible store configured — scenario skipped).
+    store: Option<Arc<cf_object_storage::S3ObjectStore>>,
+    mailbox: Option<Uuid>,
+    vm_token: String,
 }
 
 impl Drop for Stack {
@@ -486,6 +535,7 @@ impl Stack {
                         "telephony-event.apply",
                         "telephony-reconciliation.apply",
                         "telephony-enterprise.offer",
+                        "telephony-capture.deliver",
                     ],
                 )],
             ),
@@ -514,8 +564,27 @@ impl Stack {
         )
         .unwrap();
         let (_, peers) = common::service_auth_fixture();
-        let a =
-            AppWorld::with_service_auth_public_network(runtime, peers, Utc::now(), None).await?;
+        // Protected artifact storage: a real S3-compatible private bucket.
+        let store = cert_store().map(Arc::new);
+        if let Some(store) = &store {
+            store
+                .ensure_bucket()
+                .await
+                .expect("the certification bucket");
+        }
+        let artifacts = store.clone();
+        let a = AppWorld::with_service_auth_public_network_configured(
+            runtime,
+            peers,
+            Utc::now(),
+            None,
+            move |rt| {
+                if let Some(s) = artifacts {
+                    rt.artifacts = s;
+                }
+            },
+        )
+        .await?;
         let e = EnterpriseWorld::around(a).await;
         let scope = e.a.w.scope();
         // Telephony: the desk phone's edge endpoint, bound to this scope.
@@ -570,6 +639,33 @@ impl Stack {
         let member_ext = e
             .extension("6101", "ENTERPRISE_MEMBER", member_p.id())
             .await;
+        // The member's mailbox (voicemail administration needs its own scope).
+        let vm = common::enterprise::credential(
+            e.h(),
+            &e.a.w.consumer,
+            e.a.w.kind,
+            &[
+                calling::platform::scopes::names::ENTERPRISE_CONFIG_READ,
+                calling::platform::scopes::names::ENTERPRISE_VOICEMAIL_READ,
+                calling::platform::scopes::names::ENTERPRISE_VOICEMAIL_MANAGE,
+            ],
+        )
+        .await;
+        let vm_token = vm.secret.expose_once().to_string();
+        let r = e
+            .send(
+                &vm_token,
+                Method::POST,
+                "/v1/enterprise/voicemail/mailboxes",
+                Some(
+                    json!({ "owner": { "type": "PRINCIPAL", "id": member_p.id() },
+                             "displayLabel": "Cert member voicemail", "maxMessageSeconds": 60,
+                             "retentionDays": 30 }),
+                ),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        let mailbox = id_of(&r.json, "mailboxId");
         let q = e
             .create(
                 "/v1/enterprise/queues",
@@ -592,10 +688,11 @@ impl Stack {
                     { "id": "main", "kind": "MENU", "prompt": { "builtin": "MENU" }, "inputTimeoutSeconds": 6,
                       "maxRetries": 1, "options": [
                         { "digit": "1", "next": "sales" }, { "digit": "2", "next": "support" },
-                        { "digit": "0", "next": "bye" }],
+                        { "digit": "7", "next": "voicemail" }, { "digit": "0", "next": "bye" }],
                       "onInvalid": "bye", "onTimeout": "bye" },
                     { "id": "sales", "kind": "ROUTE_EXTENSION", "extensionId": id_of(&member_ext, "extensionId") },
                     { "id": "support", "kind": "ROUTE_QUEUE", "queueId": id_of(&q, "queueId") },
+                    { "id": "voicemail", "kind": "ROUTE_VOICEMAIL", "mailboxId": mailbox },
                     { "id": "bye", "kind": "HANGUP", "prompt": { "builtin": "GOODBYE" } } ] } })),
             )
             .await;
@@ -645,7 +742,11 @@ impl Stack {
             pump,
             caller: caller.id().as_uuid(),
             member,
+            member_principal: member_p.id().as_uuid(),
             flow,
+            mailbox: store.as_ref().map(|_| mailbox),
+            store,
+            vm_token,
         })
     }
 
@@ -918,6 +1019,17 @@ async fn enterprise_sip_ivr_certification() {
     assert_eq!(stack.session(call4).await, "COMPLETED:0:bye");
     println!("enterprise SIP IVR certified: hangup branch");
 
+    // 5. Voicemail (§60): key 7 routes the SAME Call to the member's mailbox; the edge plays
+    //    the greeting and records the caller's real audio; Telephony delivers it, Calling
+    //    stores it in the private bucket; READY; authorized retrieval; read; deletion.
+    if let (Some(store), Some(mailbox)) = (stack.store.clone(), stack.mailbox) {
+        voicemail_scenario(&stack, &store, mailbox, next_port()).await;
+    } else {
+        println!(
+            "SKIPPED voicemail certification: no S3-compatible store (ENTERPRISE_CERT_S3_ENDPOINT)"
+        );
+    }
+
     // No telephone number, SIP URI or key sequence reached Calling's database.
     let dump = common::dump_database(stack.e.h().conn()).await;
     assert!(
@@ -926,4 +1038,264 @@ async fn enterprise_sip_ivr_certification() {
     );
     assert!(!dump.contains("sip:"), "a SIP URI leaked into Calling");
     let _ = (&stack.telephony_db, stack.flow);
+}
+
+async fn voicemail_scenario(
+    stack: &Stack,
+    store: &cf_object_storage::S3ObjectStore,
+    mailbox: Uuid,
+    media_port: u16,
+) {
+    use cf_object_storage::ObjectStore;
+    let before = stack.last_call().await;
+    let mut sipp = Sipp::dial(
+        "6100",
+        3500,
+        &['7'],
+        End::LeavesMessage {
+            wait_ms: 8000,
+            ms: 8000,
+        },
+        media_port,
+    );
+    stack
+        .eventually(
+            "the IVR routed key 7 to voicemail",
+            Duration::from_secs(25),
+            || async {
+                match stack.last_call().await {
+                    Some(c) if Some(c) != before => stack.session(c).await == "ROUTED:0:voicemail",
+                    _ => false,
+                }
+            },
+        )
+        .await;
+    let call = stack.last_call().await.unwrap();
+    assert!(
+        sipp.finished_ok(Duration::from_secs(60)).await,
+        "{}\n{}",
+        sipp.diagnostics(),
+        stack.diagnostics().await
+    );
+    stack
+        .eventually(
+            "the voicemail message became READY",
+            Duration::from_secs(40),
+            || async {
+                stack
+                    .text(&format!(
+                        "SELECT state FROM voicemail_messages WHERE call_id = '{call}'"
+                    ))
+                    .await
+                    == "READY"
+            },
+        )
+        .await;
+    let message: Uuid = stack
+        .text(&format!(
+            "SELECT id::text FROM voicemail_messages WHERE call_id = '{call}'"
+        ))
+        .await
+        .parse()
+        .unwrap();
+    // The greeting played, the capture ran at the edge, the audio is real (seconds of it).
+    let prompts = stack.prompts(call).await;
+    assert!(
+        prompts.iter().any(|p| p == "VOICEMAIL_GREETING:ACCEPTED"),
+        "{prompts:?}"
+    );
+    assert_eq!(
+        stack
+            .text(&format!(
+                "SELECT kind || ':' || status FROM call_telephony_commands WHERE call_id = '{call}' AND kind = 'CAPTURE'"
+            ))
+            .await,
+        "CAPTURE:ACCEPTED"
+    );
+    let duration: i64 = stack
+        .text(&format!(
+            "SELECT duration_ms::text FROM voicemail_messages WHERE id = '{message}'"
+        ))
+        .await
+        .parse()
+        .unwrap();
+    assert!(duration >= 3000, "captured {duration} ms");
+    assert_eq!(
+        stack
+            .text(&format!(
+                "SELECT capture_source || ':' || content_type FROM voicemail_messages WHERE id = '{message}'"
+            ))
+            .await,
+        "SIP:audio/wav"
+    );
+    // ONE Call, linked: the enterprise outcome is VOICEMAIL, and its events carry the
+    // message. The caller hung up after speaking: CANCELLED when the hang-up reached
+    // Calling first, NO_ANSWER when the stored message did (both end the ringing Call).
+    let end = stack.state(call).await;
+    assert!(
+        matches!(end, CallState::Cancelled | CallState::NoAnswer),
+        "{end:?}"
+    );
+    assert_eq!(
+        stack
+            .text(&format!(
+                "SELECT outcome FROM enterprise_call_contexts WHERE call_id = '{call}'"
+            ))
+            .await,
+        "VOICEMAIL"
+    );
+    assert_eq!(
+        stack
+            .text(&format!(
+                "SELECT event_type FROM call_events WHERE call_id = '{call}' AND event_type LIKE 'VOICEMAIL_%' ORDER BY sequence"
+            ))
+            .await,
+        "VOICEMAIL_RECEIVED,VOICEMAIL_READY"
+    );
+    // Telephony delivered it and deleted its transient spool copy.
+    assert_eq!(
+        stack
+            .ttext(&format!(
+                "SELECT status || ':' || (spool_deleted_at IS NOT NULL)::text FROM telephony_captures WHERE id = '{message}'"
+            ))
+            .await,
+        "DELIVERED:true"
+    );
+    let spool = stack.asterisk.run.join("spool/recording");
+    let leftovers: Vec<String> = std::fs::read_dir(&spool)
+        .map(|d| {
+            d.flatten()
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        leftovers.is_empty(),
+        "edge spool not cleaned: {leftovers:?}"
+    );
+    // The object is in the private bucket with the recorded integrity metadata.
+    let key = stack
+        .text(&format!(
+            "SELECT object_key FROM voicemail_messages WHERE id = '{message}'"
+        ))
+        .await;
+    let (size, sha): (String, String) = {
+        let v = stack
+            .text(&format!(
+                "SELECT size_bytes::text || '|' || sha256 FROM voicemail_messages WHERE id = '{message}'"
+            ))
+            .await;
+        let (a, b) = v.split_once('|').unwrap();
+        (a.to_string(), b.to_string())
+    };
+    let meta = store.head(&key).await.unwrap().expect("stored object");
+    assert_eq!(meta.size.to_string(), size);
+    // Authorized retrieval: the owner (through the application) gets a short-lived signed
+    // URL; the bytes are the recorded WAV; the object is not readable unsigned.
+    let path = format!("/v1/enterprise/voicemail/messages/{message}");
+    let owner = stack.member_principal;
+    let r = stack
+        .e
+        .send(
+            &stack.vm_token,
+            Method::GET,
+            &format!("/v1/enterprise/voicemail/messages?mailboxId={mailbox}&principalId={owner}"),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["messages"][0]["messageId"], message.to_string());
+    assert!(!r.text.contains(&key));
+    let r = stack
+        .e
+        .send(
+            &stack.vm_token,
+            Method::POST,
+            &format!("{path}/media-access"),
+            Some(json!({ "principalId": owner })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let url = r.json["url"].as_str().unwrap().to_string();
+    let http = reqwest::Client::builder().no_proxy().build().unwrap();
+    let audio = http.get(&url).send().await.unwrap();
+    assert_eq!(audio.status(), 200);
+    let bytes = audio.bytes().await.unwrap().to_vec();
+    assert_eq!(&bytes[0..4], b"RIFF");
+    assert_eq!(&bytes[8..12], b"WAVE");
+    assert_eq!(cf_object_storage::sha256_hex(&bytes), sha);
+    let unsigned = url.split('?').next().unwrap().to_string();
+    assert!(http
+        .get(&unsigned)
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .is_client_error());
+    // Another principal is not the owner: 404.
+    let r = stack
+        .e
+        .send(
+            &stack.vm_token,
+            Method::POST,
+            &format!("{path}/media-access"),
+            Some(json!({ "principalId": stack.caller })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    // Read state, then deletion: DELETING -> the object leaves the bucket -> DELETED.
+    let version = stack
+        .e
+        .send(&stack.vm_token, Method::GET, &path, None)
+        .await
+        .json["version"]
+        .as_i64()
+        .unwrap();
+    let r = stack
+        .e
+        .send(
+            &stack.vm_token,
+            Method::PUT,
+            &format!("{path}/read-state"),
+            Some(json!({ "expectedVersion": version, "readState": "READ", "principalId": owner })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let r = stack
+        .e
+        .send(
+            &stack.vm_token,
+            Method::DELETE,
+            &format!("{path}?expectedVersion={}&principalId={owner}", version + 1),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    stack
+        .eventually(
+            "the message was deleted",
+            Duration::from_secs(20),
+            || async {
+                stack
+                    .text(&format!(
+                        "SELECT state FROM voicemail_messages WHERE id = '{message}'"
+                    ))
+                    .await
+                    == "DELETED"
+            },
+        )
+        .await;
+    assert!(store.head(&key).await.unwrap().is_none());
+    assert_eq!(
+        stack
+            .text(&format!(
+                "SELECT string_agg(operation, ',' ORDER BY seq) FROM enterprise_admin_audit WHERE resource_id = '{message}'"
+            ))
+            .await,
+        "MEDIA_ACCESS,MARK_READ,DELETE"
+    );
+    println!(
+        "enterprise SIP voicemail certified: IVR -> mailbox, real edge capture ({duration} ms), \
+         protected upload, READY, authorized retrieval, read, deletion"
+    );
 }

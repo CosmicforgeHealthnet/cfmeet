@@ -1,0 +1,8 @@
+{
+  "messageId": "11111111-2222-4333-8444-555555555555",
+  "url": "https://storage.example/opaque?X-Amz-Expires=300&X-Amz-Signature=abc",
+  "expiresAt": "2031-03-05T09:05:00.000Z",
+  "contentType": "audio/wav",
+  "sizeBytes": 96044,
+  "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+}

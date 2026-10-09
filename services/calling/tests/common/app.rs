@@ -173,6 +173,25 @@ impl AppWorld {
         now: chrono::DateTime<chrono::Utc>,
         contact_delegation: Option<std::sync::Arc<cf_service_auth::ContactDelegationSigner>>,
     ) -> Option<Self> {
+        Self::with_service_auth_public_network_configured(
+            service_auth,
+            peers,
+            now,
+            contact_delegation,
+            |_| {},
+        )
+        .await
+    }
+
+    /// [`with_service_auth_public_network`](Self::with_service_auth_public_network) whose
+    /// runtime is further adjusted by `configure` (e.g. protected artifact storage).
+    pub async fn with_service_auth_public_network_configured(
+        service_auth: calling::internal_auth::ServiceAuthRuntime,
+        peers: super::Peers,
+        now: chrono::DateTime<chrono::Utc>,
+        contact_delegation: Option<std::sync::Arc<cf_service_auth::ContactDelegationSigner>>,
+        configure: impl FnOnce(&mut calling::state::CallingRuntime),
+    ) -> Option<Self> {
         use std::sync::Arc;
         let db = Arc::new(super::TestDb::new().await?);
         let media = Arc::new(FakeMediaProvider::default());
@@ -193,6 +212,7 @@ impl AppWorld {
         let push = Arc::new(super::RecordingPush::default());
         runtime.push = push.clone();
         runtime.contact_delegation = contact_delegation;
+        configure(&mut runtime);
         let h = Harness::with_service_auth(
             db,
             super::TEST_PEPPER,

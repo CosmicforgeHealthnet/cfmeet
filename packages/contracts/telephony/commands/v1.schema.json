@@ -246,7 +246,7 @@
       }
     },
     "ControlCommand": {
-      "description": "POST /internal/v1/legs/{id}/terminate | hold | resume | answer | prompt. Part F: answer and prompt act on internal enterprise SIP legs only (permission telephony-leg.media); prompt requires `prompt`.",
+      "description": "POST /internal/v1/legs/{id}/terminate | hold | resume | answer | prompt | capture. Part F: answer, prompt and capture act on internal enterprise SIP legs only (permission telephony-leg.media); prompt requires `prompt`, capture requires `capture`.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -294,6 +294,35 @@
             "VOICEMAIL_GREETING",
             "BEEP"
           ]
+        },
+        "capture": {
+          "description": "Part F, CAPTURE only: capture the leg's caller audio into the edge's TRANSIENT spool for delivery to Calling (captureId is Calling's message / recording id). Never an object-storage key, a bucket, a URL or a file path: Telephony names its own spool file.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "captureId",
+            "purpose",
+            "maxDurationSeconds",
+            "beep"
+          ],
+          "properties": {
+            "captureId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "purpose": {
+              "enum": [
+                "VOICEMAIL"
+              ]
+            },
+            "maxDurationSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "beep": {
+              "type": "boolean"
+            }
+          }
         }
       }
     },

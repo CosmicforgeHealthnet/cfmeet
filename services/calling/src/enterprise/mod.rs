@@ -27,6 +27,7 @@ pub mod policy;
 pub mod queues;
 pub mod ring_groups;
 pub mod sip_devices;
+pub mod voicemail;
 
 use std::sync::Arc;
 
@@ -108,6 +109,9 @@ pub enum EnterpriseError {
     /// A kill switch / capability is off.
     #[error("{0}")]
     Unavailable(&'static str),
+    /// Protected artifact storage cannot serve the request now (retry later).
+    #[error("artifact storage unavailable")]
+    StorageUnavailable,
     #[error("database error ({summary})")]
     Database { summary: String, connectivity: bool },
 }
@@ -152,6 +156,10 @@ impl From<EnterpriseError> for CallingError {
             EnterpriseError::Unavailable(_) => CallingError::Call {
                 code: ErrorCode::CapabilityUnavailable,
                 status: axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            },
+            EnterpriseError::StorageUnavailable => CallingError::Call {
+                code: ErrorCode::ArtifactStorageUnavailable,
+                status: axum::http::StatusCode::SERVICE_UNAVAILABLE,
             },
             EnterpriseError::Database {
                 summary,
@@ -237,11 +245,25 @@ pub struct EnterpriseService {
     db: DatabaseConnection,
     clock: SharedClock,
     flags: EnterpriseFlags,
+    /// Protected artifact storage (voicemail / recordings; signed reads after
+    /// authorization).
+    pub(crate) artifacts: Arc<dyn cf_object_storage::ObjectStore>,
 }
 
 impl EnterpriseService {
     pub fn new(db: DatabaseConnection, clock: SharedClock, flags: EnterpriseFlags) -> Self {
-        Self { db, clock, flags }
+        Self {
+            db,
+            clock,
+            flags,
+            artifacts: Arc::new(cf_object_storage::UnconfiguredStore),
+        }
+    }
+
+    /// The protected artifact store of this deployment.
+    pub fn with_artifacts(mut self, artifacts: Arc<dyn cf_object_storage::ObjectStore>) -> Self {
+        self.artifacts = artifacts;
+        self
     }
 
     pub fn shared(self) -> Arc<Self> {

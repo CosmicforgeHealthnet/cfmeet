@@ -208,6 +208,27 @@ async fn main() -> anyhow::Result<()> {
         "enterprise calling configured"
     );
 
+    // Protected artifact storage (Part F voicemail): a private S3-compatible bucket. Without
+    // CALLING_ARTIFACT_STORAGE_ENDPOINT there is none and voicemail capture fails closed.
+    let artifacts: Arc<dyn cf_object_storage::ObjectStore> =
+        match cf_object_storage::S3Config::from_lookup("CALLING_ARTIFACT_STORAGE_", &lookup)
+            .and_then(|config| {
+                config
+                    .map(cf_object_storage::S3ObjectStore::new)
+                    .transpose()
+            }) {
+            Ok(Some(store)) => Arc::new(store),
+            Ok(None) => Arc::new(cf_object_storage::UnconfiguredStore),
+            Err(err) => {
+                tracing::error!(error = %err, "artifact storage configuration error");
+                std::process::exit(2);
+            }
+        };
+    tracing::info!(
+        artifact_storage_backend = artifacts.backend(),
+        "protected artifact storage configured"
+    );
+
     let clock: SharedClock = Arc::new(SystemClock);
     let state = AppState::new(
         db,
@@ -229,6 +250,8 @@ async fn main() -> anyhow::Result<()> {
             contact_delegation,
             public_network,
             enterprise_flags,
+            artifacts,
+            capture: Arc::new(calling::calls::app::enterprise::UnavailableCapture),
         },
     );
 

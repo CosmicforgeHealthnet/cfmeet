@@ -72,12 +72,20 @@ impl EnterpriseWorld {
 
     /// A world whose deployment runs with explicit enterprise kill switches.
     pub async fn with_flags(flags: calling::enterprise::EnterpriseFlags) -> Option<Self> {
+        Self::configured(|runtime| runtime.enterprise_flags = flags).await
+    }
+
+    /// A world whose Calling runtime is adjusted by `configure` (artifact storage, media
+    /// capture, kill switches, …).
+    pub async fn configured(
+        configure: impl FnOnce(&mut calling::state::CallingRuntime),
+    ) -> Option<Self> {
         use std::sync::Arc;
         let db = Arc::new(super::TestDb::new().await?);
         let media = Arc::new(super::fake_media::FakeMediaProvider::default());
         let bus = Arc::new(calling::signaling::InMemorySignalBus::new());
         let mut runtime = super::test_runtime(Some(media.clone()), bus.clone());
-        runtime.enterprise_flags = flags;
+        configure(&mut runtime);
         let h = Harness::with_runtime(
             db,
             super::TEST_PEPPER,
@@ -312,4 +320,36 @@ pub async fn strings(conn: &sea_orm::DatabaseConnection, sql: &str) -> Vec<Strin
     .into_iter()
     .map(|r| r.try_get_by_index::<String>(0).unwrap())
     .collect()
+}
+
+/// A fake application (RTC) media capture adapter: records each start request, or
+/// refuses while `refuse` is set.
+#[derive(Default)]
+pub struct RecordingCapture {
+    pub started: std::sync::Mutex<Vec<calling::calls::app::enterprise::CaptureRequest>>,
+    pub refuse: std::sync::atomic::AtomicBool,
+}
+
+impl RecordingCapture {
+    pub fn started(&self) -> Vec<calling::calls::app::enterprise::CaptureRequest> {
+        self.started.lock().unwrap().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl calling::calls::app::enterprise::CallMediaCapture for RecordingCapture {
+    fn available(&self) -> bool {
+        true
+    }
+
+    async fn start(
+        &self,
+        request: calling::calls::app::enterprise::CaptureRequest,
+    ) -> Result<(), &'static str> {
+        if self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err("CAPTURE_START_FAILED");
+        }
+        self.started.lock().unwrap().push(request);
+        Ok(())
+    }
 }

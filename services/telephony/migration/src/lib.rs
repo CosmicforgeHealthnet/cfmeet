@@ -14,6 +14,7 @@ mod m20261008_000004_bridges_usage;
 mod m20261008_000005_incidents_reconciliation;
 mod m20261008_000006_ingress_security;
 mod m20261009_000007_enterprise_sip;
+mod m20261009_000008_media_capture;
 
 /// Name of the table recording which Telephony migrations have been applied.
 pub const MIGRATION_TABLE: &str = "telephony_seaql_migrations";
@@ -31,6 +32,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261008_000005_incidents_reconciliation::Migration),
             Box::new(m20261008_000006_ingress_security::Migration),
             Box::new(m20261009_000007_enterprise_sip::Migration),
+            Box::new(m20261009_000008_media_capture::Migration),
         ]
     }
 

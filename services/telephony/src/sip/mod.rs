@@ -100,6 +100,15 @@ pub enum EdgeEventKind {
     LeftBridge {
         bridge: String,
     },
+    /// Part F: a spool recording (capture) of the channel finished — also when the caller
+    /// hung up during it (the partial recording is kept).
+    CaptureFinished {
+        name: String,
+    },
+    /// Part F: a spool recording failed at the edge.
+    CaptureFailed {
+        name: String,
+    },
 }
 
 impl fmt::Debug for EdgeEventKind {
@@ -116,6 +125,8 @@ impl fmt::Debug for EdgeEventKind {
             EdgeEventKind::Unheld => f.write_str("Unheld"),
             EdgeEventKind::EnteredBridge { .. } => f.write_str("EnteredBridge"),
             EdgeEventKind::LeftBridge { .. } => f.write_str("LeftBridge"),
+            EdgeEventKind::CaptureFinished { .. } => f.write_str("CaptureFinished"),
+            EdgeEventKind::CaptureFailed { .. } => f.write_str("CaptureFailed"),
         }
     }
 }
@@ -193,6 +204,30 @@ pub trait SipMediaEdge: Send + Sync {
 
     /// Part F: plays one edge-local sound (a built-in prompt mapped by Telephony) on a
     /// channel. Playbacks of one channel queue in order.
+    /// Part F: records the channel's caller audio (WAV) into the edge's TRANSIENT spool
+    /// under `name` (Telephony's own name, never a caller-supplied one), at most
+    /// `max_seconds`, optionally after a beep; `#` ends it early. Completion arrives as
+    /// [`EdgeEventKind::CaptureFinished`] / [`EdgeEventKind::CaptureFailed`].
+    async fn record(
+        &self,
+        _channel: &ChannelRef,
+        _name: &str,
+        _max_seconds: u32,
+        _beep: bool,
+    ) -> EdgeResult<()> {
+        Err(EdgeError::Refused)
+    }
+
+    /// Part F: the bytes of a finished spool recording (at most `max_bytes`).
+    async fn fetch_recording(&self, _name: &str, _max_bytes: usize) -> EdgeResult<Vec<u8>> {
+        Err(EdgeError::Unavailable)
+    }
+
+    /// Part F: removes a spool recording. Idempotent: a missing recording is success.
+    async fn delete_recording(&self, _name: &str) -> EdgeResult<()> {
+        Ok(())
+    }
+
     async fn play(&self, _channel: &ChannelRef, _sound: &str) -> EdgeResult<()> {
         Err(EdgeError::Unavailable)
     }

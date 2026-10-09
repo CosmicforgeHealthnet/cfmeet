@@ -94,7 +94,9 @@ async fn trusted_peer_with_a_valid_token_is_authenticated() {
             "operational-callback.deliver",
             "telephony-event.apply",
             "telephony-reconciliation.apply",
-            "telephony-inbound.offer"
+            "telephony-inbound.offer",
+            "telephony-enterprise.offer",
+            "telephony-capture.deliver"
         ])
     );
     // The hop runs in the signed request / correlation context.

@@ -52,6 +52,7 @@ pub fn forwarding_types() -> &'static [DestinationType] {
         DestinationType::RingGroup,
         DestinationType::Queue,
         DestinationType::Ivr,
+        DestinationType::Voicemail,
         DestinationType::PublicContact,
     ]
 }

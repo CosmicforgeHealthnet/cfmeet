@@ -33,6 +33,7 @@ pub fn routes() -> Router<AppState> {
         .route("/legs/:leg_id/resume", post(resume))
         .route("/legs/:leg_id/answer", post(answer))
         .route("/legs/:leg_id/prompt", post(prompt))
+        .route("/legs/:leg_id/capture", post(capture))
         .route("/bridges", post(create_bridge))
         .route("/bridges/:bridge_id", delete(end_bridge).get(get_bridge))
         .route("/routes/availability", get(availability))
@@ -184,6 +185,24 @@ async fn prompt(
         &caller,
         InternalPermission::TelephonyLegMedia,
         CommandKind::Prompt,
+        &id,
+        raw,
+    )
+    .await
+}
+
+/// Part F: capture the caller audio of an internal enterprise SIP leg (voicemail).
+async fn capture(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    Path(id): Path<String>,
+    raw: Result<Json<ControlCommand>, JsonRejection>,
+) -> Result<Response, TelephonyError> {
+    control(
+        &state,
+        &caller,
+        InternalPermission::TelephonyLegMedia,
+        CommandKind::Capture,
         &id,
         raw,
     )

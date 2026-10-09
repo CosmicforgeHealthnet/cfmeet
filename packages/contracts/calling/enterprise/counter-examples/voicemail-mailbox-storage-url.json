@@ -1,0 +1,10 @@
+{
+  "owner": {
+    "type": "PRINCIPAL",
+    "id": "8b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b"
+  },
+  "displayLabel": "Mine",
+  "maxMessageSeconds": 120,
+  "retentionDays": 30,
+  "storageUrl": "s3://bucket/voicemail"
+}

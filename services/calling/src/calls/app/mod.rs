@@ -161,6 +161,10 @@ pub struct AppCallService {
     config: AppCallingConfig,
     /// Enterprise kill switches (Part F).
     pub(crate) enterprise_flags: crate::enterprise::EnterpriseFlags,
+    /// Protected artifact storage (Part F voicemail / recordings).
+    pub(crate) artifacts: Arc<dyn cf_object_storage::ObjectStore>,
+    /// Media capture of application (RTC) callers (Part F; default: unavailable).
+    pub(crate) capture: Arc<dyn enterprise::CallMediaCapture>,
 }
 
 impl AppCallService {
@@ -185,7 +189,21 @@ impl AppCallService {
             public: public::PublicNetwork::default(),
             config,
             enterprise_flags: crate::enterprise::EnterpriseFlags::default(),
+            artifacts: Arc::new(cf_object_storage::UnconfiguredStore),
+            capture: Arc::new(enterprise::UnavailableCapture),
         }
+    }
+
+    /// Uses `artifacts` as the protected artifact store (default: unconfigured).
+    pub fn with_artifacts(mut self, artifacts: Arc<dyn cf_object_storage::ObjectStore>) -> Self {
+        self.artifacts = artifacts;
+        self
+    }
+
+    /// Uses `capture` for application (RTC) media capture (default: unavailable).
+    pub fn with_capture(mut self, capture: Arc<dyn enterprise::CallMediaCapture>) -> Self {
+        self.capture = capture;
+        self
     }
 
     /// Uses `flags` as the enterprise kill switches (default: all off).

@@ -29,6 +29,10 @@ use super::{
     policy::{NewPolicy, PolicyChange, PolicyRules, ResourceStatus},
     queues::{QueueChange, QueueMember, QueueSettings},
     ring_groups::{RingGroupChange, RingGroupSettings, RingStrategy},
+    voicemail::{
+        MailboxChange, MailboxOwnerType, MailboxSettings, MessageFilter, MessageState, ReadState,
+        VoicemailRequester,
+    },
     AdminActor, PageRequest,
 };
 use crate::{
@@ -168,6 +172,29 @@ pub fn routes() -> Router<AppState> {
             get(get_forwarding_rule)
                 .patch(update_forwarding_rule)
                 .delete(disable_forwarding_rule),
+        )
+        .route(
+            "/v1/enterprise/voicemail/mailboxes",
+            get(list_mailboxes).post(create_mailbox),
+        )
+        .route(
+            "/v1/enterprise/voicemail/mailboxes/:mailbox_id",
+            get(get_mailbox)
+                .patch(update_mailbox)
+                .delete(disable_mailbox),
+        )
+        .route("/v1/enterprise/voicemail/messages", get(list_messages))
+        .route(
+            "/v1/enterprise/voicemail/messages/:message_id",
+            get(get_message).delete(delete_message),
+        )
+        .route(
+            "/v1/enterprise/voicemail/messages/:message_id/read-state",
+            put(set_read_state),
+        )
+        .route(
+            "/v1/enterprise/voicemail/messages/:message_id/media-access",
+            post(media_access),
         )
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
 }
@@ -1585,4 +1612,287 @@ async fn disable_forwarding_rule(
         .disable_forwarding_rule(&AdminActor::of(&ctx), id, q.expected_version()?)
         .await?;
     Ok(ok(view))
+}
+
+// ---------------------------------------------------------------------------
+// Voicemail (§60)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MailboxOwnerBody {
+    #[serde(rename = "type")]
+    kind: MailboxOwnerType,
+    id: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateMailboxBody {
+    owner: MailboxOwnerBody,
+    display_label: String,
+    max_message_seconds: i32,
+    retention_days: i32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UpdateMailboxBody {
+    expected_version: i64,
+    #[serde(default)]
+    display_label: Option<String>,
+    #[serde(default)]
+    max_message_seconds: Option<i32>,
+    #[serde(default)]
+    retention_days: Option<i32>,
+}
+
+async fn create_mailbox(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    body: Result<Json<CreateMailboxBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_VOICEMAIL_MANAGE)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .create_mailbox(
+            &AdminActor::of(&ctx),
+            MailboxSettings {
+                owner_type: body.owner.kind,
+                owner_id: body.owner.id,
+                display_label: body.display_label,
+                max_message_seconds: body.max_message_seconds,
+                retention_days: body.retention_days,
+            },
+        )
+        .await?;
+    Ok(created(view))
+}
+
+async fn list_mailboxes(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let q = QueryParams::parse(query, &["limit", "cursor", "status"])?;
+    let page = state
+        .enterprise
+        .list_mailboxes(CallScope::of_platform(&ctx), q.status()?, &q.page()?)
+        .await?;
+    Ok(ok(page))
+}
+
+async fn get_mailbox(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let view = state
+        .enterprise
+        .get_mailbox(CallScope::of_platform(&ctx), uuid_path(&id)?)
+        .await?;
+    Ok(ok(view))
+}
+
+async fn update_mailbox(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    body: Result<Json<UpdateMailboxBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_VOICEMAIL_MANAGE)?;
+    let id = uuid_path(&id)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .update_mailbox(
+            &AdminActor::of(&ctx),
+            id,
+            body.expected_version,
+            MailboxChange {
+                display_label: body.display_label,
+                max_message_seconds: body.max_message_seconds,
+                retention_days: body.retention_days,
+            },
+        )
+        .await?;
+    Ok(ok(view))
+}
+
+async fn disable_mailbox(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_VOICEMAIL_MANAGE)?;
+    let id = uuid_path(&id)?;
+    let q = QueryParams::parse(query, &["expectedVersion"])?;
+    let view = state
+        .enterprise
+        .disable_mailbox(&AdminActor::of(&ctx), id, q.expected_version()?)
+        .await?;
+    Ok(ok(view))
+}
+
+/// Who a voicemail request acts for: the application on behalf of ONE principal (who must
+/// own the mailbox), or — without `principalId` — a voicemail administrator (the
+/// credential holds enterprise.voicemail.manage).
+fn requester(
+    ctx: &PlatformAuthContext,
+    principal: Option<Uuid>,
+) -> Result<VoicemailRequester, CallingError> {
+    match principal {
+        Some(p) => Ok(VoicemailRequester::Principal(p)),
+        None if ctx.has_scope(names::ENTERPRISE_VOICEMAIL_MANAGE) => {
+            Ok(VoicemailRequester::Administrator)
+        }
+        None => Err(CallingError::Validation(
+            "principalId is required without enterprise.voicemail.manage.",
+        )),
+    }
+}
+
+async fn list_messages(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_VOICEMAIL_READ)?;
+    let q = QueryParams::parse(
+        query,
+        &[
+            "limit",
+            "cursor",
+            "mailboxId",
+            "principalId",
+            "state",
+            "readState",
+        ],
+    )?;
+    let mailbox = q
+        .uuid("mailboxId")?
+        .ok_or(CallingError::Validation("mailboxId is required."))?;
+    let filter = MessageFilter {
+        state: q
+            .get("state")
+            .map(|v| MessageState::parse(v).ok_or(CallingError::Validation("state is invalid.")))
+            .transpose()?,
+        read_state: q
+            .get("readState")
+            .map(|v| ReadState::parse(v).ok_or(CallingError::Validation("readState is invalid.")))
+            .transpose()?,
+    };
+    let page = state
+        .enterprise
+        .list_voicemail_messages(
+            CallScope::of_platform(&ctx),
+            mailbox,
+            requester(&ctx, q.uuid("principalId")?)?,
+            filter,
+            &q.page()?,
+        )
+        .await?;
+    Ok(ok(page))
+}
+
+async fn get_message(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_VOICEMAIL_READ)?;
+    let q = QueryParams::parse(query, &["principalId"])?;
+    let view = state
+        .enterprise
+        .get_voicemail_message(
+            CallScope::of_platform(&ctx),
+            uuid_path(&id)?,
+            requester(&ctx, q.uuid("principalId")?)?,
+        )
+        .await?;
+    Ok(ok(view))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReadStateBody {
+    expected_version: i64,
+    read_state: ReadState,
+    #[serde(default)]
+    principal_id: Option<Uuid>,
+}
+
+async fn set_read_state(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    body: Result<Json<ReadStateBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_VOICEMAIL_MANAGE)?;
+    let id = uuid_path(&id)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .set_voicemail_read(
+            &AdminActor::of(&ctx),
+            id,
+            body.expected_version,
+            body.read_state == ReadState::Read,
+            requester(&ctx, body.principal_id)?,
+        )
+        .await?;
+    Ok(ok(view))
+}
+
+async fn delete_message(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_VOICEMAIL_MANAGE)?;
+    let id = uuid_path(&id)?;
+    let q = QueryParams::parse(query, &["expectedVersion", "principalId"])?;
+    let view = state
+        .enterprise
+        .delete_voicemail_message(
+            &AdminActor::of(&ctx),
+            id,
+            q.expected_version()?,
+            requester(&ctx, q.uuid("principalId")?)?,
+        )
+        .await?;
+    Ok(ok(view))
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MediaAccessBody {
+    #[serde(default)]
+    principal_id: Option<Uuid>,
+}
+
+async fn media_access(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    body: Result<Json<MediaAccessBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_VOICEMAIL_READ)?;
+    let id = uuid_path(&id)?;
+    let body = parse_body(body)?;
+    let access = state
+        .enterprise
+        .voicemail_media_access(
+            &AdminActor::of(&ctx),
+            id,
+            requester(&ctx, body.principal_id)?,
+        )
+        .await?;
+    Ok(ok(access))
 }

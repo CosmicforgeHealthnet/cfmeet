@@ -69,6 +69,20 @@ pub struct ControlCommand {
     /// Part F: the BUILT-IN prompt of a PROMPT command (Calling's vocabulary).
     #[serde(default)]
     pub prompt: Option<String>,
+    /// Part F: what a CAPTURE command records (Calling's capture id, purpose, bound).
+    #[serde(default)]
+    pub capture: Option<CaptureSpec>,
+}
+
+/// Part F: the body of a CAPTURE command. Never a file name, path, key or URL — the
+/// spool name is Telephony's own, derived from the capture id.
+#[derive(Debug, Clone, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CaptureSpec {
+    pub capture_id: Uuid,
+    pub purpose: String,
+    pub max_duration_seconds: i32,
+    pub beep: bool,
 }
 
 impl ControlCommand {
@@ -92,6 +106,13 @@ impl ControlCommand {
                 return Err(TelephonyError::Validation("invalid prompt"));
             }
         }
+        if let Some(c) = &self.capture {
+            if c.purpose != "VOICEMAIL"
+                || !(1..=crate::capture::MAX_CAPTURE_SECONDS).contains(&c.max_duration_seconds)
+            {
+                return Err(TelephonyError::Validation("invalid capture"));
+            }
+        }
         if let Some(r) = &self.reason {
             if !matches!(
                 r.as_str(),
@@ -107,8 +128,8 @@ impl ControlCommand {
         use sha2::{Digest, Sha256};
         hex::encode(Sha256::digest(
             format!(
-                "{kind}|{leg}|{}|{:?}|{:?}",
-                self.command_id, self.reason, self.prompt
+                "{kind}|{leg}|{}|{:?}|{:?}|{:?}",
+                self.command_id, self.reason, self.prompt, self.capture
             )
             .as_bytes(),
         ))
@@ -389,13 +410,20 @@ impl TelephonyService {
         }
         // Part F: answer / prompt exist only for internal enterprise legs, behind their
         // own switch (terminating is never blocked).
-        if matches!(kind, CommandKind::Answer | CommandKind::Prompt)
-            && (!leg.is_enterprise() || !self.flags.enterprise_sip.enabled())
+        if matches!(
+            kind,
+            CommandKind::Answer | CommandKind::Prompt | CommandKind::Capture
+        ) && (!leg.is_enterprise() || !self.flags.enterprise_sip.enabled())
         {
             return Err(TelephonyError::Refused(ErrorCode::LegNotActive));
         }
         if kind == CommandKind::Prompt && command.prompt.is_none() {
             return Err(TelephonyError::Validation("prompt is required"));
+        }
+        if (kind == CommandKind::Capture) != command.capture.is_some() {
+            return Err(TelephonyError::Validation(
+                "capture is required for (and only for) CAPTURE",
+            ));
         }
         let allowed = match kind {
             CommandKind::Terminate => true,
@@ -405,7 +433,7 @@ impl TelephonyService {
                 status,
                 LegStatus::Ringing | LegStatus::Answered | LegStatus::Connected
             ),
-            CommandKind::Prompt => matches!(
+            CommandKind::Prompt | CommandKind::Capture => matches!(
                 status,
                 LegStatus::Ringing | LegStatus::Answered | LegStatus::Connected
             ),
@@ -454,7 +482,9 @@ impl TelephonyService {
                 digest.clone().into(),
                 initial.into(),
                 now.into(),
-                json!({ "schemaVersion": "1", "reason": command.reason, "prompt": command.prompt }).into(),
+                json!({ "schemaVersion": "1", "reason": command.reason, "prompt": command.prompt,
+                        "capture": command.capture })
+                .into(),
                 requester.request_id.clone().into(),
                 command.correlation_id.clone().into(),
             ],

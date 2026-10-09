@@ -13,6 +13,7 @@
 
 pub mod abuse;
 pub mod bridges;
+pub mod capture;
 pub mod clock;
 pub mod commands;
 pub mod config;

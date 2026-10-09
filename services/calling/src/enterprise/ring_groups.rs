@@ -42,7 +42,11 @@ pub const MEMBER_TYPES: &[DestinationType] = &[
 
 /// Kinds a ring-group fallback may be (as configured kinds become available).
 pub fn fallback_types() -> &'static [DestinationType] {
-    &[DestinationType::Extension, DestinationType::Queue]
+    &[
+        DestinationType::Extension,
+        DestinationType::Queue,
+        DestinationType::Voicemail,
+    ]
 }
 
 #[derive(Debug, Clone, FromQueryResult)]

@@ -1,0 +1,21 @@
+{
+  "messageId": "11111111-2222-4333-8444-555555555555",
+  "mailboxId": "21111111-2222-4333-8444-555555555555",
+  "callId": "31111111-2222-4333-8444-555555555555",
+  "callerPrincipalId": "41111111-2222-4333-8444-555555555555",
+  "captureSource": "SIP",
+  "state": "READY",
+  "readState": "UNREAD",
+  "contentType": "audio/wav",
+  "sizeBytes": 96044,
+  "durationMs": 6000,
+  "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  "receivedAt": "2031-03-05T09:00:00.000Z",
+  "readyAt": "2031-03-05T09:00:09.000Z",
+  "readAt": null,
+  "failureCode": null,
+  "retentionUntil": "2031-04-04T09:00:09.000Z",
+  "deletedAt": null,
+  "version": 3,
+  "objectKey": "voicemail/t/a/e/m.wav"
+}

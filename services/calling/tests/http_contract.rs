@@ -567,6 +567,7 @@ fn every_operation_declares_its_authentication() {
                     "/internal/v1/telephony/inbound-calls" => "telephony-inbound.offer",
                     "/internal/v1/telephony/enterprise-calls"
                     | "/internal/v1/telephony/enterprise-keypad" => "telephony-enterprise.offer",
+                    "/internal/v1/telephony/captures" => "telephony-capture.deliver",
                     _ => "communication-authority.enforce",
                 };
                 assert_eq!(
@@ -1196,9 +1197,12 @@ async fn every_outbox_row_is_a_valid_envelope_with_a_valid_lifecycle_payload() {
         );
         types.insert(event_type.to_string());
     }
+    // Part F voicemail events are produced (and validated against these same contracts)
+    // by the enterprise voicemail suite.
     let all: BTreeSet<String> = CallEventType::ALL
         .iter()
         .map(|t| t.as_str().to_string())
+        .filter(|t| !t.starts_with("VOICEMAIL_"))
         .collect();
     assert_eq!(types, all, "every event type was produced and validated");
 }

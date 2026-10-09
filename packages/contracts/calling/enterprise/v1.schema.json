@@ -162,6 +162,33 @@
     },
     {
       "$ref": "#/$defs/ForwardingRuleList"
+    },
+    {
+      "$ref": "#/$defs/CreateVoicemailMailboxRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdateVoicemailMailboxRequest"
+    },
+    {
+      "$ref": "#/$defs/VoicemailMailbox"
+    },
+    {
+      "$ref": "#/$defs/VoicemailMailboxList"
+    },
+    {
+      "$ref": "#/$defs/VoicemailMessage"
+    },
+    {
+      "$ref": "#/$defs/VoicemailMessageList"
+    },
+    {
+      "$ref": "#/$defs/SetVoicemailReadStateRequest"
+    },
+    {
+      "$ref": "#/$defs/VoicemailMediaAccessRequest"
+    },
+    {
+      "$ref": "#/$defs/VoicemailMediaAccess"
     }
   ],
   "$defs": {
@@ -3153,6 +3180,443 @@
             "null"
           ],
           "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "MailboxOwnerType": {
+      "description": "What a mailbox belongs to: a PRINCIPAL, an EXTENSION (its member owns the messages), a QUEUE (its agents) or a RING_GROUP (its principal members).",
+      "type": "string",
+      "enum": [
+        "PRINCIPAL",
+        "EXTENSION",
+        "QUEUE",
+        "RING_GROUP"
+      ]
+    },
+    "MailboxOwner": {
+      "description": "A mailbox owner of the same scope (never a telephone number).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "id"
+      ],
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/MailboxOwnerType"
+        },
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "CreateVoicemailMailboxRequest": {
+      "description": "Body of POST /v1/enterprise/voicemail/mailboxes. Requires an enterprise policy permitting voicemail.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "displayLabel",
+        "maxMessageSeconds",
+        "retentionDays"
+      ],
+      "properties": {
+        "owner": {
+          "$ref": "#/$defs/MailboxOwner"
+        },
+        "displayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "maxMessageSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 600,
+          "description": "Maximum message length in seconds; the edge stops capturing at this length."
+        },
+        "retentionDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650,
+          "description": "Days a READY message is kept before the retention worker deletes it (audited as the system)."
+        }
+      }
+    },
+    "UpdateVoicemailMailboxRequest": {
+      "description": "Body of PATCH /v1/enterprise/voicemail/mailboxes/{mailbox_id} (the owner is fixed). A new retention applies to messages that become READY afterwards.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "displayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "maxMessageSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 600,
+          "description": "Maximum message length in seconds; the edge stops capturing at this length."
+        },
+        "retentionDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650,
+          "description": "Days a READY message is kept before the retention worker deletes it (audited as the system)."
+        }
+      }
+    },
+    "VoicemailMailbox": {
+      "description": "A voicemail mailbox. The VOICEMAIL destination type names it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mailboxId",
+        "owner",
+        "displayLabel",
+        "maxMessageSeconds",
+        "retentionDays",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "mailboxId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "owner": {
+          "$ref": "#/$defs/MailboxOwner"
+        },
+        "displayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "maxMessageSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 600,
+          "description": "Maximum message length in seconds; the edge stops capturing at this length."
+        },
+        "retentionDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650,
+          "description": "Days a READY message is kept before the retention worker deletes it (audited as the system)."
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "VoicemailMailboxList": {
+      "description": "A page of mailboxes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mailboxes",
+        "nextCursor"
+      ],
+      "properties": {
+        "mailboxes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VoicemailMailbox"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "VoicemailMessageState": {
+      "description": "RECORDING: the edge / capture adapter is capturing. PROCESSING: the audio arrived and is being stored (a storage outage keeps it here while the deliverer retries — never a fake READY). READY: stored in protected object storage. FAILED: the capture failed or never arrived (a late delivery can still make it READY). DELETING: deletion requested (user, administrator or retention); the object is being removed. DELETED: the object is gone; the row and the originating Call's history remain.",
+      "type": "string",
+      "enum": [
+        "RECORDING",
+        "PROCESSING",
+        "READY",
+        "FAILED",
+        "DELETING",
+        "DELETED"
+      ]
+    },
+    "VoicemailReadState": {
+      "description": "Whether the owner has read the message.",
+      "type": "string",
+      "enum": [
+        "UNREAD",
+        "READ"
+      ]
+    },
+    "VoicemailCaptureSource": {
+      "description": "Where the audio is captured: SIP (Telephony's edge, behind a provider-neutral command) or APPLICATION (the neutral call media capture interface for RTC callers).",
+      "type": "string",
+      "enum": [
+        "SIP",
+        "APPLICATION"
+      ]
+    },
+    "VoicemailMessage": {
+      "description": "A voicemail message of ONE originating canonical Call. Integrity metadata only: never an object-storage key, a bucket or a stored URL (media is reached through media-access).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "messageId",
+        "mailboxId",
+        "callId",
+        "callerPrincipalId",
+        "captureSource",
+        "state",
+        "readState",
+        "contentType",
+        "sizeBytes",
+        "durationMs",
+        "sha256",
+        "receivedAt",
+        "readyAt",
+        "readAt",
+        "failureCode",
+        "retentionUntil",
+        "deletedAt",
+        "version"
+      ],
+      "properties": {
+        "messageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "mailboxId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callerPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "captureSource": {
+          "$ref": "#/$defs/VoicemailCaptureSource"
+        },
+        "state": {
+          "$ref": "#/$defs/VoicemailMessageState"
+        },
+        "readState": {
+          "$ref": "#/$defs/VoicemailReadState"
+        },
+        "contentType": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "audio/wav",
+            null
+          ]
+        },
+        "sizeBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "durationMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Lower-case hex SHA-256 of the stored audio (integrity)."
+        },
+        "receivedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "readyAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "readAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "failureCode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Z][A-Z_]{1,63}$",
+          "description": "Bounded failure code (e.g. STORAGE_UNAVAILABLE, CAPTURE_LOST)."
+        },
+        "retentionUntil": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "deletedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        }
+      }
+    },
+    "VoicemailMessageList": {
+      "description": "A page of messages, newest first (keyset).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "messages",
+        "nextCursor"
+      ],
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VoicemailMessage"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "SetVoicemailReadStateRequest": {
+      "description": "Body of PUT /v1/enterprise/voicemail/messages/{message_id}/read-state. With principalId the application acts for that principal, who must own the mailbox (else 404); without it the credential acts as a voicemail administrator.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "readState"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "readState": {
+          "$ref": "#/$defs/VoicemailReadState"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "VoicemailMediaAccessRequest": {
+      "description": "Body of POST /v1/enterprise/voicemail/messages/{message_id}/media-access: principalId as for read state.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "VoicemailMediaAccess": {
+      "description": "A short-lived (at most 300 s), read-only, single-object signed URL minted AFTER authorization and audited. It is never stored and never returned again; ask anew each time.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "messageId",
+        "url",
+        "expiresAt",
+        "contentType",
+        "sizeBytes",
+        "sha256"
+      ],
+      "properties": {
+        "messageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "contentType": {
+          "type": "string",
+          "enum": [
+            "audio/wav"
+          ]
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
         }
       }
     }

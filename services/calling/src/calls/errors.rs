@@ -96,6 +96,9 @@ pub enum CallError {
     /// A durable spend reservation was refused (stable reason code).
     #[error("telecom spend limit ({0})")]
     TelecomSpendLimitExceeded(&'static str),
+    /// Protected artifact storage could not store / serve an artifact now (retry later).
+    #[error("artifact storage unavailable")]
+    ArtifactStorageUnavailable,
     /// Unexpected database failure (summary: SQLSTATE + constraint only).
     #[error("database error ({summary})")]
     Database { summary: String, connectivity: bool },
@@ -135,6 +138,7 @@ impl CallError {
             CallError::PublicRouteDenied(_) => "PUBLIC_ROUTE_DENIED",
             CallError::PublicRouteUnavailable(_) => "PUBLIC_ROUTE_UNAVAILABLE",
             CallError::TelecomSpendLimitExceeded(_) => "TELECOM_SPEND_LIMIT_EXCEEDED",
+            CallError::ArtifactStorageUnavailable => "ARTIFACT_STORAGE_UNAVAILABLE",
             CallError::Database { connectivity, .. } => {
                 if *connectivity {
                     "SERVICE_UNAVAILABLE"
@@ -172,6 +176,7 @@ impl CallError {
             }
             CallError::MediaUnavailable
             | CallError::PrivacyAuthorizationUnavailable
+            | CallError::ArtifactStorageUnavailable
             | CallError::PublicRouteUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             CallError::PublicRouteDenied(_) => StatusCode::FORBIDDEN,
             CallError::TelecomSpendLimitExceeded(_) => StatusCode::TOO_MANY_REQUESTS,
@@ -241,6 +246,7 @@ impl From<CallError> for CallingError {
             CallError::MediaUnavailable => ErrorCode::MediaUnavailable,
             CallError::ParticipantLimitExceeded { .. } => ErrorCode::ParticipantLimitExceeded,
             CallError::TargetUnavailable => ErrorCode::TargetUnavailable,
+            CallError::ArtifactStorageUnavailable => ErrorCode::ArtifactStorageUnavailable,
             CallError::PrivacyAuthorizationUnavailable => {
                 ErrorCode::PrivacyAuthorizationUnavailable
             }

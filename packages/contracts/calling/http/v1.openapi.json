@@ -2037,6 +2037,60 @@
         }
       }
     },
+    "/internal/v1/telephony/captures": {
+      "post": {
+        "operationId": "acceptCaptureReport",
+        "summary": "acceptCaptureReport",
+        "description": "Part F: Telephony delivers a finished or failed edge media capture (contract cfmeet.telephony.capture). Requires telephony-capture.deliver (grantable only to cfmeet.telephony). Only a SIP capture Calling asked for, on that leg, is accepted (anything else is 404). The audio is integrity-checked (size, SHA-256, audio/wav, bounded length) and stored in protected object storage; the message becomes READY. 200 = stored or acknowledged (the edge may delete its spool copy); 503 ARTIFACT_STORAGE_UNAVAILABLE = retry later; 400 = refused for good.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "telephony-capture.deliver"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/telephony/capture/v1.schema.json#/$defs/CaptureReport"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored / already stored / acknowledged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/capture/v1.schema.json#/$defs/CaptureReportAck"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
     "/v1/enterprise/policies": {
       "post": {
         "operationId": "createEnterprisePolicy",
@@ -6410,6 +6464,806 @@
           }
         }
       }
+    },
+    "/v1/enterprise/voicemail/mailboxes": {
+      "post": {
+        "operationId": "createVoicemailMailbox",
+        "summary": "Create a voicemail mailbox",
+        "description": "Requires enterprise.voicemail.manage, MANAGE_VOICEMAIL and an enterprise policy permitting voicemail. The owner is a typed principal / extension / queue / ring group of the scope. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.voicemail.manage"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.voicemail.manage",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/CreateVoicemailMailboxRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The mailbox (version 1).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/VoicemailMailbox"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listVoicemailMailboxes",
+        "summary": "List mailboxes",
+        "description": "Requires enterprise.config.read.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1-100, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Only resources in this status.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ACTIVE",
+                "DISABLED"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of mailboxes.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/VoicemailMailboxList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/voicemail/mailboxes/{mailbox_id}": {
+      "get": {
+        "operationId": "getVoicemailMailbox",
+        "summary": "Get a mailbox",
+        "description": "Requires enterprise.config.read.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.read",
+        "parameters": [
+          {
+            "name": "mailbox_id",
+            "in": "path",
+            "required": true,
+            "description": "Mailbox id (another scope's is 404).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The mailbox.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/VoicemailMailbox"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateVoicemailMailbox",
+        "summary": "Change a mailbox",
+        "description": "Requires enterprise.voicemail.manage, MANAGE_VOICEMAIL and expectedVersion. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.voicemail.manage"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.voicemail.manage",
+        "parameters": [
+          {
+            "name": "mailbox_id",
+            "in": "path",
+            "required": true,
+            "description": "Mailbox id (another scope's is 404).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/UpdateVoicemailMailboxRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The changed mailbox.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/VoicemailMailbox"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "disableVoicemailMailbox",
+        "summary": "Disable a mailbox",
+        "description": "Requires enterprise.voicemail.manage and expectedVersion. Routing to a disabled mailbox ends in NO_ROUTE; its messages remain (retention still applies). Never blocked. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.voicemail.manage"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.voicemail.manage",
+        "parameters": [
+          {
+            "name": "mailbox_id",
+            "in": "path",
+            "required": true,
+            "description": "Mailbox id (another scope's is 404).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expectedVersion",
+            "in": "query",
+            "required": true,
+            "description": "The version the change was decided on (409 VERSION_CONFLICT otherwise).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The disabled mailbox.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/VoicemailMailbox"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/voicemail/messages": {
+      "get": {
+        "operationId": "listVoicemailMessages",
+        "summary": "List a mailbox's messages",
+        "description": "Requires enterprise.voicemail.read. Authorization first: the owner (principalId) or a voicemail administrator. Newest first; DELETED messages only with state=DELETED.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.voicemail.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.voicemail.read",
+        "parameters": [
+          {
+            "name": "mailboxId",
+            "in": "query",
+            "required": true,
+            "description": "The mailbox.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "principalId",
+            "in": "query",
+            "required": false,
+            "description": "Act for this principal, who must own the mailbox (else 404). Without it the credential must hold enterprise.voicemail.manage and acts as a voicemail administrator.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "description": "Only messages in this state.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "RECORDING",
+                "PROCESSING",
+                "READY",
+                "FAILED",
+                "DELETING",
+                "DELETED"
+              ]
+            }
+          },
+          {
+            "name": "readState",
+            "in": "query",
+            "required": false,
+            "description": "Only read / unread messages.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "UNREAD",
+                "READ"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1-100, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of messages.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/VoicemailMessageList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/voicemail/messages/{message_id}": {
+      "get": {
+        "operationId": "getVoicemailMessage",
+        "summary": "Get a message",
+        "description": "Requires enterprise.voicemail.read; owner or voicemail administrator.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.voicemail.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.voicemail.read",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "description": "Message id (another scope's, or a mailbox the principal does not own, is 404).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "principalId",
+            "in": "query",
+            "required": false,
+            "description": "Act for this principal, who must own the mailbox (else 404). Without it the credential must hold enterprise.voicemail.manage and acts as a voicemail administrator.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The message.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/VoicemailMessage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteVoicemailMessage",
+        "summary": "Delete a message",
+        "description": "Requires enterprise.voicemail.manage and expectedVersion; owner or voicemail administrator. Asynchronous: DELETING now (audited), the protected object is removed by the worker, then DELETED (calling.voicemail-deleted). A message still being captured is 409. The originating Call is untouched.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.voicemail.manage"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.voicemail.manage",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "description": "Message id (another scope's, or a mailbox the principal does not own, is 404).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expectedVersion",
+            "in": "query",
+            "required": true,
+            "description": "The version the change was decided on (409 VERSION_CONFLICT otherwise).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "principalId",
+            "in": "query",
+            "required": false,
+            "description": "Act for this principal, who must own the mailbox (else 404). Without it the credential must hold enterprise.voicemail.manage and acts as a voicemail administrator.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The message (DELETING).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/VoicemailMessage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/voicemail/messages/{message_id}/read-state": {
+      "put": {
+        "operationId": "setVoicemailReadState",
+        "summary": "Mark a message read / unread",
+        "description": "Requires enterprise.voicemail.manage and expectedVersion; owner or voicemail administrator. Audited (MARK_READ / MARK_UNREAD).",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.voicemail.manage"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.voicemail.manage",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "description": "Message id (another scope's, or a mailbox the principal does not own, is 404).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/SetVoicemailReadStateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The message.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/VoicemailMessage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/voicemail/messages/{message_id}/media-access": {
+      "post": {
+        "operationId": "accessVoicemailMedia",
+        "summary": "Get short-lived access to a message's audio",
+        "description": "Requires enterprise.voicemail.read; owner or voicemail administrator — authorized BEFORE any URL is minted; another scope's message is 404. READY messages only (else 409). Returns a read-only signed URL of ONE object valid for at most 300 s; nothing is stored. Audited (MEDIA_ACCESS).",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.voicemail.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.voicemail.read",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "description": "Message id (another scope's, or a mailbox the principal does not own, is 404).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/VoicemailMediaAccessRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The signed media access.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/VoicemailMediaAccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6872,7 +7726,8 @@
           "PUBLIC_ROUTE_UNAVAILABLE",
           "TELECOM_SPEND_LIMIT_EXCEEDED",
           "VERSION_CONFLICT",
-          "ENTERPRISE_POLICY_DENIED"
+          "ENTERPRISE_POLICY_DENIED",
+          "ARTIFACT_STORAGE_UNAVAILABLE"
         ]
       },
       "ErrorEnvelope": {

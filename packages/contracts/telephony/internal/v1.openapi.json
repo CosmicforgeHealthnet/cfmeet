@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Telephony internal API",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Internal HTTP surface of services/telephony (Part E §165–§172): GET /health and the provider callback ingress (public, provider-authenticated before parsing, 16 KiB limit) and the service-authenticated /internal/v1 API used by Calling only. Every /internal/v1 path — including unknown ones — requires a valid service token; customer credentials, cfmk_ keys and Authorization headers are refused. Telephony -> Calling delivery is the durable outbox (cfmeet.telephony.event to Calling's POST /internal/v1/telephony/events). Metrics are served on a separate listener, never here."
   },
   "components": {
@@ -936,6 +936,81 @@
       "post": {
         "operationId": "promptLeg",
         "description": "Part F: play one BUILT-IN prompt (body `prompt`) on an internal enterprise SIP leg; playbacks of a leg run in order. Permission telephony-leg.media.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "leg_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/ControlCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replay of an identical earlier command.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/LegAccepted"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted (durable before any provider action).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/LegAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/legs/{leg_id}/capture": {
+      "post": {
+        "operationId": "captureLeg",
+        "description": "Part F: capture the caller audio of an internal enterprise SIP leg (body `capture`: Calling's capture id, purpose, maximum length, beep) into the edge's transient spool; on completion Telephony delivers it to Calling (cfmeet.telephony.capture) and then deletes the spool copy. Permission telephony-leg.media; refused (LEG_NOT_ACTIVE) for public-network legs and while ENTERPRISE_SIP_ENABLED is off.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"

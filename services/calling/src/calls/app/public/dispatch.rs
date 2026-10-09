@@ -209,7 +209,8 @@ impl AppCallService {
                 | CommandKind::Hold
                 | CommandKind::Resume
                 | CommandKind::Answer
-                | CommandKind::Prompt),
+                | CommandKind::Prompt
+                | CommandKind::Capture),
             ) => self.dispatch_control(row, &call, k).await,
             Some(CommandKind::Bridge) => self.dispatch_bridge(row, &call).await,
             Some(CommandKind::Unbridge) => self.dispatch_unbridge(row, &call).await,
@@ -566,10 +567,13 @@ impl AppCallService {
             CommandKind::Hold => LegControl::Hold,
             CommandKind::Answer => LegControl::Answer,
             CommandKind::Prompt => LegControl::Prompt,
+            CommandKind::Capture => LegControl::Capture,
             _ => LegControl::Resume,
         };
-        if matches!(kind, CommandKind::Answer | CommandKind::Prompt)
-            && (call.current_state.is_terminal() || call.current_state == CallState::Ending)
+        if matches!(
+            kind,
+            CommandKind::Answer | CommandKind::Prompt | CommandKind::Capture
+        ) && (call.current_state.is_terminal() || call.current_state == CallState::Ending)
         {
             // A prompt / answer for a Call that is over has nothing left to do.
             self.complete(row.id, "DEAD", Some("CALL_NOT_ACTIVE"), None)
@@ -583,9 +587,10 @@ impl AppCallService {
             "correlationId": correlation(&row.payload).as_str(),
             "reason": row.payload["reason"],
             "prompt": row.payload["prompt"],
+            "capture": row.payload["capture"],
         });
         let mut body = body;
-        for key in ["reason", "prompt"] {
+        for key in ["reason", "prompt", "capture"] {
             if body[key].is_null() {
                 body.as_object_mut().map(|o| o.remove(key));
             }
@@ -603,7 +608,10 @@ impl AppCallService {
             }
             Err(TelephonyError::Refused { code, .. })
                 if code == "LEG_NOT_FOUND"
-                    && matches!(kind, CommandKind::Answer | CommandKind::Prompt)
+                    && matches!(
+                        kind,
+                        CommandKind::Answer | CommandKind::Prompt | CommandKind::Capture
+                    )
                     && row.attempts < 10 =>
             {
                 // Part F: an enterprise dialog's leg is persisted by Telephony right after

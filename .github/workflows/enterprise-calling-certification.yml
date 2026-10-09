@@ -16,6 +16,7 @@ on:
       - "services/telephony/**"
       - "infra/telephony/**"
       - "packages/service-auth/**"
+      - "packages/object-storage/**"
       - "packages/contracts/**"
       - ".github/workflows/enterprise-calling-certification.yml"
   pull_request:
@@ -24,6 +25,7 @@ on:
       - "services/telephony/**"
       - "infra/telephony/**"
       - "packages/service-auth/**"
+      - "packages/object-storage/**"
       - "packages/contracts/**"
       - ".github/workflows/enterprise-calling-certification.yml"
   workflow_dispatch:
@@ -55,6 +57,10 @@ jobs:
       TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
       # Anything missing FAILS here (it only skips on a developer machine without it).
       ENTERPRISE_SIP_CERT_REQUIRED: "1"
+      # Voicemail: a real S3-compatible private bucket (MinIO, certification only).
+      ENTERPRISE_CERT_S3_ENDPOINT: http://127.0.0.1:9000
+      ENTERPRISE_CERT_S3_ACCESS_KEY: cfmeet-cert
+      ENTERPRISE_CERT_S3_SECRET_KEY: cfmeet-cert-only-not-a-secret
     steps:
       - uses: actions/checkout@v4
 
@@ -70,6 +76,19 @@ jobs:
           getcap "$(command -v sipp)" | grep -q cap_net_raw
           asterisk -V
           ls /usr/share/asterisk/sounds/en/dir-pls-enter.gsm /usr/share/asterisk/sounds/en/pm-invalid-option.gsm
+
+      - name: S3-compatible private bucket (MinIO, certification only)
+        run: |
+          set -euo pipefail
+          docker run -d --name minio -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER="$ENTERPRISE_CERT_S3_ACCESS_KEY" \
+            -e MINIO_ROOT_PASSWORD="$ENTERPRISE_CERT_S3_SECRET_KEY" \
+            minio/minio:RELEASE.2024-10-13T13-34-11Z server /data
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:9000/minio/health/live && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:9000/minio/health/live
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -105,6 +124,8 @@ jobs:
             grep -q "^enterprise SIP IVR certified: $scenario" "$RUNNER_TEMP/ent.log" \
               || { echo "::error::IVR scenario not certified: $scenario"; exit 1; }
           done
+          grep -q "^enterprise SIP voicemail certified: IVR -> mailbox, real edge capture" "$RUNNER_TEMP/ent.log" \
+            || { echo "::error::voicemail was not certified"; exit 1; }
 
       - name: Edge logs (on failure)
         if: failure()

@@ -56,6 +56,7 @@ pub enum ErrorCode {
     TelecomSpendLimitExceeded,
     VersionConflict,
     EnterprisePolicyDenied,
+    ArtifactStorageUnavailable,
 }
 
 impl ErrorCode {
@@ -91,6 +92,7 @@ impl ErrorCode {
         ErrorCode::TelecomSpendLimitExceeded,
         ErrorCode::VersionConflict,
         ErrorCode::EnterprisePolicyDenied,
+        ErrorCode::ArtifactStorageUnavailable,
     ];
 
     /// Codes that only internal routes return.
@@ -153,6 +155,9 @@ impl ErrorCode {
             ErrorCode::EnterprisePolicyDenied => {
                 "The enterprise policy does not permit this operation."
             }
+            ErrorCode::ArtifactStorageUnavailable => {
+                "Protected artifact storage is unavailable; nothing was lost. Retry later."
+            }
             _ => "The request could not be completed.",
         }
     }
@@ -190,6 +195,7 @@ impl ErrorCode {
             ErrorCode::TelecomSpendLimitExceeded => "TELECOM_SPEND_LIMIT_EXCEEDED",
             ErrorCode::VersionConflict => "VERSION_CONFLICT",
             ErrorCode::EnterprisePolicyDenied => "ENTERPRISE_POLICY_DENIED",
+            ErrorCode::ArtifactStorageUnavailable => "ARTIFACT_STORAGE_UNAVAILABLE",
         }
     }
 }

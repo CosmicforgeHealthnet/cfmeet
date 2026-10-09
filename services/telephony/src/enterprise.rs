@@ -11,7 +11,8 @@
 //! 4. the caller hears ringing; Calling receives an authenticated offer (opaque device
 //!    reference + dialled extension) and creates the ONE canonical Call — or refuses;
 //! 5. Calling then commands the leg: ANSWER, PROMPT (BUILT-IN prompts only — Calling never
-//!    names an edge sound file), TERMINATE, HOLD / RESUME, bridges to application media.
+//!    names an edge sound file), CAPTURE (voicemail; see [`crate::capture`]), TERMINATE,
+//!    HOLD / RESUME, bridges to application media.
 //!
 //! Keypad input (DTMF RFC 4733) of an enterprise leg is forwarded to Calling's IVR as it
 //! happens and is never persisted or logged; Calling keeps only the selected branch.
@@ -348,6 +349,9 @@ impl TelephonyService {
                     return Ok(Executed::DefiniteFailure("INVALID_PROMPT"));
                 };
                 self.edge.play(&channel, sound).await
+            }
+            CommandKind::Capture => {
+                return self.start_capture(command, leg, channel).await;
             }
             CommandKind::Terminate => self.edge.hangup(&channel).await,
             CommandKind::Hold => self.edge.hold(&channel).await,

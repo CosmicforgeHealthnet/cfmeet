@@ -106,6 +106,11 @@ pub enum InternalPermission {
     /// dialled extension) and deliver its keypad input for an IVR (Part F §54, §57).
     #[serde(rename = "telephony-enterprise.offer")]
     CallsTelephonyEnterpriseOffer,
+    /// Telephony -> Calling: deliver (or report the failure of) an edge media capture —
+    /// the captured audio of a voicemail / recording, with its integrity metadata
+    /// (Part F §105–§110).
+    #[serde(rename = "telephony-capture.deliver")]
+    CallsTelephonyCaptureDeliver,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -306,6 +311,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: false,
         description: "Offer an internal enterprise SIP dialog (opaque device reference, dialled extension) and deliver its keypad input",
     },
+    PermissionDefinition {
+        permission: InternalPermission::CallsTelephonyCaptureDeliver,
+        name: "telephony-capture.deliver",
+        receiver: services::CALLING,
+        grantable_to: &[services::TELEPHONY],
+        sensitive: true,
+        description: "Deliver an edge media capture (voicemail / recording audio with integrity metadata) or report its failure",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -336,6 +349,7 @@ impl InternalPermission {
         InternalPermission::CallsTelephonyInboundOffer,
         InternalPermission::TelephonyLegMedia,
         InternalPermission::CallsTelephonyEnterpriseOffer,
+        InternalPermission::CallsTelephonyCaptureDeliver,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {

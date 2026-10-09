@@ -1,0 +1,80 @@
+name: Object storage
+
+# packages/object-storage (cf-object-storage, ADR 0023): the provider-neutral PROTECTED
+# artifact store (private S3-compatible bucket, AWS Signature V4, signed reads only after
+# the owning service authorized the requester). Unit tests include the AWS SigV4 test
+# vector; the live test runs against a real S3-compatible server (MinIO) and must not skip.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "packages/object-storage/**"
+      - ".github/workflows/object-storage.yml"
+  pull_request:
+    paths:
+      - "packages/object-storage/**"
+      - ".github/workflows/object-storage.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: object-storage-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+defaults:
+  run:
+    working-directory: packages/object-storage
+
+jobs:
+  test:
+    name: fmt / clippy / test (MinIO)
+    runs-on: ubuntu-24.04
+    env:
+      OBJECT_STORAGE_TEST_REQUIRED: "1"
+      OBJECT_STORAGE_TEST_ENDPOINT: http://127.0.0.1:9000
+      OBJECT_STORAGE_TEST_ACCESS_KEY: cfmeet-ci
+      OBJECT_STORAGE_TEST_SECRET_KEY: cfmeet-ci-only-not-a-secret
+      # MinIO without a KMS has no SSE-S3: the live test then checks private access only.
+      OBJECT_STORAGE_TEST_SSE: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: S3-compatible server (MinIO)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          docker run -d --name minio -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER="$OBJECT_STORAGE_TEST_ACCESS_KEY" \
+            -e MINIO_ROOT_PASSWORD="$OBJECT_STORAGE_TEST_SECRET_KEY" \
+            minio/minio:RELEASE.2024-10-13T13-34-11Z server /data
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:9000/minio/health/live && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:9000/minio/health/live
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/object-storage -> target
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: cargo test
+        run: |
+          set -euo pipefail
+          cargo test --locked -- --nocapture 2>&1 | tee "$RUNNER_TEMP/os.log"
+          if grep -q "SKIPPED" "$RUNNER_TEMP/os.log"; then
+            echo "::error::the live object-storage test was skipped"; exit 1
+          fi

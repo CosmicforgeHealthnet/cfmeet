@@ -71,7 +71,7 @@
       "enum": ["MOBILE", "WEB", "DESKTOP", "SERVER", "NETWORK"]
     },
     "CallEventType": {
-      "description": "Facts the call domain records. CALL_REQUESTED and CALL_STATE_CHANGED are lifecycle events (they carry states); the others are facts about the Call's children: participants, sessions, routes, legs, attempts, quality, usage, ring offers (invitations), transfers and the Call's media resource. Media facts never carry provider identifiers.",
+      "description": "Facts the call domain records. CALL_REQUESTED and CALL_STATE_CHANGED are lifecycle events (they carry states); the others are facts about the Call's children: participants, sessions, routes, legs, attempts, quality, usage, ring offers (invitations), transfers and the Call's media resource. Media facts never carry provider identifiers. Part F: VOICEMAIL_RECEIVED (a mailbox took the Call), VOICEMAIL_READY (the message is stored in protected object storage) and VOICEMAIL_DELETED (its object was removed) carry only opaque ids, a bounded reason and a duration, never an object key, URL or audio.",
       "type": "string",
       "enum": [
         "CALL_REQUESTED",
@@ -111,7 +111,10 @@
         "CALL_MEDIA_CREDENTIAL_ISSUED",
         "CALL_MEDIA_PARTICIPANT_EVICTED",
         "CALL_MEDIA_ENFORCEMENT_PENDING",
-        "CALL_MEDIA_RECONCILED"
+        "CALL_MEDIA_RECONCILED",
+        "VOICEMAIL_RECEIVED",
+        "VOICEMAIL_READY",
+        "VOICEMAIL_DELETED"
       ]
     },
     "CallInvitationPurpose": {

@@ -703,6 +703,11 @@ impl AppCallService {
     pub(crate) async fn enterprise_after_commit(&self, call_id: Uuid) {
         let context = context_of(self.db(), call_id).await;
         if let Ok(Some(c)) = &context {
+            if c.phase == EnterprisePhase::Voicemail.as_str() {
+                // An application caller's capture starts through the neutral interface.
+                Box::pin(self.start_application_capture(call_id)).await;
+                return;
+            }
             if c.phase == EnterprisePhase::Forwarded.as_str() {
                 // A public forward waits for its Part E gates (the worker retries).
                 if let Err(error) = self.execute_public_forward(call_id).await {

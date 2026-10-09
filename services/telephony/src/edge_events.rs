@@ -71,6 +71,9 @@ impl TelephonyService {
             EdgeEventKind::EnterpriseInbound(dialog) => {
                 self.handle_enterprise_dialog(&event, dialog.clone()).await
             }
+            // Part F: a spool recording ended (its leg may be over already).
+            EdgeEventKind::CaptureFinished { name } => self.capture_edge_event(name, true).await,
+            EdgeEventKind::CaptureFailed { name } => self.capture_edge_event(name, false).await,
             kind => {
                 let normalized = match kind {
                     EdgeEventKind::Ringing => Some(NormalizedEvent::LegRinging),

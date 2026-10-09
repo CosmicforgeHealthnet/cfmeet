@@ -29,7 +29,7 @@ use crate::{
         hours::{self, HoursStatus},
         ivr,
         policy::EffectivePolicy,
-        queues, ring_groups,
+        queues, ring_groups, voicemail,
     },
     platform::principals::{PrincipalReference, PrincipalResolver, ResolvedPrincipal},
 };
@@ -63,6 +63,11 @@ pub(crate) enum RouteAction {
     /// Forward to a registered, ACTIVE protected public contact (every Part E gate still
     /// applies before a public leg exists).
     ForwardPublic { destination: Destination },
+    /// Take a voicemail message into an ACTIVE mailbox (same Call).
+    EnterVoicemail {
+        mailbox: voicemail::MailboxRow,
+        destination: Destination,
+    },
     /// Nothing can take the Call.
     NoRoute {
         reason: &'static str,
@@ -385,6 +390,26 @@ async fn walk_to(
                     Ok(queue) if queue.status == "ACTIVE" => {
                         walk.done(RouteAction::EnterQueue {
                             queue,
+                            destination: current,
+                        })
+                        .await
+                    }
+                    _ => walk.disabled(current).await,
+                };
+            }
+            DestinationType::Voicemail => {
+                if !policy.rules.voicemail_allowed {
+                    return walk
+                        .done(RouteAction::NoRoute {
+                            reason: "VOICEMAIL_NOT_PERMITTED",
+                            destination: Some(current),
+                        })
+                        .await;
+                }
+                return match voicemail::mailbox_row(walk.txn, scope, current.id, false).await {
+                    Ok(mailbox) if mailbox.status == "ACTIVE" => {
+                        walk.done(RouteAction::EnterVoicemail {
+                            mailbox,
                             destination: current,
                         })
                         .await

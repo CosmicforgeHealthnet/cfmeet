@@ -104,6 +104,8 @@ const ENTERPRISE_TABLES: &[&str] = &[
     "enterprise_ring_groups",
     "enterprise_routing_steps",
     "enterprise_sip_devices",
+    "voicemail_mailboxes",
+    "voicemail_messages",
 ];
 
 /// Derived from the migrator itself (never a brittle hand-maintained count).

@@ -328,6 +328,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "calling-migration",
+ "cf-object-storage",
  "cf-service-auth",
  "chrono",
  "chrono-tz",
@@ -374,6 +375,20 @@ checksum = "f74872d07caf508b30a21f6836e7d7016a2eaf7d9ff4f48deaa58cd8a0407630"
 dependencies = [
  "find-msvc-tools",
  "shlex",
+]
+
+[[package]]
+name = "cf-object-storage"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "hex",
+ "hmac",
+ "reqwest",
+ "sha2",
+ "thiserror 2.0.21",
+ "url",
 ]
 
 [[package]]

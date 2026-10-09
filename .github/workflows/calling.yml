@@ -21,6 +21,7 @@ on:
     paths:
       - "services/calling/**"
       - "packages/service-auth/**"
+      - "packages/object-storage/**"
       - "packages/contracts/calling/**"
       - "packages/contracts/privacy-relay/**"
       - "packages/contracts/telephony/**"
@@ -31,6 +32,7 @@ on:
     paths:
       - "services/calling/**"
       - "packages/service-auth/**"
+      - "packages/object-storage/**"
       - "packages/contracts/calling/**"
       - "packages/contracts/privacy-relay/**"
       - "packages/contracts/telephony/**"

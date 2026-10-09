@@ -98,6 +98,8 @@ pub(crate) enum CommandKind {
     Answer,
     /// Part F: play a built-in prompt on an internal enterprise SIP leg.
     Prompt,
+    /// Part F: capture an internal enterprise SIP leg's audio at the edge.
+    Capture,
 }
 
 impl CommandKind {
@@ -111,6 +113,7 @@ impl CommandKind {
             CommandKind::Unbridge => "UNBRIDGE",
             CommandKind::Answer => "ANSWER",
             CommandKind::Prompt => "PROMPT",
+            CommandKind::Capture => "CAPTURE",
         }
     }
 
@@ -124,6 +127,7 @@ impl CommandKind {
             "UNBRIDGE" => CommandKind::Unbridge,
             "ANSWER" => CommandKind::Answer,
             "PROMPT" => CommandKind::Prompt,
+            "CAPTURE" => CommandKind::Capture,
             _ => return None,
         })
     }

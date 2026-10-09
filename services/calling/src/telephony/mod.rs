@@ -61,6 +61,8 @@ pub enum LegControl {
     Answer,
     /// Part F: play one BUILT-IN prompt on an internal enterprise SIP leg.
     Prompt,
+    /// Part F: capture the leg's audio at the edge (voicemail / recording).
+    Capture,
 }
 
 impl LegControl {
@@ -71,6 +73,7 @@ impl LegControl {
             LegControl::Resume => "resume",
             LegControl::Answer => "answer",
             LegControl::Prompt => "prompt",
+            LegControl::Capture => "capture",
         }
     }
 }

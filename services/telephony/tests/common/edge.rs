@@ -44,6 +44,11 @@ struct State {
     complete_since: Option<DateTime<Utc>>,
     health: Option<Health>,
     next: u64,
+    /// Part F: spool recordings started (name -> (channel, max seconds, beep)) and the
+    /// spool files that exist.
+    recordings: HashMap<String, (ChannelRef, u32, bool)>,
+    spool: HashMap<String, Vec<u8>>,
+    spool_available: bool,
 }
 
 #[derive(Clone)]
@@ -54,8 +59,12 @@ pub struct ScriptedEdge {
 
 impl Default for ScriptedEdge {
     fn default() -> Self {
+        let state = State {
+            spool_available: true,
+            ..Default::default()
+        };
         Self {
-            state: Arc::default(),
+            state: Arc::new(Mutex::new(state)),
             events: broadcast::channel(256).0,
         }
     }
@@ -94,6 +103,32 @@ impl ScriptedEdge {
         if s.live.remove(channel).is_some() && observed {
             s.ended.insert(channel.to_string(), reason);
         }
+    }
+
+    /// Adds a live channel (e.g. an enterprise device's dialog).
+    pub fn add_live(&self, channel: &str, status: LegStatus) {
+        self.lock().live.insert(channel.to_string(), status);
+    }
+
+    /// Part F: the recordings started on the edge (name -> (channel, max, beep)).
+    pub fn recordings(&self) -> HashMap<String, (ChannelRef, u32, bool)> {
+        self.lock().recordings.clone()
+    }
+
+    /// Part F: the edge wrote `bytes` as spool file `name` (the recording finished).
+    pub fn put_spool(&self, name: &str, bytes: Vec<u8>) {
+        self.lock().spool.insert(name.to_string(), bytes);
+    }
+
+    pub fn spool_files(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.lock().spool.keys().cloned().collect();
+        out.sort();
+        out
+    }
+
+    /// Part F: failure injection — the spool cannot be read / deleted.
+    pub fn set_spool_unavailable(&self, unavailable: bool) {
+        self.lock().spool_available = !unavailable;
     }
 
     /// Moves a live channel (e.g. it answered).
@@ -219,6 +254,43 @@ impl SipMediaEdge for ScriptedEdge {
 
     async fn resume(&self, channel: &ChannelRef) -> EdgeResult<()> {
         self.control(channel, Some(LegStatus::Connected))
+    }
+
+    async fn record(
+        &self,
+        channel: &ChannelRef,
+        name: &str,
+        max_seconds: u32,
+        beep: bool,
+    ) -> EdgeResult<()> {
+        let mut s = self.lock();
+        if !s.live.contains_key(channel) {
+            return Err(EdgeError::NotFound);
+        }
+        s.recordings
+            .insert(name.to_string(), (channel.clone(), max_seconds, beep));
+        Ok(())
+    }
+
+    async fn fetch_recording(&self, name: &str, max_bytes: usize) -> EdgeResult<Vec<u8>> {
+        let s = self.lock();
+        if !s.spool_available {
+            return Err(EdgeError::Unavailable);
+        }
+        match s.spool.get(name) {
+            Some(b) if b.len() > max_bytes => Err(EdgeError::Refused),
+            Some(b) => Ok(b.clone()),
+            None => Err(EdgeError::NotFound),
+        }
+    }
+
+    async fn delete_recording(&self, name: &str) -> EdgeResult<()> {
+        let mut s = self.lock();
+        if !s.spool_available {
+            return Err(EdgeError::Unavailable);
+        }
+        s.spool.remove(name);
+        Ok(())
     }
 
     async fn send_dtmf(&self, channel: &ChannelRef, _: &str) -> EdgeResult<()> {

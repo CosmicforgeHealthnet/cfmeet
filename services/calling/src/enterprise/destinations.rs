@@ -64,6 +64,7 @@ pub const EXTENSION_TARGETS: &[DestinationType] = &[
     DestinationType::Queue,
     DestinationType::Ivr,
     DestinationType::Schedule,
+    DestinationType::Voicemail,
 ];
 
 /// Whether `dest` exists and is usable (ACTIVE) in `scope`.
@@ -101,13 +102,14 @@ pub(crate) async fn destination_active<C: ConnectionTrait>(
             "SELECT 1 FROM enterprise_business_hours WHERE tenant_id = $1 AND application_id = $2 \
              AND environment_id = $3 AND id = $4 AND status = 'ACTIVE'"
         }
+        DestinationType::Voicemail => {
+            "SELECT 1 FROM voicemail_mailboxes WHERE tenant_id = $1 AND application_id = $2 \
+             AND environment_id = $3 AND id = $4 AND status = 'ACTIVE'"
+        }
         DestinationType::PublicContact => {
             "SELECT 1 FROM enterprise_public_contacts WHERE tenant_id = $1 AND application_id = $2 \
              AND environment_id = $3 AND id = $4 AND status = 'ACTIVE'"
         }
-        // Destination kinds whose configuration is not available in this deployment
-        // never resolve (and the database refuses to store them).
-        _ => return Ok(false),
     };
     let mut values = scope_values(scope);
     values.push(dest.id.into());

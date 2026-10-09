@@ -17,7 +17,7 @@ result of the Part F implementation; ADRs 0018–0023 hold the decisions.
 | Telephony core, SIP / media edge (Asterisk 20 + ARI): legs, durable commands, DTMF / hold / redirect / bridge primitives, normalized events, reconciliation | `services/telephony/` (ADR 0014–0017) | Extended with neutral enterprise primitives: internal SIP device dialogs, answer, prompt playback, DTMF forwarding, media capture + transient capture content |
 | Public-network execution: ContactReference + Contact Resolution Grant, spend reservations, Privacy Relay authority, failover | `calls/app/public/`, `telephony/spend.rs` | Public forwarding reuses it unchanged (no bypass) |
 | Tenant / application / environment trust model, scopes registry, principals (incl. `ENTERPRISE_MEMBER`) | `platform/` (ADR 0003) | The enterprise security boundary (§7 of the brief): no new "organization" authority |
-| Object storage | Only Meeting Service (`services/meeting-service/src/services/artifacts/storage.rs`) | NOT imported. A neutral `packages/object-storage` is introduced (ADR 0021); Meeting Service unchanged |
+| Object storage | Only Meeting Service (`services/meeting-service/src/services/artifacts/storage.rs`) | NOT imported. A neutral `packages/object-storage` is introduced (ADR 0023); Meeting Service unchanged |
 
 ## 2. Organization scope
 
@@ -117,8 +117,11 @@ Calling decides; Telephony executes provider-neutral commands:
 * `answer`, `prompt` (built-in prompts only), DTMF forwarding as normalized
   `DTMF_RECEIVED` events (digit never logged / persisted by either side; Calling
   persists only the selected IVR branch);
-* media capture of a leg or bridge (`captures`), transient capture content
-  (`GET /internal/v1/captures/{id}/content`, deleted after Calling's upload).
+* media capture of an enterprise leg (`CAPTURE`, `telephony_captures`): the edge records
+  into its transient spool; Telephony pushes the finished audio (size / duration /
+  SHA-256) to Calling (`POST /internal/v1/telephony/captures`, permission
+  `telephony-capture.deliver`) and deletes the spool copy only after Calling's 200
+  (retry with backoff; dead-letter + incident, spool still deleted) — ADR 0023.
 
 Calling uploads artifacts to protected object storage; Telephony never holds storage
 credentials.

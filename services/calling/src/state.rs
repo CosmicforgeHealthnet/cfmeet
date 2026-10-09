@@ -48,6 +48,10 @@ pub struct CallingRuntime {
     pub public_network: crate::calls::app::public::PublicNetwork,
     /// Enterprise kill switches (Part F; default: all off).
     pub enterprise_flags: crate::enterprise::EnterpriseFlags,
+    /// Protected artifact storage (Part F voicemail; default: unconfigured — fail closed).
+    pub artifacts: Arc<dyn cf_object_storage::ObjectStore>,
+    /// Application (RTC) call media capture (Part F; default: unavailable).
+    pub capture: Arc<dyn crate::calls::app::enterprise::CallMediaCapture>,
 }
 
 #[derive(Clone)]
@@ -102,11 +106,10 @@ impl AppState {
             PresenceWindow::default(),
         ));
         let media_gateway = runtime.media_gateway.clone();
-        let enterprise = Arc::new(EnterpriseService::new(
-            db.clone(),
-            clock.clone(),
-            runtime.enterprise_flags,
-        ));
+        let enterprise = Arc::new(
+            EnterpriseService::new(db.clone(), clock.clone(), runtime.enterprise_flags)
+                .with_artifacts(runtime.artifacts.clone()),
+        );
         let app = Arc::new(
             AppCallService::new(
                 calls.clone(),
@@ -120,7 +123,9 @@ impl AppState {
             .with_push(runtime.push)
             .with_privacy_relay(runtime.privacy_relay.clone())
             .with_public_network(runtime.public_network)
-            .with_enterprise_flags(runtime.enterprise_flags),
+            .with_enterprise_flags(runtime.enterprise_flags)
+            .with_artifacts(runtime.artifacts)
+            .with_capture(runtime.capture),
         );
         Self {
             authenticator: Arc::new(CredentialAuthenticator::new(

@@ -1,0 +1,27 @@
+[package]
+name = "cf-object-storage"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "CF Meet provider-neutral protected object storage: private S3-compatible objects (AWS SigV4), integrity metadata, idempotent delete and short-lived signed reads issued only after the caller's own authorization"
+
+# Stand-alone workspace: consumed by deployable services as a path dependency. It never
+# depends on any deployable service and carries no business vocabulary.
+[workspace]
+
+[lib]
+name = "cf_object_storage"
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+hex = "0.4"
+hmac = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+sha2 = "0.10"
+thiserror = "2.0"
+url = "2"
+
+[dev-dependencies]
+tokio = { version = "1.42", features = ["macros", "rt-multi-thread"] }

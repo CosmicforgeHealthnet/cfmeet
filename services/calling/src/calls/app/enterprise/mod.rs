@@ -22,10 +22,15 @@ mod ring_groups;
 mod router;
 mod sip;
 mod transfer;
+mod voicemail;
 
 pub use ivr::IvrInputSource;
 pub use sip::{EnterpriseDialogOffer, EnterpriseKeypad};
 pub use transfer::{ResolvedTransferTarget, TransferTarget};
+pub use voicemail::{
+    CallMediaCapture, CaptureDelivery, CapturePurpose, CaptureRequest, CapturedMedia,
+    UnavailableCapture, CAPTURE_CONTENT_TYPE, MAX_CAPTURE_BYTES,
+};
 
 use sea_orm::{
     ConnectionTrait, DatabaseTransaction, EntityTrait, FromQueryResult, TransactionTrait,
@@ -300,6 +305,7 @@ fn enterprise_error(e: EnterpriseError) -> CallError {
         },
         EnterpriseError::PolicyDenied(_) => CallError::AuthorizationDenied,
         EnterpriseError::Unavailable(m) => CallError::CapabilityUnavailable(m),
+        EnterpriseError::StorageUnavailable => CallError::ArtifactStorageUnavailable,
         EnterpriseError::VersionConflict { .. } | EnterpriseError::Conflict(_) => {
             CallError::Conflict("enterprise configuration changed; retry")
         }
@@ -748,6 +754,7 @@ impl AppCallService {
             c.phase == EnterprisePhase::Queued.as_str()
                 || c.phase == EnterprisePhase::Ivr.as_str()
                 || c.phase == EnterprisePhase::Forwarded.as_str()
+                || c.phase == EnterprisePhase::Voicemail.as_str()
         }))
     }
 
@@ -897,6 +904,13 @@ impl AppCallService {
             }
             RouteAction::EnterQueue { queue, destination } => {
                 Box::pin(self.enter_queue(txn, cmd, call, leg, context, policy, queue, destination))
+                    .await
+            }
+            RouteAction::EnterVoicemail {
+                mailbox,
+                destination,
+            } => {
+                self.enter_voicemail(txn, cmd, call, context, mailbox, destination)
                     .await
             }
             RouteAction::ForwardPublic { destination } => {
@@ -1120,6 +1134,8 @@ impl AppCallService {
         }
         let outcome = match call.current_state {
             _ if served_by_ivr => "COMPLETED_IN_IVR",
+            // The caller left (or the Call ended) while the mailbox was taking the message.
+            _ if context.phase == EnterprisePhase::Voicemail.as_str() => "VOICEMAIL",
             CallState::Cancelled => "ABANDONED",
             CallState::Failed => "FAILED",
             CallState::NoAnswer => "NO_ANSWER",

@@ -22,6 +22,8 @@ pub struct SweepReport {
     pub bridges_expired: usize,
     pub evidence_purged: u64,
     pub abuse_signals: usize,
+    /// Part F: edge captures delivered to Calling.
+    pub captures_delivered: usize,
 }
 
 impl TelephonyService {
@@ -64,6 +66,8 @@ impl TelephonyService {
         let (delivered, failed) = self.deliver_outbox_once(100).await?;
         report.delivered = delivered;
         report.delivery_failures = failed;
+        // Part F: after the leg events (a caller's hang-up reaches Calling first).
+        report.captures_delivered = self.deliver_captures_once(20).await?.delivered;
         Ok(report)
     }
 

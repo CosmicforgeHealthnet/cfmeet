@@ -27,14 +27,14 @@
     },
     {
       "id": "cfmeet.calling.call-common",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "calling/common/v1.schema.json",
       "owner": "calling",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Canonical call-domain vocabulary (Part C sections 15-25): the 17 call states, call kind, normalized failure categories, terminal reasons, participant roles, session states, endpoint categories, call event types, the call representation (CallCore / CallSummary), ring-offer, media-access, transfer and endpoint vocabularies, server-authorized media capabilities and the bounded safe event data object."
+      "description": "Canonical call-domain vocabulary (Part C sections 15-25): the 17 call states, call kind, normalized failure categories, terminal reasons, participant roles, session states, endpoint categories, call event types, the call representation (CallCore / CallSummary), ring-offer, media-access, transfer and endpoint vocabularies, server-authorized media capabilities and the bounded safe event data object. Part F: VOICEMAIL_RECEIVED / VOICEMAIL_READY / VOICEMAIL_DELETED call events."
     },
     {
       "id": "cfmeet.calling.call-lifecycle-event",
@@ -93,14 +93,14 @@
     },
     {
       "id": "cfmeet.platform.common",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "kind": "json-schema",
       "path": "platform/common/v1.schema.json",
       "owner": "platform",
       "visibility": "internal",
       "lifecycle": "stable",
       "authority": "contract-first",
-      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) and telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input)."
+      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata)."
     },
     {
       "id": "cfmeet.platform.service-token-header",
@@ -367,15 +367,26 @@
       "description": "Part F: Telephony -> Calling internal enterprise SIP dialog offers (opaque device reference, dialled short code) and transient keypad input for IVRs. Never a number, SIP URI, edge endpoint, channel id or provider identifier."
     },
     {
+      "id": "cfmeet.telephony.capture",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "telephony/capture/v1.schema.json",
+      "owner": "telephony",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Part F: Telephony -> Calling delivery of an edge media capture (voicemail): audio with size / duration / SHA-256, or a bounded failure. Never an object key, URL, file path, channel id or provider identifier."
+    },
+    {
       "id": "cfmeet.telephony.command",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "telephony/commands/v1.schema.json",
       "owner": "telephony",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Calling -> Telephony commands (ORIGINATE, TERMINATE / HOLD / RESUME, BRIDGE) and their answers (leg / bridge views, the error envelope). Versioned; commandId, idempotencyKey, correlationId, Call / CallLeg / attempt / route ids, authorization evidence, spend reservation and expected generation. No caller identity, number, provider, carrier or SIP field. Part F: ENTERPRISE_INTERNAL legs of enterprise SIP devices; ANSWER / PROMPT (built-in prompts) on them."
+      "description": "Calling -> Telephony commands (ORIGINATE, TERMINATE / HOLD / RESUME, BRIDGE) and their answers (leg / bridge views, the error envelope). Versioned; commandId, idempotencyKey, correlationId, Call / CallLeg / attempt / route ids, authorization evidence, spend reservation and expected generation. No caller identity, number, provider, carrier or SIP field. Part F: ENTERPRISE_INTERNAL legs of enterprise SIP devices; ANSWER / PROMPT (built-in prompts) on them. Part F: CAPTURE (edge voicemail capture into a transient spool) on them."
     },
     {
       "id": "cfmeet.telephony.routes",
@@ -401,14 +412,14 @@
     },
     {
       "id": "cfmeet.telephony.internal-http-api",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "openapi",
       "path": "telephony/internal/v1.openapi.json",
       "owner": "telephony",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface of services/telephony: health and the provider callback ingress (provider-authenticated before parsing, 16 KiB limit, dedupe), and the service-authenticated /internal/v1 API for Calling (legs originate / get / terminate / hold / resume, bridges create / get / end, route availability, readiness). Metrics live on a separate listener. Part F: ENTERPRISE_INTERNAL legs of enterprise SIP devices; ANSWER / PROMPT (built-in prompts) on them."
+      "description": "HTTP surface of services/telephony: health and the provider callback ingress (provider-authenticated before parsing, 16 KiB limit, dedupe), and the service-authenticated /internal/v1 API for Calling (legs originate / get / terminate / hold / resume, bridges create / get / end, route availability, readiness). Metrics live on a separate listener. Part F: ENTERPRISE_INTERNAL legs of enterprise SIP devices; ANSWER / PROMPT (built-in prompts) on them. Part F: CAPTURE (edge voicemail capture into a transient spool) on them."
     }
   ]
 }

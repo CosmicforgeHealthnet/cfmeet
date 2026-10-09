@@ -71,6 +71,9 @@ text_enum!(
         CallMediaParticipantEvicted = "CALL_MEDIA_PARTICIPANT_EVICTED",
         CallMediaEnforcementPending = "CALL_MEDIA_ENFORCEMENT_PENDING",
         CallMediaReconciled = "CALL_MEDIA_RECONCILED",
+        VoicemailReceived = "VOICEMAIL_RECEIVED",
+        VoicemailReady = "VOICEMAIL_READY",
+        VoicemailDeleted = "VOICEMAIL_DELETED",
     }
 );
 
@@ -210,10 +213,8 @@ mod tests {
             for future in [
                 "FAILOVER",
                 "RELAY_NUMBER",
-                "VOICEMAIL",
                 "PROVIDER",
                 "CARRIER",
-                "RECORDING",
                 "LIVEKIT",
                 "SIP",
                 "PSTN",
@@ -221,5 +222,20 @@ mod tests {
                 assert!(!t.as_str().contains(future), "{t}");
             }
         }
+    }
+
+    /// Part F: voicemail facts are the only artifact facts of a Call and never carry a
+    /// provider / edge vocabulary.
+    #[test]
+    fn part_f_artifact_events_are_explicit() {
+        let artifact: Vec<&str> = CallEventType::ALL
+            .iter()
+            .map(|t| t.as_str())
+            .filter(|t| t.starts_with("VOICEMAIL_") || t.starts_with("RECORDING_"))
+            .collect();
+        assert_eq!(
+            artifact,
+            ["VOICEMAIL_RECEIVED", "VOICEMAIL_READY", "VOICEMAIL_DELETED"]
+        );
     }
 }

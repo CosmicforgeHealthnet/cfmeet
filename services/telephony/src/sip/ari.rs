@@ -354,6 +354,42 @@ impl AriEdge {
         }
     }
 
+    /// A raw (binary) GET bounded to `max_bytes`.
+    async fn fetch_bytes(&self, path: &str, max_bytes: usize) -> EdgeResult<Vec<u8>> {
+        let url = format!("{}/ari{path}", self.settings.base_url);
+        let mut response = self
+            .http
+            .get(url)
+            .basic_auth(
+                &self.settings.username,
+                Some(self.settings.password.as_str()),
+            )
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_connect() {
+                    EdgeError::Unavailable
+                } else {
+                    EdgeError::Timeout
+                }
+            })?;
+        match response.status() {
+            s if s.is_success() => {}
+            StatusCode::NOT_FOUND => return Err(EdgeError::NotFound),
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => return Err(EdgeError::Unavailable),
+            s if s.is_client_error() => return Err(EdgeError::Refused),
+            _ => return Err(EdgeError::Timeout),
+        }
+        let mut out = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|_| EdgeError::Timeout)? {
+            if out.len() + chunk.len() > max_bytes {
+                return Err(EdgeError::Refused);
+            }
+            out.extend_from_slice(&chunk);
+        }
+        Ok(out)
+    }
+
     fn valid_ref(s: &str) -> bool {
         !s.is_empty()
             && s.len() <= 128
@@ -362,9 +398,48 @@ impl AriEdge {
     }
 }
 
+/// Part F: a spool recording's end (its target channel is in `target_uri`).
+fn translate_recording(kind: &str, value: &Value) -> Option<EdgeEvent> {
+    let recording = &value["recording"];
+    let name = recording["name"].as_str()?;
+    let channel = recording["target_uri"].as_str()?.strip_prefix("channel:")?;
+    if !AriEdge::valid_ref(name) || !AriEdge::valid_ref(channel) {
+        return None;
+    }
+    let at = value["timestamp"]
+        .as_str()
+        .and_then(|t| DateTime::parse_from_str(t, "%Y-%m-%dT%H:%M:%S%.3f%z").ok())
+        .map(|t| t.with_timezone(&Utc))
+        .unwrap_or_else(now);
+    let edge_kind = if kind == "RecordingFinished" {
+        EdgeEventKind::CaptureFinished {
+            name: name.to_string(),
+        }
+    } else {
+        EdgeEventKind::CaptureFailed {
+            name: name.to_string(),
+        }
+    };
+    let digest = {
+        use sha2::{Digest, Sha256};
+        hex::encode(Sha256::digest(format!("{kind}|{name}").as_bytes()))
+    };
+    Some(EdgeEvent {
+        event_id: format!("ari-{}", &digest[..40]),
+        application_media: false,
+        channel: channel.to_string(),
+        correlation_key: None,
+        kind: edge_kind,
+        at,
+    })
+}
+
 /// Translates one ARI event into a neutral edge event (None: not relevant).
 fn translate(value: &Value, history: &Mutex<History>) -> Option<EdgeEvent> {
     let kind = value["type"].as_str()?;
+    if matches!(kind, "RecordingFinished" | "RecordingFailed") {
+        return translate_recording(kind, value);
+    }
     let channel = &value["channel"];
     let channel_id = channel["id"].as_str()?.to_string();
     let at = value["timestamp"]
@@ -685,6 +760,60 @@ impl SipMediaEdge for AriEdge {
         .map(|_| ())
     }
 
+    async fn record(
+        &self,
+        channel: &ChannelRef,
+        name: &str,
+        max_seconds: u32,
+        beep: bool,
+    ) -> EdgeResult<()> {
+        if !Self::valid_ref(channel) || !Self::valid_ref(name) || max_seconds == 0 {
+            return Err(EdgeError::Refused);
+        }
+        self.call(
+            Method::POST,
+            &format!("/channels/{channel}/record"),
+            &[
+                ("name", name.to_string()),
+                ("format", "wav".to_string()),
+                ("maxDurationSeconds", max_seconds.to_string()),
+                ("maxSilenceSeconds", "0".to_string()),
+                ("ifExists", "overwrite".to_string()),
+                ("beep", beep.to_string()),
+                ("terminateOn", "#".to_string()),
+            ],
+            None,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    async fn fetch_recording(&self, name: &str, max_bytes: usize) -> EdgeResult<Vec<u8>> {
+        if !Self::valid_ref(name) {
+            return Err(EdgeError::Refused);
+        }
+        self.fetch_bytes(&format!("/recordings/stored/{name}/file"), max_bytes)
+            .await
+    }
+
+    async fn delete_recording(&self, name: &str) -> EdgeResult<()> {
+        if !Self::valid_ref(name) {
+            return Err(EdgeError::Refused);
+        }
+        match self
+            .call(
+                Method::DELETE,
+                &format!("/recordings/stored/{name}"),
+                &[],
+                None,
+            )
+            .await
+        {
+            Ok(_) | Err(EdgeError::NotFound) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
     async fn play(&self, channel: &ChannelRef, sound: &str) -> EdgeResult<()> {
         if !Self::valid_ref(channel)
             || sound.is_empty()
@@ -862,6 +991,37 @@ mod tests {
             Some("cfm-0123456789abcdef")
         );
         assert!(h.lock().unwrap().ended.contains_key("cfm-0123456789abcdef"));
+    }
+
+    #[test]
+    fn recording_ends_translate_by_spool_name_and_target_channel() {
+        let h = Mutex::new(History::default());
+        let finished = translate(
+            &json!({ "type": "RecordingFinished", "timestamp": "2026-10-09T10:00:00.000+0000",
+                     "recording": { "name": "cfm-cap-0123456789abcdef0123456789abcdef", "format": "wav",
+                                    "state": "done", "target_uri": "channel:1760000000.42" } }),
+            &h,
+        )
+        .unwrap();
+        assert_eq!(finished.channel, "1760000000.42");
+        assert!(matches!(
+            &finished.kind,
+            EdgeEventKind::CaptureFinished { name } if name == "cfm-cap-0123456789abcdef0123456789abcdef"
+        ));
+        let failed = translate(
+            &json!({ "type": "RecordingFailed", "recording": { "name": "cfm-cap-x1",
+                     "target_uri": "channel:abc" } }),
+            &h,
+        )
+        .unwrap();
+        assert!(matches!(failed.kind, EdgeEventKind::CaptureFailed { .. }));
+        // Not a channel target, or an unsafe name: ignored.
+        for value in [
+            json!({ "type": "RecordingFinished", "recording": { "name": "cfm-cap-x1", "target_uri": "bridge:b1" } }),
+            json!({ "type": "RecordingFinished", "recording": { "name": "../../etc/passwd", "target_uri": "channel:c" } }),
+        ] {
+            assert!(translate(&value, &h).is_none());
+        }
     }
 
     #[test]

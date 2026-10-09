@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1",
+  "captureId": "11111111-2222-4333-8444-555555555555",
+  "telephonyLegId": "5b0f7a3e-9a1c-4c6e-8e43-2f1f3b9c0a11",
+  "callId": "41111111-2222-4333-8444-555555555555",
+  "callLegId": "51111111-2222-4333-8444-555555555555",
+  "outcome": "COMPLETED",
+  "media": {
+    "contentType": "audio/wav",
+    "durationMs": 1000,
+    "sizeBytes": 4,
+    "sha256": "8d2d6cb94bd0cebd2c1d2b9c6c4b0c8a1d1a3f7e1d1b2b6b7c9a0e2f3d4c5b6a",
+    "base64": "UklGRg=="
+  }
+}

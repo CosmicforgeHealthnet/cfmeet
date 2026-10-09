@@ -713,7 +713,7 @@ impl AppCallService {
 
     /// Post-commit work of an IVR step: a terminal Call's media goes; a queued Call's
     /// queue is dispatched; SIP commands are dispatched.
-    async fn ivr_after_commit(&self, call: &calls::Model) {
+    pub(crate) async fn ivr_after_commit(&self, call: &calls::Model) {
         if call.current_state.is_terminal() {
             self.teardown_media(call.id).await;
             if let Err(error) = self.release_public_legs(call.id).await {

@@ -29,6 +29,10 @@ pub struct WorkerReport {
     pub queue_offers: usize,
     pub ivr_timeouts: usize,
     pub public_forwards: usize,
+    pub voicemail_failed: usize,
+    pub voicemail_calls_ended: usize,
+    pub voicemail_retention: usize,
+    pub voicemail_deleted: usize,
 }
 
 impl AppCallService {
@@ -79,6 +83,13 @@ impl AppCallService {
         report.ivr_timeouts = self.ivr_tick(limit).await?;
         // Public forwards waiting for their Part E gates (placed, or refused safely).
         report.public_forwards = self.public_forward_tick(limit).await?;
+        // Voicemail: lost captures, overdue recordings, retention and deletion (never
+        // blocked by a kill switch).
+        let (failed, ended, retention, deleted) = self.voicemail_tick(limit).await?;
+        report.voicemail_failed = failed;
+        report.voicemail_calls_ended = ended;
+        report.voicemail_retention = retention;
+        report.voicemail_deleted = deleted;
         Ok(report)
     }
 
