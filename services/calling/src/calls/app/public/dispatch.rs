@@ -210,7 +210,8 @@ impl AppCallService {
                 | CommandKind::Resume
                 | CommandKind::Answer
                 | CommandKind::Prompt
-                | CommandKind::Capture),
+                | CommandKind::Capture
+                | CommandKind::CaptureStop),
             ) => self.dispatch_control(row, &call, k).await,
             Some(CommandKind::Bridge) => self.dispatch_bridge(row, &call).await,
             Some(CommandKind::Unbridge) => self.dispatch_unbridge(row, &call).await,
@@ -568,14 +569,19 @@ impl AppCallService {
             CommandKind::Answer => LegControl::Answer,
             CommandKind::Prompt => LegControl::Prompt,
             CommandKind::Capture => LegControl::Capture,
+            CommandKind::CaptureStop => LegControl::CaptureStop,
             _ => LegControl::Resume,
         };
         if matches!(
             kind,
-            CommandKind::Answer | CommandKind::Prompt | CommandKind::Capture
+            CommandKind::Answer
+                | CommandKind::Prompt
+                | CommandKind::Capture
+                | CommandKind::CaptureStop
         ) && (call.current_state.is_terminal() || call.current_state == CallState::Ending)
         {
-            // A prompt / answer for a Call that is over has nothing left to do.
+            // A prompt / answer / capture for a Call that is over has nothing left to do
+            // (ending the leg ends a running capture at the edge).
             self.complete(row.id, "DEAD", Some("CALL_NOT_ACTIVE"), None)
                 .await?;
             return Ok(Dispatched::Dead);

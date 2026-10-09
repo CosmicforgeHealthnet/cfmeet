@@ -353,12 +353,22 @@ async fn an_app_user_calls_a_protected_phone_and_hangs_up() {
 
     // Calling's database holds no telephone number of the contact or the relay.
     let dump = common::dump_database(x.w.h().conn()).await;
-    for needle in ["+234", "2348", "grant-secret"] {
+    for needle in ["+234", "grant-secret"] {
         assert!(
             !dump.contains(needle),
             "{needle} leaked into Calling's database"
         );
     }
+    // Nor a national-format number (234 + at least 7 more digits in one run). A short
+    // substring like "2348" is not evidence: random UUIDs and timestamps contain it.
+    let digits: Vec<&str> = dump
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|run| run.len() >= 10 && run.starts_with("234"))
+        .collect();
+    assert!(
+        digits.is_empty(),
+        "a telephone number leaked into Calling's database"
+    );
 }
 
 #[tokio::test]

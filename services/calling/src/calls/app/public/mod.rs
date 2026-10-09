@@ -100,6 +100,8 @@ pub(crate) enum CommandKind {
     Prompt,
     /// Part F: capture an internal enterprise SIP leg's audio at the edge.
     Capture,
+    /// Part F: stop an edge capture early (a recording's explicit / policy stop).
+    CaptureStop,
 }
 
 impl CommandKind {
@@ -114,6 +116,7 @@ impl CommandKind {
             CommandKind::Answer => "ANSWER",
             CommandKind::Prompt => "PROMPT",
             CommandKind::Capture => "CAPTURE",
+            CommandKind::CaptureStop => "CAPTURE_STOP",
         }
     }
 
@@ -128,6 +131,7 @@ impl CommandKind {
             "ANSWER" => CommandKind::Answer,
             "PROMPT" => CommandKind::Prompt,
             "CAPTURE" => CommandKind::Capture,
+            "CAPTURE_STOP" => CommandKind::CaptureStop,
             _ => return None,
         })
     }

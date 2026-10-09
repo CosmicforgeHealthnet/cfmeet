@@ -1081,6 +1081,81 @@
           }
         }
       }
+    },
+    "/internal/v1/legs/{leg_id}/capture-stop": {
+      "post": {
+        "operationId": "stopCaptureLeg",
+        "description": "Part F: stop a running capture of an internal enterprise SIP leg early (body `capture`: the capture to stop) — a call recording's explicit / policy stop. The edge then delivers it like any finished capture. Never blocked by a kill switch; a capture that already finished makes it a no-op. Permission telephony-leg.media.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "leg_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/ControlCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replay of an identical earlier command.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/LegAccepted"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted (durable before any provider action).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/telephony/commands/v1.schema.json#/$defs/LegAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   }
 }

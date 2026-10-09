@@ -57,6 +57,7 @@ pub enum ErrorCode {
     VersionConflict,
     EnterprisePolicyDenied,
     ArtifactStorageUnavailable,
+    RecordingNotAuthorized,
 }
 
 impl ErrorCode {
@@ -93,6 +94,7 @@ impl ErrorCode {
         ErrorCode::VersionConflict,
         ErrorCode::EnterprisePolicyDenied,
         ErrorCode::ArtifactStorageUnavailable,
+        ErrorCode::RecordingNotAuthorized,
     ];
 
     /// Codes that only internal routes return.
@@ -158,6 +160,9 @@ impl ErrorCode {
             ErrorCode::ArtifactStorageUnavailable => {
                 "Protected artifact storage is unavailable; nothing was lost. Retry later."
             }
+            ErrorCode::RecordingNotAuthorized => {
+                "Recording this call is not authorized; the decision and its reason are in the call's recording authorizations."
+            }
             _ => "The request could not be completed.",
         }
     }
@@ -196,6 +201,7 @@ impl ErrorCode {
             ErrorCode::VersionConflict => "VERSION_CONFLICT",
             ErrorCode::EnterprisePolicyDenied => "ENTERPRISE_POLICY_DENIED",
             ErrorCode::ArtifactStorageUnavailable => "ARTIFACT_STORAGE_UNAVAILABLE",
+            ErrorCode::RecordingNotAuthorized => "RECORDING_NOT_AUTHORIZED",
         }
     }
 }

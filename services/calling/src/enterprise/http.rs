@@ -28,6 +28,10 @@ use super::{
     ivr::IvrGraph,
     policy::{NewPolicy, PolicyChange, PolicyRules, ResourceStatus},
     queues::{QueueChange, QueueMember, QueueSettings},
+    recording::{
+        CallRecordingView, ConsentDecision, ConsentParticipants, RecordingMode,
+        RecordingPolicyChange, RecordingPolicySettings, RecordingRequester,
+    },
     ring_groups::{RingGroupChange, RingGroupSettings, RingStrategy},
     voicemail::{
         MailboxChange, MailboxOwnerType, MailboxSettings, MessageFilter, MessageState, ReadState,
@@ -37,7 +41,10 @@ use super::{
 };
 use crate::{
     calls::{
-        app::http::{parse_body, respond, uuid_path},
+        app::{
+            enterprise::{RecordingActor, StartOutcome},
+            http::{parse_body, respond, uuid_path},
+        },
         command::CallScope,
     },
     error::CallingError,
@@ -195,6 +202,44 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/v1/enterprise/voicemail/messages/:message_id/media-access",
             post(media_access),
+        )
+        .route(
+            "/v1/enterprise/recording-policies",
+            get(list_recording_policies).post(create_recording_policy),
+        )
+        .route(
+            "/v1/enterprise/recording-policies/:recording_policy_id",
+            get(get_recording_policy)
+                .patch(update_recording_policy)
+                .delete(disable_recording_policy),
+        )
+        .route(
+            "/v1/calls/:call_id/recording-consent",
+            post(record_recording_consent),
+        )
+        .route(
+            "/v1/calls/:call_id/recordings",
+            get(list_call_recordings).post(start_recording),
+        )
+        .route(
+            "/v1/calls/:call_id/recordings/:recording_id/stop",
+            post(stop_recording),
+        )
+        .route(
+            "/v1/calls/:call_id/recording-authorizations",
+            get(list_recording_authorizations),
+        )
+        .route(
+            "/v1/enterprise/recordings/:recording_id",
+            get(get_call_recording).delete(delete_call_recording),
+        )
+        .route(
+            "/v1/enterprise/recordings/:recording_id/media-access",
+            post(recording_media_access),
+        )
+        .route(
+            "/v1/enterprise/recordings/:recording_id/access-audit",
+            get(recording_access_audit),
         )
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
 }
@@ -1895,4 +1940,371 @@ async fn media_access(
         )
         .await?;
     Ok(ok(access))
+}
+
+// ---------------------------------------------------------------------------
+// Call recording (§61)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateRecordingPolicyBody {
+    name: String,
+    mode: RecordingMode,
+    notice_required: bool,
+    consent_participants: ConsentParticipants,
+    jurisdiction_ref: String,
+    retention_days: i32,
+    max_recording_seconds: i32,
+    #[serde(default)]
+    is_default: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UpdateRecordingPolicyBody {
+    expected_version: i64,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    mode: Option<RecordingMode>,
+    #[serde(default)]
+    notice_required: Option<bool>,
+    #[serde(default)]
+    consent_participants: Option<ConsentParticipants>,
+    #[serde(default)]
+    jurisdiction_ref: Option<String>,
+    #[serde(default)]
+    retention_days: Option<i32>,
+    #[serde(default)]
+    max_recording_seconds: Option<i32>,
+    #[serde(default)]
+    is_default: Option<bool>,
+}
+
+async fn create_recording_policy(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    body: Result<Json<CreateRecordingPolicyBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_RECORDING_MANAGE)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .create_recording_policy(
+            &AdminActor::of(&ctx),
+            RecordingPolicySettings {
+                name: body.name,
+                mode: body.mode,
+                notice_required: body.notice_required,
+                consent_participants: body.consent_participants,
+                jurisdiction_ref: body.jurisdiction_ref,
+                retention_days: body.retention_days,
+                max_recording_seconds: body.max_recording_seconds,
+                is_default: body.is_default,
+            },
+        )
+        .await?;
+    Ok(created(view))
+}
+
+async fn list_recording_policies(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let q = QueryParams::parse(query, &["limit", "cursor", "status"])?;
+    let page = state
+        .enterprise
+        .list_recording_policies(CallScope::of_platform(&ctx), q.status()?, &q.page()?)
+        .await?;
+    Ok(ok(page))
+}
+
+async fn get_recording_policy(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let view = state
+        .enterprise
+        .get_recording_policy(CallScope::of_platform(&ctx), uuid_path(&id)?)
+        .await?;
+    Ok(ok(view))
+}
+
+async fn update_recording_policy(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    body: Result<Json<UpdateRecordingPolicyBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_RECORDING_MANAGE)?;
+    let id = uuid_path(&id)?;
+    let body = parse_body(body)?;
+    let (view, revoked) = state
+        .enterprise
+        .update_recording_policy(
+            &AdminActor::of(&ctx),
+            id,
+            body.expected_version,
+            RecordingPolicyChange {
+                name: body.name,
+                mode: body.mode,
+                notice_required: body.notice_required,
+                consent_participants: body.consent_participants,
+                jurisdiction_ref: body.jurisdiction_ref,
+                retention_days: body.retention_days,
+                max_recording_seconds: body.max_recording_seconds,
+                is_default: body.is_default,
+            },
+        )
+        .await?;
+    if revoked {
+        // Recording authorized under the previous terms stops (POLICY_REVOKED).
+        state
+            .app
+            .revoke_recordings_of_policy(CallScope::of_platform(&ctx), id)
+            .await?;
+    }
+    Ok(ok(view))
+}
+
+async fn disable_recording_policy(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_RECORDING_MANAGE)?;
+    let id = uuid_path(&id)?;
+    let q = QueryParams::parse(query, &["expectedVersion"])?;
+    let view = state
+        .enterprise
+        .disable_recording_policy(&AdminActor::of(&ctx), id, q.expected_version()?)
+        .await?;
+    state
+        .app
+        .revoke_recordings_of_policy(CallScope::of_platform(&ctx), id)
+        .await?;
+    Ok(ok(view))
+}
+
+/// Who a recording request acts for: the application on behalf of ONE principal (a
+/// participant of the Call), or — without `principalId` — a recording administrator
+/// (the credential holds enterprise.recording.manage).
+fn recording_requester(
+    ctx: &PlatformAuthContext,
+    principal: Option<Uuid>,
+) -> Result<RecordingRequester, CallingError> {
+    match principal {
+        Some(p) => Ok(RecordingRequester::Principal(p)),
+        None if ctx.has_scope(names::ENTERPRISE_RECORDING_MANAGE) => {
+            Ok(RecordingRequester::Administrator)
+        }
+        None => Err(CallingError::Validation(
+            "principalId is required without enterprise.recording.manage.",
+        )),
+    }
+}
+
+fn recording_actor(requester: RecordingRequester) -> RecordingActor {
+    match requester {
+        RecordingRequester::Principal(p) => RecordingActor::Principal(p),
+        RecordingRequester::Administrator => RecordingActor::Administrator,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RecordingConsentBody {
+    endpoint_id: Uuid,
+    decision: ConsentDecision,
+}
+
+async fn record_recording_consent(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(call_id): Path<String>,
+    body: Result<Json<RecordingConsentBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    ctx.require_scope(names::ENTERPRISE_CALLS_USE)?;
+    let call_id = uuid_path(&call_id)?;
+    let body = parse_body(body)?;
+    let view = state
+        .app
+        .record_recording_consent(&ctx, call_id, body.endpoint_id, body.decision)
+        .await?;
+    Ok(ok(view))
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RecordingActorBody {
+    #[serde(default)]
+    principal_id: Option<Uuid>,
+}
+
+async fn start_recording(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(call_id): Path<String>,
+    body: Result<Json<RecordingActorBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_RECORDING_MANAGE)?;
+    let call_id = uuid_path(&call_id)?;
+    let body = parse_body(body)?;
+    let actor = recording_actor(recording_requester(&ctx, body.principal_id)?);
+    let outcome = state
+        .app
+        .start_recording(Some(&ctx), CallScope::of_platform(&ctx), call_id, actor)
+        .await?;
+    match outcome {
+        StartOutcome::Started(recording) => Ok(created(RecordingEnvelope { recording })),
+        StartOutcome::AlreadyActive(recording) => Ok(ok(RecordingEnvelope { recording })),
+        StartOutcome::Denied(_) => Err(CallingError::Call {
+            code: crate::error::ErrorCode::RecordingNotAuthorized,
+            status: StatusCode::FORBIDDEN,
+        }),
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecordingEnvelope {
+    recording: CallRecordingView,
+}
+
+async fn stop_recording(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path((call_id, recording_id)): Path<(String, String)>,
+    body: Result<Json<RecordingActorBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_RECORDING_MANAGE)?;
+    let call_id = uuid_path(&call_id)?;
+    let recording_id = uuid_path(&recording_id)?;
+    let body = parse_body(body)?;
+    let actor = recording_actor(recording_requester(&ctx, body.principal_id)?);
+    let recording = state
+        .app
+        .stop_recording(&ctx, call_id, recording_id, actor)
+        .await?;
+    Ok(ok(RecordingEnvelope { recording }))
+}
+
+async fn list_call_recordings(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(call_id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_RECORDING_READ)?;
+    let call_id = uuid_path(&call_id)?;
+    let q = QueryParams::parse(query, &["principalId"])?;
+    let page = state
+        .enterprise
+        .list_call_recordings(
+            CallScope::of_platform(&ctx),
+            call_id,
+            recording_requester(&ctx, q.uuid("principalId")?)?,
+        )
+        .await?;
+    Ok(ok(page))
+}
+
+async fn list_recording_authorizations(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(call_id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_RECORDING_READ)?;
+    let call_id = uuid_path(&call_id)?;
+    let q = QueryParams::parse(query, &["principalId"])?;
+    let list = state
+        .enterprise
+        .list_recording_authorizations(
+            CallScope::of_platform(&ctx),
+            call_id,
+            recording_requester(&ctx, q.uuid("principalId")?)?,
+        )
+        .await?;
+    Ok(ok(list))
+}
+
+async fn get_call_recording(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_RECORDING_READ)?;
+    let q = QueryParams::parse(query, &["principalId"])?;
+    let view = state
+        .enterprise
+        .get_call_recording(
+            &AdminActor::of(&ctx),
+            uuid_path(&id)?,
+            recording_requester(&ctx, q.uuid("principalId")?)?,
+        )
+        .await?;
+    Ok(ok(view))
+}
+
+async fn recording_media_access(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    body: Result<Json<RecordingActorBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_RECORDING_READ)?;
+    let id = uuid_path(&id)?;
+    let body = parse_body(body)?;
+    let access = state
+        .enterprise
+        .recording_media_access(
+            &AdminActor::of(&ctx),
+            id,
+            recording_requester(&ctx, body.principal_id)?,
+        )
+        .await?;
+    Ok(ok(access))
+}
+
+async fn delete_call_recording(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_RECORDING_MANAGE)?;
+    let id = uuid_path(&id)?;
+    let q = QueryParams::parse(query, &["expectedVersion", "principalId"])?;
+    let view = state
+        .enterprise
+        .delete_call_recording(
+            &AdminActor::of(&ctx),
+            id,
+            q.expected_version()?,
+            recording_requester(&ctx, q.uuid("principalId")?)?,
+        )
+        .await?;
+    Ok(ok(view))
+}
+
+async fn recording_access_audit(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_RECORDING_MANAGE)?;
+    let list = state
+        .enterprise
+        .recording_access_audit(CallScope::of_platform(&ctx), uuid_path(&id)?)
+        .await?;
+    Ok(ok(list))
 }

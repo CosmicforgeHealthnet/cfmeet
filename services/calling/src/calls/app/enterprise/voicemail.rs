@@ -95,6 +95,11 @@ pub trait CallMediaCapture: Send + Sync {
     fn available(&self) -> bool;
 
     async fn start(&self, request: CaptureRequest) -> Result<(), &'static str>;
+
+    /// Stops a running capture early (idempotent); its media is still delivered.
+    async fn stop(&self, _capture_id: Uuid) -> Result<(), &'static str> {
+        Ok(())
+    }
 }
 
 /// No application media capture in this deployment (SIP captures still work).
@@ -343,14 +348,21 @@ impl AppCallService {
         }
     }
 
-    /// Whether `capture_id` is the SIP capture of `call_id` on leg `call_leg_id` — the edge
-    /// may deliver only what it was asked to capture.
+    /// Whether `capture_id` is the SIP capture (voicemail message or call recording) of
+    /// `call_id` on leg `call_leg_id` — the edge may deliver only what it was asked to
+    /// capture.
     pub async fn is_sip_capture(
         &self,
         capture_id: Uuid,
         call_id: Uuid,
         call_leg_id: Uuid,
     ) -> CallResult<bool> {
+        if self
+            .is_sip_recording(capture_id, call_id, call_leg_id)
+            .await?
+        {
+            return Ok(true);
+        }
         Ok(self
             .db()
             .query_one(stmt(
@@ -391,7 +403,10 @@ impl AppCallService {
             return Err(CallError::Validation("the capture digest does not match."));
         }
         let Some(message) = message_by_id(self.db(), capture_id, false).await? else {
-            return Err(CallError::NotFound);
+            // Not a voicemail message: a call recording's capture (§61), or unknown.
+            return self
+                .deliver_recording_capture(capture_id, call_id, media, digest)
+                .await;
         };
         if message.call_id != call_id {
             return Err(CallError::NotFound);
@@ -536,7 +551,7 @@ impl AppCallService {
             code
         };
         let Some(message) = message_by_id(self.db(), capture_id, false).await? else {
-            return Err(CallError::NotFound);
+            return self.recording_capture_failed(capture_id, &code).await;
         };
         let txn = self.db().begin().await?;
         let Some(call) = calls::Entity::find_by_id(message.call_id)

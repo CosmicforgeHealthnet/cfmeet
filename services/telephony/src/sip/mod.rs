@@ -218,6 +218,24 @@ pub trait SipMediaEdge: Send + Sync {
         Err(EdgeError::Refused)
     }
 
+    /// Part F: records a bridge's MIXED audio (a call recording of a bridged leg) into the
+    /// spool under `name`; completion arrives as for [`SipMediaEdge::record`].
+    async fn record_bridge(
+        &self,
+        _bridge: &str,
+        _name: &str,
+        _max_seconds: u32,
+        _beep: bool,
+    ) -> EdgeResult<()> {
+        Err(EdgeError::Refused)
+    }
+
+    /// Part F: stops a running spool recording early (its end event follows). A
+    /// recording that is not running is [`EdgeError::NotFound`].
+    async fn stop_recording(&self, _name: &str) -> EdgeResult<()> {
+        Err(EdgeError::NotFound)
+    }
+
     /// Part F: the bytes of a finished spool recording (at most `max_bytes`).
     async fn fetch_recording(&self, _name: &str, _max_bytes: usize) -> EdgeResult<Vec<u8>> {
         Err(EdgeError::Unavailable)

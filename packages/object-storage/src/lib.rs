@@ -88,6 +88,11 @@ pub trait ObjectStore: Send + Sync {
     /// Backend name for logs / metrics (bounded).
     fn backend(&self) -> &'static str;
 
+    /// Whether a store is configured at all (an unconfigured deployment fails closed).
+    fn configured(&self) -> bool {
+        true
+    }
+
     /// Writes `bytes` under `key` (overwriting an earlier attempt of the same key).
     async fn put(
         &self,
@@ -118,6 +123,10 @@ pub struct UnconfiguredStore;
 impl ObjectStore for UnconfiguredStore {
     fn backend(&self) -> &'static str {
         "unconfigured"
+    }
+
+    fn configured(&self) -> bool {
+        false
     }
 
     async fn put(&self, _: &str, _: Vec<u8>, _: &str) -> StorageResult<StoredObject> {

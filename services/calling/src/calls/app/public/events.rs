@@ -846,9 +846,15 @@ impl AppCallService {
             ))
             .all(&txn)
             .await?;
+        // The edge-executed network legs: public legs, and (Part F) the bound
+        // PRIVATE_NETWORK leg of an enterprise SIP device bridged to application media.
         let public: Vec<&call_legs::Model> = legs
             .iter()
-            .filter(|l| l.leg_kind == LegKind::PublicNetwork && !l.state.is_terminal())
+            .filter(|l| {
+                (l.leg_kind == LegKind::PublicNetwork
+                    || (l.leg_kind == LegKind::PrivateNetwork && l.execution_binding_ref.is_some()))
+                    && !l.state.is_terminal()
+            })
             .collect();
         let bridge_active = bridge::live_bridge(&txn, call.id)
             .await?

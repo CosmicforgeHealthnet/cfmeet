@@ -33,6 +33,10 @@ pub struct WorkerReport {
     pub voicemail_calls_ended: usize,
     pub voicemail_retention: usize,
     pub voicemail_deleted: usize,
+    pub recordings_stopped: usize,
+    pub recordings_failed: usize,
+    pub recordings_auto_started: usize,
+    pub recordings_deleted: usize,
 }
 
 impl AppCallService {
@@ -90,6 +94,13 @@ impl AppCallService {
         report.voicemail_calls_ended = ended;
         report.voicemail_retention = retention;
         report.voicemail_deleted = deleted;
+        // Call recording: ended Calls / deadlines stop, lost captures fail, automatic
+        // starts (only while recording is enabled), retention and deletion.
+        let (stopped, failed, auto, deleted) = self.recording_tick(limit).await?;
+        report.recordings_stopped = stopped;
+        report.recordings_failed = failed;
+        report.recordings_auto_started = auto;
+        report.recordings_deleted = deleted;
         Ok(report)
     }
 

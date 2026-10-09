@@ -388,7 +388,7 @@ async fn capture_is_refused_outside_enterprise_legs_and_behind_the_switch() {
     let (leg, _) = w.dialog().await;
     // Strict bodies: purpose, bound, no unknown fields (never a path or URL).
     for capture in [
-        json!({ "captureId": Uuid::new_v4(), "purpose": "RECORDING", "maxDurationSeconds": 60, "beep": true }),
+        json!({ "captureId": Uuid::new_v4(), "purpose": "SNAPSHOT", "maxDurationSeconds": 60, "beep": true }),
         json!({ "captureId": Uuid::new_v4(), "purpose": "VOICEMAIL", "maxDurationSeconds": 0, "beep": true }),
         json!({ "captureId": Uuid::new_v4(), "purpose": "VOICEMAIL", "maxDurationSeconds": 601, "beep": true }),
         json!({ "captureId": Uuid::new_v4(), "purpose": "VOICEMAIL", "maxDurationSeconds": 60, "beep": true,
@@ -427,4 +427,184 @@ async fn capture_is_refused_outside_enterprise_legs_and_behind_the_switch() {
     w.h.run().await;
     assert_eq!(w.state(capture).await, "DELIVERED::");
     assert!(w.edge.spool_files().is_empty());
+}
+
+/// Part F §61: a call RECORDING records the leg's bridge (the mixed call audio) when the
+/// leg is bridged, else its channel; CAPTURE_STOP ends it early and is never blocked by a
+/// kill switch; bounds differ per purpose.
+#[tokio::test]
+async fn recording_captures_the_bridge_and_stops_early() {
+    let Some(w) = World::new().await else {
+        return;
+    };
+    let (leg, channel) = w.dialog().await;
+    let recording = |capture: Uuid, max: i64| {
+        json!({ "capture": { "captureId": capture, "purpose": "RECORDING",
+                              "maxDurationSeconds": max, "beep": false } })
+    };
+    // Bounds: a recording up to 1440 s, a voicemail up to 600 s.
+    let r = w
+        .command(leg, "capture", recording(Uuid::new_v4(), 1441))
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
+    let r = w
+        .command(
+            leg,
+            "capture",
+            json!({ "capture": { "captureId": Uuid::new_v4(), "purpose": "VOICEMAIL",
+                                  "maxDurationSeconds": 601, "beep": true } }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
+    // Not bridged: the channel is recorded.
+    let first = Uuid::new_v4();
+    let r = w.command(leg, "capture", recording(first, 1440)).await;
+    assert!(r.status.is_success(), "{}", r.text);
+    w.h.run().await;
+    let name = telephony::capture::spool_name(first);
+    assert_eq!(
+        w.edge.recordings().get(&name),
+        Some(&(channel.clone(), 1440, false))
+    );
+    // CAPTURE_STOP stops it at the edge — even with every kill switch off.
+    w.h.flags.enterprise_sip.set(false);
+    w.h.flags.telephony.set(false);
+    let r = w.command(leg, "capture-stop", recording(first, 1440)).await;
+    assert!(r.status.is_success(), "{}", r.text);
+    w.h.run().await;
+    assert_eq!(w.edge.stopped(), std::slice::from_ref(&name));
+    w.finish(&channel, first, Some(wav(2000))).await;
+    w.h.run().await;
+    assert_eq!(w.state(first).await, "DELIVERED::");
+    w.h.flags.enterprise_sip.set(true);
+    w.h.flags.telephony.set(true);
+    // Bridged: the bridge's mixed audio is recorded.
+    let now = w.h.clock_now();
+    let bridge = Uuid::new_v4();
+    w.h.sql(&format!(
+        "INSERT INTO telephony_bridges (id, calling_call_id, tenant_id, application_id, environment_id, kind, \
+           status, media_join_code, edge_bridge_ref, created_at, established_at, updated_at) \
+         SELECT '{bridge}', calling_call_id, tenant_id, application_id, environment_id, 'APPLICATION_MEDIA', \
+           'ACTIVE', 'cfmj{}', 'cfmb-test-1', '{now}', '{now}', '{now}' FROM telephony_legs WHERE id = '{leg}'",
+        Uuid::new_v4().simple()
+    ))
+    .await;
+    w.h.sql(&format!(
+        "INSERT INTO telephony_bridge_legs (id, bridge_id, member_kind, telephony_leg_id, edge_channel_ref, \
+           status, created_at, joined_at, updated_at) \
+         VALUES ('{}', '{bridge}', 'PUBLIC_LEG', '{leg}', '{channel}', 'JOINED', '{now}', '{now}', '{now}')",
+        Uuid::new_v4()
+    ))
+    .await;
+    let second = Uuid::new_v4();
+    let r = w.command(leg, "capture", recording(second, 600)).await;
+    assert!(r.status.is_success(), "{}", r.text);
+    w.h.run().await;
+    assert_eq!(
+        w.edge
+            .recordings()
+            .get(&telephony::capture::spool_name(second)),
+        Some(&("bridge:cfmb-test-1".to_string(), 600, false))
+    );
+    // Stopping a capture that already finished is a no-op success.
+    let r = w
+        .command(leg, "capture-stop", recording(Uuid::new_v4(), 60))
+        .await;
+    assert!(r.status.is_success(), "{}", r.text);
+    w.h.run().await;
+    assert_eq!(
+        w.h.scalar(
+            "SELECT count(*) FROM telephony_commands WHERE kind = 'CAPTURE_STOP' AND status = 'SUCCEEDED'"
+        )
+        .await,
+        2
+    );
+}
+
+/// Part F: an enterprise device's leg (no provider binding — its edge channel is bound
+/// directly) is bridged to application media: the edge answers it, the application side
+/// joins with the single-use code, the bridge is ACTIVE and the leg CONNECTED; a call
+/// RECORDING of it then records the bridge.
+#[tokio::test]
+async fn an_enterprise_leg_bridges_to_application_media() {
+    let Some(w) = World::new().await else {
+        return;
+    };
+    let (leg, channel) = w.dialog().await;
+    let call: Uuid =
+        w.h.text(&format!(
+            "SELECT calling_call_id::text FROM telephony_legs WHERE id = '{leg}'"
+        ))
+        .await
+        .unwrap()
+        .parse()
+        .unwrap();
+    let r =
+        w.h.calling(
+            Method::POST,
+            "/internal/v1/bridges",
+            Some(json!({
+                "schemaVersion": "1",
+                "commandId": Uuid::new_v4(),
+                "idempotencyKey": format!("bridge-{}", Uuid::new_v4().simple()),
+                "correlationId": cf_service_auth::CorrelationId::generate().as_str(),
+                "callId": call,
+                "kind": "APPLICATION_MEDIA",
+                "telephonyLegIds": [leg],
+            })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{}", r.text);
+    let code = r.json["bridge"]["mediaJoinCode"]
+        .as_str()
+        .expect("join code")
+        .to_string();
+    w.h.run().await;
+    // The edge answered the ringing device leg and put its channel in the bridge.
+    assert_eq!(w.h.leg_status(leg).await, "ANSWERED");
+    assert_eq!(
+        w.h.scalar(
+            "SELECT count(*) FROM telephony_bridge_legs WHERE member_kind = 'PUBLIC_LEG' AND status = 'JOINED'"
+        )
+        .await,
+        1
+    );
+    // The application media side joins with its code: ACTIVE, the leg CONNECTED.
+    let media = "app-media-1".to_string();
+    w.edge.add_live(&media, LegStatus::Connected);
+    assert!(w
+        .h
+        .svc
+        .application_media_joined(&code, &media)
+        .await
+        .unwrap());
+    assert_eq!(
+        w.h.text("SELECT status FROM telephony_bridges")
+            .await
+            .unwrap(),
+        "ACTIVE"
+    );
+    assert_eq!(w.h.leg_status(leg).await, "CONNECTED");
+    // A recording of the bridged leg records the bridge.
+    let capture = Uuid::new_v4();
+    let r = w
+        .command(
+            leg,
+            "capture",
+            json!({ "capture": { "captureId": capture, "purpose": "RECORDING",
+                                  "maxDurationSeconds": 600, "beep": false } }),
+        )
+        .await;
+    assert!(r.status.is_success(), "{}", r.text);
+    w.h.run().await;
+    let target = w
+        .edge
+        .recordings()
+        .get(&telephony::capture::spool_name(capture))
+        .map(|r| r.0.clone())
+        .unwrap();
+    assert!(
+        target.starts_with("bridge:"),
+        "{target} (channel {channel})"
+    );
 }

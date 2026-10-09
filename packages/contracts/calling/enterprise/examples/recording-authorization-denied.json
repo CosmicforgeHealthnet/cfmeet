@@ -1,0 +1,41 @@
+{
+  "authorizationId": "11111111-2222-4333-8444-555555555555",
+  "callId": "21111111-2222-4333-8444-555555555555",
+  "recordingPolicyId": "31111111-2222-4333-8444-555555555555",
+  "policyVersion": 2,
+  "mode": "MANUAL_ALLOWED",
+  "jurisdictionRef": "NG-NDPA-2023/v2",
+  "actor": {
+    "kind": "PRINCIPAL",
+    "principalId": "41111111-2222-4333-8444-555555555555"
+  },
+  "requiredParticipantIds": [
+    "51111111-2222-4333-8444-555555555555"
+  ],
+  "notice": {
+    "required": true,
+    "deliveries": [
+      {
+        "participantId": "51111111-2222-4333-8444-555555555555",
+        "channel": "APPLICATION_SIGNAL"
+      },
+      {
+        "participantId": "61111111-2222-4333-8444-555555555555",
+        "channel": "EDGE_TONE"
+      }
+    ]
+  },
+  "consent": {
+    "required": true,
+    "participants": [
+      {
+        "participantId": "51111111-2222-4333-8444-555555555555",
+        "consentId": null,
+        "decision": null
+      }
+    ]
+  },
+  "decision": "DENIED",
+  "reason": "CONSENT_MISSING",
+  "createdAt": "2031-03-05T09:00:00.000Z"
+}

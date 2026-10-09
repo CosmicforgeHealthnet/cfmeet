@@ -18,6 +18,7 @@
 mod forward;
 mod ivr;
 mod queues;
+mod recording;
 mod ring_groups;
 mod router;
 mod sip;
@@ -25,6 +26,7 @@ mod transfer;
 mod voicemail;
 
 pub use ivr::IvrInputSource;
+pub use recording::{RecordingActor, RecordingConsentView, StartOutcome};
 pub use sip::{EnterpriseDialogOffer, EnterpriseKeypad};
 pub use transfer::{ResolvedTransferTarget, TransferTarget};
 pub use voicemail::{

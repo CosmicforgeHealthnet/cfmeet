@@ -70,7 +70,7 @@ packages/object-storage/   neutral protected object storage (S3 SigV4 + memory b
 | 5 | `enterprise_ivr_flows`, `enterprise_ivr_flow_versions` (immutable), `enterprise_ivr_sessions` |
 | 6 | `enterprise_business_hours_rules`, `…_windows`, `…_exceptions`, `enterprise_forwarding_rules` |
 | 8 | `voicemail_mailboxes`, `voicemail_messages` |
-| 9 | `call_recording_policies`, `call_recording_authorizations`, `call_recording_consents`, `call_recordings`, `enterprise_artifact_access_audit` |
+| 9 | `call_recording_policies`, `call_recording_authorizations`, `call_recording_consents`, `call_recordings`, `call_recording_access_audit` (ADR 0024) |
 | 10 | history indexes |
 
 Polymorphic destinations (`EXTENSION`, `PRINCIPAL`, `RING_GROUP`, `QUEUE`, `IVR`,

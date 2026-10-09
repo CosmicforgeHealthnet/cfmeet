@@ -189,6 +189,48 @@
     },
     {
       "$ref": "#/$defs/VoicemailMediaAccess"
+    },
+    {
+      "$ref": "#/$defs/CreateRecordingPolicyRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdateRecordingPolicyRequest"
+    },
+    {
+      "$ref": "#/$defs/RecordingPolicy"
+    },
+    {
+      "$ref": "#/$defs/RecordingPolicyList"
+    },
+    {
+      "$ref": "#/$defs/RecordingConsentRequest"
+    },
+    {
+      "$ref": "#/$defs/RecordingConsent"
+    },
+    {
+      "$ref": "#/$defs/RecordingActorRequest"
+    },
+    {
+      "$ref": "#/$defs/CallRecording"
+    },
+    {
+      "$ref": "#/$defs/CallRecordingEnvelope"
+    },
+    {
+      "$ref": "#/$defs/CallRecordingList"
+    },
+    {
+      "$ref": "#/$defs/RecordingAuthorization"
+    },
+    {
+      "$ref": "#/$defs/RecordingAuthorizationList"
+    },
+    {
+      "$ref": "#/$defs/RecordingMediaAccess"
+    },
+    {
+      "$ref": "#/$defs/RecordingAccessList"
     }
   ],
   "$defs": {
@@ -3617,6 +3659,920 @@
         "sha256": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "RecordingMode": {
+      "description": "DISABLED: never recorded. MANUAL_ALLOWED: recorded only on an explicit, authorized request. AUTO_WHEN_AUTHORIZED: the platform starts recording a CONNECTED Call by itself — only once every configured notice / consent requirement is met (never assumed).",
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "MANUAL_ALLOWED",
+        "AUTO_WHEN_AUTHORIZED"
+      ]
+    },
+    "ConsentParticipants": {
+      "description": "Who must consent: NONE, every participant, or every participant other than the one requesting the recording (a system / administrator request: everyone).",
+      "type": "string",
+      "enum": [
+        "NONE",
+        "ALL_PARTICIPANTS",
+        "OTHER_PARTICIPANTS"
+      ]
+    },
+    "CreateRecordingPolicyRequest": {
+      "description": "Body of POST /v1/enterprise/recording-policies. A recording policy is SEPARATE from the right to call, enterprise membership, Privacy Relay authorization and any meeting recording policy.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "mode",
+        "noticeRequired",
+        "consentParticipants",
+        "jurisdictionRef",
+        "retentionDays",
+        "maxRecordingSeconds"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "mode": {
+          "$ref": "#/$defs/RecordingMode"
+        },
+        "noticeRequired": {
+          "type": "boolean",
+          "description": "Every participant must be notified (the server issues the notice: a realtime notice to application endpoints, a tone at the edge for SIP legs) before capture starts."
+        },
+        "consentParticipants": {
+          "$ref": "#/$defs/ConsentParticipants"
+        },
+        "jurisdictionRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "description": "Opaque reference to the compliance configuration this policy implements (e.g. NG-NDPA-2023/v2). Authoritative input from compliance / legal — the platform never infers recording law from a country. Never a telephone number."
+        },
+        "retentionDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650,
+          "description": "Days a READY recording is kept before the retention worker deletes it (audited)."
+        },
+        "maxRecordingSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 1440,
+          "description": "Maximum recording length in seconds (the recording then stops: MAX_DURATION)."
+        },
+        "isDefault": {
+          "type": "boolean",
+          "description": "The scope's effective policy (one ACTIVE default)."
+        }
+      }
+    },
+    "UpdateRecordingPolicyRequest": {
+      "description": "Body of PATCH /v1/enterprise/recording-policies/{recording_policy_id}. A change that stops permitting a running recording (DISABLED, no longer the default, stricter notice / consent) stops it (POLICY_REVOKED).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "mode": {
+          "$ref": "#/$defs/RecordingMode"
+        },
+        "noticeRequired": {
+          "type": "boolean",
+          "description": "Every participant must be notified (the server issues the notice: a realtime notice to application endpoints, a tone at the edge for SIP legs) before capture starts."
+        },
+        "consentParticipants": {
+          "$ref": "#/$defs/ConsentParticipants"
+        },
+        "jurisdictionRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "description": "Opaque reference to the compliance configuration this policy implements (e.g. NG-NDPA-2023/v2). Authoritative input from compliance / legal — the platform never infers recording law from a country. Never a telephone number."
+        },
+        "retentionDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650,
+          "description": "Days a READY recording is kept before the retention worker deletes it (audited)."
+        },
+        "maxRecordingSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 1440,
+          "description": "Maximum recording length in seconds (the recording then stops: MAX_DURATION)."
+        },
+        "isDefault": {
+          "type": "boolean",
+          "description": "The scope's effective policy (one ACTIVE default)."
+        }
+      }
+    },
+    "RecordingPolicy": {
+      "description": "A call recording policy.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recordingPolicyId",
+        "name",
+        "mode",
+        "noticeRequired",
+        "consentParticipants",
+        "jurisdictionRef",
+        "retentionDays",
+        "maxRecordingSeconds",
+        "isDefault",
+        "consentRequired",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "recordingPolicyId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "mode": {
+          "$ref": "#/$defs/RecordingMode"
+        },
+        "noticeRequired": {
+          "type": "boolean",
+          "description": "Every participant must be notified (the server issues the notice: a realtime notice to application endpoints, a tone at the edge for SIP legs) before capture starts."
+        },
+        "consentParticipants": {
+          "$ref": "#/$defs/ConsentParticipants"
+        },
+        "jurisdictionRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "description": "Opaque reference to the compliance configuration this policy implements (e.g. NG-NDPA-2023/v2). Authoritative input from compliance / legal — the platform never infers recording law from a country. Never a telephone number."
+        },
+        "retentionDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650,
+          "description": "Days a READY recording is kept before the retention worker deletes it (audited)."
+        },
+        "maxRecordingSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 1440,
+          "description": "Maximum recording length in seconds (the recording then stops: MAX_DURATION)."
+        },
+        "isDefault": {
+          "type": "boolean",
+          "description": "The scope's effective policy (one ACTIVE default)."
+        },
+        "consentRequired": {
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "RecordingPolicyList": {
+      "description": "A page of recording policies.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recordingPolicies",
+        "nextCursor"
+      ],
+      "properties": {
+        "recordingPolicies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordingPolicy"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "ConsentDecision": {
+      "description": "A participant's decision.",
+      "type": "string",
+      "enum": [
+        "GRANTED",
+        "DECLINED"
+      ]
+    },
+    "RecordingConsentRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/recording-consent: ONE participant's own decision, taken through that participant's endpoint (an endpoint with a session of an active participant of this Call; anything else is 404). There is no 'everyone consented' flag. Replaying the same decision is idempotent; a DECLINED by a participant a running recording relies on stops it (CONSENT_WITHDRAWN).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpointId",
+        "decision"
+      ],
+      "properties": {
+        "endpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "decision": {
+          "$ref": "#/$defs/ConsentDecision"
+        }
+      }
+    },
+    "RecordingConsent": {
+      "description": "A recorded consent decision (append-only; the latest per participant counts).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "consentId",
+        "callId",
+        "participantId",
+        "decision",
+        "recordedAt"
+      ],
+      "properties": {
+        "consentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "decision": {
+          "$ref": "#/$defs/ConsentDecision"
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "RecordingActorRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/recordings, POST .../recordings/{recording_id}/stop and POST /v1/enterprise/recordings/{recording_id}/media-access. With principalId the application acts for that principal, who must be a participant of the Call (else 404); without it the credential acts as a recording administrator (enterprise.recording.manage).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "RecordingState": {
+      "description": "STARTING / RECORDING: capturing. STOPPING: stop requested (explicit, Call end, policy revocation, consent withdrawal, maximum length). PROCESSING: the audio arrived and is being stored (a storage outage keeps it here — never a fake READY). READY: in protected object storage. FAILED: the capture failed or never arrived. DELETING / DELETED: removed (user, administrator or retention); the Call's history remains.",
+      "type": "string",
+      "enum": [
+        "STARTING",
+        "RECORDING",
+        "STOPPING",
+        "PROCESSING",
+        "READY",
+        "FAILED",
+        "DELETING",
+        "DELETED"
+      ]
+    },
+    "RecordingStopReason": {
+      "description": "Why a recording stopped.",
+      "type": "string",
+      "enum": [
+        "EXPLICIT",
+        "CALL_ENDED",
+        "POLICY_REVOKED",
+        "CONSENT_WITHDRAWN",
+        "CAPTURE_FAILED",
+        "MAX_DURATION",
+        "KILL_SWITCH"
+      ]
+    },
+    "CallRecording": {
+      "description": "A recording of ONE canonical Call. Integrity metadata only: never an object-storage key, a bucket, a stored URL, a telephone number or a provider identity (media through media-access).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recordingId",
+        "callId",
+        "authorizationId",
+        "recordingPolicyId",
+        "captureSource",
+        "state",
+        "startedAt",
+        "stoppedAt",
+        "stopReason",
+        "contentType",
+        "sizeBytes",
+        "durationMs",
+        "sha256",
+        "readyAt",
+        "failureCode",
+        "retentionUntil",
+        "deletedAt",
+        "version"
+      ],
+      "properties": {
+        "recordingId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "authorizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "recordingPolicyId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "captureSource": {
+          "type": "string",
+          "enum": [
+            "SIP",
+            "APPLICATION"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/RecordingState"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "stoppedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "stopReason": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RecordingStopReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contentType": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "audio/wav",
+            null
+          ]
+        },
+        "sizeBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "durationMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Lower-case hex SHA-256 of the audio."
+        },
+        "readyAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "failureCode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Z][A-Z_]{1,63}$"
+        },
+        "retentionUntil": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "deletedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        }
+      }
+    },
+    "CallRecordingEnvelope": {
+      "description": "A recording (start / stop responses).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recording"
+      ],
+      "properties": {
+        "recording": {
+          "$ref": "#/$defs/CallRecording"
+        }
+      }
+    },
+    "CallRecordingList": {
+      "description": "The recordings of a Call (oldest first).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recordings",
+        "nextCursor"
+      ],
+      "properties": {
+        "recordings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CallRecording"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "RecordingNoticeEvidence": {
+      "description": "Notice evidence: whether notice was required and, if so, the channel the server issued it through to each participant.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required"
+      ],
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "deliveries": {
+          "type": "array",
+          "items": {
+            "description": "One participant's notice.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "participantId",
+              "channel"
+            ],
+            "properties": {
+              "participantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "channel": {
+                "type": "string",
+                "enum": [
+                  "APPLICATION_SIGNAL",
+                  "EDGE_TONE"
+                ]
+              }
+            }
+          },
+          "maxItems": 64
+        }
+      }
+    },
+    "RecordingConsentEvidence": {
+      "description": "Consent evidence: each required participant's latest decision for THIS Call at decision time (null: none).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required"
+      ],
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "participants": {
+          "type": "array",
+          "items": {
+            "description": "One required participant.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "participantId",
+              "consentId",
+              "decision"
+            ],
+            "properties": {
+              "participantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "consentId": {
+                "oneOf": [
+                  {
+                    "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "decision": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/ConsentDecision"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "maxItems": 64
+        }
+      }
+    },
+    "RecordingAuthorizationReason": {
+      "description": "Why a recording was (not) authorized.",
+      "type": "string",
+      "enum": [
+        "AUTHORIZED",
+        "RECORDING_DISABLED",
+        "NOT_AN_ENTERPRISE_CALL",
+        "NO_RECORDING_POLICY",
+        "POLICY_DISABLED",
+        "AUTO_RECORDING_NOT_CONFIGURED",
+        "CALL_STATE_NOT_ELIGIBLE",
+        "ACTOR_NOT_PARTICIPANT",
+        "NOTICE_UNDELIVERABLE",
+        "CONSENT_MISSING",
+        "CONSENT_DECLINED",
+        "ARTIFACT_STORAGE_UNAVAILABLE",
+        "CAPTURE_UNAVAILABLE"
+      ]
+    },
+    "RecordingAuthorization": {
+      "description": "An immutable, server-authoritative recording decision taken before any capture.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorizationId",
+        "callId",
+        "recordingPolicyId",
+        "policyVersion",
+        "mode",
+        "jurisdictionRef",
+        "actor",
+        "requiredParticipantIds",
+        "notice",
+        "consent",
+        "decision",
+        "reason",
+        "createdAt"
+      ],
+      "properties": {
+        "authorizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "recordingPolicyId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "policyVersion": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "NONE",
+            "DISABLED",
+            "MANUAL_ALLOWED",
+            "AUTO_WHEN_AUTHORIZED"
+          ]
+        },
+        "jurisdictionRef": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+              "description": "Opaque reference to the compliance configuration this policy implements (e.g. NG-NDPA-2023/v2). Authoritative input from compliance / legal — the platform never infers recording law from a country. Never a telephone number."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actor": {
+          "description": "Who asked.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "principalId"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "PRINCIPAL",
+                "ADMINISTRATOR",
+                "SYSTEM"
+              ]
+            },
+            "principalId": {
+              "oneOf": [
+                {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "requiredParticipantIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "maxItems": 64
+        },
+        "notice": {
+          "$ref": "#/$defs/RecordingNoticeEvidence"
+        },
+        "consent": {
+          "$ref": "#/$defs/RecordingConsentEvidence"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "ALLOWED",
+            "DENIED"
+          ]
+        },
+        "reason": {
+          "$ref": "#/$defs/RecordingAuthorizationReason"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "RecordingAuthorizationList": {
+      "description": "The recording decisions of a Call (oldest first).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorizations"
+      ],
+      "properties": {
+        "authorizations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordingAuthorization"
+          },
+          "maxItems": 200
+        }
+      }
+    },
+    "RecordingMediaAccess": {
+      "description": "A short-lived (at most 300 s), read-only, single-object signed URL minted AFTER authorization and audited; never stored.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recordingId",
+        "url",
+        "expiresAt",
+        "contentType",
+        "sizeBytes",
+        "sha256"
+      ],
+      "properties": {
+        "recordingId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "contentType": {
+          "type": "string",
+          "enum": [
+            "audio/wav"
+          ]
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "RecordingAccessRecord": {
+      "description": "One access-audit record (granted or denied).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "recordingId",
+        "callId",
+        "actorKind",
+        "actorCredentialId",
+        "onBehalfOfPrincipalId",
+        "operation",
+        "outcome",
+        "reason",
+        "requestId",
+        "correlationId",
+        "occurredAt"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "recordingId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "actorKind": {
+          "type": "string",
+          "enum": [
+            "APPLICATION_CREDENTIAL",
+            "SYSTEM"
+          ]
+        },
+        "actorCredentialId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onBehalfOfPrincipalId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "READ_METADATA",
+            "MEDIA_ACCESS",
+            "DELETE",
+            "RETENTION_DELETE",
+            "STOP"
+          ]
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "GRANTED",
+            "DENIED"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Z][A-Z_]{1,63}$"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 36
+        },
+        "correlationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 37
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "RecordingAccessList": {
+      "description": "A recording's access-audit trail.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "records"
+      ],
+      "properties": {
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordingAccessRecord"
+          },
+          "maxItems": 500
         }
       }
     }

@@ -402,7 +402,11 @@ impl AriEdge {
 fn translate_recording(kind: &str, value: &Value) -> Option<EdgeEvent> {
     let recording = &value["recording"];
     let name = recording["name"].as_str()?;
-    let channel = recording["target_uri"].as_str()?.strip_prefix("channel:")?;
+    // The recorded channel, or (a call recording of a bridged leg) the bridge.
+    let target = recording["target_uri"].as_str()?;
+    let channel = target
+        .strip_prefix("channel:")
+        .or_else(|| target.strip_prefix("bridge:"))?;
     if !AriEdge::valid_ref(name) || !AriEdge::valid_ref(channel) {
         return None;
     }
@@ -788,6 +792,48 @@ impl SipMediaEdge for AriEdge {
         .map(|_| ())
     }
 
+    async fn record_bridge(
+        &self,
+        bridge: &str,
+        name: &str,
+        max_seconds: u32,
+        beep: bool,
+    ) -> EdgeResult<()> {
+        if !Self::valid_ref(bridge) || !Self::valid_ref(name) || max_seconds == 0 {
+            return Err(EdgeError::Refused);
+        }
+        self.call(
+            Method::POST,
+            &format!("/bridges/{bridge}/record"),
+            &[
+                ("name", name.to_string()),
+                ("format", "wav".to_string()),
+                ("maxDurationSeconds", max_seconds.to_string()),
+                ("maxSilenceSeconds", "0".to_string()),
+                ("ifExists", "overwrite".to_string()),
+                ("beep", beep.to_string()),
+                ("terminateOn", "none".to_string()),
+            ],
+            None,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    async fn stop_recording(&self, name: &str) -> EdgeResult<()> {
+        if !Self::valid_ref(name) {
+            return Err(EdgeError::Refused);
+        }
+        self.call(
+            Method::POST,
+            &format!("/recordings/live/{name}/stop"),
+            &[],
+            None,
+        )
+        .await
+        .map(|_| ())
+    }
+
     async fn fetch_recording(&self, name: &str, max_bytes: usize) -> EdgeResult<Vec<u8>> {
         if !Self::valid_ref(name) {
             return Err(EdgeError::Refused);
@@ -1015,9 +1061,20 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(failed.kind, EdgeEventKind::CaptureFailed { .. }));
-        // Not a channel target, or an unsafe name: ignored.
+        // A bridge recording ends the same way.
+        let bridged = translate(
+            &json!({ "type": "RecordingFinished", "recording": { "name": "cfm-cap-x2",
+                     "target_uri": "bridge:cfmb-1" } }),
+            &h,
+        )
+        .unwrap();
+        assert!(matches!(
+            bridged.kind,
+            EdgeEventKind::CaptureFinished { .. }
+        ));
+        // Not a channel / bridge target, or an unsafe name: ignored.
         for value in [
-            json!({ "type": "RecordingFinished", "recording": { "name": "cfm-cap-x1", "target_uri": "bridge:b1" } }),
+            json!({ "type": "RecordingFinished", "recording": { "name": "cfm-cap-x1", "target_uri": "endpoint:x" } }),
             json!({ "type": "RecordingFinished", "recording": { "name": "../../etc/passwd", "target_uri": "channel:c" } }),
         ] {
             assert!(translate(&value, &h).is_none());

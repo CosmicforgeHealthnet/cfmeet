@@ -442,10 +442,18 @@ impl TelephonyService {
             let leg = legs::load(&self.db, m.telephony_leg_id.unwrap_or_default())
                 .await?
                 .ok_or(TelephonyError::Refused(ErrorCode::LegNotFound))?;
-            let Some((_, Some(channel), _)) = self.bound_ref(&self.db, &leg).await? else {
-                return self
-                    .requeue(command, "WAITING_FOR_BINDING", Duration::milliseconds(500))
-                    .await;
+            // Part F: an internal enterprise leg has no provider binding — its edge channel
+            // is bound directly.
+            let channel = match (leg.is_enterprise(), leg.edge_channel_ref.clone()) {
+                (true, Some(channel)) => channel,
+                _ => {
+                    let Some((_, Some(channel), _)) = self.bound_ref(&self.db, &leg).await? else {
+                        return self
+                            .requeue(command, "WAITING_FOR_BINDING", Duration::milliseconds(500))
+                            .await;
+                    };
+                    channel
+                }
             };
             if leg.direction() == crate::domain::Direction::Inbound
                 && leg.status()? == LegStatus::Ringing

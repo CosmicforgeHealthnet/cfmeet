@@ -93,9 +93,12 @@ impl TelephonyService {
                 Some(CommandKind::Resume) => {
                     self.execute_control(command, CommandKind::Resume).await
                 }
-                Some(k @ (CommandKind::Answer | CommandKind::Prompt | CommandKind::Capture)) => {
-                    self.execute_control(command, k).await
-                }
+                Some(
+                    k @ (CommandKind::Answer
+                    | CommandKind::Prompt
+                    | CommandKind::Capture
+                    | CommandKind::CaptureStop),
+                ) => self.execute_control(command, k).await,
                 Some(other) => self.execute_bridge_command(command, other).await,
                 None => Ok(Executed::Skipped),
             };

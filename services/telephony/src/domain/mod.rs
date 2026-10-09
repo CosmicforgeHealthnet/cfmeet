@@ -156,6 +156,7 @@ vocab!(CommandKind {
     Answer = "ANSWER",
     Prompt = "PROMPT",
     Capture = "CAPTURE",
+    CaptureStop = "CAPTURE_STOP",
 });
 
 vocab!(CommandStatus {

@@ -67,7 +67,7 @@
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Frames of an endpoint's realtime signaling channel: call signals (call.incoming ... call.invitation_expired) derived from committed state and sent after commit, with event id, call id, version / sequence, target endpoint and principal, safe state, issue time, offer expiry, correlation id and a bounded payload; and the channel control frames. No telephone numbers, provider ids, credentials or tokens. Part F: call.queued and call.queue_position (to the caller of a queued enterprise Call; data queueId, position). call.ivr_waiting / call.ivr_input (to the caller of a Call in an IVR; never the key pressed)."
+      "description": "Frames of an endpoint's realtime signaling channel: call signals (call.incoming ... call.invitation_expired) derived from committed state and sent after commit, with event id, call id, version / sequence, target endpoint and principal, safe state, issue time, offer expiry, correlation id and a bounded payload; and the channel control frames. No telephone numbers, provider ids, credentials or tokens. Part F: call.queued and call.queue_position (to the caller of a queued enterprise Call; data queueId, position). call.ivr_waiting / call.ivr_input (to the caller of a Call in an IVR; never the key pressed). Part F: call.recording_started (the server-issued recording notice) and call.recording_stopped."
     },
     {
       "id": "cfmeet.calling.push-invitation",

@@ -327,12 +327,17 @@ pub async fn strings(conn: &sea_orm::DatabaseConnection, sql: &str) -> Vec<Strin
 #[derive(Default)]
 pub struct RecordingCapture {
     pub started: std::sync::Mutex<Vec<calling::calls::app::enterprise::CaptureRequest>>,
+    pub stopped: std::sync::Mutex<Vec<uuid::Uuid>>,
     pub refuse: std::sync::atomic::AtomicBool,
 }
 
 impl RecordingCapture {
     pub fn started(&self) -> Vec<calling::calls::app::enterprise::CaptureRequest> {
         self.started.lock().unwrap().clone()
+    }
+
+    pub fn stopped(&self) -> Vec<uuid::Uuid> {
+        self.stopped.lock().unwrap().clone()
     }
 }
 
@@ -350,6 +355,11 @@ impl calling::calls::app::enterprise::CallMediaCapture for RecordingCapture {
             return Err("CAPTURE_START_FAILED");
         }
         self.started.lock().unwrap().push(request);
+        Ok(())
+    }
+
+    async fn stop(&self, capture_id: uuid::Uuid) -> Result<(), &'static str> {
+        self.stopped.lock().unwrap().push(capture_id);
         Ok(())
     }
 }

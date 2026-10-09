@@ -44,7 +44,9 @@
         "call.queued",
         "call.queue_position",
         "call.ivr_waiting",
-        "call.ivr_input"
+        "call.ivr_input",
+        "call.recording_started",
+        "call.recording_stopped"
       ]
     },
     "SignalInvitation": {

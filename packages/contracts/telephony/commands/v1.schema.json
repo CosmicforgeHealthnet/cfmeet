@@ -246,7 +246,7 @@
       }
     },
     "ControlCommand": {
-      "description": "POST /internal/v1/legs/{id}/terminate | hold | resume | answer | prompt | capture. Part F: answer, prompt and capture act on internal enterprise SIP legs only (permission telephony-leg.media); prompt requires `prompt`, capture requires `capture`.",
+      "description": "POST /internal/v1/legs/{id}/terminate | hold | resume | answer | prompt | capture | capture-stop. Part F: answer, prompt, capture and capture-stop act on internal enterprise SIP legs only (permission telephony-leg.media); prompt requires `prompt`, capture and capture-stop require `capture` (a call RECORDING records the leg's bridge when bridged).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -311,13 +311,15 @@
             },
             "purpose": {
               "enum": [
-                "VOICEMAIL"
+                "VOICEMAIL",
+                "RECORDING"
               ]
             },
             "maxDurationSeconds": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 600
+              "maximum": 1440,
+              "description": "VOICEMAIL at most 600, RECORDING at most 1440."
             },
             "beep": {
               "type": "boolean"

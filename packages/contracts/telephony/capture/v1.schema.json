@@ -31,13 +31,15 @@
         },
         "purpose": {
           "enum": [
-            "VOICEMAIL"
+            "VOICEMAIL",
+            "RECORDING"
           ]
         },
         "maxDurationSeconds": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 600
+          "maximum": 1440,
+          "description": "VOICEMAIL at most 600, RECORDING at most 1440."
         },
         "beep": {
           "type": "boolean"

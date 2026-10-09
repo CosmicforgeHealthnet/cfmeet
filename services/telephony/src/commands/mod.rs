@@ -107,9 +107,12 @@ impl ControlCommand {
             }
         }
         if let Some(c) = &self.capture {
-            if c.purpose != "VOICEMAIL"
-                || !(1..=crate::capture::MAX_CAPTURE_SECONDS).contains(&c.max_duration_seconds)
-            {
+            let max = match c.purpose.as_str() {
+                "VOICEMAIL" => crate::capture::MAX_VOICEMAIL_SECONDS,
+                "RECORDING" => crate::capture::MAX_CAPTURE_SECONDS,
+                _ => return Err(TelephonyError::Validation("invalid capture")),
+            };
+            if !(1..=max).contains(&c.max_duration_seconds) {
                 return Err(TelephonyError::Validation("invalid capture"));
             }
         }
@@ -405,8 +408,14 @@ impl TelephonyService {
         let txn = self.db.begin().await?;
         let leg = legs::lock(&txn, leg_id).await?;
         let status = leg.status()?;
-        if kind != CommandKind::Terminate && !self.flags.telephony.enabled() {
+        // Terminating and stopping a capture are never blocked by a kill switch.
+        if !matches!(kind, CommandKind::Terminate | CommandKind::CaptureStop)
+            && !self.flags.telephony.enabled()
+        {
             return Err(TelephonyError::Refused(ErrorCode::TelephonyDisabled));
+        }
+        if kind == CommandKind::CaptureStop && !leg.is_enterprise() {
+            return Err(TelephonyError::Refused(ErrorCode::LegNotActive));
         }
         // Part F: answer / prompt exist only for internal enterprise legs, behind their
         // own switch (terminating is never blocked).
@@ -420,9 +429,11 @@ impl TelephonyService {
         if kind == CommandKind::Prompt && command.prompt.is_none() {
             return Err(TelephonyError::Validation("prompt is required"));
         }
-        if (kind == CommandKind::Capture) != command.capture.is_some() {
+        if matches!(kind, CommandKind::Capture | CommandKind::CaptureStop)
+            != command.capture.is_some()
+        {
             return Err(TelephonyError::Validation(
-                "capture is required for (and only for) CAPTURE",
+                "capture is required for (and only for) CAPTURE / CAPTURE_STOP",
             ));
         }
         let allowed = match kind {
@@ -437,6 +448,8 @@ impl TelephonyService {
                 status,
                 LegStatus::Ringing | LegStatus::Answered | LegStatus::Connected
             ),
+            // Stopping is always accepted (a finished capture makes it a no-op).
+            CommandKind::CaptureStop => true,
             _ => false,
         };
         if !allowed {

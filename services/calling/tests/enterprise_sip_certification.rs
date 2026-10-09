@@ -14,8 +14,13 @@
 //! delivers it to Calling, Calling stores it in a real S3-compatible private bucket
 //! (MinIO in CI), the message is READY and linked to the Call, authorized media access
 //! returns the same WAV through a short-lived signed URL, it is marked read, and deletion
-//! removes the object; the edge spool copy is gone. No carrier, no public number: this
-//! certifies internal enterprise SIP, never real PSTN.
+//! removes the object; the edge spool copy is gone. Part F §61 recording: a desk phone
+//! calls a member's application endpoint, the call is bridged to application media at the
+//! edge (SIPp as the media side), recording is DENIED without the configured consent, then
+//! ALLOWED with server-issued notice (a tone at the edge, a realtime notice in the app);
+//! the edge records the bridge's mixed audio, an explicit stop ends it (CAPTURE_STOP), the
+//! artifact lands in the private bucket, retrieval is authorized and audited. No carrier,
+//! no public number: this certifies internal enterprise SIP, never real PSTN.
 //!
 //! Requires `TELEPHONY_BIN`, `TELEPHONY_MIGRATION_BIN` (with `telephony-admin` next to
 //! them), `asterisk`, `sipp`, `TEST_DATABASE_URL` and (voicemail) an S3-compatible
@@ -350,6 +355,55 @@ impl Sipp {
         Self { child, dir }
     }
 
+    /// The application media side of an edge bridge (what the RTC media gateway does):
+    /// presents the single-use join code from 127.0.0.3, exchanges RTP, waits for BYE.
+    fn app_media(code: &str, media_port: u16) -> Self {
+        let dir = std::env::temp_dir().join(format!("cfmeet-ent-sipp-{}", Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::copy(
+            cert_dir().join("sipp/app_media_uac.xml"),
+            dir.join("scenario.xml"),
+        )
+        .unwrap();
+        let child = Command::new("sipp")
+            .arg(EDGE)
+            .args([
+                "-sf",
+                dir.join("scenario.xml").to_str().unwrap(),
+                "-s",
+                code,
+                "-i",
+                "127.0.0.3",
+                "-p",
+                "5090",
+                "-mi",
+                "127.0.0.3",
+                "-min_rtp_port",
+                &media_port.to_string(),
+                "-max_rtp_port",
+                &(media_port + 98).to_string(),
+                "-m",
+                "1",
+                "-l",
+                "1",
+                "-timeout",
+                "90s",
+                "-timeout_error",
+                "-nostdin",
+                "-trace_err",
+                "-trace_msg",
+                "-key",
+                "code",
+                code,
+            ])
+            .current_dir(&dir)
+            .stdout(Stdio::null())
+            .stderr(std::fs::File::create(dir.join("stderr.log")).unwrap())
+            .spawn()
+            .expect("sipp starts");
+        Self { child, dir }
+    }
+
     async fn finished_ok(&mut self, within: Duration) -> bool {
         let deadline = Instant::now() + within;
         loop {
@@ -399,6 +453,10 @@ struct Stack {
     store: Option<Arc<cf_object_storage::S3ObjectStore>>,
     mailbox: Option<Uuid>,
     vm_token: String,
+    /// Recording administration (recording.manage / read, config.read).
+    rec_token: String,
+    /// Application media attachments (room, identity, single-use join code).
+    public_media: Arc<common::telephony::FakePublicMedia>,
 }
 
 impl Drop for Stack {
@@ -573,6 +631,10 @@ impl Stack {
                 .expect("the certification bucket");
         }
         let artifacts = store.clone();
+        // The RTC side of an edge bridge: the gateway records the single-use join code;
+        // SIPp then plays the application media side with it.
+        let public_media = Arc::new(common::telephony::FakePublicMedia::default());
+        let gateway = public_media.clone();
         let a = AppWorld::with_service_auth_public_network_configured(
             runtime,
             peers,
@@ -582,6 +644,7 @@ impl Stack {
                 if let Some(s) = artifacts {
                     rt.artifacts = s;
                 }
+                rt.public_network.media = Some(gateway);
             },
         )
         .await?;
@@ -652,6 +715,32 @@ impl Stack {
         )
         .await;
         let vm_token = vm.secret.expose_once().to_string();
+        // Recording administration: its own scopes and the operator-granted capability.
+        e.h()
+            .state
+            .enterprise
+            .operator_set_capabilities(
+                e.a.w.scope(),
+                vec![
+                    calling::enterprise::policy::AdminCapability::ManageRouting,
+                    calling::enterprise::policy::AdminCapability::ManageVoicemail,
+                    calling::enterprise::policy::AdminCapability::ManageRecording,
+                ],
+            )
+            .await
+            .unwrap();
+        let rec = common::enterprise::credential(
+            e.h(),
+            &e.a.w.consumer,
+            e.a.w.kind,
+            &[
+                calling::platform::scopes::names::ENTERPRISE_CONFIG_READ,
+                calling::platform::scopes::names::ENTERPRISE_RECORDING_READ,
+                calling::platform::scopes::names::ENTERPRISE_RECORDING_MANAGE,
+            ],
+        )
+        .await;
+        let rec_token = rec.secret.expose_once().to_string();
         let r = e
             .send(
                 &vm_token,
@@ -747,6 +836,8 @@ impl Stack {
             mailbox: store.as_ref().map(|_| mailbox),
             store,
             vm_token,
+            rec_token,
+            public_media,
         })
     }
 
@@ -1030,6 +1121,18 @@ async fn enterprise_sip_ivr_certification() {
         );
     }
 
+    // 6. Recording (§61): a desk phone calls the member's application endpoint; the Call is
+    //    bridged to application media at the edge; recording is denied without consent,
+    //    then recorded (bridge mix) with server-issued notice, stopped explicitly, stored.
+    if let Some(store) = stack.store.clone() {
+        let (device_port, media_port) = (next_port(), next_port());
+        recording_scenario(&stack, &store, device_port, media_port).await;
+    } else {
+        println!(
+            "SKIPPED recording certification: no S3-compatible store (ENTERPRISE_CERT_S3_ENDPOINT)"
+        );
+    }
+
     // No telephone number, SIP URI or key sequence reached Calling's database.
     let dump = common::dump_database(stack.e.h().conn()).await;
     assert!(
@@ -1297,5 +1400,312 @@ async fn voicemail_scenario(
     println!(
         "enterprise SIP voicemail certified: IVR -> mailbox, real edge capture ({duration} ms), \
          protected upload, READY, authorized retrieval, read, deletion"
+    );
+}
+
+async fn recording_scenario(
+    stack: &Stack,
+    store: &cf_object_storage::S3ObjectStore,
+    device_port: u16,
+    media_port: u16,
+) {
+    use cf_object_storage::ObjectStore;
+    let e = &stack.e;
+    let rec = |method: Method, path: String, body: Option<serde_json::Value>| {
+        let token = stack.rec_token.clone();
+        async move { e.send(&token, method, &path, body).await }
+    };
+    // A policy that requires every participant's consent: the desk phone cannot give it.
+    let r = rec(
+        Method::POST,
+        "/v1/enterprise/recording-policies".into(),
+        Some(json!({ "name": "Cert recording", "mode": "MANUAL_ALLOWED", "noticeRequired": true,
+                     "consentParticipants": "ALL_PARTICIPANTS", "jurisdictionRef": "CERT-LOOPBACK/v1",
+                     "retentionDays": 30, "maxRecordingSeconds": 600, "isDefault": true })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let policy = id_of(&r.json, "recordingPolicyId");
+    let before = stack.last_call().await;
+    let attached = stack.public_media.attached.lock().unwrap().len();
+    // The desk phone dials the member's extension; it speaks twice (real G.711 RTP) and
+    // hangs up 16 s after the answer.
+    let mut device = Sipp::dial(
+        "6101",
+        2000,
+        &[],
+        End::LeavesMessage {
+            wait_ms: 4000,
+            ms: 10000,
+        },
+        device_port,
+    );
+    stack
+        .eventually(
+            "the member's endpoint rings",
+            Duration::from_secs(20),
+            || async {
+                match stack.last_call().await {
+                    Some(c) if Some(c) != before => stack
+                        .e
+                        .a
+                        .invitation_for(c, stack.member.endpoint)
+                        .await
+                        .is_some(),
+                    _ => false,
+                }
+            },
+        )
+        .await;
+    let call = stack.last_call().await.unwrap();
+    let invitation =
+        e.a.invitation_for(call, stack.member.endpoint)
+            .await
+            .unwrap();
+    let (_, v) = e.a.state(call).await;
+    let r = e.a.accept(call, invitation, &stack.member, v).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    // The RTC side joins the edge bridge with its single-use code (SIPp as the gateway).
+    stack
+        .eventually(
+            "the bridge's join code",
+            Duration::from_secs(20),
+            || async { stack.public_media.attached.lock().unwrap().len() > attached },
+        )
+        .await;
+    let code = stack
+        .public_media
+        .attached
+        .lock()
+        .unwrap()
+        .last()
+        .unwrap()
+        .2
+        .clone();
+    let mut app_media = Sipp::app_media(&code, media_port);
+    let session = e.a.session_on(call, stack.member.endpoint).await.unwrap();
+    e.a.connect(call, session).await;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while stack.state(call).await != CallState::Connected {
+        if Instant::now() > deadline {
+            panic!(
+                "the Call is CONNECTED (bridged) did not happen: call {:?}; public bridges {}; \
+                 telephony bridges {}; bridge members {}; legs {}\n{}\n{}",
+                stack.state(call).await,
+                stack
+                    .text(&format!(
+                        "SELECT kind || ':' || status FROM call_public_bridges WHERE call_id = '{call}'"
+                    ))
+                    .await,
+                stack
+                    .ttext("SELECT string_agg(kind || ':' || status, ' | ') FROM telephony_bridges")
+                    .await,
+                stack
+                    .ttext("SELECT string_agg(member_kind || ':' || status, ' | ') FROM telephony_bridge_legs")
+                    .await,
+                stack
+                    .text(&format!(
+                        "SELECT leg_kind || ':' || state FROM call_legs WHERE call_id = '{call}'"
+                    ))
+                    .await,
+                app_media.diagnostics(),
+                stack.diagnostics().await
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    // Permission to call is not permission to record: no consent from the desk phone.
+    let member = stack
+        .text(&format!(
+            "SELECT principal_id::text FROM call_participants WHERE call_id = '{call}' AND role = 'RECIPIENT'"
+        ))
+        .await;
+    let r = rec(
+        Method::POST,
+        format!("/v1/calls/{call}/recordings"),
+        Some(json!({ "principalId": member })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    assert_eq!(r.json["error"]["code"], "RECORDING_NOT_AUTHORIZED");
+    // Compliance configuration changes: notice only. The recording is authorized.
+    let r = rec(
+        Method::PATCH,
+        format!("/v1/enterprise/recording-policies/{policy}"),
+        Some(json!({ "expectedVersion": 1, "consentParticipants": "NONE" })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let r = rec(
+        Method::POST,
+        format!("/v1/calls/{call}/recordings"),
+        Some(json!({ "principalId": member })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let recording = id_of(&r.json["recording"], "recordingId");
+    assert_eq!(r.json["recording"]["captureSource"], "SIP");
+    let decisions = rec(
+        Method::GET,
+        format!("/v1/calls/{call}/recording-authorizations"),
+        None,
+    )
+    .await;
+    let d = decisions.json["authorizations"].as_array().unwrap().clone();
+    assert_eq!(d[0]["reason"], "CONSENT_MISSING");
+    assert_eq!(d[1]["decision"], "ALLOWED");
+    let channels: Vec<String> = d[1]["notice"]["deliveries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["channel"].as_str().unwrap().to_string())
+        .collect();
+    assert!(channels.contains(&"EDGE_TONE".to_string()), "{channels:?}");
+    assert!(
+        channels.contains(&"APPLICATION_SIGNAL".to_string()),
+        "{channels:?}"
+    );
+    // The edge records the bridge's mixed audio.
+    let name = format!("cfm-cap-{}", recording.simple());
+    let http = reqwest::Client::builder().no_proxy().build().unwrap();
+    stack
+        .eventually(
+            "the edge records the bridge",
+            Duration::from_secs(15),
+            || async {
+                match http
+                    .get(format!("{ARI_URL}/ari/recordings/live/{name}"))
+                    .basic_auth(ARI_USER, Some(ARI_PASSWORD))
+                    .send()
+                    .await
+                {
+                    Ok(r) if r.status().is_success() => r
+                        .json::<serde_json::Value>()
+                        .await
+                        .ok()
+                        .and_then(|v| v["target_uri"].as_str().map(|t| t.starts_with("bridge:")))
+                        .unwrap_or(false),
+                    _ => false,
+                }
+            },
+        )
+        .await;
+    // Both sides speak (the desk phone's second sentence starts 6 s after the answer).
+    tokio::time::sleep(Duration::from_secs(9)).await;
+    let r = rec(
+        Method::POST,
+        format!("/v1/calls/{call}/recordings/{recording}/stop"),
+        Some(json!({ "principalId": member })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["recording"]["stopReason"], "EXPLICIT");
+    stack
+        .eventually(
+            "the recording is READY",
+            Duration::from_secs(30),
+            || async {
+                stack
+                    .text(&format!(
+                        "SELECT state FROM call_recordings WHERE id = '{recording}'"
+                    ))
+                    .await
+                    == "READY"
+            },
+        )
+        .await;
+    assert_eq!(
+        stack
+            .ttext("SELECT string_agg(DISTINCT kind || ':' || status, ',') FROM telephony_commands WHERE kind = 'CAPTURE_STOP'")
+            .await,
+        "CAPTURE_STOP:SUCCEEDED"
+    );
+    assert_eq!(
+        stack
+            .ttext(&format!(
+                "SELECT status || ':' || (spool_deleted_at IS NOT NULL)::text FROM telephony_captures WHERE id = '{recording}'"
+            ))
+            .await,
+        "DELIVERED:true"
+    );
+    let duration: i64 = stack
+        .text(&format!(
+            "SELECT duration_ms::text FROM call_recordings WHERE id = '{recording}'"
+        ))
+        .await
+        .parse()
+        .unwrap();
+    assert!(duration >= 5000, "recorded {duration} ms");
+    let key = stack
+        .text(&format!(
+            "SELECT object_key FROM call_recordings WHERE id = '{recording}'"
+        ))
+        .await;
+    assert!(store.head(&key).await.unwrap().is_some());
+    // Authorized retrieval of the same WAV; audited.
+    let r = rec(
+        Method::POST,
+        format!("/v1/enterprise/recordings/{recording}/media-access"),
+        Some(json!({ "principalId": member })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let bytes = http
+        .get(r.json["url"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap()
+        .to_vec();
+    assert_eq!(&bytes[0..4], b"RIFF");
+    assert_eq!(
+        cf_object_storage::sha256_hex(&bytes),
+        stack
+            .text(&format!(
+                "SELECT sha256 FROM call_recordings WHERE id = '{recording}'"
+            ))
+            .await
+    );
+    // A principal who was not part of the Call is refused (404) and audited DENIED.
+    let r = rec(
+        Method::POST,
+        format!("/v1/enterprise/recordings/{recording}/media-access"),
+        Some(json!({ "principalId": Uuid::new_v4() })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    assert_eq!(
+        stack
+            .text(&format!(
+                "SELECT string_agg(operation || ':' || outcome, ',' ORDER BY seq) FROM call_recording_access_audit \
+                  WHERE recording_id = '{recording}'"
+            ))
+            .await,
+        "STOP:GRANTED,MEDIA_ACCESS:GRANTED,MEDIA_ACCESS:DENIED"
+    );
+    assert!(
+        device.finished_ok(Duration::from_secs(40)).await,
+        "{}\n{}",
+        device.diagnostics(),
+        stack.diagnostics().await
+    );
+    assert!(
+        app_media.finished_ok(Duration::from_secs(20)).await,
+        "{}",
+        app_media.diagnostics()
+    );
+    assert_eq!(
+        stack
+            .text(&format!(
+                "SELECT event_type FROM call_events WHERE call_id = '{call}' AND event_type LIKE 'RECORDING_%' ORDER BY sequence"
+            ))
+            .await,
+        "RECORDING_STARTED,RECORDING_STOPPED,RECORDING_READY"
+    );
+    println!(
+        "enterprise SIP recording certified: denied without consent, notice (edge tone + app signal), \
+         bridge recording ({duration} ms), explicit stop, protected upload, audited retrieval"
     );
 }

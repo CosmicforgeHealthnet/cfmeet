@@ -1,0 +1,9 @@
+{
+  "name": "Inferred",
+  "mode": "MANUAL_ALLOWED",
+  "noticeRequired": false,
+  "consentParticipants": "NONE",
+  "jurisdictionRef": "+2348012345678",
+  "retentionDays": 30,
+  "maxRecordingSeconds": 600
+}

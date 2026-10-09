@@ -710,10 +710,23 @@ fn every_operation_declares_its_authentication() {
 /// The enterprise scope an enterprise operation requires (Part F §19): configuration
 /// reads / writes, voicemail and recording have their own scopes — never calls.*.
 fn enterprise_scope(path: &str, method: &str) -> Option<&'static str> {
+    // Part F §61: a Call's recordings and recording decisions (consent is calls.write).
+    if path.starts_with("/v1/calls/")
+        && (path.contains("/recordings") || path.ends_with("/recording-authorizations"))
+    {
+        return Some(if method == "get" {
+            names::ENTERPRISE_RECORDING_READ
+        } else {
+            names::ENTERPRISE_RECORDING_MANAGE
+        });
+    }
     if !path.starts_with("/v1/enterprise/") {
         return None;
     }
-    Some(if path.starts_with("/v1/enterprise/voicemail/messages") {
+    Some(if path.ends_with("/access-audit") {
+        // The access-audit trail is administrative.
+        names::ENTERPRISE_RECORDING_MANAGE
+    } else if path.starts_with("/v1/enterprise/voicemail/messages") {
         if method == "get" || path.ends_with("/media-access") {
             names::ENTERPRISE_VOICEMAIL_READ
         } else {
@@ -1197,12 +1210,12 @@ async fn every_outbox_row_is_a_valid_envelope_with_a_valid_lifecycle_payload() {
         );
         types.insert(event_type.to_string());
     }
-    // Part F voicemail events are produced (and validated against these same contracts)
-    // by the enterprise voicemail suite.
+    // Part F voicemail / recording events are produced (and validated against these same
+    // contracts) by the enterprise voicemail / recording suites.
     let all: BTreeSet<String> = CallEventType::ALL
         .iter()
         .map(|t| t.as_str().to_string())
-        .filter(|t| !t.starts_with("VOICEMAIL_"))
+        .filter(|t| !t.starts_with("VOICEMAIL_") && !t.starts_with("RECORDING_"))
         .collect();
     assert_eq!(types, all, "every event type was produced and validated");
 }

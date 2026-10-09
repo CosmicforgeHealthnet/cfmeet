@@ -106,6 +106,11 @@ const ENTERPRISE_TABLES: &[&str] = &[
     "enterprise_sip_devices",
     "voicemail_mailboxes",
     "voicemail_messages",
+    "call_recording_access_audit",
+    "call_recording_authorizations",
+    "call_recording_consents",
+    "call_recording_policies",
+    "call_recordings",
 ];
 
 /// Derived from the migrator itself (never a brittle hand-maintained count).

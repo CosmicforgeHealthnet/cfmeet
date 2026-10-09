@@ -63,6 +63,8 @@ pub enum LegControl {
     Prompt,
     /// Part F: capture the leg's audio at the edge (voicemail / recording).
     Capture,
+    /// Part F: stop a running edge capture (recording).
+    CaptureStop,
 }
 
 impl LegControl {
@@ -74,6 +76,7 @@ impl LegControl {
             LegControl::Answer => "answer",
             LegControl::Prompt => "prompt",
             LegControl::Capture => "capture",
+            LegControl::CaptureStop => "capture-stop",
         }
     }
 }

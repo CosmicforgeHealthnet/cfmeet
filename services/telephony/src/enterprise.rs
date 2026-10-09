@@ -353,6 +353,9 @@ impl TelephonyService {
             CommandKind::Capture => {
                 return self.start_capture(command, leg, channel).await;
             }
+            CommandKind::CaptureStop => {
+                return self.stop_capture(command).await;
+            }
             CommandKind::Terminate => self.edge.hangup(&channel).await,
             CommandKind::Hold => self.edge.hold(&channel).await,
             CommandKind::Resume => self.edge.resume(&channel).await,

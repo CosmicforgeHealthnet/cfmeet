@@ -49,6 +49,8 @@ struct State {
     recordings: HashMap<String, (ChannelRef, u32, bool)>,
     spool: HashMap<String, Vec<u8>>,
     spool_available: bool,
+    /// Recordings stopped early (by name).
+    stopped: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -118,6 +120,11 @@ impl ScriptedEdge {
     /// Part F: the edge wrote `bytes` as spool file `name` (the recording finished).
     pub fn put_spool(&self, name: &str, bytes: Vec<u8>) {
         self.lock().spool.insert(name.to_string(), bytes);
+    }
+
+    /// Part F: recordings stopped early (by name).
+    pub fn stopped(&self) -> Vec<String> {
+        self.lock().stopped.clone()
     }
 
     pub fn spool_files(&self) -> Vec<String> {
@@ -269,6 +276,29 @@ impl SipMediaEdge for ScriptedEdge {
         }
         s.recordings
             .insert(name.to_string(), (channel.clone(), max_seconds, beep));
+        Ok(())
+    }
+
+    async fn record_bridge(
+        &self,
+        bridge: &str,
+        name: &str,
+        max_seconds: u32,
+        beep: bool,
+    ) -> EdgeResult<()> {
+        self.lock().recordings.insert(
+            name.to_string(),
+            (format!("bridge:{bridge}"), max_seconds, beep),
+        );
+        Ok(())
+    }
+
+    async fn stop_recording(&self, name: &str) -> EdgeResult<()> {
+        let mut s = self.lock();
+        if !s.recordings.contains_key(name) {
+            return Err(EdgeError::NotFound);
+        }
+        s.stopped.push(name.to_string());
         Ok(())
     }
 

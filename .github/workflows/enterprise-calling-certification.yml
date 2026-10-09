@@ -126,6 +126,8 @@ jobs:
           done
           grep -q "^enterprise SIP voicemail certified: IVR -> mailbox, real edge capture" "$RUNNER_TEMP/ent.log" \
             || { echo "::error::voicemail was not certified"; exit 1; }
+          grep -q "^enterprise SIP recording certified: denied without consent" "$RUNNER_TEMP/ent.log" \
+            || { echo "::error::call recording was not certified"; exit 1; }
 
       - name: Edge logs (on failure)
         if: failure()

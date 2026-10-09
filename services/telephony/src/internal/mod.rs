@@ -34,6 +34,7 @@ pub fn routes() -> Router<AppState> {
         .route("/legs/:leg_id/answer", post(answer))
         .route("/legs/:leg_id/prompt", post(prompt))
         .route("/legs/:leg_id/capture", post(capture))
+        .route("/legs/:leg_id/capture-stop", post(capture_stop))
         .route("/bridges", post(create_bridge))
         .route("/bridges/:bridge_id", delete(end_bridge).get(get_bridge))
         .route("/routes/availability", get(availability))
@@ -203,6 +204,24 @@ async fn capture(
         &caller,
         InternalPermission::TelephonyLegMedia,
         CommandKind::Capture,
+        &id,
+        raw,
+    )
+    .await
+}
+
+/// Part F: stop a running capture early (a call recording's stop). Never blocked.
+async fn capture_stop(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    Path(id): Path<String>,
+    raw: Result<Json<ControlCommand>, JsonRejection>,
+) -> Result<Response, TelephonyError> {
+    control(
+        &state,
+        &caller,
+        InternalPermission::TelephonyLegMedia,
+        CommandKind::CaptureStop,
         &id,
         raw,
     )

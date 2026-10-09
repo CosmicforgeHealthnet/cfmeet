@@ -2,8 +2,11 @@
 //!
 //! ```text
 //! Calling CAPTURE(captureId, purpose, max, beep) on an internal enterprise SIP leg
-//!   ─▶ telephony_captures RECORDING, the edge records the caller into its TRANSIENT
-//!      spool under `cfm-cap-<captureId>` (Telephony's own name, never Calling's)
+//!   ─▶ telephony_captures RECORDING, the edge records into its TRANSIENT spool under
+//!      `cfm-cap-<captureId>` (Telephony's own name, never Calling's): a VOICEMAIL the
+//!      caller's channel; a call RECORDING the leg's bridge when it is bridged (the mixed
+//!      call audio), else its channel
+//! Calling CAPTURE_STOP ─▶ the edge stops the capture early (never blocked)
 //! edge RecordingFinished ─▶ FINISHED (also after a caller hang-up: the partial audio)
 //! edge RecordingFailed   ─▶ FAILED (EDGE_RECORDING_FAILED)
 //! worker: FINISHED ─▶ fetch the spool file, size / duration / SHA-256 ─▶ POST Calling
@@ -35,8 +38,10 @@ use crate::{
     sip::EdgeError,
 };
 
-/// The longest capture Calling may command.
-pub const MAX_CAPTURE_SECONDS: i32 = 600;
+/// The longest capture Calling may command (a call recording; one WAV delivery).
+pub const MAX_CAPTURE_SECONDS: i32 = 1440;
+/// The longest voicemail message.
+pub const MAX_VOICEMAIL_SECONDS: i32 = 600;
 /// The largest spool file delivered (600 s of 16-bit 16 kHz mono is ~19 MiB).
 pub const MAX_CAPTURE_BYTES: usize = 24 * 1024 * 1024;
 /// Delivery attempts before a capture is dead-lettered.
@@ -173,10 +178,24 @@ impl TelephonyService {
                 .await?;
             return Ok(Executed::Done);
         }
-        let outcome = self
-            .edge
-            .record(&channel, &name, spec.max_duration_seconds as u32, spec.beep)
-            .await;
+        // A call recording records the mixed bridge audio when the leg is bridged.
+        let bridge = if spec.purpose == "RECORDING" {
+            self.live_bridge_of(leg.id).await?
+        } else {
+            None
+        };
+        let outcome = match &bridge {
+            Some(bridge) => {
+                self.edge
+                    .record_bridge(bridge, &name, spec.max_duration_seconds as u32, spec.beep)
+                    .await
+            }
+            None => {
+                self.edge
+                    .record(&channel, &name, spec.max_duration_seconds as u32, spec.beep)
+                    .await
+            }
+        };
         let result = match outcome {
             Ok(()) => "STARTED",
             // A previous attempt timed out after the edge may have started it.
@@ -205,6 +224,56 @@ impl TelephonyService {
         self.finish_command_pub(command.id, "SUCCEEDED", result, now)
             .await?;
         Ok(Executed::Done)
+    }
+
+    /// The edge bridge a leg is a live member of (none: not bridged).
+    async fn live_bridge_of(&self, leg_id: Uuid) -> TelephonyResult<Option<String>> {
+        #[derive(FromQueryResult)]
+        struct Bridge {
+            edge_bridge_ref: String,
+        }
+        let row: Option<Bridge> = db::one(
+            &self.db,
+            "SELECT b.edge_bridge_ref FROM telephony_bridge_legs l \
+               JOIN telephony_bridges b ON b.id = l.bridge_id \
+              WHERE l.telephony_leg_id = $1 AND l.status = 'JOINED' \
+                AND b.status IN ('PENDING', 'ACTIVE') AND b.edge_bridge_ref IS NOT NULL \
+              ORDER BY b.created_at DESC LIMIT 1",
+            vec![leg_id.into()],
+        )
+        .await?;
+        Ok(row.map(|b| b.edge_bridge_ref))
+    }
+
+    /// Executes CAPTURE_STOP: the edge stops the running capture (its end event then
+    /// delivers it). A capture that already finished makes this a no-op.
+    pub(crate) async fn stop_capture(&self, command: CommandRow) -> TelephonyResult<Executed> {
+        let now = self.now();
+        let Ok(spec) = serde_json::from_value::<CaptureSpec>(command.payload["capture"].clone())
+        else {
+            self.finish_command_pub(command.id, "FAILED", "INVALID_CAPTURE", now)
+                .await?;
+            return Ok(Executed::DefiniteFailure("INVALID_CAPTURE"));
+        };
+        match self.edge.stop_recording(&spool_name(spec.capture_id)).await {
+            Ok(()) | Err(EdgeError::NotFound) => {
+                self.finish_command_pub(command.id, "SUCCEEDED", "DONE", now)
+                    .await?;
+                crate::metrics::inc(
+                    "telephony_enterprise_commands_total",
+                    &[("kind", "CAPTURE_STOP"), ("result", "DONE")],
+                );
+                Ok(Executed::Done)
+            }
+            Err(EdgeError::Refused) => {
+                self.finish_command_pub(command.id, "FAILED", "EDGE_REFUSED", now)
+                    .await?;
+                Ok(Executed::DefiniteFailure("EDGE_REFUSED"))
+            }
+            Err(EdgeError::Unavailable | EdgeError::Timeout) => {
+                self.reschedule_pub(&command, "EDGE_UNAVAILABLE").await
+            }
+        }
     }
 
     async fn capture_failed(&self, id: Uuid, code: &str) -> TelephonyResult<()> {

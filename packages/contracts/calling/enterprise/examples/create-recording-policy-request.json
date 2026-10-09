@@ -1,0 +1,10 @@
+{
+  "name": "Support recording",
+  "mode": "MANUAL_ALLOWED",
+  "noticeRequired": true,
+  "consentParticipants": "OTHER_PARTICIPANTS",
+  "jurisdictionRef": "NG-NDPA-2023/v2",
+  "retentionDays": 90,
+  "maxRecordingSeconds": 1440,
+  "isDefault": true
+}

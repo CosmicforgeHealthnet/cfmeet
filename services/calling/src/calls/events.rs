@@ -74,6 +74,11 @@ text_enum!(
         VoicemailReceived = "VOICEMAIL_RECEIVED",
         VoicemailReady = "VOICEMAIL_READY",
         VoicemailDeleted = "VOICEMAIL_DELETED",
+        RecordingStarted = "RECORDING_STARTED",
+        RecordingStopped = "RECORDING_STOPPED",
+        RecordingReady = "RECORDING_READY",
+        RecordingFailed = "RECORDING_FAILED",
+        RecordingDeleted = "RECORDING_DELETED",
     }
 );
 
@@ -224,8 +229,8 @@ mod tests {
         }
     }
 
-    /// Part F: voicemail facts are the only artifact facts of a Call and never carry a
-    /// provider / edge vocabulary.
+    /// Part F: voicemail and recording facts are the only artifact facts of a Call and
+    /// never carry a provider / edge vocabulary.
     #[test]
     fn part_f_artifact_events_are_explicit() {
         let artifact: Vec<&str> = CallEventType::ALL
@@ -235,7 +240,16 @@ mod tests {
             .collect();
         assert_eq!(
             artifact,
-            ["VOICEMAIL_RECEIVED", "VOICEMAIL_READY", "VOICEMAIL_DELETED"]
+            [
+                "VOICEMAIL_RECEIVED",
+                "VOICEMAIL_READY",
+                "VOICEMAIL_DELETED",
+                "RECORDING_STARTED",
+                "RECORDING_STOPPED",
+                "RECORDING_READY",
+                "RECORDING_FAILED",
+                "RECORDING_DELETED"
+            ]
         );
     }
 }

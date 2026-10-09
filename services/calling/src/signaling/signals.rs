@@ -49,6 +49,11 @@ pub enum SignalType {
     IvrWaiting,
     /// The IVR took the caller's key (data: valid). Never the key itself.
     IvrInput,
+    /// Part F: the Call is being recorded (data: recordingId, noticeRequired). The
+    /// server-issued recording notice to every participant endpoint.
+    RecordingStarted,
+    /// Part F: the Call's recording stopped (data: recordingId).
+    RecordingStopped,
 }
 
 impl SignalType {
@@ -76,6 +81,8 @@ impl SignalType {
         SignalType::QueuePosition,
         SignalType::IvrWaiting,
         SignalType::IvrInput,
+        SignalType::RecordingStarted,
+        SignalType::RecordingStopped,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -103,6 +110,8 @@ impl SignalType {
             SignalType::QueuePosition => "call.queue_position",
             SignalType::IvrWaiting => "call.ivr_waiting",
             SignalType::IvrInput => "call.ivr_input",
+            SignalType::RecordingStarted => "call.recording_started",
+            SignalType::RecordingStopped => "call.recording_stopped",
         }
     }
 }
