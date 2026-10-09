@@ -24,7 +24,7 @@ use uuid::Uuid;
 use super::{create::CreateAppCall, media::MediaCredentialActor, InvitationActor, TransferRequest};
 use crate::{
     calls::{
-        command::CallCommandContext,
+        command::{CallCommandContext, CallScope},
         ids::{CallId, CallInvitationId, CallParticipantId, CallSessionId},
         kinds::{CallKind, CommandOperation},
         participants::DisplayName,
@@ -53,6 +53,7 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/calls/:call_id/hold", post(hold))
         .route("/v1/calls/:call_id/resume", post(resume))
         .route("/v1/calls/:call_id/transfer", post(transfer))
+        .route("/v1/calls/:call_id/ivr/input", post(ivr_input))
         .route(
             "/v1/calls/:call_id/sessions/:session_id/media-credentials",
             post(media_credentials),
@@ -589,6 +590,48 @@ async fn remove_session(
         )
         .await?;
     Ok(respond(StatusCode::OK, outcome.body, outcome.replayed))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct IvrInputBody {
+    endpoint_id: Uuid,
+    /// One key (0-9, * or #). Never logged or stored.
+    digit: String,
+}
+
+impl std::fmt::Display for IvrInputBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("IvrInputBody(<redacted>)")
+    }
+}
+
+/// Part F §57: the RTC caller's keypad input to the IVR its Call waits in. Only the
+/// Call's initiator endpoint may press keys; the key is used once and never stored.
+async fn ivr_input(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(call_id): Path<String>,
+    body: Result<Json<IvrInputBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    ctx.require_scope(names::ENTERPRISE_CALLS_USE)?;
+    let call_id = uuid_path(&call_id)?;
+    let body = parse_body(body)?;
+    let accepted = state
+        .app
+        .ivr_keypad(
+            CallScope::of_platform(&ctx),
+            call_id,
+            body.endpoint_id,
+            &body.digit,
+        )
+        .await?;
+    Ok(respond(
+        StatusCode::OK,
+        serde_json::json!({ "callId": call_id, "accepted": accepted }),
+        false,
+    ))
 }
 
 /// The media provider callback route (provider signature only; no other credential).

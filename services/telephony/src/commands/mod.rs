@@ -49,11 +49,12 @@ pub(crate) struct CommandRow {
     pub grant_expires_at: Option<chrono::DateTime<chrono::Utc>>,
     pub payload: Value,
     pub correlation_id: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 pub(crate) const COMMAND_COLUMNS: &str = "id, kind, telephony_leg_id, bridge_id, request_digest, \
     status, attempts, max_attempts, transmitted_at, grant_id, grant_secret, grant_expires_at, payload, \
-    correlation_id";
+    correlation_id, created_at";
 
 /// Body of TERMINATE / HOLD / RESUME.
 #[derive(Debug, Clone, Deserialize)]
@@ -65,6 +66,9 @@ pub struct ControlCommand {
     pub correlation_id: String,
     #[serde(default)]
     pub reason: Option<String>,
+    /// Part F: the BUILT-IN prompt of a PROMPT command (Calling's vocabulary).
+    #[serde(default)]
+    pub prompt: Option<String>,
 }
 
 impl ControlCommand {
@@ -83,6 +87,11 @@ impl ControlCommand {
                 "invalid idempotencyKey or correlationId",
             ));
         }
+        if let Some(p) = &self.prompt {
+            if crate::enterprise::prompt_sound(p).is_none() {
+                return Err(TelephonyError::Validation("invalid prompt"));
+            }
+        }
         if let Some(r) = &self.reason {
             if !matches!(
                 r.as_str(),
@@ -97,7 +106,11 @@ impl ControlCommand {
     fn digest(&self, kind: CommandKind, leg: Uuid) -> String {
         use sha2::{Digest, Sha256};
         hex::encode(Sha256::digest(
-            format!("{kind}|{leg}|{}|{:?}", self.command_id, self.reason).as_bytes(),
+            format!(
+                "{kind}|{leg}|{}|{:?}|{:?}",
+                self.command_id, self.reason, self.prompt
+            )
+            .as_bytes(),
         ))
     }
 }
@@ -374,10 +387,28 @@ impl TelephonyService {
         if kind != CommandKind::Terminate && !self.flags.telephony.enabled() {
             return Err(TelephonyError::Refused(ErrorCode::TelephonyDisabled));
         }
+        // Part F: answer / prompt exist only for internal enterprise legs, behind their
+        // own switch (terminating is never blocked).
+        if matches!(kind, CommandKind::Answer | CommandKind::Prompt)
+            && (!leg.is_enterprise() || !self.flags.enterprise_sip.enabled())
+        {
+            return Err(TelephonyError::Refused(ErrorCode::LegNotActive));
+        }
+        if kind == CommandKind::Prompt && command.prompt.is_none() {
+            return Err(TelephonyError::Validation("prompt is required"));
+        }
         let allowed = match kind {
             CommandKind::Terminate => true,
             CommandKind::Hold => matches!(status, LegStatus::Connected | LegStatus::Answered),
             CommandKind::Resume => status == LegStatus::Held,
+            CommandKind::Answer => matches!(
+                status,
+                LegStatus::Ringing | LegStatus::Answered | LegStatus::Connected
+            ),
+            CommandKind::Prompt => matches!(
+                status,
+                LegStatus::Ringing | LegStatus::Answered | LegStatus::Connected
+            ),
             _ => false,
         };
         if !allowed {
@@ -423,7 +454,7 @@ impl TelephonyService {
                 digest.clone().into(),
                 initial.into(),
                 now.into(),
-                json!({ "schemaVersion": "1", "reason": command.reason }).into(),
+                json!({ "schemaVersion": "1", "reason": command.reason, "prompt": command.prompt }).into(),
                 requester.request_id.clone().into(),
                 command.correlation_id.clone().into(),
             ],

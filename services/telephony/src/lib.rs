@@ -19,6 +19,7 @@ pub mod config;
 pub mod db;
 pub mod domain;
 pub mod edge_events;
+pub mod enterprise;
 pub mod error;
 pub mod events;
 pub mod inbound;

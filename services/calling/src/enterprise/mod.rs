@@ -20,9 +20,11 @@ pub mod departments;
 pub mod destinations;
 pub mod extensions;
 pub mod http;
+pub mod ivr;
 pub mod policy;
 pub mod queues;
 pub mod ring_groups;
+pub mod sip_devices;
 
 use std::sync::Arc;
 

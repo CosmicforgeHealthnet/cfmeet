@@ -98,6 +98,14 @@ pub enum InternalPermission {
     /// relay mapping and protected caller reference (Part E §45).
     #[serde(rename = "telephony-inbound.offer")]
     CallsTelephonyInboundOffer,
+    /// Telephony: answer an internal enterprise SIP leg, play BUILT-IN prompts on it and
+    /// capture its media (Part F §57, §60, §61). Never a public-network leg.
+    #[serde(rename = "telephony-leg.media")]
+    TelephonyLegMedia,
+    /// Calling: offer an internal enterprise SIP dialog (opaque device reference and the
+    /// dialled extension) and deliver its keypad input for an IVR (Part F §54, §57).
+    #[serde(rename = "telephony-enterprise.offer")]
+    CallsTelephonyEnterpriseOffer,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -282,6 +290,22 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: false,
         description: "Offer an authenticated inbound public-network call (resolved relay mapping and protected caller reference only)",
     },
+    PermissionDefinition {
+        permission: InternalPermission::TelephonyLegMedia,
+        name: "telephony-leg.media",
+        receiver: services::TELEPHONY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Answer an internal enterprise SIP leg, play built-in prompts on it and capture its media",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CallsTelephonyEnterpriseOffer,
+        name: "telephony-enterprise.offer",
+        receiver: services::CALLING,
+        grantable_to: &[services::TELEPHONY],
+        sensitive: false,
+        description: "Offer an internal enterprise SIP dialog (opaque device reference, dialled extension) and deliver its keypad input",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -310,6 +334,8 @@ impl InternalPermission {
         InternalPermission::CallsTelephonyEventApply,
         InternalPermission::CallsTelephonyReconciliationApply,
         InternalPermission::CallsTelephonyInboundOffer,
+        InternalPermission::TelephonyLegMedia,
+        InternalPermission::CallsTelephonyEnterpriseOffer,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {

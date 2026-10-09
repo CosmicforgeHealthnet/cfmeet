@@ -128,6 +128,19 @@ pub trait CallingPort: Send + Sync {
 
     /// Offers an inbound public call; Calling answers with the canonical Call and leg.
     async fn offer_inbound(&self, offer: &Value) -> Result<Value, PortError>;
+
+    /// Part F: offers an internal enterprise SIP dialog (opaque device reference and
+    /// dialled extension); Calling answers with the canonical Call and leg.
+    async fn offer_enterprise(&self, _offer: &Value) -> Result<Value, PortError> {
+        Err(PortError::Unavailable)
+    }
+
+    /// Part F: delivers ONE key of an enterprise leg's caller to Calling's IVR. Never
+    /// persisted (no outbox), never logged: a lost key is like an unheard one (the IVR
+    /// times out and retries).
+    async fn deliver_keypad(&self, _payload: &Value) -> Result<(), PortError> {
+        Err(PortError::Unavailable)
+    }
 }
 
 /// Not configured: everything fails closed (protected origination never resolves a
@@ -358,5 +371,35 @@ impl CallingPort for HttpCalling {
             .await
             .map_err(port_error)?;
         response.json().map_err(|_| PortError::Unavailable)
+    }
+
+    async fn offer_enterprise(&self, offer: &Value) -> Result<Value, PortError> {
+        let correlation_id = offer["correlationId"]
+            .as_str()
+            .map(correlation)
+            .unwrap_or_else(CorrelationId::generate);
+        let outbound = OutboundServiceRequest::continuing(ServiceId::calling(), &correlation_id);
+        let response = self
+            .auth
+            .client()
+            .post_json(&outbound, "/internal/v1/telephony/enterprise-calls", offer)
+            .await
+            .map_err(port_error)?;
+        response.json().map_err(|_| PortError::Unavailable)
+    }
+
+    async fn deliver_keypad(&self, payload: &Value) -> Result<(), PortError> {
+        let correlation_id = CorrelationId::generate();
+        let outbound = OutboundServiceRequest::continuing(ServiceId::calling(), &correlation_id);
+        self.auth
+            .client()
+            .post_json(
+                &outbound,
+                "/internal/v1/telephony/enterprise-keypad",
+                payload,
+            )
+            .await
+            .map(|_| ())
+            .map_err(port_error)
     }
 }

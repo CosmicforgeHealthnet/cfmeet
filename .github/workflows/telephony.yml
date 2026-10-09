@@ -212,8 +212,8 @@ jobs:
           ./target/debug/telephony-migration reset
           ./target/debug/telephony-migration up
           q() { psql -h 127.0.0.1 -U postgres -d telephony_migration_smoke -tAc "$1"; }
-          test "$(q "SELECT count(*) FROM telephony_seaql_migrations")" = "6"
-          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'telephony_seaql_migrations'")" = "15"
+          test "$(q "SELECT count(*) FROM telephony_seaql_migrations")" = "7"
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'telephony_seaql_migrations'")" = "16"
           # No Calling / Privacy Relay authority tables.
           test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename IN \
             ('calls', 'call_participants', 'call_sessions', 'call_legs', 'communication_contexts', \

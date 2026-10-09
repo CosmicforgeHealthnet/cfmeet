@@ -23,6 +23,7 @@ use super::{
     departments::{DepartmentChange, DepartmentMember, DepartmentRole, NewDepartment},
     destinations::{Destination, DestinationType},
     extensions::{ExtensionChange, ExtensionFilter, NewExtension},
+    ivr::IvrGraph,
     policy::{NewPolicy, PolicyChange, PolicyRules, ResourceStatus},
     queues::{QueueChange, QueueMember, QueueSettings},
     ring_groups::{RingGroupChange, RingGroupSettings, RingStrategy},
@@ -97,6 +98,36 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/v1/enterprise/queues/:queue_id/entries",
             get(list_queue_entries),
+        )
+        .route(
+            "/v1/enterprise/ivr-flows",
+            get(list_ivr_flows).post(create_ivr_flow),
+        )
+        .route(
+            "/v1/enterprise/ivr-flows/:ivr_flow_id",
+            get(get_ivr_flow)
+                .patch(rename_ivr_flow)
+                .delete(disable_ivr_flow),
+        )
+        .route(
+            "/v1/enterprise/ivr-flows/:ivr_flow_id/versions",
+            get(list_ivr_versions).post(publish_ivr_version),
+        )
+        .route(
+            "/v1/enterprise/ivr-flows/:ivr_flow_id/versions/:version_number",
+            get(get_ivr_version),
+        )
+        .route(
+            "/v1/enterprise/ivr-flows/:ivr_flow_id/activation",
+            put(activate_ivr_version),
+        )
+        .route(
+            "/v1/enterprise/sip-devices",
+            get(list_sip_devices).post(bind_sip_device),
+        )
+        .route(
+            "/v1/enterprise/sip-devices/:sip_device_id",
+            get(get_sip_device).delete(disable_sip_device),
         )
         .route(
             "/v1/enterprise/extensions/:extension_id",
@@ -967,4 +998,249 @@ async fn list_queue_entries(
         .list_queue_entries(CallScope::of_platform(&ctx), id, active_only, limit)
         .await?;
     Ok(ok(page))
+}
+
+// ---------------------------------------------------------------------------
+// IVR flows (§57)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateIvrFlowBody {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RenameIvrFlowBody {
+    expected_version: i64,
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PublishIvrVersionBody {
+    graph: IvrGraph,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ActivateIvrVersionBody {
+    expected_version: i64,
+    version_number: i32,
+}
+
+async fn create_ivr_flow(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    body: Result<Json<CreateIvrFlowBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .create_ivr_flow(&AdminActor::of(&ctx), body.name)
+        .await?;
+    Ok(created(view))
+}
+
+async fn list_ivr_flows(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let q = QueryParams::parse(query, &["limit", "cursor", "status"])?;
+    let page = state
+        .enterprise
+        .list_ivr_flows(CallScope::of_platform(&ctx), q.status()?, &q.page()?)
+        .await?;
+    Ok(ok(page))
+}
+
+async fn get_ivr_flow(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let view = state
+        .enterprise
+        .get_ivr_flow(CallScope::of_platform(&ctx), uuid_path(&id)?)
+        .await?;
+    Ok(ok(view))
+}
+
+async fn rename_ivr_flow(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    body: Result<Json<RenameIvrFlowBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .rename_ivr_flow(&AdminActor::of(&ctx), id, body.expected_version, body.name)
+        .await?;
+    Ok(ok(view))
+}
+
+async fn disable_ivr_flow(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let q = QueryParams::parse(query, &["expectedVersion"])?;
+    let view = state
+        .enterprise
+        .disable_ivr_flow(&AdminActor::of(&ctx), id, q.expected_version()?)
+        .await?;
+    Ok(ok(view))
+}
+
+async fn publish_ivr_version(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    body: Result<Json<PublishIvrVersionBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .publish_ivr_version(&AdminActor::of(&ctx), id, body.graph)
+        .await?;
+    Ok(created(view))
+}
+
+async fn list_ivr_versions(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let view = state
+        .enterprise
+        .list_ivr_versions(CallScope::of_platform(&ctx), uuid_path(&id)?)
+        .await?;
+    Ok(ok(view))
+}
+
+async fn get_ivr_version(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path((id, number)): Path<(String, String)>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let number = number
+        .parse::<i32>()
+        .ok()
+        .filter(|n| *n >= 1)
+        .ok_or(CallingError::NotFound)?;
+    let view = state
+        .enterprise
+        .get_ivr_version(CallScope::of_platform(&ctx), uuid_path(&id)?, number)
+        .await?;
+    Ok(ok(view))
+}
+
+async fn activate_ivr_version(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    body: Result<Json<ActivateIvrVersionBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .activate_ivr_version(
+            &AdminActor::of(&ctx),
+            id,
+            body.expected_version,
+            body.version_number,
+        )
+        .await?;
+    Ok(ok(view))
+}
+
+// ---------------------------------------------------------------------------
+// Enterprise SIP devices (§54)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BindSipDeviceBody {
+    device_ref: String,
+    principal_id: Uuid,
+    display_label: String,
+}
+
+async fn bind_sip_device(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    body: Result<Json<BindSipDeviceBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .bind_sip_device(
+            &AdminActor::of(&ctx),
+            body.device_ref,
+            body.principal_id,
+            body.display_label,
+        )
+        .await?;
+    Ok(created(view))
+}
+
+async fn list_sip_devices(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let q = QueryParams::parse(query, &["limit", "cursor", "status"])?;
+    let page = state
+        .enterprise
+        .list_sip_devices(CallScope::of_platform(&ctx), q.status()?, &q.page()?)
+        .await?;
+    Ok(ok(page))
+}
+
+async fn get_sip_device(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let view = state
+        .enterprise
+        .get_sip_device(CallScope::of_platform(&ctx), uuid_path(&id)?)
+        .await?;
+    Ok(ok(view))
+}
+
+async fn disable_sip_device(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let q = QueryParams::parse(query, &["expectedVersion"])?;
+    let view = state
+        .enterprise
+        .disable_sip_device(&AdminActor::of(&ctx), id, q.expected_version()?)
+        .await?;
+    Ok(ok(view))
 }

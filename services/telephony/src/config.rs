@@ -10,6 +10,7 @@
 //! | `PUBLIC_OUTBOUND_CALLING_ENABLED` | no | paid outbound origination (default `false`) |
 //! | `PUBLIC_INBOUND_CALLING_ENABLED` | no | inbound public calls (default `false`) |
 //! | `CALLBACK_RELAY_ENABLED` | no | callback relay legs (default `false`) |
+//! | `ENTERPRISE_SIP_ENABLED` | no | Part F internal enterprise SIP devices: new dialogs, answer / prompt / capture (default `false`) |
 //! | `TELEPHONY_WORKER_INTERVAL_MS` | no | command / outbox / reconciliation cadence (default 500) |
 //! | `CF_SERVICE_ID` | no | if set, must be `cfmeet.telephony` |
 //! | `CF_RUNTIME_ENVIRONMENT` | yes | `local`, `test`, `staging` or `production` |
@@ -87,6 +88,9 @@ pub struct TelecomFlags {
     pub public_outbound: FeatureFlag,
     pub public_inbound: FeatureFlag,
     pub callback_relay: FeatureFlag,
+    /// Part F: internal enterprise SIP dialogs (never paid, never public). Stops NEW
+    /// dialogs and media effects only; hanging up / reconciling always run.
+    pub enterprise_sip: FeatureFlag,
 }
 
 impl TelecomFlags {
@@ -96,7 +100,14 @@ impl TelecomFlags {
             public_outbound: FeatureFlag::new(outbound),
             public_inbound: FeatureFlag::new(inbound),
             callback_relay: FeatureFlag::new(callback),
+            enterprise_sip: FeatureFlag::new(false),
         }
+    }
+
+    /// With the enterprise SIP switch set.
+    pub fn with_enterprise_sip(self, enabled: bool) -> Self {
+        self.enterprise_sip.set(enabled);
+        self
     }
 
     pub fn all_off() -> Self {
@@ -123,6 +134,7 @@ pub struct TelephonyConfig {
     pub public_outbound_enabled: bool,
     pub public_inbound_enabled: bool,
     pub callback_relay_enabled: bool,
+    pub enterprise_sip_enabled: bool,
     pub worker_interval: Duration,
     pub json_logs: bool,
 }
@@ -139,6 +151,7 @@ impl TelephonyConfig {
             self.public_inbound_enabled,
             self.callback_relay_enabled,
         )
+        .with_enterprise_sip(self.enterprise_sip_enabled)
     }
 
     pub fn from_env() -> Result<Self, ConfigError> {
@@ -206,6 +219,7 @@ impl TelephonyConfig {
             public_outbound_enabled: flag(get, "PUBLIC_OUTBOUND_CALLING_ENABLED")?,
             public_inbound_enabled: flag(get, "PUBLIC_INBOUND_CALLING_ENABLED")?,
             callback_relay_enabled: flag(get, "CALLBACK_RELAY_ENABLED")?,
+            enterprise_sip_enabled: flag(get, "ENTERPRISE_SIP_ENABLED")?,
             worker_interval,
             json_logs,
         })

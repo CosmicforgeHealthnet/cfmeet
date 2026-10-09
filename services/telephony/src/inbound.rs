@@ -291,7 +291,7 @@ impl TelephonyService {
         Ok(leg_id)
     }
 
-    async fn count_ingress(&self, peer: &str) -> TelephonyResult<i64> {
+    pub(crate) async fn count_ingress(&self, peer: &str) -> TelephonyResult<i64> {
         let now = self.now();
         let window = chrono::DateTime::<chrono::Utc>::from_timestamp(
             now.timestamp() - now.timestamp() % 60,

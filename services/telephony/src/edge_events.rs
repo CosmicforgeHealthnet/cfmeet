@@ -68,6 +68,9 @@ impl TelephonyService {
                 }
                 self.handle_inbound_dialog(&event, inbound.clone()).await
             }
+            EdgeEventKind::EnterpriseInbound(dialog) => {
+                self.handle_enterprise_dialog(&event, dialog.clone()).await
+            }
             kind => {
                 let normalized = match kind {
                     EdgeEventKind::Ringing => Some(NormalizedEvent::LegRinging),
@@ -100,6 +103,11 @@ impl TelephonyService {
                 // Application-media attachments are bridge members, not provider calls.
                 if event.application_media {
                     return Ok(());
+                }
+                // Part F: an internal enterprise leg has no provider binding: its channel
+                // progress (and keypad input) is handled directly.
+                if let Some(leg) = self.enterprise_leg_of_channel(&event.channel).await? {
+                    return self.handle_enterprise_channel_event(leg, &event).await;
                 }
                 // The interconnect that owns this channel (by binding).
                 let owner: Option<Owner> = db::one(

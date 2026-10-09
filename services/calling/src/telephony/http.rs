@@ -26,6 +26,8 @@ pub fn internal_routes() -> Router<AppState> {
     Router::new()
         .route("/telephony/events", post(apply_event))
         .route("/telephony/inbound-calls", post(inbound_call))
+        .route("/telephony/enterprise-calls", post(enterprise_call))
+        .route("/telephony/enterprise-keypad", post(enterprise_keypad))
         .layer(DefaultBodyLimit::max(MAX_EVENT_BYTES))
 }
 
@@ -56,4 +58,32 @@ async fn inbound_call(
         .map_err(|_| CallingError::Validation("The offer is invalid."))?;
     let answer = state.app.accept_inbound_offer(&offer).await?;
     Ok((StatusCode::OK, Json(answer)))
+}
+
+/// Part F: an internal enterprise SIP dialog (`telephony-enterprise.offer`).
+async fn enterprise_call(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    body: Result<Json<Value>, JsonRejection>,
+) -> Result<(StatusCode, Json<Value>), CallingError> {
+    caller.require_permission(InternalPermission::CallsTelephonyEnterpriseOffer)?;
+    let Json(body) = body.map_err(|_| CallingError::Validation("The offer is invalid."))?;
+    let offer: crate::calls::app::enterprise::EnterpriseDialogOffer = serde_json::from_value(body)
+        .map_err(|_| CallingError::Validation("The offer is invalid."))?;
+    let answer = state.app.accept_enterprise_offer(&offer).await?;
+    Ok((StatusCode::OK, Json(answer)))
+}
+
+/// Part F: one key of an enterprise SIP leg (`telephony-enterprise.offer`). Never logged.
+async fn enterprise_keypad(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    body: Result<Json<Value>, JsonRejection>,
+) -> Result<(StatusCode, Json<Value>), CallingError> {
+    caller.require_permission(InternalPermission::CallsTelephonyEnterpriseOffer)?;
+    let Json(body) = body.map_err(|_| CallingError::Validation("The input is invalid."))?;
+    let keypad: crate::calls::app::enterprise::EnterpriseKeypad = serde_json::from_value(body)
+        .map_err(|_| CallingError::Validation("The input is invalid."))?;
+    let accepted = state.app.accept_enterprise_keypad(&keypad).await?;
+    Ok((StatusCode::OK, Json(json!({ "accepted": accepted }))))
 }

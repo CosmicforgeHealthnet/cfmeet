@@ -84,6 +84,45 @@
     },
     {
       "$ref": "#/$defs/QueueEntryList"
+    },
+    {
+      "$ref": "#/$defs/CreateIvrFlowRequest"
+    },
+    {
+      "$ref": "#/$defs/RenameIvrFlowRequest"
+    },
+    {
+      "$ref": "#/$defs/PublishIvrVersionRequest"
+    },
+    {
+      "$ref": "#/$defs/ActivateIvrVersionRequest"
+    },
+    {
+      "$ref": "#/$defs/IvrFlow"
+    },
+    {
+      "$ref": "#/$defs/IvrFlowList"
+    },
+    {
+      "$ref": "#/$defs/IvrFlowVersion"
+    },
+    {
+      "$ref": "#/$defs/IvrFlowVersionList"
+    },
+    {
+      "$ref": "#/$defs/IvrInputRequest"
+    },
+    {
+      "$ref": "#/$defs/IvrInputResult"
+    },
+    {
+      "$ref": "#/$defs/BindSipDeviceRequest"
+    },
+    {
+      "$ref": "#/$defs/SipDevice"
+    },
+    {
+      "$ref": "#/$defs/SipDeviceList"
     }
   ],
   "$defs": {
@@ -981,11 +1020,15 @@
             "FAILED",
             "FORWARDED_PUBLIC",
             "BUSY",
+            "COMPLETED_IN_IVR",
             null
           ]
         },
         "queue": {
           "$ref": "#/$defs/EnterpriseQueueState"
+        },
+        "ivr": {
+          "$ref": "#/$defs/EnterpriseIvrState"
         }
       }
     },
@@ -1631,6 +1674,763 @@
         "enteredAt": {
           "type": "string",
           "format": "date-time"
+        }
+      }
+    },
+    "BuiltinPrompt": {
+      "description": "The controlled built-in prompt catalog. The media plane plays its own copy (Telephony maps it to edge-local audio; an application client to its own asset). Never a URL, path, file name or synthesized text. Each prompt has a nominal length the media plane's audio must fit (WELCOME, MENU, NO_INPUT, GOODBYE 2 s; PLEASE_HOLD, TRANSFERRING, CLOSED 3 s; INVALID_OPTION 4 s; VOICEMAIL_GREETING 6 s; BEEP 1 s): a menu's input timer starts after the prompts it queued, and a HANGUP node's prompt plays for its nominal length before the platform ends the Call.",
+      "type": "string",
+      "enum": [
+        "WELCOME",
+        "MENU",
+        "INVALID_OPTION",
+        "NO_INPUT",
+        "PLEASE_HOLD",
+        "TRANSFERRING",
+        "GOODBYE",
+        "CLOSED",
+        "VOICEMAIL_GREETING",
+        "BEEP"
+      ]
+    },
+    "PromptRef": {
+      "description": "A prompt: a built-in prompt (customer audio artifacts are not accepted by this deployment).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "builtin"
+      ],
+      "properties": {
+        "builtin": {
+          "$ref": "#/$defs/BuiltinPrompt"
+        }
+      }
+    },
+    "IvrMenuOption": {
+      "description": "One key of a menu and the node it leads to.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "digit",
+        "next"
+      ],
+      "properties": {
+        "digit": {
+          "type": "string",
+          "pattern": "^[0-9*#]$"
+        },
+        "next": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        }
+      }
+    },
+    "IvrPromptNode": {
+      "description": "Play a prompt, then continue to `next`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "prompt",
+        "next"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "kind": {
+          "const": "PROMPT"
+        },
+        "prompt": {
+          "$ref": "#/$defs/PromptRef"
+        },
+        "next": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        }
+      }
+    },
+    "IvrMenuNode": {
+      "description": "Play a prompt and wait for ONE key (1-12 distinct options). An invalid key or no key within inputTimeoutSeconds replays the menu up to maxRetries times, then continues to onInvalid / onTimeout.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "prompt",
+        "inputTimeoutSeconds",
+        "maxRetries",
+        "options",
+        "onInvalid",
+        "onTimeout"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "kind": {
+          "const": "MENU"
+        },
+        "prompt": {
+          "$ref": "#/$defs/PromptRef"
+        },
+        "inputTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 60
+        },
+        "maxRetries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IvrMenuOption"
+          },
+          "maxItems": 12
+        },
+        "onInvalid": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "onTimeout": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        }
+      }
+    },
+    "IvrRouteExtensionNode": {
+      "description": "Route the SAME Call to an extension of the scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "extensionId"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "kind": {
+          "const": "ROUTE_EXTENSION"
+        },
+        "extensionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "IvrRouteRingGroupNode": {
+      "description": "Route the SAME Call to a ring group of the scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "ringGroupId"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "kind": {
+          "const": "ROUTE_RING_GROUP"
+        },
+        "ringGroupId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "IvrRouteQueueNode": {
+      "description": "Route the SAME Call to a call queue of the scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "queueId"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "kind": {
+          "const": "ROUTE_QUEUE"
+        },
+        "queueId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "IvrRouteVoicemailNode": {
+      "description": "Route the SAME Call to a voicemail mailbox of the scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "mailboxId"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "kind": {
+          "const": "ROUTE_VOICEMAIL"
+        },
+        "mailboxId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "IvrRouteScheduleNode": {
+      "description": "Route the SAME Call by a business-hours schedule of the scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "scheduleId"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "kind": {
+          "const": "ROUTE_SCHEDULE"
+        },
+        "scheduleId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "IvrHangupNode": {
+      "description": "Optionally play a prompt; the IVR ends the Call (outcome COMPLETED_IN_IVR).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "kind": {
+          "const": "HANGUP"
+        },
+        "prompt": {
+          "$ref": "#/$defs/PromptRef"
+        }
+      }
+    },
+    "IvrNode": {
+      "description": "A typed IVR node. Never a script, expression, dialplan fragment or URL.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/IvrPromptNode"
+        },
+        {
+          "$ref": "#/$defs/IvrMenuNode"
+        },
+        {
+          "$ref": "#/$defs/IvrRouteExtensionNode"
+        },
+        {
+          "$ref": "#/$defs/IvrRouteRingGroupNode"
+        },
+        {
+          "$ref": "#/$defs/IvrRouteQueueNode"
+        },
+        {
+          "$ref": "#/$defs/IvrRouteVoicemailNode"
+        },
+        {
+          "$ref": "#/$defs/IvrRouteScheduleNode"
+        },
+        {
+          "$ref": "#/$defs/IvrHangupNode"
+        }
+      ]
+    },
+    "IvrGraph": {
+      "description": "A declarative IVR graph: 1-32 uniquely named nodes, every node reachable from startNode, every reference to an existing node or an ACTIVE destination of the same scope, no loop without caller input. Validated on publish.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "startNode",
+        "nodes"
+      ],
+      "properties": {
+        "startNode": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IvrNode"
+          },
+          "maxItems": 32
+        }
+      }
+    },
+    "CreateIvrFlowRequest": {
+      "description": "Body of POST /v1/enterprise/ivr-flows.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        }
+      }
+    },
+    "RenameIvrFlowRequest": {
+      "description": "Body of PATCH /v1/enterprise/ivr-flows/{ivr_flow_id}.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "name"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        }
+      }
+    },
+    "PublishIvrVersionRequest": {
+      "description": "Body of POST /v1/enterprise/ivr-flows/{ivr_flow_id}/versions: a new immutable version (not yet active).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "graph"
+      ],
+      "properties": {
+        "graph": {
+          "$ref": "#/$defs/IvrGraph"
+        }
+      }
+    },
+    "ActivateIvrVersionRequest": {
+      "description": "Body of PUT /v1/enterprise/ivr-flows/{ivr_flow_id}/activation: the published version NEW Calls run (Calls already in the IVR keep theirs). Its destinations are re-validated.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "versionNumber"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "versionNumber": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "IvrFlow": {
+      "description": "An IVR flow.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ivrFlowId",
+        "name",
+        "activeVersionNumber",
+        "latestVersionNumber",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "ivrFlowId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "activeVersionNumber": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "latestVersionNumber": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "IvrFlowList": {
+      "description": "A page of IVR flows.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ivrFlows",
+        "nextCursor"
+      ],
+      "properties": {
+        "ivrFlows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IvrFlow"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "IvrFlowVersion": {
+      "description": "A published, immutable IVR version.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ivrFlowId",
+        "versionNumber",
+        "nodeCount",
+        "active",
+        "graph",
+        "createdAt"
+      ],
+      "properties": {
+        "ivrFlowId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "versionNumber": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "nodeCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "graph": {
+          "$ref": "#/$defs/IvrGraph"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "IvrFlowVersionList": {
+      "description": "The most recent versions of a flow (newest first).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "versions"
+      ],
+      "properties": {
+        "versions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IvrFlowVersion"
+          },
+          "maxItems": 100
+        }
+      }
+    },
+    "EnterpriseIvrState": {
+      "description": "The IVR state of a Call (caller view): what the caller hears (recent built-in prompts) and may press (allowed keys) while a menu waits. Never the keys pressed; selectedBranch is a node id. ACTIVE without awaitingInput and with an inputDeadline: a HANGUP prompt is playing and the Call ends at the deadline.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ivrFlowId",
+        "state",
+        "awaitingInput",
+        "prompts",
+        "options",
+        "inputTimeoutSeconds",
+        "inputDeadline",
+        "retries",
+        "selectedBranch"
+      ],
+      "properties": {
+        "ivrFlowId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "state": {
+          "description": "IVR session state.",
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "ROUTED",
+            "COMPLETED",
+            "ABANDONED",
+            "FAILED"
+          ]
+        },
+        "awaitingInput": {
+          "type": "boolean"
+        },
+        "prompts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BuiltinPrompt"
+          },
+          "maxItems": 8
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9*#]$"
+          },
+          "maxItems": 12
+        },
+        "inputTimeoutSeconds": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "inputDeadline": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "selectedBranch": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{0,31}$",
+              "description": "Node id (1-32 lower-case letters, digits, underscores)."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "IvrInputRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/ivr/input: one key of the RTC caller (the Call's initiator endpoint only). Used once, never stored or logged.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpointId",
+        "digit"
+      ],
+      "properties": {
+        "endpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "digit": {
+          "type": "string",
+          "pattern": "^[0-9*#]$"
+        }
+      }
+    },
+    "IvrInputResult": {
+      "description": "Whether the IVR took the key (false: the Call does not wait for one).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "callId",
+        "accepted"
+      ],
+      "properties": {
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "accepted": {
+          "type": "boolean"
+        }
+      }
+    },
+    "BindSipDeviceRequest": {
+      "description": "Body of POST /v1/enterprise/sip-devices: binds an operator-minted opaque device reference to an ACTIVE principal of the scope. Never a SIP URI, address, credential or number.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deviceRef",
+        "principalId",
+        "displayLabel"
+      ],
+      "properties": {
+        "deviceRef": {
+          "type": "string",
+          "pattern": "^dev-[a-z0-9-]{4,60}$"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "displayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        }
+      }
+    },
+    "SipDevice": {
+      "description": "An enterprise SIP device binding.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sipDeviceId",
+        "deviceRef",
+        "principalId",
+        "displayLabel",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "sipDeviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "deviceRef": {
+          "type": "string",
+          "pattern": "^dev-[a-z0-9-]{4,60}$"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "displayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "SipDeviceList": {
+      "description": "A page of SIP device bindings.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sipDevices",
+        "nextCursor"
+      ],
+      "properties": {
+        "sipDevices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SipDevice"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
         }
       }
     }

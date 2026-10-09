@@ -30,6 +30,8 @@ mod m20261009_000020_enterprise_foundation;
 mod m20261009_000021_enterprise_extensions;
 mod m20261009_000022_enterprise_ring_groups;
 mod m20261009_000023_enterprise_queues;
+mod m20261009_000024_enterprise_ivr;
+mod m20261009_000025_enterprise_sip_devices;
 
 /// Name of the table recording which Calling migrations have been applied.
 pub const MIGRATION_TABLE: &str = "calling_seaql_migrations";
@@ -63,6 +65,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20261009_000021_enterprise_extensions::Migration),
             Box::new(m20261009_000022_enterprise_ring_groups::Migration),
             Box::new(m20261009_000023_enterprise_queues::Migration),
+            Box::new(m20261009_000024_enterprise_ivr::Migration),
+            Box::new(m20261009_000025_enterprise_sip_devices::Migration),
         ]
     }
 

@@ -533,13 +533,18 @@ impl AppCallService {
             else {
                 return Ok(false);
             };
-            if call.origin != "PUBLIC_INBOUND" || call.current_state != CallState::Answered {
+            if !matches!(call.origin.as_str(), "PUBLIC_INBOUND" | "ENTERPRISE_DEVICE")
+                || call.current_state != CallState::Answered
+            {
                 txn.commit().await?;
                 return Ok(false);
             }
+            // The caller's executed leg: a public inbound leg, or (Part F) an enterprise
+            // SIP device's internal dialog.
             let row = txn
                 .query_one(stmt(
-                    "SELECT execution_binding_ref FROM call_legs WHERE call_id = $1 AND leg_kind = 'PUBLIC_NETWORK' \
+                    "SELECT execution_binding_ref FROM call_legs WHERE call_id = $1 \
+                     AND leg_kind IN ('PUBLIC_NETWORK', 'PRIVATE_NETWORK') \
                      AND direction = 'INBOUND' AND execution_binding_ref IS NOT NULL \
                      AND state NOT IN ('ENDED', 'DECLINED', 'BUSY', 'NO_ANSWER', 'FAILED', 'CANCELLED')",
                     vec![call.id.into()],

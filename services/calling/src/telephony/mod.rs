@@ -57,6 +57,10 @@ pub enum LegControl {
     Terminate,
     Hold,
     Resume,
+    /// Part F: answer an internal enterprise SIP dialog (IVR / voicemail need media).
+    Answer,
+    /// Part F: play one BUILT-IN prompt on an internal enterprise SIP leg.
+    Prompt,
 }
 
 impl LegControl {
@@ -65,6 +69,8 @@ impl LegControl {
             LegControl::Terminate => "terminate",
             LegControl::Hold => "hold",
             LegControl::Resume => "resume",
+            LegControl::Answer => "answer",
+            LegControl::Prompt => "prompt",
         }
     }
 }
@@ -89,7 +95,7 @@ pub trait TelephonyPort: Send + Sync {
         command: &Value,
     ) -> Result<Value, TelephonyError>;
 
-    /// `POST /internal/v1/legs/{telephonyLegId}/{terminate|hold|resume}`.
+    /// `POST /internal/v1/legs/{telephonyLegId}/{terminate|hold|resume|answer|prompt}`.
     async fn control(
         &self,
         telephony_leg_id: Uuid,

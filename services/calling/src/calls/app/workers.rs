@@ -27,6 +27,7 @@ pub struct WorkerReport {
     pub repairs: usize,
     pub queue_entries_finished: usize,
     pub queue_offers: usize,
+    pub ivr_timeouts: usize,
 }
 
 impl AppCallService {
@@ -73,6 +74,8 @@ impl AppCallService {
         let (finished, offers) = self.queue_tick(limit).await?;
         report.queue_entries_finished = finished;
         report.queue_offers = offers;
+        // IVR menus whose input deadline passed (retry / onTimeout).
+        report.ivr_timeouts = self.ivr_tick(limit).await?;
         Ok(report)
     }
 

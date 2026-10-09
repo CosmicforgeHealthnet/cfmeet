@@ -93,6 +93,10 @@ pub(crate) enum CommandKind {
     Resume,
     Bridge,
     Unbridge,
+    /// Part F: answer an internal enterprise SIP leg.
+    Answer,
+    /// Part F: play a built-in prompt on an internal enterprise SIP leg.
+    Prompt,
 }
 
 impl CommandKind {
@@ -104,6 +108,8 @@ impl CommandKind {
             CommandKind::Resume => "RESUME",
             CommandKind::Bridge => "BRIDGE",
             CommandKind::Unbridge => "UNBRIDGE",
+            CommandKind::Answer => "ANSWER",
+            CommandKind::Prompt => "PROMPT",
         }
     }
 
@@ -115,6 +121,8 @@ impl CommandKind {
             "RESUME" => CommandKind::Resume,
             "BRIDGE" => CommandKind::Bridge,
             "UNBRIDGE" => CommandKind::Unbridge,
+            "ANSWER" => CommandKind::Answer,
+            "PROMPT" => CommandKind::Prompt,
             _ => return None,
         })
     }
@@ -132,10 +140,11 @@ pub(crate) struct CommandRow {
     pub idempotency_key: String,
     pub payload: Value,
     pub attempts: i32,
+    pub created_at: DateTime<Utc>,
 }
 
 pub(crate) const COMMAND_COLUMNS: &str = "id, call_id, call_leg_id, attempt_id, bridge_id, kind, \
-    idempotency_key, payload, attempts";
+    idempotency_key, payload, attempts, created_at";
 
 /// A protected public party of a Call.
 #[derive(Debug, Clone, FromQueryResult)]

@@ -12,7 +12,7 @@ use crate::{
     domain::PrincipalId,
     enterprise::{
         destinations::{Destination, DestinationType},
-        extensions,
+        extensions, ivr,
         policy::EffectivePolicy,
         queues, ring_groups,
     },
@@ -30,6 +30,11 @@ pub(crate) enum RouteAction {
     /// Ring a ring group (simultaneous / ordered).
     RingGroup {
         group: ring_groups::RingGroupRow,
+        destination: Destination,
+    },
+    /// Enter an IVR flow (its ACTIVE version).
+    EnterIvr {
+        flow: ivr::FlowRow,
         destination: Destination,
     },
     /// Wait in a call queue (FIFO, offered to available agents).
@@ -124,6 +129,18 @@ pub(crate) async fn resolve(
                         persist(txn, context, &visited, hops, at).await?;
                         Ok(RouteAction::RingGroup {
                             group,
+                            destination: current,
+                        })
+                    }
+                    _ => disabled(txn, context, &visited, hops, current, at).await,
+                };
+            }
+            DestinationType::Ivr => {
+                return match ivr::flow_row(txn, scope, current.id, false).await {
+                    Ok(flow) if flow.status == "ACTIVE" && flow.active_version_id.is_some() => {
+                        persist(txn, context, &visited, hops, at).await?;
+                        Ok(RouteAction::EnterIvr {
+                            flow,
                             destination: current,
                         })
                     }

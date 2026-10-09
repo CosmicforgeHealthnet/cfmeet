@@ -24,7 +24,7 @@ pub(crate) const LEG_COLUMNS: &str = "id, calling_call_id, calling_call_leg_id, 
     spend_reserved_minor, spend_currency, provider_cost_minor, provider_cost_currency, max_duration_seconds, media_attachment, end_reason, \
     failure_category, usage_status, reconcile_after, reconcile_lease_until, reconcile_attempts, \
     last_provider_sequence, event_sequence, created_at, originating_at, ringing_at, answered_at, \
-    connected_at, ended_at, updated_at, version";
+    connected_at, ended_at, updated_at, version, enterprise_device_id, edge_channel_ref";
 
 #[derive(Debug, Clone, FromQueryResult)]
 pub struct LegRow {
@@ -71,6 +71,17 @@ pub struct LegRow {
     pub ended_at: Option<DateTime<Utc>>,
     pub updated_at: DateTime<Utc>,
     pub version: i64,
+    /// Part F: the enterprise device of an ENTERPRISE_INTERNAL leg.
+    pub enterprise_device_id: Option<Uuid>,
+    /// Part F: the edge channel of an ENTERPRISE_INTERNAL leg (internal to Telephony).
+    pub edge_channel_ref: Option<String>,
+}
+
+impl LegRow {
+    /// An internal enterprise SIP leg (no provider, no spend).
+    pub fn is_enterprise(&self) -> bool {
+        self.route_class == "ENTERPRISE_INTERNAL"
+    }
 }
 
 impl LegRow {

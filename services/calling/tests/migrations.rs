@@ -88,12 +88,17 @@ const ENTERPRISE_TABLES: &[&str] = &[
     "enterprise_department_members",
     "enterprise_departments",
     "enterprise_extensions",
+    "enterprise_ivr_flow_destinations",
+    "enterprise_ivr_flow_versions",
+    "enterprise_ivr_flows",
+    "enterprise_ivr_sessions",
     "enterprise_queue_entries",
     "enterprise_queue_members",
     "enterprise_queue_offers",
     "enterprise_ring_group_members",
     "enterprise_ring_groups",
     "enterprise_routing_steps",
+    "enterprise_sip_devices",
 ];
 
 /// Derived from the migrator itself (never a brittle hand-maintained count).

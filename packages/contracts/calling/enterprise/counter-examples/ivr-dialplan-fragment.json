@@ -1,0 +1,12 @@
+{
+  "graph": {
+    "startNode": "a",
+    "nodes": [
+      {
+        "id": "a",
+        "kind": "HANGUP",
+        "dialplan": "Dial(PJSIP/1001)"
+      }
+    ]
+  }
+}

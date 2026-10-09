@@ -1,0 +1,16 @@
+{
+  "graph": {
+    "startNode": "a",
+    "nodes": [
+      {
+        "id": "a",
+        "kind": "PROMPT",
+        "prompt": {
+          "builtin": "WELCOME",
+          "url": "https://x.example/a.wav"
+        },
+        "next": "a"
+      }
+    ]
+  }
+}

@@ -77,6 +77,10 @@ impl TelephonyService {
             ],
         )
         .await?;
+        // RETURNING has no order: execute in creation order (Part F: the prompts of one
+        // enterprise leg play in sequence).
+        let mut claimed = claimed;
+        claimed.sort_by_key(|c| c.created_at);
         let mut out = Vec::new();
         for command in claimed {
             let id = command.id;
@@ -88,6 +92,9 @@ impl TelephonyService {
                 Some(CommandKind::Hold) => self.execute_control(command, CommandKind::Hold).await,
                 Some(CommandKind::Resume) => {
                     self.execute_control(command, CommandKind::Resume).await
+                }
+                Some(k @ (CommandKind::Answer | CommandKind::Prompt)) => {
+                    self.execute_control(command, k).await
                 }
                 Some(other) => self.execute_bridge_command(command, other).await,
                 None => Ok(Executed::Skipped),
@@ -211,6 +218,27 @@ impl TelephonyService {
         txn.commit().await?;
         tracing::info!(command_id = %command.id, code, "origination failed before transmission");
         Ok(Executed::DefiniteFailure(code))
+    }
+
+    /// Finishes a command (outside a caller transaction).
+    pub(crate) async fn finish_command_pub(
+        &self,
+        id: Uuid,
+        status: &str,
+        result_code: &str,
+        now: DateTime<Utc>,
+    ) -> TelephonyResult<()> {
+        let category = (status == "FAILED").then_some(FailureCategory::Execution);
+        self.finish_command(&self.db, id, status, result_code, category, now)
+            .await
+    }
+
+    pub(crate) async fn reschedule_pub(
+        &self,
+        command: &CommandRow,
+        code: &str,
+    ) -> TelephonyResult<Executed> {
+        self.reschedule(command, code).await
     }
 
     async fn reschedule(&self, command: &CommandRow, code: &str) -> TelephonyResult<Executed> {
@@ -867,6 +895,10 @@ impl TelephonyService {
         let leg = legs::load(&self.db, leg_id)
             .await?
             .ok_or(TelephonyError::Refused(ErrorCode::LegNotFound))?;
+        // Part F: an internal enterprise leg has no provider; the edge executes directly.
+        if leg.is_enterprise() {
+            return self.execute_enterprise_control(command, kind, leg).await;
+        }
         let status = leg.status()?;
         if status.is_terminal() {
             self.finish_command(

@@ -60,14 +60,14 @@
     },
     {
       "id": "cfmeet.calling.realtime-signal",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "calling/realtime/v1.schema.json",
       "owner": "calling",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Frames of an endpoint's realtime signaling channel: call signals (call.incoming ... call.invitation_expired) derived from committed state and sent after commit, with event id, call id, version / sequence, target endpoint and principal, safe state, issue time, offer expiry, correlation id and a bounded payload; and the channel control frames. No telephone numbers, provider ids, credentials or tokens. Part F: call.queued and call.queue_position (to the caller of a queued enterprise Call; data queueId, position)."
+      "description": "Frames of an endpoint's realtime signaling channel: call signals (call.incoming ... call.invitation_expired) derived from committed state and sent after commit, with event id, call id, version / sequence, target endpoint and principal, safe state, issue time, offer expiry, correlation id and a bounded payload; and the channel control frames. No telephone numbers, provider ids, credentials or tokens. Part F: call.queued and call.queue_position (to the caller of a queued enterprise Call; data queueId, position). call.ivr_waiting / call.ivr_input (to the caller of a Call in an IVR; never the key pressed)."
     },
     {
       "id": "cfmeet.calling.push-invitation",
@@ -93,14 +93,14 @@
     },
     {
       "id": "cfmeet.platform.common",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "kind": "json-schema",
       "path": "platform/common/v1.schema.json",
       "owner": "platform",
       "visibility": "internal",
       "lifecycle": "stable",
       "authority": "contract-first",
-      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions."
+      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) and telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input)."
     },
     {
       "id": "cfmeet.platform.service-token-header",
@@ -324,14 +324,14 @@
     },
     {
       "id": "cfmeet.telephony.common",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "telephony/common/v1.schema.json",
       "owner": "telephony",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Provider-neutral vocabulary of public-network execution (Part E): leg statuses (UNKNOWN is never a failure), public route classes, directions, end reasons, failure categories, normalized event types, bridge kinds, route health, country / currency codes. No provider, carrier, SIP or telephone-number concept."
+      "description": "Provider-neutral vocabulary of public-network execution (Part E): leg statuses (UNKNOWN is never a failure), public route classes, directions, end reasons, failure categories, normalized event types, bridge kinds, route health, country / currency codes. No provider, carrier, SIP or telephone-number concept. Part F: ENTERPRISE_INTERNAL legs of enterprise SIP devices; ANSWER / PROMPT (built-in prompts) on them."
     },
     {
       "id": "cfmeet.telephony.event",
@@ -356,15 +356,26 @@
       "description": "Phone-to-app inbound offer from Telephony to Calling and Calling's answer (canonical Call / CallLeg). References only: never the called relay number or the caller's number."
     },
     {
-      "id": "cfmeet.telephony.command",
+      "id": "cfmeet.telephony.enterprise",
       "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "telephony/enterprise/v1.schema.json",
+      "owner": "telephony",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Part F: Telephony -> Calling internal enterprise SIP dialog offers (opaque device reference, dialled short code) and transient keypad input for IVRs. Never a number, SIP URI, edge endpoint, channel id or provider identifier."
+    },
+    {
+      "id": "cfmeet.telephony.command",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "telephony/commands/v1.schema.json",
       "owner": "telephony",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Calling -> Telephony commands (ORIGINATE, TERMINATE / HOLD / RESUME, BRIDGE) and their answers (leg / bridge views, the error envelope). Versioned; commandId, idempotencyKey, correlationId, Call / CallLeg / attempt / route ids, authorization evidence, spend reservation and expected generation. No caller identity, number, provider, carrier or SIP field."
+      "description": "Calling -> Telephony commands (ORIGINATE, TERMINATE / HOLD / RESUME, BRIDGE) and their answers (leg / bridge views, the error envelope). Versioned; commandId, idempotencyKey, correlationId, Call / CallLeg / attempt / route ids, authorization evidence, spend reservation and expected generation. No caller identity, number, provider, carrier or SIP field. Part F: ENTERPRISE_INTERNAL legs of enterprise SIP devices; ANSWER / PROMPT (built-in prompts) on them."
     },
     {
       "id": "cfmeet.telephony.routes",
@@ -390,14 +401,14 @@
     },
     {
       "id": "cfmeet.telephony.internal-http-api",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "openapi",
       "path": "telephony/internal/v1.openapi.json",
       "owner": "telephony",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface of services/telephony: health and the provider callback ingress (provider-authenticated before parsing, 16 KiB limit, dedupe), and the service-authenticated /internal/v1 API for Calling (legs originate / get / terminate / hold / resume, bridges create / get / end, route availability, readiness). Metrics live on a separate listener."
+      "description": "HTTP surface of services/telephony: health and the provider callback ingress (provider-authenticated before parsing, 16 KiB limit, dedupe), and the service-authenticated /internal/v1 API for Calling (legs originate / get / terminate / hold / resume, bridges create / get / end, route availability, readiness). Metrics live on a separate listener. Part F: ENTERPRISE_INTERNAL legs of enterprise SIP devices; ANSWER / PROMPT (built-in prompts) on them."
     }
   ]
 }

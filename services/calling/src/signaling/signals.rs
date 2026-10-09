@@ -44,6 +44,11 @@ pub enum SignalType {
     Queued,
     /// The caller's authoritative position in its queue changed.
     QueuePosition,
+    /// An IVR waits for one key from the caller (data: ivrSessionId, awaitingInput,
+    /// retries; prompts and allowed keys are in the Call view).
+    IvrWaiting,
+    /// The IVR took the caller's key (data: valid). Never the key itself.
+    IvrInput,
 }
 
 impl SignalType {
@@ -69,6 +74,8 @@ impl SignalType {
         SignalType::InvitationExpired,
         SignalType::Queued,
         SignalType::QueuePosition,
+        SignalType::IvrWaiting,
+        SignalType::IvrInput,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -94,6 +101,8 @@ impl SignalType {
             SignalType::InvitationExpired => "call.invitation_expired",
             SignalType::Queued => "call.queued",
             SignalType::QueuePosition => "call.queue_position",
+            SignalType::IvrWaiting => "call.ivr_waiting",
+            SignalType::IvrInput => "call.ivr_input",
         }
     }
 }

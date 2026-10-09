@@ -65,11 +65,22 @@ pub struct EdgeInbound {
     pub media_join_code: Option<String>,
 }
 
+/// Part F: an internal dialog of an enterprise device (desk phone / softphone).
+#[derive(Debug, Clone)]
+pub struct EdgeEnterpriseDialog {
+    /// The edge endpoint the device authenticated as (validated; never a person's URI).
+    pub endpoint: String,
+    /// The dialled extension (an internal short code; never a telephone number).
+    pub extension: String,
+}
+
 /// Normalized edge events.
 #[derive(Clone)]
 pub enum EdgeEventKind {
     /// A new inbound dialog entered Telephony's control application.
     Inbound(EdgeInbound),
+    /// Part F: a new internal dialog of an enterprise device.
+    EnterpriseInbound(EdgeEnterpriseDialog),
     /// An originated channel entered the control application (it answered).
     OriginatedAnswered,
     Ringing,
@@ -95,6 +106,7 @@ impl fmt::Debug for EdgeEventKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             EdgeEventKind::Inbound(_) => f.write_str("Inbound(..)"),
+            EdgeEventKind::EnterpriseInbound(_) => f.write_str("EnterpriseInbound(..)"),
             EdgeEventKind::OriginatedAnswered => f.write_str("OriginatedAnswered"),
             EdgeEventKind::Ringing => f.write_str("Ringing"),
             EdgeEventKind::Answered => f.write_str("Answered"),
@@ -178,6 +190,12 @@ pub trait SipMediaEdge: Send + Sync {
     /// Transfer primitive: moves a channel to another edge endpoint. Business transfer
     /// permission is decided by Calling, never by the edge or a provider.
     async fn redirect(&self, channel: &ChannelRef, endpoint: &str) -> EdgeResult<()>;
+
+    /// Part F: plays one edge-local sound (a built-in prompt mapped by Telephony) on a
+    /// channel. Playbacks of one channel queue in order.
+    async fn play(&self, _channel: &ChannelRef, _sound: &str) -> EdgeResult<()> {
+        Err(EdgeError::Unavailable)
+    }
 
     async fn query(&self, channel: &ChannelRef) -> ChannelState;
 

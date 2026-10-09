@@ -42,7 +42,9 @@
         "call.answered_elsewhere",
         "call.invitation_expired",
         "call.queued",
-        "call.queue_position"
+        "call.queue_position",
+        "call.ivr_waiting",
+        "call.ivr_input"
       ]
     },
     "SignalInvitation": {

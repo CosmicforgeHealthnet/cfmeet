@@ -61,6 +61,7 @@ pub const EXTENSION_TARGETS: &[DestinationType] = &[
     DestinationType::Principal,
     DestinationType::RingGroup,
     DestinationType::Queue,
+    DestinationType::Ivr,
 ];
 
 /// Whether `dest` exists and is usable (ACTIVE) in `scope`.
@@ -89,6 +90,10 @@ pub(crate) async fn destination_active<C: ConnectionTrait>(
         DestinationType::Queue => {
             "SELECT 1 FROM enterprise_call_queues WHERE tenant_id = $1 AND application_id = $2 \
              AND environment_id = $3 AND id = $4 AND status = 'ACTIVE'"
+        }
+        DestinationType::Ivr => {
+            "SELECT 1 FROM enterprise_ivr_flows WHERE tenant_id = $1 AND application_id = $2 \
+             AND environment_id = $3 AND id = $4 AND status = 'ACTIVE' AND active_version_id IS NOT NULL"
         }
         // Destination kinds whose configuration is not available in this deployment
         // never resolve (and the database refuses to store them).

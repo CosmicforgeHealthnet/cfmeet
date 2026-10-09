@@ -15,9 +15,14 @@
 //! snapshot, the policy version relied on, the current destination, the hop budget and the
 //! visited set; `enterprise_routing_steps` is the append-only routing evidence.
 
+mod ivr;
 mod queues;
 mod ring_groups;
 mod router;
+mod sip;
+
+pub use ivr::IvrInputSource;
+pub use sip::{EnterpriseDialogOffer, EnterpriseKeypad};
 
 use sea_orm::{
     ConnectionTrait, DatabaseTransaction, EntityTrait, FromQueryResult, TransactionTrait,
@@ -131,6 +136,7 @@ pub(crate) struct ContextRow {
     pub answer_group_id: Option<Uuid>,
     pub ring_deadline: Option<chrono::DateTime<chrono::Utc>>,
     pub queue_entry_id: Option<Uuid>,
+    pub ivr_session_id: Option<Uuid>,
 }
 
 impl ContextRow {
@@ -145,7 +151,7 @@ impl ContextRow {
 const CONTEXT_COLUMNS: &str = "call_id, entry_extension_id, entry_extension_number, entry_label, \
     policy_id, policy_version, phase, current_destination_type, current_destination_id, hop_count, \
     max_hops, visited, answered_principal_id, outcome, ring_group_id, ring_cursor, answer_group_id, \
-    ring_deadline, queue_entry_id";
+    ring_deadline, queue_entry_id, ivr_session_id";
 
 pub(crate) fn stmt(sql: &str, values: Vec<sea_orm::Value>) -> sea_orm::Statement {
     sea_orm::Statement::from_sql_and_values(sea_orm::DbBackend::Postgres, sql, values)
@@ -351,60 +357,17 @@ impl AppCallService {
         self.calls
             .record_command_in(&txn, &cmd, &request.key, Some(call.id), None, None, None)
             .await?;
-        // ENTERPRISE_INTERNAL_V1: authenticated application with calls.write +
-        // enterprise.calls.use, an ACTIVE initiator of the scope, an ACTIVE extension of the
-        // same scope, the enterprise policy allowing internal calls, the concurrent-call
-        // limit passed. Never a client-supplied result.
-        let mut snapshot = SafeAttributes::new();
-        snapshot.insert("call_kind", SafeValue::Text(request.kind.to_string()))?;
-        snapshot.insert("scope_rule", SafeValue::Text("SAME_ENVIRONMENT".into()))?;
-        snapshot.insert("extension_id", SafeValue::Text(extension.id.to_string()))?;
-        snapshot.insert(
-            "destination_type",
-            SafeValue::Text(destination.kind.as_str().into()),
-        )?;
-        snapshot.insert("enterprise_policy", SafeValue::Text(policy.label()))?;
-        let mut limits = SafeAttributes::new();
-        limits.insert(
-            "max_routing_hops",
-            SafeValue::from(policy.rules.max_routing_hops as usize),
-        )?;
-        limits.insert(
-            "max_ring_group_fanout",
-            SafeValue::from(policy.rules.max_ring_group_fanout as usize),
-        )?;
-        let authorization = self
-            .calls
-            .record_authorization_in(
+        let call = self
+            .authorize_enterprise_in(
                 &txn,
                 &cmd,
                 &call,
-                NewAuthorization {
-                    reason: AuthorizationReason::PolicySatisfied,
-                    policy_version: PolicyVersion::parse(ENTERPRISE_POLICY)?,
-                    policy_snapshot: snapshot,
-                    limits_snapshot: limits,
-                },
+                request.kind,
+                &extension,
+                destination,
+                &policy,
             )
             .await?;
-        let call = self
-            .calls
-            .transition_in(
-                &txn,
-                &cmd,
-                &call,
-                1,
-                CallAction::Authorize {
-                    authorization_id: CallAuthorizationId::from_uuid(authorization.id),
-                },
-            )
-            .await?
-            .call;
-        let call = self
-            .calls
-            .transition_in(&txn, &cmd, &call, call.version, CallAction::BeginResolution)
-            .await?
-            .call;
         self.calls
             .ensure_media_permissions_in(&txn, &call, &initiator_participant)
             .await?;
@@ -419,84 +382,16 @@ impl AppCallService {
                 None,
             )
             .await?;
-        let call = self.locked(&txn, &call).await?;
-        let plan =
-            self.enterprise_plan(&txn, scope)
-                .await?
-                .ok_or(CallError::CapabilityUnavailable(
-                    "the routing policy does not allow ENTERPRISE_INTERNAL",
-                ));
-        let plan = match plan {
-            Ok(plan) => plan,
+        let call = match self
+            .route_enterprise_in(&txn, &cmd, &call, destination, "ENTERPRISE_EXTENSION")
+            .await
+        {
+            Ok((call, _)) => call,
             Err(error) => {
                 txn.rollback().await?;
                 return Err(error);
             }
         };
-        let call = self
-            .calls
-            .transition_in(&txn, &cmd, &call, call.version, CallAction::BeginRouting)
-            .await?
-            .call;
-        let mut decision = SafeAttributes::new();
-        decision.insert("reason", SafeValue::Text("ENTERPRISE_EXTENSION".into()))?;
-        decision.insert(
-            "destination_type",
-            SafeValue::Text(destination.kind.as_str().into()),
-        )?;
-        let route = self
-            .calls
-            .record_route_in(
-                &txn,
-                &cmd,
-                &call,
-                NewRoute {
-                    route_class: RouteClass::PrivateNetwork,
-                    policy_version: PolicyVersion::parse(ENTERPRISE_ROUTE_POLICY)?,
-                    decision_snapshot: decision,
-                    plan: Some(plan),
-                },
-            )
-            .await?;
-        // The internal media path is the Call's RTC resource (no carrier, no provider spend).
-        let leg = self
-            .calls
-            .record_leg_in(
-                &txn,
-                &cmd,
-                &call,
-                NewLeg {
-                    route_id: Some(CallRouteId::from_uuid(route.id)),
-                    participant_id: None,
-                    direction: LegDirection::Outbound,
-                    kind: LegKind::Application,
-                },
-            )
-            .await?;
-        self.calls
-            .record_attempt_in(
-                &txn,
-                &cmd,
-                &call,
-                NewAttempt {
-                    route_id: Some(CallRouteId::from_uuid(route.id)),
-                    leg_id: Some(CallLegId::from_uuid(leg.id)),
-                    previous_attempt_id: None,
-                },
-            )
-            .await?;
-        self.calls
-            .record_media_binding_in(
-                &txn,
-                &call,
-                NewMediaBinding {
-                    route_id: route.id,
-                    leg_id: leg.id,
-                    adapter: provider.adapter_name(),
-                    max_participants: (self.config.max_group_participants * 2) as i32,
-                },
-            )
-            .await?;
         insert_context(
             &txn,
             &call,
@@ -536,6 +431,158 @@ impl AppCallService {
             body,
             replayed: false,
         })
+    }
+
+    /// ENTERPRISE_INTERNAL_V1 (inside the creating transaction): the policy snapshot is
+    /// recorded and the Call moves REQUESTED -> AUTHORIZED -> RESOLVING. Never a
+    /// client-supplied result.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn authorize_enterprise_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        kind: CallKind,
+        extension: &extensions::ExtensionRow,
+        destination: Destination,
+        policy: &EffectivePolicy,
+    ) -> CallResult<calls::Model> {
+        let mut snapshot = SafeAttributes::new();
+        snapshot.insert("call_kind", SafeValue::Text(kind.to_string()))?;
+        snapshot.insert("scope_rule", SafeValue::Text("SAME_ENVIRONMENT".into()))?;
+        snapshot.insert("extension_id", SafeValue::Text(extension.id.to_string()))?;
+        snapshot.insert(
+            "destination_type",
+            SafeValue::Text(destination.kind.as_str().into()),
+        )?;
+        snapshot.insert("enterprise_policy", SafeValue::Text(policy.label()))?;
+        let mut limits = SafeAttributes::new();
+        limits.insert(
+            "max_routing_hops",
+            SafeValue::from(policy.rules.max_routing_hops as usize),
+        )?;
+        limits.insert(
+            "max_ring_group_fanout",
+            SafeValue::from(policy.rules.max_ring_group_fanout as usize),
+        )?;
+        let authorization = self
+            .calls
+            .record_authorization_in(
+                txn,
+                cmd,
+                call,
+                NewAuthorization {
+                    reason: AuthorizationReason::PolicySatisfied,
+                    policy_version: PolicyVersion::parse(ENTERPRISE_POLICY)?,
+                    policy_snapshot: snapshot,
+                    limits_snapshot: limits,
+                },
+            )
+            .await?;
+        let call = self
+            .calls
+            .transition_in(
+                txn,
+                cmd,
+                call,
+                1,
+                CallAction::Authorize {
+                    authorization_id: CallAuthorizationId::from_uuid(authorization.id),
+                },
+            )
+            .await?
+            .call;
+        Ok(self
+            .calls
+            .transition_in(txn, cmd, &call, call.version, CallAction::BeginResolution)
+            .await?
+            .call)
+    }
+
+    /// RESOLVING -> ROUTING over ENTERPRISE_INTERNAL: route (PRIVATE_NETWORK + plan), the
+    /// Call's RTC application leg, its attempt and media binding. Returns the Call and
+    /// the route id.
+    pub(crate) async fn route_enterprise_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        destination: Destination,
+        reason: &'static str,
+    ) -> CallResult<(calls::Model, Uuid)> {
+        let provider = self.provider()?.clone();
+        let call = self.locked(txn, call).await?;
+        let plan = self
+            .enterprise_plan(txn, super::scope_of(&call))
+            .await?
+            .ok_or(CallError::CapabilityUnavailable(
+                "the routing policy does not allow ENTERPRISE_INTERNAL",
+            ))?;
+        let call = self
+            .calls
+            .transition_in(txn, cmd, &call, call.version, CallAction::BeginRouting)
+            .await?
+            .call;
+        let mut decision = SafeAttributes::new();
+        decision.insert("reason", SafeValue::Text(reason.into()))?;
+        decision.insert(
+            "destination_type",
+            SafeValue::Text(destination.kind.as_str().into()),
+        )?;
+        let route = self
+            .calls
+            .record_route_in(
+                txn,
+                cmd,
+                &call,
+                NewRoute {
+                    route_class: RouteClass::PrivateNetwork,
+                    policy_version: PolicyVersion::parse(ENTERPRISE_ROUTE_POLICY)?,
+                    decision_snapshot: decision,
+                    plan: Some(plan),
+                },
+            )
+            .await?;
+        // The internal media path is the Call's RTC resource (no carrier, no spend).
+        let leg = self
+            .calls
+            .record_leg_in(
+                txn,
+                cmd,
+                &call,
+                NewLeg {
+                    route_id: Some(CallRouteId::from_uuid(route.id)),
+                    participant_id: None,
+                    direction: LegDirection::Outbound,
+                    kind: LegKind::Application,
+                },
+            )
+            .await?;
+        self.calls
+            .record_attempt_in(
+                txn,
+                cmd,
+                &call,
+                NewAttempt {
+                    route_id: Some(CallRouteId::from_uuid(route.id)),
+                    leg_id: Some(CallLegId::from_uuid(leg.id)),
+                    previous_attempt_id: None,
+                },
+            )
+            .await?;
+        self.calls
+            .record_media_binding_in(
+                txn,
+                &call,
+                NewMediaBinding {
+                    route_id: route.id,
+                    leg_id: leg.id,
+                    adapter: provider.adapter_name(),
+                    max_participants: (self.config.max_group_participants * 2) as i32,
+                },
+            )
+            .await?;
+        Ok((call, route.id))
     }
 
     /// The ENTERPRISE_INTERNAL route plan of this environment's routing policy (None if
@@ -649,15 +696,15 @@ impl AppCallService {
         Ok(Some((call, offers)))
     }
 
-    /// Whether the Call legitimately waits without ring offers (queued).
+    /// Whether the Call legitimately waits without ring offers (queued, or in an IVR).
     pub(crate) async fn waiting_in<C: ConnectionTrait>(
         &self,
         db: &C,
         call: &calls::Model,
     ) -> CallResult<bool> {
-        Ok(context_of(db, call.id)
-            .await?
-            .is_some_and(|c| c.phase == EnterprisePhase::Queued.as_str()))
+        Ok(context_of(db, call.id).await?.is_some_and(|c| {
+            c.phase == EnterprisePhase::Queued.as_str() || c.phase == EnterprisePhase::Ivr.as_str()
+        }))
     }
 
     /// Executes a routing action on a DIALING / RINGING Call. Returns the Call as it now
@@ -766,6 +813,10 @@ impl AppCallService {
                     destination,
                 ))
                 .await
+            }
+            RouteAction::EnterIvr { flow, destination } => {
+                Box::pin(self.enter_ivr(txn, cmd, call, leg, context, policy, flow, destination))
+                    .await
             }
             RouteAction::EnterQueue { queue, destination } => {
                 Box::pin(self.enter_queue(txn, cmd, call, leg, context, policy, queue, destination))
@@ -953,6 +1004,11 @@ impl AppCallService {
                 });
             }
         }
+        if let Some(session) = c.ivr_session_id {
+            if let Some(ivr) = self.ivr_view(db, session).await? {
+                view["ivr"] = ivr;
+            }
+        }
         Ok(Some(view))
     }
 
@@ -975,10 +1031,14 @@ impl AppCallService {
         {
             queue = context.destination().map(|d| d.id);
         }
+        // The IVR had served the caller (its HANGUP prompt was playing) when the Call ended.
+        let served_by_ivr = context.phase == EnterprisePhase::Ivr.as_str()
+            && self.ivr_session_ended_in(txn, call, &context).await?;
         if context.outcome.is_some() || context.answered_principal_id.is_some() {
             return Ok(queue);
         }
         let outcome = match call.current_state {
+            _ if served_by_ivr => "COMPLETED_IN_IVR",
             CallState::Cancelled => "ABANDONED",
             CallState::Failed => "FAILED",
             CallState::NoAnswer => "NO_ANSWER",
@@ -1030,6 +1090,8 @@ impl AppCallService {
         }
         if invitations.is_empty() {
             self.queued_signal(db, pending, call, correlation).await?;
+            self.ivr_waiting_signal(db, pending, call, correlation)
+                .await?;
         }
         Ok(())
     }

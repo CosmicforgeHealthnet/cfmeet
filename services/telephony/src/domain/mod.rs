@@ -102,6 +102,8 @@ vocab!(
         PstnToApp = "PSTN_TO_APP",
         PstnRelay = "PSTN_RELAY",
         CallbackRelay = "CALLBACK_RELAY",
+        // Part F: an internal enterprise SIP dialog on the own edge (no carrier).
+        EnterpriseInternal = "ENTERPRISE_INTERNAL",
     }
 );
 
@@ -151,6 +153,8 @@ vocab!(CommandKind {
     Unbridge = "UNBRIDGE",
     SendDtmf = "SEND_DTMF",
     QueryStatus = "QUERY_STATUS",
+    Answer = "ANSWER",
+    Prompt = "PROMPT",
 });
 
 vocab!(CommandStatus {

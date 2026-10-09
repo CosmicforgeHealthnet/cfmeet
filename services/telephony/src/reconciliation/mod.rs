@@ -173,6 +173,15 @@ impl TelephonyService {
     /// Reconciles one leased leg.
     pub async fn reconcile_leg(&self, leg: &LegRow) -> TelephonyResult<()> {
         let status = leg.status()?;
+        // Part F: an internal enterprise leg is read back from the edge directly (no
+        // provider binding exists): a vanished channel ends it; a live one is re-checked
+        // with backoff.
+        if leg.is_enterprise() {
+            if status.is_terminal() || self.reconcile_enterprise_leg(leg).await? {
+                return self.clear_reconcile(leg.id).await;
+            }
+            return self.reschedule_reconcile(leg, None).await;
+        }
         let Some(binding) = self.latest_binding(leg).await? else {
             // Nothing was ever sent for this leg.
             if status == LegStatus::Unknown {
@@ -614,6 +623,9 @@ impl TelephonyService {
         )
         .await?;
         for leg in &over {
+            if leg.is_enterprise() {
+                self.hang_up_enterprise(leg).await;
+            }
             if let Some(b) = self.latest_binding(leg).await? {
                 if let (Some(p), Some(r)) = (
                     self.providers.get(&b.provider_id).cloned(),
@@ -731,6 +743,14 @@ impl TelephonyService {
                         )
                         .await?;
                         if member.is_some() {
+                            continue;
+                        }
+                        // Part F: an internal enterprise dialog is bound to its leg directly.
+                        if self
+                            .enterprise_leg_of_channel(&call.provider_call_ref)
+                            .await?
+                            .is_some()
+                        {
                             continue;
                         }
                         let key = format!("unbound-call:{id}:{}", call.provider_call_ref);

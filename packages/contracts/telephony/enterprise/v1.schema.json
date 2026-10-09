@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/telephony/enterprise/v1.schema.json",
+  "title": "CF Meet Telephony enterprise SIP dialog v1",
+  "description": "Part F (sections 54, 57): an enterprise SIP device registered on CF Meet's own edge dialled an internal extension. Telephony offers the dialog to Calling (POST /internal/v1/telephony/enterprise-calls, permission telephony-enterprise.offer) with the device's OPAQUE reference and the dialled short code; Calling binds the reference to a principal, resolves the extension in that scope and answers with the ONE canonical Call / CallLeg (or refuses; Telephony then rejects the dialog). Keypad input of the leg is delivered as it happens (POST /internal/v1/telephony/enterprise-keypad) and is never persisted or logged by either service. Never a telephone number, SIP URI, edge endpoint, channel id or provider identifier.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/EnterpriseDialogOffer"
+    },
+    {
+      "$ref": "#/$defs/EnterpriseDialogAnswer"
+    },
+    {
+      "$ref": "#/$defs/EnterpriseKeypad"
+    },
+    {
+      "$ref": "#/$defs/EnterpriseKeypadAck"
+    }
+  ],
+  "$defs": {
+    "EnterpriseDialogOffer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "telephonyLegId",
+        "correlationId",
+        "scope",
+        "deviceRef",
+        "extension",
+        "maxDurationSeconds"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "1"
+        },
+        "telephonyLegId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "correlationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/CorrelationId"
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tenantId",
+            "applicationId",
+            "environmentId"
+          ],
+          "properties": {
+            "tenantId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "applicationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "environmentId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        },
+        "deviceRef": {
+          "description": "Opaque device reference (operator-minted; bound to a principal by Calling).",
+          "type": "string",
+          "pattern": "^dev-[a-z0-9-]{4,60}$"
+        },
+        "extension": {
+          "description": "The dialled internal short code: 2-6 digits or a lower-case word. Never a telephone number.",
+          "type": "string",
+          "pattern": "^([0-9]{2,6}|[a-z][a-z0-9-]{1,31})$"
+        },
+        "maxDurationSeconds": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 86400
+        }
+      }
+    },
+    "EnterpriseDialogAnswer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "callId",
+        "callLegId",
+        "routeClass"
+      ],
+      "properties": {
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callLegId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "routeClass": {
+          "const": "ENTERPRISE_INTERNAL"
+        }
+      }
+    },
+    "EnterpriseKeypad": {
+      "description": "One key of an enterprise leg's caller (RFC 4733 at the edge). Transient: never stored, never logged, never a metric label.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "telephonyLegId",
+        "callId",
+        "callLegId",
+        "digit"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "1"
+        },
+        "telephonyLegId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callLegId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "digit": {
+          "type": "string",
+          "pattern": "^[0-9*#]$"
+        }
+      }
+    },
+    "EnterpriseKeypadAck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accepted"
+      ],
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

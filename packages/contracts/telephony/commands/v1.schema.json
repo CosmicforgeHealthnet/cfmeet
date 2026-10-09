@@ -246,7 +246,7 @@
       }
     },
     "ControlCommand": {
-      "description": "POST /internal/v1/legs/{id}/terminate | hold | resume.",
+      "description": "POST /internal/v1/legs/{id}/terminate | hold | resume | answer | prompt. Part F: answer and prompt act on internal enterprise SIP legs only (permission telephony-leg.media); prompt requires `prompt`.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -278,6 +278,21 @@
             "POLICY",
             "DURATION_LIMIT",
             "ORPHAN"
+          ]
+        },
+        "prompt": {
+          "description": "Part F, PROMPT only: one BUILT-IN prompt of Calling's catalog. Telephony maps it to an edge-local sound; Calling never names a sound file, URL or path.",
+          "enum": [
+            "WELCOME",
+            "MENU",
+            "INVALID_OPTION",
+            "NO_INPUT",
+            "PLEASE_HOLD",
+            "TRANSFERRING",
+            "GOODBYE",
+            "CLOSED",
+            "VOICEMAIL_GREETING",
+            "BEEP"
           ]
         }
       }

@@ -565,6 +565,8 @@ fn every_operation_declares_its_authentication() {
                 let expected_permission = match path.as_str() {
                     "/internal/v1/telephony/events" => "telephony-event.apply",
                     "/internal/v1/telephony/inbound-calls" => "telephony-inbound.offer",
+                    "/internal/v1/telephony/enterprise-calls"
+                    | "/internal/v1/telephony/enterprise-keypad" => "telephony-enterprise.offer",
                     _ => "communication-authority.enforce",
                 };
                 assert_eq!(

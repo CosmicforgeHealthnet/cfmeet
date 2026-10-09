@@ -36,6 +36,9 @@ enum Command {
     SipPeer(SipPeerCmd),
     #[command(subcommand)]
     Number(NumberCmd),
+    /// Part F: enterprise SIP devices on the own edge (internal; never paid).
+    #[command(subcommand)]
+    EnterpriseDevice(EnterpriseDeviceCmd),
     /// Open incidents (restricted operational view; never numbers).
     Incidents,
 }
@@ -146,6 +149,32 @@ enum NumberCmd {
         number: String,
         #[arg(long)]
         route: String,
+    },
+    List,
+}
+
+#[derive(Subcommand)]
+enum EnterpriseDeviceCmd {
+    /// Registers a device: the opaque reference Calling binds to a principal, the edge
+    /// endpoint it authenticates as (its credentials stay in the edge's secret store) and
+    /// the scope whose Calling receives its dialogs.
+    Add {
+        #[arg(long)]
+        device_ref: String,
+        #[arg(long)]
+        edge_endpoint: String,
+        #[arg(long)]
+        tenant: uuid::Uuid,
+        #[arg(long)]
+        application: uuid::Uuid,
+        #[arg(long)]
+        environment: uuid::Uuid,
+    },
+    Enable {
+        device_ref: String,
+    },
+    Disable {
+        device_ref: String,
     },
     List,
 }
@@ -267,6 +296,22 @@ async fn run(db: &DatabaseConnection, command: Command) -> Result<serde_json::Va
                     r
                 }).collect::<Vec<_>>()))
             }
+        },
+        Command::EnterpriseDevice(cmd) => match cmd {
+            EnterpriseDeviceCmd::Add { device_ref, edge_endpoint, tenant, application, environment } => {
+                exec(db, "INSERT INTO telephony_enterprise_devices (id, device_ref, edge_endpoint, tenant_id, application_id, environment_id, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, 'DISABLED', $7, $7)",
+                    vec![uuid::Uuid::new_v4().into(), device_ref.clone().into(), edge_endpoint.into(), tenant.into(), application.into(), environment.into(), now.into()]).await?;
+                Ok(json!({ "deviceRef": device_ref, "status": "DISABLED" }))
+            }
+            EnterpriseDeviceCmd::Enable { device_ref } => {
+                exec(db, "UPDATE telephony_enterprise_devices SET status = 'ENABLED', updated_at = $2 WHERE device_ref = $1", vec![device_ref.clone().into(), now.into()]).await?;
+                Ok(json!({ "deviceRef": device_ref, "status": "ENABLED" }))
+            }
+            EnterpriseDeviceCmd::Disable { device_ref } => {
+                exec(db, "UPDATE telephony_enterprise_devices SET status = 'DISABLED', updated_at = $2 WHERE device_ref = $1", vec![device_ref.clone().into(), now.into()]).await?;
+                Ok(json!({ "deviceRef": device_ref, "status": "DISABLED" }))
+            }
+            EnterpriseDeviceCmd::List => Ok(json!(rows(db, "SELECT device_ref, edge_endpoint, tenant_id, application_id, environment_id, status FROM telephony_enterprise_devices ORDER BY device_ref").await?)),
         },
         Command::Incidents => Ok(json!(rows(db, "SELECT id, severity, category, status, provider_id, route_id, telephony_leg_id, occurrences, escalation_count, first_seen_at, last_seen_at FROM telephony_incidents WHERE status = 'OPEN' ORDER BY last_seen_at DESC LIMIT 200").await?)),
     }

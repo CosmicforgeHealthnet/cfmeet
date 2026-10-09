@@ -291,9 +291,15 @@ impl AppCallService {
             ))
             .one(txn)
             .await?;
-        let Some(leg) = leg.filter(|l| l.leg_kind == LegKind::PublicNetwork) else {
+        // Public legs, and (Part F) the bound PRIVATE_NETWORK leg of an enterprise SIP
+        // device. An unbound private leg is never matched.
+        let Some(leg) = leg.filter(|l| {
+            l.leg_kind == LegKind::PublicNetwork
+                || (l.leg_kind == LegKind::PrivateNetwork && l.execution_binding_ref.is_some())
+        }) else {
             return Ok(EventDisposition::Unmatched);
         };
+        let enterprise_device_leg = leg.leg_kind == LegKind::PrivateNetwork;
         // The execution must be THIS leg's (set once; an unbound leg binds now only if
         // Calling commanded its origination or it is an inbound leg Telephony offered).
         match (leg.execution_binding_ref, event.telephony_leg_id) {
@@ -544,7 +550,9 @@ impl AppCallService {
                 }
                 // A DEFINITE provider-side failure before connection may fail over to
                 // another interconnect (new leg + attempt) when the plan permits.
-                if super::failover::failover_candidate(event, &leg) && leg.state == LegState::Failed
+                if !enterprise_device_leg
+                    && super::failover::failover_candidate(event, &leg)
+                    && leg.state == LegState::Failed
                 {
                     let attempt = match event.attempt_id {
                         Some(a) => attempt_of(txn, call, CallAttemptId::from_uuid(a))
@@ -561,7 +569,9 @@ impl AppCallService {
                         return Ok(EventDisposition::Applied);
                     }
                 }
-                let caller_leg = party_role(txn, leg.id).await?.as_deref() == Some("CALLER");
+                // An enterprise device's dialog is the caller of its Call.
+                let caller_leg = enterprise_device_leg
+                    || party_role(txn, leg.id).await?.as_deref() == Some("CALLER");
                 self.public_leg_terminal_in(txn, call, outcome, caller_leg, after, pending)
                     .await?;
                 Ok(EventDisposition::Applied)
@@ -596,6 +606,9 @@ impl AppCallService {
                     .calls
                     .transition_in(txn, &cmd, &call, call.version, CallAction::Cancel)
                     .await?;
+                // Part F: an enterprise caller hung up while routed (queue, IVR, ring):
+                // abandoned.
+                self.enterprise_call_ended_in(txn, &call.call).await?;
                 for invitation in &call.cancelled_invitations {
                     self.invitation_signal(
                         txn,

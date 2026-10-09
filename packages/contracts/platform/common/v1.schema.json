@@ -13,7 +13,12 @@
     "RuntimeEnvironment": {
       "description": "Deployment/runtime environment of a service identity. Not the same dimension as a customer's application environment (SANDBOX / TEST / PRODUCTION).",
       "type": "string",
-      "enum": ["local", "test", "staging", "production"]
+      "enum": [
+        "local",
+        "test",
+        "staging",
+        "production"
+      ]
     },
     "RequestId": {
       "description": "Server-generated identifier of one request / one service hop.",
@@ -33,7 +38,11 @@
     "ApplicationEnvironmentKind": {
       "description": "Kind of a customer application environment (Part B section 7).",
       "type": "string",
-      "enum": ["SANDBOX", "TEST", "PRODUCTION"]
+      "enum": [
+        "SANDBOX",
+        "TEST",
+        "PRODUCTION"
+      ]
     },
     "PrincipalKind": {
       "description": "Category of communication principal (Part B section 10).",
@@ -83,7 +92,9 @@
         "protected-contact.protect-inbound",
         "telephony-event.apply",
         "telephony-reconciliation.apply",
-        "telephony-inbound.offer"
+        "telephony-inbound.offer",
+        "telephony-leg.media",
+        "telephony-enterprise.offer"
       ]
     }
   }

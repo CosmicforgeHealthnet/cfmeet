@@ -76,13 +76,17 @@ impl AppCallService {
                    updated_at = GREATEST(updated_at, $1) \
                  WHERE id IN (SELECT id FROM call_telephony_commands \
                    WHERE status = 'PENDING' AND next_attempt_at <= $1 AND (lease_until IS NULL OR lease_until < $1) \
-                   ORDER BY next_attempt_at LIMIT $2 FOR UPDATE SKIP LOCKED) \
+                   ORDER BY next_attempt_at, created_at, idempotency_key LIMIT $2 FOR UPDATE SKIP LOCKED) \
                  RETURNING {COMMAND_COLUMNS}"
             ),
             vec![now.into(), (limit.clamp(1, 200) as i64).into()],
         ))
         .all(self.db())
         .await?;
+        let mut rows = rows;
+        rows.sort_by(|a, b| {
+            (a.created_at, &a.idempotency_key).cmp(&(b.created_at, &b.idempotency_key))
+        });
         let mut done = 0;
         for row in rows {
             match self.dispatch_one(&row).await {
@@ -113,14 +117,18 @@ impl AppCallService {
                  WHERE id IN (SELECT id FROM call_telephony_commands \
                    WHERE call_id = $1 AND status = 'PENDING' AND next_attempt_at <= $2 \
                      AND (lease_until IS NULL OR lease_until < $2) \
-                   ORDER BY created_at FOR UPDATE SKIP LOCKED) \
+                   ORDER BY created_at, idempotency_key FOR UPDATE SKIP LOCKED) \
                  RETURNING {COMMAND_COLUMNS}"
             ),
             vec![call_id.into(), self.calls.now().into()],
         ))
         .all(self.db())
         .await;
-        let Ok(rows) = rows else { return };
+        let Ok(mut rows) = rows else { return };
+        // RETURNING has no order: send in creation order (prompts of one leg in sequence).
+        rows.sort_by(|a, b| {
+            (a.created_at, &a.idempotency_key).cmp(&(b.created_at, &b.idempotency_key))
+        });
         for row in rows {
             if let Err(error) = self.dispatch_one(&row).await {
                 tracing::warn!(command_id = %row.id, %error, "telephony command dispatch failed; will retry");
@@ -196,9 +204,13 @@ impl AppCallService {
         let call = self.call_row(row.call_id).await?;
         match CommandKind::parse(&row.kind) {
             Some(CommandKind::Originate) => self.dispatch_originate(row, &call).await,
-            Some(k @ (CommandKind::Terminate | CommandKind::Hold | CommandKind::Resume)) => {
-                self.dispatch_control(row, &call, k).await
-            }
+            Some(
+                k @ (CommandKind::Terminate
+                | CommandKind::Hold
+                | CommandKind::Resume
+                | CommandKind::Answer
+                | CommandKind::Prompt),
+            ) => self.dispatch_control(row, &call, k).await,
             Some(CommandKind::Bridge) => self.dispatch_bridge(row, &call).await,
             Some(CommandKind::Unbridge) => self.dispatch_unbridge(row, &call).await,
             None => {
@@ -552,18 +564,31 @@ impl AppCallService {
         let action = match kind {
             CommandKind::Terminate => LegControl::Terminate,
             CommandKind::Hold => LegControl::Hold,
+            CommandKind::Answer => LegControl::Answer,
+            CommandKind::Prompt => LegControl::Prompt,
             _ => LegControl::Resume,
         };
+        if matches!(kind, CommandKind::Answer | CommandKind::Prompt)
+            && (call.current_state.is_terminal() || call.current_state == CallState::Ending)
+        {
+            // A prompt / answer for a Call that is over has nothing left to do.
+            self.complete(row.id, "DEAD", Some("CALL_NOT_ACTIVE"), None)
+                .await?;
+            return Ok(Dispatched::Dead);
+        }
         let body = json!({
             "schemaVersion": "1",
             "commandId": row.id,
             "idempotencyKey": row.idempotency_key,
             "correlationId": correlation(&row.payload).as_str(),
             "reason": row.payload["reason"],
+            "prompt": row.payload["prompt"],
         });
         let mut body = body;
-        if body["reason"].is_null() {
-            body.as_object_mut().map(|o| o.remove("reason"));
+        for key in ["reason", "prompt"] {
+            if body[key].is_null() {
+                body.as_object_mut().map(|o| o.remove(key));
+            }
         }
         match self
             .public
@@ -575,6 +600,17 @@ impl AppCallService {
                 self.complete(row.id, "ACCEPTED", None, Some(telephony_leg))
                     .await?;
                 Ok(Dispatched::Accepted)
+            }
+            Err(TelephonyError::Refused { code, .. })
+                if code == "LEG_NOT_FOUND"
+                    && matches!(kind, CommandKind::Answer | CommandKind::Prompt)
+                    && row.attempts < 10 =>
+            {
+                // Part F: an enterprise dialog's leg is persisted by Telephony right after
+                // Calling accepted its offer — a first ANSWER / PROMPT may arrive before
+                // it exists. Retried (bounded); never mistaken for "already over".
+                self.reschedule(row, "LEG_NOT_YET_KNOWN").await?;
+                Ok(Dispatched::Retry)
             }
             Err(TelephonyError::Refused { code, .. })
                 if code == "LEG_NOT_ACTIVE" || code == "LEG_NOT_FOUND" =>
@@ -602,7 +638,8 @@ impl AppCallService {
         let row = self
             .db()
             .query_one(stmt(
-                "SELECT count(*) FROM call_legs WHERE call_id = $1 AND leg_kind = 'PUBLIC_NETWORK' \
+                "SELECT count(*) FROM call_legs WHERE call_id = $1 AND (leg_kind = 'PUBLIC_NETWORK' \
+                   OR (leg_kind = 'PRIVATE_NETWORK' AND execution_binding_ref IS NOT NULL)) \
                  AND state NOT IN ('ENDED', 'DECLINED', 'BUSY', 'NO_ANSWER', 'FAILED', 'CANCELLED')",
                 vec![call_id.into()],
             ))
@@ -619,10 +656,26 @@ impl AppCallService {
         let call = self.call_row(call_id).await?;
         let txn = self.db().begin().await?;
         let mut queued = 0;
-        for party in parties(&txn, call_id).await? {
-            let Some(leg_id) = party.call_leg_id else {
-                continue;
-            };
+        let mut leg_ids: Vec<Uuid> = parties(&txn, call_id)
+            .await?
+            .into_iter()
+            .filter_map(|p| p.call_leg_id)
+            .collect();
+        // Part F: an enterprise SIP device's dialog (bound PRIVATE_NETWORK leg).
+        {
+            use sea_orm::ConnectionTrait;
+            for row in txn
+                .query_all(stmt(
+                    "SELECT id FROM call_legs WHERE call_id = $1 AND leg_kind = 'PRIVATE_NETWORK' \
+                     AND execution_binding_ref IS NOT NULL",
+                    vec![call_id.into()],
+                ))
+                .await?
+            {
+                leg_ids.push(row.try_get_by_index::<Uuid>(0)?);
+            }
+        }
+        for leg_id in leg_ids {
             let leg = leg_of(&txn, &call, CallLegId::from_uuid(leg_id)).await?;
             if leg.state.is_terminal() {
                 continue;

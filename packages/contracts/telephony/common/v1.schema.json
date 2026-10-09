@@ -10,9 +10,9 @@
       "enum": ["PLANNED", "ORIGINATING", "RINGING", "ANSWERED", "CONNECTED", "HELD", "ENDING", "ENDED", "FAILED", "UNKNOWN"]
     },
     "PublicRouteClass": {
-      "description": "Public-network route classes Telephony executes (Calling's Routing Engine classes; APP_RTC never reaches Telephony).",
+      "description": "Public-network route classes Telephony executes (Calling's Routing Engine classes; APP_RTC never reaches Telephony). Part F: ENTERPRISE_INTERNAL is an internal dialog of an enterprise SIP device on CF Meet's own edge (no carrier, no provider, no spend, no usage fact).",
       "type": "string",
-      "enum": ["APP_TO_PSTN", "PSTN_TO_APP", "PSTN_RELAY", "CALLBACK_RELAY"]
+      "enum": ["APP_TO_PSTN", "PSTN_TO_APP", "PSTN_RELAY", "CALLBACK_RELAY", "ENTERPRISE_INTERNAL"]
     },
     "LegDirection": {
       "type": "string",

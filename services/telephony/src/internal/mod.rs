@@ -31,6 +31,8 @@ pub fn routes() -> Router<AppState> {
         .route("/legs/:leg_id/terminate", post(terminate))
         .route("/legs/:leg_id/hold", post(hold))
         .route("/legs/:leg_id/resume", post(resume))
+        .route("/legs/:leg_id/answer", post(answer))
+        .route("/legs/:leg_id/prompt", post(prompt))
         .route("/bridges", post(create_bridge))
         .route("/bridges/:bridge_id", delete(end_bridge).get(get_bridge))
         .route("/routes/availability", get(availability))
@@ -146,6 +148,42 @@ async fn resume(
         &caller,
         InternalPermission::TelephonyLegResume,
         CommandKind::Resume,
+        &id,
+        raw,
+    )
+    .await
+}
+
+/// Part F: answer an internal enterprise SIP leg (an IVR / voicemail needs media).
+async fn answer(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    Path(id): Path<String>,
+    raw: Result<Json<ControlCommand>, JsonRejection>,
+) -> Result<Response, TelephonyError> {
+    control(
+        &state,
+        &caller,
+        InternalPermission::TelephonyLegMedia,
+        CommandKind::Answer,
+        &id,
+        raw,
+    )
+    .await
+}
+
+/// Part F: play one BUILT-IN prompt on an internal enterprise SIP leg.
+async fn prompt(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    Path(id): Path<String>,
+    raw: Result<Json<ControlCommand>, JsonRejection>,
+) -> Result<Response, TelephonyError> {
+    control(
+        &state,
+        &caller,
+        InternalPermission::TelephonyLegMedia,
+        CommandKind::Prompt,
         &id,
         raw,
     )
