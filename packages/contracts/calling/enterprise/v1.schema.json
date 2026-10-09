@@ -1,0 +1,668 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json",
+  "title": "CF Meet enterprise calling bodies v1",
+  "description": "Request and response bodies of Calling's enterprise calling API (Part F sections 52-62): the typed enterprise call policy, departments, extensions, ring groups, call queues, IVR flows, business hours, forwarding rules, voicemail mailboxes and messages, call-recording policies and recordings, administrative audit and the enterprise call context. Scope (tenant, application, environment) comes only from the authenticated credential and is never a body field. Mutations of existing resources carry expectedVersion. No body carries a raw telephone number (public forwarding targets are opaque ContactReferences), a provider, SIP or edge identifier, a DTMF digit sequence, an object-storage key or a public media URL. The root accepts exactly one of the bodies (fixtures); the HTTP contract references the $defs.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/CreatePolicyRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdatePolicyRequest"
+    },
+    {
+      "$ref": "#/$defs/CallPolicy"
+    },
+    {
+      "$ref": "#/$defs/CallPolicyList"
+    },
+    {
+      "$ref": "#/$defs/EffectivePolicy"
+    },
+    {
+      "$ref": "#/$defs/CreateDepartmentRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdateDepartmentRequest"
+    },
+    {
+      "$ref": "#/$defs/ReplaceDepartmentMembersRequest"
+    },
+    {
+      "$ref": "#/$defs/Department"
+    },
+    {
+      "$ref": "#/$defs/DepartmentList"
+    },
+    {
+      "$ref": "#/$defs/AuditRecordList"
+    }
+  ],
+  "$defs": {
+    "ResourceStatus": {
+      "description": "Lifecycle of an enterprise configuration resource. Configuration is never deleted: DISABLED stops future routing and keeps historical Call references valid.",
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "DISABLED"
+      ]
+    },
+    "AdminCapability": {
+      "description": "Organization-level administrative capabilities (second key after the credential's enterprise scopes). MANAGE_PUBLIC_FORWARDING and MANAGE_RECORDING are granted by a CF Meet operator only.",
+      "type": "string",
+      "enum": [
+        "MANAGE_ROUTING",
+        "MANAGE_PUBLIC_FORWARDING",
+        "MANAGE_VOICEMAIL",
+        "MANAGE_RECORDING"
+      ]
+    },
+    "ExtensionFormat": {
+      "description": "Extension number format of the namespace.",
+      "type": "string",
+      "enum": [
+        "NUMERIC",
+        "ALPHANUMERIC"
+      ]
+    },
+    "SpendPolicy": {
+      "description": "Where public-network spend of enterprise calls is accounted: the application's Part E telecom spend limits (one spend authority, referenced — never duplicated).",
+      "type": "string",
+      "enum": [
+        "APPLICATION_TELECOM_LIMITS"
+      ]
+    },
+    "CountryCode": {
+      "description": "ISO 3166-1 alpha-2 country code.",
+      "type": "string",
+      "pattern": "^[A-Z]{2}$"
+    },
+    "PolicyRules": {
+      "description": "The typed enterprise call policy (§18). Every hook is a typed field; unknown fields are refused. publicForwardingAllowed requires forwardingAllowed and externalPublicCallingAllowed; public effects still pass every Part E gate (routing policy, live telecom, ContactReference verification, destination country, spend, Privacy Relay, Telephony route).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "internalCallingEnabled",
+        "externalPublicCallingAllowed",
+        "forwardingAllowed",
+        "publicForwardingAllowed",
+        "spendPolicy",
+        "voicemailAllowed",
+        "transferAllowed",
+        "maxRingGroupFanout",
+        "maxQueueCapacity",
+        "maxQueueWaitSeconds",
+        "maxRoutingHops",
+        "extensionFormat",
+        "extensionMinLength",
+        "extensionMaxLength"
+      ],
+      "properties": {
+        "internalCallingEnabled": {
+          "type": "boolean"
+        },
+        "externalPublicCallingAllowed": {
+          "type": "boolean"
+        },
+        "publicDestinationCountries": {
+          "description": "Countries enterprise public forwarding may reach, in addition to the environment's routing policy. Empty = none.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CountryCode"
+          },
+          "maxItems": 300
+        },
+        "forwardingAllowed": {
+          "type": "boolean"
+        },
+        "publicForwardingAllowed": {
+          "type": "boolean"
+        },
+        "spendPolicy": {
+          "$ref": "#/$defs/SpendPolicy"
+        },
+        "voicemailAllowed": {
+          "type": "boolean"
+        },
+        "transferAllowed": {
+          "type": "boolean"
+        },
+        "maxRingGroupFanout": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 15
+        },
+        "maxQueueCapacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "maxQueueWaitSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 3600
+        },
+        "maxRoutingHops": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "extensionFormat": {
+          "$ref": "#/$defs/ExtensionFormat"
+        },
+        "extensionMinLength": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 32
+        },
+        "extensionMaxLength": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 32
+        },
+        "adminCapabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AdminCapability"
+          },
+          "maxItems": 4
+        }
+      }
+    },
+    "CreatePolicyRequest": {
+      "description": "Body of POST /v1/enterprise/policies.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "rules"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "isDefault": {
+          "type": "boolean",
+          "default": false
+        },
+        "rules": {
+          "$ref": "#/$defs/PolicyRules"
+        }
+      }
+    },
+    "UpdatePolicyRequest": {
+      "description": "Body of PATCH /v1/enterprise/policies/{policy_id}: absent fields keep their value; rules replaces the rule set.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "isDefault": {
+          "type": "boolean"
+        },
+        "rules": {
+          "$ref": "#/$defs/PolicyRules"
+        }
+      }
+    },
+    "CallPolicy": {
+      "description": "A stored enterprise call policy.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyId",
+        "name",
+        "isDefault",
+        "status",
+        "rules",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "policyId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "isDefault": {
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "rules": {
+          "$ref": "#/$defs/PolicyRules"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "CallPolicyList": {
+      "description": "A page of policies (keyset, creation order).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policies",
+        "nextCursor"
+      ],
+      "properties": {
+        "policies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CallPolicy"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "EffectivePolicy": {
+      "description": "The policy in force for the environment: its ACTIVE default, else the restrictive built-in default (policyId null, version 0).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyId",
+        "version",
+        "rules"
+      ],
+      "properties": {
+        "policyId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rules": {
+          "$ref": "#/$defs/PolicyRules"
+        }
+      }
+    },
+    "DepartmentRole": {
+      "description": "A member's organizational role (grants no scope or capability).",
+      "type": "string",
+      "enum": [
+        "MEMBER",
+        "MANAGER"
+      ]
+    },
+    "CreateDepartmentRequest": {
+      "description": "Body of POST /v1/enterprise/departments.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
+        }
+      }
+    },
+    "UpdateDepartmentRequest": {
+      "description": "Body of PATCH /v1/enterprise/departments/{department_id}; description null clears it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
+        }
+      }
+    },
+    "DepartmentMemberInput": {
+      "description": "One member: an ACTIVE principal of the same scope (a foreign or unknown principal is 404).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "principalId"
+      ],
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "role": {
+          "$ref": "#/$defs/DepartmentRole"
+        }
+      }
+    },
+    "ReplaceDepartmentMembersRequest": {
+      "description": "Body of PUT /v1/enterprise/departments/{department_id}/members: replaces the whole member list atomically.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "members"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DepartmentMemberInput"
+          },
+          "maxItems": 500
+        }
+      }
+    },
+    "DepartmentMember": {
+      "description": "A department member.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "principalId",
+        "role",
+        "addedAt"
+      ],
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "role": {
+          "$ref": "#/$defs/DepartmentRole"
+        },
+        "addedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "Department": {
+      "description": "An administrative / routing group of principals.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "departmentId",
+        "name",
+        "description",
+        "status",
+        "memberCount",
+        "members",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "departmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "memberCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 500
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DepartmentMember"
+          },
+          "maxItems": 500
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "DepartmentList": {
+      "description": "A page of departments.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "departments",
+        "nextCursor"
+      ],
+      "properties": {
+        "departments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Department"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "AuditRecord": {
+      "description": "Durable evidence of one administrative change (append-only). details holds bounded safe values only.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "auditId",
+        "actorKind",
+        "actorServiceAccountId",
+        "actorCredentialId",
+        "resourceType",
+        "resourceId",
+        "operation",
+        "oldVersion",
+        "newVersion",
+        "requestId",
+        "correlationId",
+        "details",
+        "occurredAt"
+      ],
+      "properties": {
+        "auditId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "actorKind": {
+          "description": "Who the change is attributed to.",
+          "type": "string",
+          "enum": [
+            "CUSTOMER_APPLICATION",
+            "OPERATOR",
+            "SYSTEM"
+          ]
+        },
+        "actorServiceAccountId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actorCredentialId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resourceType": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,63}$"
+        },
+        "resourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "operation": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,63}$"
+        },
+        "oldVersion": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "newVersion": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "requestId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "correlationId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "details": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/SafeEventData"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "AuditRecordList": {
+      "description": "Newest-first audit records.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "records",
+        "nextCursor"
+      ],
+      "properties": {
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AuditRecord"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    }
+  }
+}

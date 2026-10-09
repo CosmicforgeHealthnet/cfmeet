@@ -21,3 +21,4 @@ Short, numbered records of significant architectural decisions.
 | [0015](0015-sip-media-edge-stack-and-network-topology.md) | SIP / media edge stack (Asterisk 20 + ARI) and network topology (Part E §41) | Accepted |
 | [0016](0016-first-telecom-interconnect.md) | Provider-neutral interconnect contract; first interconnect = SIP trunk on the CF Meet edge; real-carrier certification pending (Part E §42–§43) | Accepted (certification pending) |
 | [0017](0017-provider-failover.md) | Provider failover: definite vs unknown, Calling decides whether / Telephony decides which, duplicate-call prevention at both boundaries, circuit breaker, late-success race (Part E §48, §51) | Accepted (real-carrier failover pending) |
+| [0018](0018-enterprise-calling-architecture.md) | Enterprise calling architecture: configuration and continuity inside Calling, one Call, tenant as the organization boundary, typed policy, explicit scopes, versioning and audit (Part F §52–§62) | Accepted |

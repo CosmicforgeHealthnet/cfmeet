@@ -53,6 +53,20 @@ pub mod names {
     pub const PRIVACY_CONTACTS_VERIFY: &str = "privacy.contacts.verify";
     /// Read privacy-safe call evidence of Privacy Relay sessions (Part D §36).
     pub const PRIVACY_EVIDENCE_READ: &str = "privacy.evidence.read";
+    /// Read enterprise calling configuration (Part F §19).
+    pub const ENTERPRISE_CONFIG_READ: &str = "enterprise.config.read";
+    /// Create / change / disable enterprise calling configuration.
+    pub const ENTERPRISE_CONFIG_WRITE: &str = "enterprise.config.write";
+    /// Place and control calls to enterprise destinations (extensions).
+    pub const ENTERPRISE_CALLS_USE: &str = "enterprise.calls.use";
+    /// Read voicemail messages of mailboxes the request is authorized for.
+    pub const ENTERPRISE_VOICEMAIL_READ: &str = "enterprise.voicemail.read";
+    /// Change read state, delete voicemail; configure mailboxes.
+    pub const ENTERPRISE_VOICEMAIL_MANAGE: &str = "enterprise.voicemail.manage";
+    /// Configure call-recording policies and start / stop recordings.
+    pub const ENTERPRISE_RECORDING_MANAGE: &str = "enterprise.recording.manage";
+    /// Read call-recording metadata and request authorized media access (audited).
+    pub const ENTERPRISE_RECORDING_READ: &str = "enterprise.recording.read";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -130,6 +144,41 @@ const STANDARD_SCOPES: &[ScopeDefinition] = &[
     ScopeDefinition {
         name: names::PRIVACY_EVIDENCE_READ,
         description: "Read privacy-safe call evidence (timing, outcome, duration; never a telephone number) of Privacy Relay sessions within the credential's application environment",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::ENTERPRISE_CONFIG_READ,
+        description: "Read enterprise calling configuration (policies, departments, extensions, ring groups, queues, IVR, business hours, forwarding, mailboxes, recording policies) and its audit within the credential's application environment",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::ENTERPRISE_CONFIG_WRITE,
+        description: "Create, change and disable enterprise calling configuration within the credential's application environment (never implies calls.* or voicemail / recording access)",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::ENTERPRISE_CALLS_USE,
+        description: "Place calls to enterprise destinations (extensions) and send IVR input within the credential's application environment",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::ENTERPRISE_VOICEMAIL_READ,
+        description: "List voicemail messages and request short-lived authorized media access for mailboxes owned by the named principal",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::ENTERPRISE_VOICEMAIL_MANAGE,
+        description: "Mark voicemail read / unread, delete voicemail and configure voicemail mailboxes",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::ENTERPRISE_RECORDING_MANAGE,
+        description: "Configure call-recording policies, record consent evidence and start / stop call recordings",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::ENTERPRISE_RECORDING_READ,
+        description: "Read call-recording metadata and request short-lived, audited media access",
         trust: ScopeTrust::Standard,
     },
     ScopeDefinition {

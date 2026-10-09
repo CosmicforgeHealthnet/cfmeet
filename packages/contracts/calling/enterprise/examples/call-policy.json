@@ -1,0 +1,31 @@
+{
+  "policyId": "0d2b8f5e-4c1a-4f7b-9a3e-1b2c3d4e5f60",
+  "name": "Head office",
+  "isDefault": true,
+  "status": "ACTIVE",
+  "rules": {
+    "internalCallingEnabled": true,
+    "externalPublicCallingAllowed": false,
+    "publicDestinationCountries": [],
+    "forwardingAllowed": true,
+    "publicForwardingAllowed": false,
+    "spendPolicy": "APPLICATION_TELECOM_LIMITS",
+    "voicemailAllowed": true,
+    "transferAllowed": true,
+    "maxRingGroupFanout": 10,
+    "maxQueueCapacity": 50,
+    "maxQueueWaitSeconds": 600,
+    "maxRoutingHops": 8,
+    "extensionFormat": "NUMERIC",
+    "extensionMinLength": 3,
+    "extensionMaxLength": 6,
+    "adminCapabilities": [
+      "MANAGE_ROUTING",
+      "MANAGE_VOICEMAIL"
+    ]
+  },
+  "version": 2,
+  "createdAt": "2031-03-01T10:00:30.000Z",
+  "updatedAt": "2031-03-01T10:05:00.000Z",
+  "disabledAt": null
+}

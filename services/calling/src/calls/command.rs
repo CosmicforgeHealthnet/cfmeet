@@ -60,6 +60,15 @@ impl CallScope {
         }
     }
 
+    /// The scope of an environment (operator tooling).
+    pub fn of_environment(env: &crate::platform::environments::EnvironmentView) -> Self {
+        Self {
+            tenant_id: env.tenant_id,
+            application_id: env.application_id,
+            environment_id: env.id,
+        }
+    }
+
     pub(crate) fn from_parts(
         tenant_id: TenantId,
         application_id: ApplicationId,

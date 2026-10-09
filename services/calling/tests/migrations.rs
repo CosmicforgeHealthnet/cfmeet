@@ -78,7 +78,18 @@ const CALL_TABLES: &[&str] = &[
     "calls",
 ];
 
-const MIGRATIONS: usize = 19;
+/// Part F enterprise calling and continuity (Calling-owned, ADR 0018).
+const ENTERPRISE_TABLES: &[&str] = &[
+    "enterprise_admin_audit",
+    "enterprise_call_policies",
+    "enterprise_department_members",
+    "enterprise_departments",
+];
+
+/// Derived from the migrator itself (never a brittle hand-maintained count).
+fn migrations() -> usize {
+    <calling_migration::Migrator as MigratorTrait>::migrations().len()
+}
 const PART_B_MIGRATIONS: u32 = 4;
 
 #[tokio::test]
@@ -93,6 +104,7 @@ async fn migrations_apply_roll_back_and_reapply_on_a_clean_database() {
     let mut expected: Vec<String> = PLATFORM_TABLES
         .iter()
         .chain(CALL_TABLES)
+        .chain(ENTERPRISE_TABLES)
         .map(|s| s.to_string())
         .collect();
     expected.push(MIGRATION_TABLE.to_string());
@@ -105,7 +117,7 @@ async fn migrations_apply_roll_back_and_reapply_on_a_clean_database() {
 
     // Roll back only the call domain: the Part B schema is intact, including the
     // principal ownership targets the call core added.
-    calling_migration::Migrator::down(conn, Some(MIGRATIONS as u32 - PART_B_MIGRATIONS))
+    calling_migration::Migrator::down(conn, Some(migrations() as u32 - PART_B_MIGRATIONS))
         .await
         .unwrap();
     let mut part_b: Vec<String> = PLATFORM_TABLES.iter().map(|s| s.to_string()).collect();
@@ -124,7 +136,7 @@ async fn migrations_apply_roll_back_and_reapply_on_a_clean_database() {
     let calling_functions = names(
         conn,
         "SELECT proname::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
-         WHERE n.nspname = 'public' AND proname LIKE 'calling\\_%'",
+         WHERE n.nspname = 'public' AND (proname LIKE 'calling\\_%' OR proname LIKE 'enterprise\\_%')",
     )
     .await;
     assert!(calling_functions.is_empty(), "{calling_functions:?}");
@@ -138,7 +150,8 @@ async fn migrations_apply_roll_back_and_reapply_on_a_clean_database() {
     let functions = strings(
         conn,
         "SELECT proname::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
-         WHERE n.nspname = 'public' AND (proname LIKE 'platform\\_%' OR proname LIKE 'calling\\_%')",
+         WHERE n.nspname = 'public' AND (proname LIKE 'platform\\_%' OR proname LIKE 'calling\\_%' \
+         OR proname LIKE 'enterprise\\_%')",
     )
     .await;
     assert!(functions.is_empty(), "{functions:?}");
@@ -147,7 +160,7 @@ async fn migrations_apply_roll_back_and_reapply_on_a_clean_database() {
             .await
             .unwrap()
             .len(),
-        MIGRATIONS
+        migrations()
     );
 
     // And up again.
@@ -156,7 +169,7 @@ async fn migrations_apply_roll_back_and_reapply_on_a_clean_database() {
     let applied = calling_migration::Migrator::get_applied_migrations(conn)
         .await
         .unwrap();
-    assert_eq!(applied.len(), MIGRATIONS);
+    assert_eq!(applied.len(), migrations());
 }
 
 #[tokio::test]
@@ -667,5 +680,86 @@ async fn no_privacy_relay_telephony_or_meeting_service_tables_exist() {
         || t.starts_with("call_")
         || t == "calls"
         || t == "calling_outbox_events"
+        || t.starts_with("enterprise_")
+        || t.starts_with("voicemail_")
         || t == MIGRATION_TABLE));
+    // No second Call authority (Part F, ADR 0018).
+    for duplicate in [
+        "enterprise_calls",
+        "pbx_calls",
+        "voicemail_calls",
+        "ivr_calls",
+    ] {
+        assert!(!all.iter().any(|t| t == duplicate), "{duplicate}");
+    }
+}
+
+/// Part F tables hold no raw telephone number, provider / SIP / edge identifier, DTMF
+/// digits, secret or public URL (§4–§5, §107, §123, §151–§154). Opaque cross-service
+/// references are UUIDs and are listed explicitly.
+#[tokio::test]
+async fn enterprise_columns_hold_no_contact_secret_dtmf_or_provider_data() {
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let columns = strings(
+        &db.conn,
+        "SELECT table_name || '.' || column_name FROM information_schema.columns \
+         WHERE table_schema = 'public' AND (table_name LIKE 'enterprise\\_%' OR table_name LIKE 'voicemail\\_%' \
+         OR table_name LIKE 'call\\_recording%')",
+    )
+    .await;
+    assert!(!columns.is_empty());
+    // Opaque references to records other services own (never contact values).
+    const OPAQUE_REFERENCES: &[&str] = &[
+        "enterprise_forwarding_rules.target_contact_reference",
+        "enterprise_forwarding_rules.privacy_relay_session_ref",
+    ];
+    for column in &columns {
+        if OPAQUE_REFERENCES.contains(&column.as_str()) {
+            continue;
+        }
+        let name = column.split('.').nth(1).unwrap();
+        for forbidden in [
+            "phone",
+            "e164",
+            "msisdn",
+            "telephone",
+            "number_raw",
+            "raw",
+            "dialed",
+            "caller_id",
+            "sip",
+            "pstn",
+            "provider",
+            "carrier",
+            "channel",
+            "asterisk",
+            "dialog",
+            "secret",
+            "password",
+            "token",
+            "url",
+            "digit",
+            "dtmf",
+            "contact",
+        ] {
+            assert!(
+                !name.contains(forbidden),
+                "column {column} looks like contact / provider / secret / DTMF storage"
+            );
+        }
+    }
+    for column in OPAQUE_REFERENCES {
+        let (table, name) = column.split_once('.').unwrap();
+        let types = strings(
+            &db.conn,
+            &format!(
+                "SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' \
+                 AND table_name = '{table}' AND column_name = '{name}'"
+            ),
+        )
+        .await;
+        assert!(types.is_empty() || types == ["uuid"], "{column}: {types:?}");
+    }
 }

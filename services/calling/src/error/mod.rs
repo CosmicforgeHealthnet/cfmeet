@@ -54,6 +54,8 @@ pub enum ErrorCode {
     PublicRouteDenied,
     PublicRouteUnavailable,
     TelecomSpendLimitExceeded,
+    VersionConflict,
+    EnterprisePolicyDenied,
 }
 
 impl ErrorCode {
@@ -87,6 +89,8 @@ impl ErrorCode {
         ErrorCode::PublicRouteDenied,
         ErrorCode::PublicRouteUnavailable,
         ErrorCode::TelecomSpendLimitExceeded,
+        ErrorCode::VersionConflict,
+        ErrorCode::EnterprisePolicyDenied,
     ];
 
     /// Codes that only internal routes return.
@@ -143,6 +147,12 @@ impl ErrorCode {
             ErrorCode::TelecomSpendLimitExceeded => {
                 "A telecom spend or velocity limit is reached; the call was not placed."
             }
+            ErrorCode::VersionConflict => {
+                "The resource has changed since expectedVersion; fetch it and retry."
+            }
+            ErrorCode::EnterprisePolicyDenied => {
+                "The enterprise policy does not permit this operation."
+            }
             _ => "The request could not be completed.",
         }
     }
@@ -178,6 +188,8 @@ impl ErrorCode {
             ErrorCode::PublicRouteDenied => "PUBLIC_ROUTE_DENIED",
             ErrorCode::PublicRouteUnavailable => "PUBLIC_ROUTE_UNAVAILABLE",
             ErrorCode::TelecomSpendLimitExceeded => "TELECOM_SPEND_LIMIT_EXCEEDED",
+            ErrorCode::VersionConflict => "VERSION_CONFLICT",
+            ErrorCode::EnterprisePolicyDenied => "ENTERPRISE_POLICY_DENIED",
         }
     }
 }

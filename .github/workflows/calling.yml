@@ -183,8 +183,27 @@ jobs:
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' \
              AND (tablename = 'calls' OR tablename LIKE 'call\_%' OR tablename = 'calling_outbox_events')")" = "30"
+          # Applied = registered migrations (derived from the migrator, never hand-counted).
+          registered="$(grep -c 'Box::new(m20' migration/src/lib.rs)"
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
-            "SELECT count(*) FROM calling_seaql_migrations")" = "19"
+            "SELECT count(*) FROM calling_seaql_migrations")" = "$registered"
+          # Part F (ADR 0018): the enterprise foundation exists, and there is no second
+          # Call authority.
+          for t in enterprise_call_policies enterprise_departments enterprise_department_members \
+                   enterprise_admin_audit; do
+            test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
+              "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename = '$t'")" = "1" \
+              || { echo "::error::missing enterprise table $t"; exit 1; }
+          done
+          test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
+            "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename IN \
+             ('enterprise_calls', 'pbx_calls', 'voicemail_calls', 'ivr_calls')")" = "0"
+          # Every public table is Calling's own.
+          test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
+            "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND NOT ( \
+               tablename LIKE 'platform\_%' OR tablename LIKE 'call\_%' OR tablename IN ('calls', \
+               'calling_outbox_events', 'calling_seaql_migrations') OR tablename LIKE 'enterprise\_%' \
+               OR tablename LIKE 'voicemail\_%')")" = "0"
 
       - name: Service starts against the migrated database and refuses unsafe configuration
         env:

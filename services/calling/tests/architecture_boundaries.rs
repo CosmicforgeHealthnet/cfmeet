@@ -106,6 +106,9 @@ fn is_calling_table(name: &str) -> bool {
         || name.starts_with("call_")
         || name == "calls"
         || name == "calling_outbox_events"
+        // Part F: enterprise configuration / continuity is Calling-owned (ADR 0018).
+        || name.starts_with("enterprise_")
+        || name.starts_with("voicemail_")
 }
 
 /// Code with the contents of string literals removed (identifiers, types and syntax
@@ -298,7 +301,6 @@ const PROVIDER_TERMS: &[&str] = &[
     "sip_dialog",
     "dialog_id",
     "pstn",
-    "voicemail",
 ];
 
 /// Identifiers that would hold a telephone number.
@@ -1026,4 +1028,73 @@ fn request_bodies_carry_cf_meet_concepts_only() {
         "#[derive(Deserialize)]\nstruct Body {\n    expected_version: i64,\n}"
     )
     .is_empty());
+}
+
+/// Part F (ADR 0018): enterprise calling extends the ONE canonical Call. No second Call
+/// authority (table), no PBX / enterprise-calling / voicemail / IVR deployable, no
+/// Meeting Service domain types in enterprise code.
+#[test]
+fn enterprise_calling_has_no_second_call_model_or_service() {
+    let mut files = Vec::new();
+    rust_files(&manifest_dir().join("migration/src"), &mut files);
+    for file in files {
+        let lower = std::fs::read_to_string(&file).unwrap().to_lowercase();
+        for duplicate in [
+            "enterprise_calls",
+            "pbx_calls",
+            "voicemail_calls",
+            "ivr_calls",
+            "queue_calls",
+            "enterprise_call_legs",
+            "enterprise_participants",
+        ] {
+            assert!(
+                !contains_word(&lower, duplicate),
+                "{}: `{duplicate}` would be a second Call authority",
+                file.display()
+            );
+        }
+    }
+    let services = manifest_dir().join("..");
+    for forbidden in [
+        "pbx",
+        "enterprise-calling",
+        "enterprise_calling",
+        "voicemail",
+        "ivr",
+    ] {
+        assert!(
+            !services.join(forbidden).exists(),
+            "services/{forbidden} must not exist: enterprise calling lives in services/calling"
+        );
+    }
+    for (file, code) in production_sources() {
+        if !(file.starts_with("src/enterprise/") || file.starts_with("src/calls/app/enterprise/")) {
+            continue;
+        }
+        let lower = code.to_lowercase();
+        for meeting in [
+            "meeting_space",
+            "conference_session",
+            "meeting_participant",
+            "meeting_recording",
+            "meeting_permission",
+        ] {
+            assert!(
+                !lower.contains(meeting),
+                "{file} uses Meeting Service domain vocabulary `{meeting}`"
+            );
+        }
+        // Enterprise code never stores or accepts a raw telephone number.
+        let identifiers = strip_strings(&code).to_lowercase();
+        for field in TELEPHONE_FIELDS
+            .iter()
+            .chain(&["raw_number", "rawnumber", "telephonenumber"])
+        {
+            assert!(
+                !identifiers.contains(field),
+                "{file}: telephone-number field `{field}`"
+            );
+        }
+    }
 }

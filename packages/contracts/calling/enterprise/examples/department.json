@@ -1,0 +1,18 @@
+{
+  "departmentId": "6a1f3e2d-7b4c-4d5e-8f60-718293a4b5c6",
+  "name": "Sales",
+  "description": null,
+  "status": "ACTIVE",
+  "memberCount": 1,
+  "members": [
+    {
+      "principalId": "11111111-2222-4333-8444-555555555555",
+      "role": "MANAGER",
+      "addedAt": "2031-03-01T10:00:30.000Z"
+    }
+  ],
+  "version": 2,
+  "createdAt": "2031-03-01T10:00:30.000Z",
+  "updatedAt": "2031-03-01T10:01:00.000Z",
+  "disabledAt": null
+}

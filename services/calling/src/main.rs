@@ -192,6 +192,22 @@ async fn main() -> anyhow::Result<()> {
         "public-network calling configured"
     );
 
+    // Enterprise calling (Part F): kill switches, all OFF unless explicitly enabled. Each
+    // stops NEW effects only; termination and cleanup are never blocked.
+    let enterprise_flags = match calling::enterprise::EnterpriseFlags::from_lookup(&lookup) {
+        Ok(flags) => flags,
+        Err(err) => {
+            tracing::error!(error = %err, "enterprise configuration error");
+            std::process::exit(2);
+        }
+    };
+    tracing::info!(
+        enterprise_calling_enabled = enterprise_flags.enterprise_calling,
+        voicemail_enabled = enterprise_flags.voicemail,
+        call_recording_enabled = enterprise_flags.call_recording,
+        "enterprise calling configured"
+    );
+
     let clock: SharedClock = Arc::new(SystemClock);
     let state = AppState::new(
         db,
@@ -212,6 +228,7 @@ async fn main() -> anyhow::Result<()> {
             privacy_relay,
             contact_delegation,
             public_network,
+            enterprise_flags,
         },
     );
 

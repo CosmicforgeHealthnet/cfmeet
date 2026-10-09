@@ -87,6 +87,46 @@ enum Command {
     /// §45). No owner = inbound public calls are refused.
     #[command(subcommand)]
     InboundOwner(InboundOwnerCmd),
+    /// Enterprise calling administrative capabilities of an environment (Part F §18):
+    /// the organization-level second key. High-risk capabilities (public forwarding,
+    /// recording administration) are granted here only, never by the customer API.
+    #[command(subcommand)]
+    EnterpriseCapabilities(EnterpriseCapabilitiesCmd),
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+#[allow(clippy::enum_variant_names)] // the CLI values mirror MANAGE_* capabilities
+enum CapabilityArg {
+    ManageRouting,
+    ManagePublicForwarding,
+    ManageVoicemail,
+    ManageRecording,
+}
+
+impl From<CapabilityArg> for calling::enterprise::policy::AdminCapability {
+    fn from(c: CapabilityArg) -> Self {
+        use calling::enterprise::policy::AdminCapability as C;
+        match c {
+            CapabilityArg::ManageRouting => C::ManageRouting,
+            CapabilityArg::ManagePublicForwarding => C::ManagePublicForwarding,
+            CapabilityArg::ManageVoicemail => C::ManageVoicemail,
+            CapabilityArg::ManageRecording => C::ManageRecording,
+        }
+    }
+}
+
+#[derive(Subcommand)]
+enum EnterpriseCapabilitiesCmd {
+    /// Replace the capability set of the environment's baseline policy (audited as
+    /// OPERATOR).
+    Set {
+        #[command(flatten)]
+        environment: EnvironmentPath,
+        #[arg(long = "capability", value_enum)]
+        capabilities: Vec<CapabilityArg>,
+    },
+    /// The environment's effective baseline policy.
+    Show(EnvironmentPath),
 }
 
 #[derive(Subcommand)]
@@ -886,6 +926,52 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                         "policyVersion": effective.version_label(),
                         "policy": effective.policy,
                     }))
+                }
+            }
+        }
+        Command::EnterpriseCapabilities(cmd) => {
+            let enterprise = calling::enterprise::EnterpriseService::new(
+                admin.db.clone(),
+                std::sync::Arc::new(calling::domain::SystemClock),
+                calling::enterprise::EnterpriseFlags::default(),
+            );
+            let refused = |e: calling::enterprise::EnterpriseError| match e {
+                calling::enterprise::EnterpriseError::Validation(m) => {
+                    PlatformError::Validation(m.to_string())
+                }
+                calling::enterprise::EnterpriseError::NotFound => {
+                    PlatformError::NotFound("environment")
+                }
+                _ => PlatformError::Database {
+                    summary: "enterprise policy".to_string(),
+                    connectivity: false,
+                },
+            };
+            match cmd {
+                EnterpriseCapabilitiesCmd::Set {
+                    environment,
+                    capabilities,
+                } => {
+                    let env = admin.environment(&environment).await?;
+                    let scope = calling::calls::command::CallScope::of_environment(&env);
+                    let view = enterprise
+                        .operator_set_capabilities(
+                            scope,
+                            capabilities.into_iter().map(Into::into).collect(),
+                        )
+                        .await
+                        .map_err(refused)?;
+                    print(&view)
+                }
+                EnterpriseCapabilitiesCmd::Show(environment) => {
+                    let env = admin.environment(&environment).await?;
+                    let scope = calling::calls::command::CallScope::of_environment(&env);
+                    print(
+                        &enterprise
+                            .effective_default_policy(scope)
+                            .await
+                            .map_err(refused)?,
+                    )
                 }
             }
         }

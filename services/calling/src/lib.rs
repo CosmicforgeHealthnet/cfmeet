@@ -27,6 +27,7 @@ pub mod domain;
 pub mod calls;
 pub mod config;
 pub mod endpoints;
+pub mod enterprise;
 pub mod error;
 pub mod internal_auth;
 pub mod media;

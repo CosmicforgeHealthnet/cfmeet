@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Calling service API",
-    "version": "1.6.0",
+    "version": "1.7.0",
     "description": "HTTP surface exposed by services/calling (Part C sections 15-25): the health endpoint; the call API (list, get, available actions); application call creation (POST /v1/calls) and control (accept, decline, cancel, end, hold, resume, transfer, session removal, media credentials); the application endpoint registry and signaling-credential minting; the endpoint's own signaling operations (WebSocket channel, offer recovery, accept / decline, media credentials) authenticated by a short-lived signaling credential; the media connection gateway, which admits every media signaling connection against authoritative state before the media server is contacted; and the media provider callback, authenticated by the provider's signature. There is no generic state mutation: a client never sends a state, a scope, an authorization result, a route, a provider, a room, a media identity, a permission or a telephone number. Tenant, application and environment scope comes only from the authenticated credential; a call, principal, endpoint, offer or session of another scope is answered exactly like a missing one (404). Every state-changing command carries expectedVersion (the single concurrency mechanism); Idempotency-Key is required for call creation and transfer and honoured on every other command (a replay returns the recorded response with Idempotent-Replayed: true; a different request under the same key is 409 IDEMPOTENCY_CONFLICT). Every response carries an x-request-id header with the server-generated request id; a well-formed client x-request-id is echoed as x-client-request-id."
   },
   "paths": {
@@ -1928,6 +1928,934 @@
           }
         }
       }
+    },
+    "/v1/enterprise/policies": {
+      "post": {
+        "operationId": "createEnterprisePolicy",
+        "summary": "Create an enterprise call policy",
+        "description": "Requires enterprise.config.write. Typed rules only. isDefault makes it the environment's baseline (the previous default is cleared, a versioned change). Enabling public forwarding or granting MANAGE_PUBLIC_FORWARDING / MANAGE_RECORDING needs that capability in the current baseline (granted by a CF Meet operator): otherwise 403 ENTERPRISE_POLICY_DENIED. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/CreatePolicyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The policy (version 1).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/CallPolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listEnterprisePolicies",
+        "summary": "List enterprise call policies",
+        "description": "Requires enterprise.config.read. Keyset pagination in creation order.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1-100, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Only resources in this status.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ACTIVE",
+                "DISABLED"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of policies.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/CallPolicyList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/policies/{policy_id}": {
+      "get": {
+        "operationId": "getEnterprisePolicy",
+        "summary": "Get an enterprise call policy",
+        "description": "Requires enterprise.config.read.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.read",
+        "parameters": [
+          {
+            "name": "policy_id",
+            "in": "path",
+            "required": true,
+            "description": "Enterprise call policy id (a policy of another scope is 404).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The policy.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/CallPolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateEnterprisePolicy",
+        "summary": "Change an enterprise call policy",
+        "description": "Requires enterprise.config.write and the current expectedVersion (409 VERSION_CONFLICT otherwise; nothing changes). Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "parameters": [
+          {
+            "name": "policy_id",
+            "in": "path",
+            "required": true,
+            "description": "Enterprise call policy id (a policy of another scope is 404).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/UpdatePolicyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The changed policy.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/CallPolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "disableEnterprisePolicy",
+        "summary": "Disable an enterprise call policy",
+        "description": "Requires enterprise.config.write and expectedVersion. Never deleted (historical references stay valid); never blocked by a kill switch. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "parameters": [
+          {
+            "name": "policy_id",
+            "in": "path",
+            "required": true,
+            "description": "Enterprise call policy id (a policy of another scope is 404).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expectedVersion",
+            "in": "query",
+            "required": true,
+            "description": "The version the change was decided on (409 VERSION_CONFLICT otherwise).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The disabled policy.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/CallPolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/effective-policy": {
+      "get": {
+        "operationId": "getEffectiveEnterprisePolicy",
+        "summary": "The environment's policy in force",
+        "description": "Requires enterprise.config.read. The ACTIVE default policy, else the restrictive built-in default (policyId null, version 0).",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.read",
+        "responses": {
+          "200": {
+            "description": "The effective baseline policy.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/EffectivePolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/departments": {
+      "post": {
+        "operationId": "createDepartment",
+        "summary": "Create a department",
+        "description": "Requires enterprise.config.write. Departments group principals for administration and routing; membership grants nothing. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/CreateDepartmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The department (version 1).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/Department"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listDepartments",
+        "summary": "List departments",
+        "description": "Requires enterprise.config.read.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1-100, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Only resources in this status.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ACTIVE",
+                "DISABLED"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of departments.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/DepartmentList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/departments/{department_id}": {
+      "get": {
+        "operationId": "getDepartment",
+        "summary": "Get a department",
+        "description": "Requires enterprise.config.read.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.read",
+        "parameters": [
+          {
+            "name": "department_id",
+            "in": "path",
+            "required": true,
+            "description": "Department id (a department of another scope is 404).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The department and its members.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/Department"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateDepartment",
+        "summary": "Change a department",
+        "description": "Requires enterprise.config.write and expectedVersion. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "parameters": [
+          {
+            "name": "department_id",
+            "in": "path",
+            "required": true,
+            "description": "Department id (a department of another scope is 404).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/UpdateDepartmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The changed department.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/Department"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "disableDepartment",
+        "summary": "Disable a department",
+        "description": "Requires enterprise.config.write and expectedVersion. Membership is kept as history. Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "parameters": [
+          {
+            "name": "department_id",
+            "in": "path",
+            "required": true,
+            "description": "Department id (a department of another scope is 404).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expectedVersion",
+            "in": "query",
+            "required": true,
+            "description": "The version the change was decided on (409 VERSION_CONFLICT otherwise).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The disabled department.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/Department"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/departments/{department_id}/members": {
+      "put": {
+        "operationId": "replaceDepartmentMembers",
+        "summary": "Replace a department's members",
+        "description": "Requires enterprise.config.write and expectedVersion. Atomic, bounded (500), distinct ACTIVE principals of the same scope (a foreign or unknown principal is 404 and nothing changes). Audited.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.write",
+        "parameters": [
+          {
+            "name": "department_id",
+            "in": "path",
+            "required": true,
+            "description": "Department id (a department of another scope is 404).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/ReplaceDepartmentMembersRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The department with its new members.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/Department"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EnterpriseConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/enterprise/audit": {
+      "get": {
+        "operationId": "listEnterpriseAudit",
+        "summary": "Administrative audit records",
+        "description": "Requires enterprise.config.read. Newest first; optionally one resource. Only the caller's scope.",
+        "security": [
+          {
+            "platformCredential": [
+              "enterprise.config.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.config.read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1-100, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "resourceId",
+            "in": "query",
+            "required": false,
+            "description": "Only records of this resource.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of audit records.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/AuditRecordList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/EnterpriseForbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2305,6 +3233,36 @@
             }
           }
         }
+      },
+      "EnterpriseForbidden": {
+        "description": "INSUFFICIENT_SCOPE (the credential lacks the operation's enterprise scope; calls.* never implies it) or ENTERPRISE_POLICY_DENIED (the organization's enterprise policy does not grant this capability or action).",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "EnterpriseConflict": {
+        "description": "VERSION_CONFLICT (expectedVersion is not the current version; nothing changed) or CONFLICT (an active name / extension number already exists, the resource is disabled, or it is still referenced).",
+        "headers": {
+          "x-request-id": {
+            "$ref": "#/components/headers/XRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
       }
     },
     "schemas": {
@@ -2358,7 +3316,9 @@
           "PRIVACY_AUTHORIZATION_UNAVAILABLE",
           "PUBLIC_ROUTE_DENIED",
           "PUBLIC_ROUTE_UNAVAILABLE",
-          "TELECOM_SPEND_LIMIT_EXCEEDED"
+          "TELECOM_SPEND_LIMIT_EXCEEDED",
+          "VERSION_CONFLICT",
+          "ENTERPRISE_POLICY_DENIED"
         ]
       },
       "ErrorEnvelope": {

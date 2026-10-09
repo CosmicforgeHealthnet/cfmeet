@@ -324,7 +324,15 @@ class RealRepository(unittest.TestCase):
             "call_inbound_owners",
         }
         self.assertTrue(call_domain <= calling)
-        self.assertTrue(all(t.startswith("platform_") or t in call_domain for t in calling), calling)
+        # Part F sections 52-62: enterprise configuration and continuity are Calling-owned
+        # (ADR 0018) and live under the enterprise_ / voicemail_ / call_recording prefixes.
+        self.assertTrue({"enterprise_call_policies", "enterprise_departments",
+                         "enterprise_department_members", "enterprise_admin_audit"} <= calling)
+        self.assertTrue(all(t.startswith(("platform_", "enterprise_", "voicemail_"))
+                            or t in call_domain or t.startswith("call_recording")
+                            for t in calling), calling)
+        # No second Call authority.
+        self.assertFalse(calling & {"enterprise_calls", "pbx_calls", "voicemail_calls", "ivr_calls"})
         self.assertFalse(calling & self.repo.tables["meeting-service"])
 
     def test_privacy_relay_owns_its_tables(self):

@@ -11,6 +11,7 @@ use crate::{
     },
     domain::SharedClock,
     endpoints::{EndpointService, PresenceWindow},
+    enterprise::EnterpriseService,
     internal_auth::ServiceAuthRuntime,
     media::{gateway::MediaConnectionGateway, CallMediaProvider, MediaCredentialPolicy},
     platform::{
@@ -45,6 +46,8 @@ pub struct CallingRuntime {
     pub contact_delegation: Option<Arc<cf_service_auth::ContactDelegationSigner>>,
     /// Public-network execution (Part E; default: unconfigured — no public route).
     pub public_network: crate::calls::app::public::PublicNetwork,
+    /// Enterprise kill switches (Part F; default: all off).
+    pub enterprise_flags: crate::enterprise::EnterpriseFlags,
 }
 
 #[derive(Clone)]
@@ -71,6 +74,8 @@ pub struct AppState {
     pub privacy_relay: Arc<dyn PrivacyRelayAuthority>,
     /// Contact Vault access-token minting (§31).
     pub contact_delegation: Option<Arc<cf_service_auth::ContactDelegationSigner>>,
+    /// Enterprise calling configuration (Part F).
+    pub enterprise: Arc<EnterpriseService>,
 }
 
 impl AppState {
@@ -97,6 +102,11 @@ impl AppState {
             PresenceWindow::default(),
         ));
         let media_gateway = runtime.media_gateway.clone();
+        let enterprise = Arc::new(EnterpriseService::new(
+            db.clone(),
+            clock.clone(),
+            runtime.enterprise_flags,
+        ));
         let app = Arc::new(
             AppCallService::new(
                 calls.clone(),
@@ -133,6 +143,7 @@ impl AppState {
             service_auth,
             privacy_relay: runtime.privacy_relay,
             contact_delegation: runtime.contact_delegation,
+            enterprise,
             clock,
             db,
         }

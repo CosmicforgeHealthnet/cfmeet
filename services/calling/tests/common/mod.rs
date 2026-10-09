@@ -12,6 +12,7 @@
 pub mod app;
 pub mod calls;
 pub mod contracts;
+pub mod enterprise;
 pub mod fake_media;
 pub mod privacy;
 pub mod provider_contract;
@@ -470,6 +471,7 @@ pub fn test_runtime(
         privacy_relay: Arc::new(calling::privacy_relay::UnconfiguredPrivacyRelay),
         contact_delegation: None,
         public_network: Default::default(),
+        enterprise_flags: calling::enterprise::EnterpriseFlags::ALL_ON,
     }
 }
 

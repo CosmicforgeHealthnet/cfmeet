@@ -587,11 +587,11 @@ fn every_operation_declares_its_authentication() {
             assert_eq!(scheme, expected, "{method} {path}");
             if scheme == "platformCredential" {
                 let scope = security[0][scheme][0].as_str().unwrap();
-                let expected_scope = if method == "get" {
+                let expected_scope = enterprise_scope(path, method).unwrap_or(if method == "get" {
                     names::CALLS_READ
                 } else {
                     names::CALLS_WRITE
-                };
+                });
                 assert_eq!(scope, expected_scope, "{method} {path}");
                 assert_eq!(op["x-cfmeet-required-scope"], scope, "{method} {path}");
             }
@@ -691,9 +691,54 @@ fn every_operation_declares_its_authentication() {
     }
     let paths: Vec<&String> = documented["paths"].as_object().unwrap().keys().collect();
     assert!(paths.iter().all(|p| !p.ends_with("/state")), "{paths:?}");
-    for (_, item) in documented["paths"].as_object().unwrap() {
-        assert!(item.get("patch").is_none() && item.get("put").is_none());
+    // Calls have no generic mutation: PATCH / PUT exist only for versioned enterprise
+    // CONFIGURATION resources (Part F §20), never for a Call or its state.
+    for (path, item) in documented["paths"].as_object().unwrap() {
+        if path.starts_with("/v1/enterprise/") {
+            continue;
+        }
+        assert!(
+            item.get("patch").is_none() && item.get("put").is_none(),
+            "{path}"
+        );
     }
+}
+
+/// The enterprise scope an enterprise operation requires (Part F §19): configuration
+/// reads / writes, voicemail and recording have their own scopes — never calls.*.
+fn enterprise_scope(path: &str, method: &str) -> Option<&'static str> {
+    if !path.starts_with("/v1/enterprise/") {
+        return None;
+    }
+    Some(if path.starts_with("/v1/enterprise/voicemail/messages") {
+        if method == "get" || path.ends_with("/media-access") {
+            names::ENTERPRISE_VOICEMAIL_READ
+        } else {
+            names::ENTERPRISE_VOICEMAIL_MANAGE
+        }
+    } else if path.starts_with("/v1/enterprise/voicemail/mailboxes") {
+        if method == "get" {
+            names::ENTERPRISE_CONFIG_READ
+        } else {
+            names::ENTERPRISE_VOICEMAIL_MANAGE
+        }
+    } else if path.starts_with("/v1/enterprise/recordings") {
+        if method == "get" || path.ends_with("/media-access") {
+            names::ENTERPRISE_RECORDING_READ
+        } else {
+            names::ENTERPRISE_RECORDING_MANAGE
+        }
+    } else if path.starts_with("/v1/enterprise/recording-policies") {
+        if method == "get" {
+            names::ENTERPRISE_CONFIG_READ
+        } else {
+            names::ENTERPRISE_RECORDING_MANAGE
+        }
+    } else if method == "get" {
+        names::ENTERPRISE_CONFIG_READ
+    } else {
+        names::ENTERPRISE_CONFIG_WRITE
+    })
 }
 
 #[test]
