@@ -21,7 +21,10 @@ use axum::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{create::CreateAppCall, media::MediaCredentialActor, InvitationActor, TransferRequest};
+use super::{
+    create::CreateAppCall, enterprise::TransferTarget, media::MediaCredentialActor,
+    InvitationActor, TransferRequest,
+};
 use crate::{
     calls::{
         command::{CallCommandContext, CallScope},
@@ -491,7 +494,14 @@ async fn resume(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TransferBody {
     transferring_participant_id: Uuid,
-    target_principal_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target_principal_id: Option<Uuid>,
+    /// Part F: an enterprise extension number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target_extension: Option<String>,
+    /// Part F: a typed enterprise destination.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target_destination: Option<crate::enterprise::destinations::Destination>,
     expected_version: i64,
 }
 
@@ -513,18 +523,40 @@ async fn transfer(
         true,
     )?
     .ok_or(CallingError::Internal)?;
+    let target = match (
+        body.target_principal_id,
+        body.target_extension.clone(),
+        body.target_destination,
+    ) {
+        (Some(p), None, None) => TransferTarget::Principal(PrincipalId::from_uuid(p)),
+        (None, Some(number), None) => TransferTarget::Extension(number),
+        (None, None, Some(d)) => TransferTarget::Destination(d),
+        _ => return Err(CallingError::Validation(
+            "exactly one of targetPrincipalId, targetExtension or targetDestination is required.",
+        )),
+    };
+    if !matches!(target, TransferTarget::Principal(_)) {
+        // Enterprise targets need the enterprise calling scope, never implied by calls.*.
+        ctx.require_scope(names::ENTERPRISE_CALLS_USE)?;
+    }
+    let call_id = CallId::from_uuid(call_uuid);
+    let resolved = state
+        .app
+        .resolve_transfer_target(&ctx, call_id, target)
+        .await?;
     let outcome = state
         .app
         .transfer(
             &ctx,
-            CallId::from_uuid(call_uuid),
+            call_id,
             TransferRequest {
                 transferring_participant: CallParticipantId::from_uuid(
                     body.transferring_participant_id,
                 ),
-                target: PrincipalId::from_uuid(body.target_principal_id),
+                target: resolved.principal,
                 expected_version: body.expected_version,
                 key,
+                enterprise_destination: resolved.destination,
             },
         )
         .await?;

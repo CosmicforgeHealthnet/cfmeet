@@ -332,6 +332,7 @@ async fn real_livekit_certification() {
     enterprise_extension_call(&cert).await;
     enterprise_ring_groups(&cert).await;
     enterprise_queue(&cert).await;
+    enterprise_transfer(&cert).await;
     video_call_and_removal(&cert).await;
     for round in 0..3 {
         refreshed_privileged_token_cannot_reenter(&cert, round).await;
@@ -1136,6 +1137,234 @@ async fn enterprise_queue(cert: &Cert) {
     );
     a.quit().await;
     b.quit().await;
+}
+
+/// Part F §207 / §208: an enterprise transfer with real media — B hands the Call to
+/// extension C (same Call id, B removed from the media resource, A now hears C), then a
+/// failed transfer (D declines) returns the SAME Call to CONNECTED with media intact.
+async fn enterprise_transfer(cert: &Cert) {
+    use calling::platform::scopes::names;
+    let h = cert.a.h();
+    let admin = common::enterprise::credential(
+        h,
+        &cert.a.w.consumer,
+        cert.a.w.kind,
+        &[
+            names::ENTERPRISE_CONFIG_READ,
+            names::ENTERPRISE_CONFIG_WRITE,
+        ],
+    )
+    .await;
+    let user = common::enterprise::credential(
+        h,
+        &cert.a.w.consumer,
+        cert.a.w.kind,
+        &[
+            names::CALLS_READ,
+            names::CALLS_WRITE,
+            names::ENTERPRISE_CALLS_USE,
+        ],
+    )
+    .await;
+    let member = |reference: &'static str| async move {
+        let (view, _) = h
+            .platform
+            .register_principal(
+                cert.a.w.consumer.env(cert.a.w.kind).id,
+                calling::platform::principals::NewPrincipal::External {
+                    kind: calling::domain::PrincipalKind::EnterpriseMember,
+                    external_reference: reference.to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        h.state
+            .principals
+            .resolve(
+                &cert.a.w.ctx,
+                &calling::platform::principals::PrincipalReference::Id(view.id),
+            )
+            .await
+            .unwrap()
+    };
+    let alice = member("xf-alice").await;
+    let bob = member("xf-bob").await;
+    let carol = member("xf-carol").await;
+    let dave = member("xf-dave").await;
+    for (number, who) in [("1502", &bob), ("1503", &carol), ("1504", &dave)] {
+        let r = h
+            .request(
+                axum::http::Method::POST,
+                "/v1/enterprise/extensions",
+                Some(admin.secret.expose_once()),
+                Some(json!({ "extensionNumber": number, "displayLabel": number,
+                              "destination": { "type": "ENTERPRISE_MEMBER", "id": who.id() } })),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    }
+    let alice_desk = cert.a.device(&alice, "xf-alice-desk").await;
+    let bob_desk = cert.a.device(&bob, "xf-bob-desk").await;
+    let carol_desk = cert.a.device(&carol, "xf-carol-desk").await;
+    let dave_desk = cert.a.device(&dave, "xf-dave-desk").await;
+    let r = h
+        .request_with(
+            axum::http::Method::POST,
+            "/v1/calls",
+            Some(user.secret.expose_once()),
+            Some(json!({ "kind": "VOICE", "initiatorPrincipalId": alice.id(),
+                         "initiatorEndpointId": alice_desk.endpoint, "targetExtension": "1502" })),
+            &[("idempotency-key", "xf-cert-1")],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let call: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+    let invitation = cert
+        .a
+        .invitation_for(call, bob_desk.endpoint)
+        .await
+        .unwrap();
+    let (_, version) = cert.a.state(call).await;
+    let r = cert.a.accept(call, invitation, &bob_desk, version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let mut clients = Vec::new();
+    for desk in [&alice_desk, &bob_desk] {
+        let s = cert.a.session_on(call, desk.endpoint).await.unwrap();
+        let c = cert.credential(call, s).await;
+        let mut client = RtcClient::spawn(&cert.cfg).await;
+        assert_eq!(
+            client
+                .connect(c["url"].as_str().unwrap(), c["token"].as_str().unwrap())
+                .await["ok"],
+            true
+        );
+        clients.push(client);
+    }
+    eventually(15, "transfer scenario CONNECTED", || async {
+        cert.state(call).await == CallState::Connected
+    })
+    .await;
+    for client in clients.iter_mut() {
+        assert_eq!(
+            client
+                .cmd(json!({ "cmd": "wait_permission", "publish": true, "timeout": 10 }))
+                .await["ok"],
+            true
+        );
+        assert_eq!(
+            client
+                .cmd(json!({ "cmd": "publish", "kind": "audio" }))
+                .await["ok"],
+            true
+        );
+    }
+    let mut b = clients.pop().unwrap();
+    let mut a = clients.pop().unwrap();
+    assert_eq!(
+        a.cmd(json!({ "cmd": "wait_subscribed", "count": 1, "timeout": 15 }))
+            .await["ok"],
+        true
+    );
+
+    // B transfers its place to extension 1503 (an enterprise target).
+    let transfer = |participant: Uuid, extension: &'static str, key: &'static str| {
+        let token = user.secret.expose_once().to_string();
+        async move {
+            let (_, version) = cert.a.state(call).await;
+            h.request_with(
+                axum::http::Method::POST,
+                &format!("/v1/calls/{call}/transfer"),
+                Some(&token),
+                Some(json!({ "transferringParticipantId": participant,
+                             "targetExtension": extension, "expectedVersion": version })),
+                &[("idempotency-key", key)],
+            )
+            .await
+        }
+    };
+    let bob_participant = cert.a.participant_of(call, bob.id().as_uuid()).await;
+    let r = transfer(bob_participant, "1503", "xf-cert-2").await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(cert.state(call).await, CallState::Transferring);
+    let invitation = cert
+        .a
+        .invitation_for(call, carol_desk.endpoint)
+        .await
+        .unwrap();
+    let (_, version) = cert.a.state(call).await;
+    let r = cert.a.accept(call, invitation, &carol_desk, version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let s3 = cert.a.session_on(call, carol_desk.endpoint).await.unwrap();
+    let c3 = cert.credential(call, s3).await;
+    let mut c = RtcClient::spawn(&cert.cfg).await;
+    let joined = c
+        .connect(c3["url"].as_str().unwrap(), c3["token"].as_str().unwrap())
+        .await;
+    assert_eq!(joined["ok"], true);
+    let carol_identity = joined["identity"].as_str().unwrap().to_string();
+    eventually(20, "transfer completed on real media evidence", || async {
+        cert.state(call).await == CallState::Connected
+    })
+    .await;
+    // B was removed from the media resource; A now hears C — the SAME Call.
+    assert_eq!(
+        b.cmd(json!({ "cmd": "wait_disconnected", "timeout": 15 }))
+            .await["ok"],
+        true
+    );
+    assert_eq!(
+        c.cmd(json!({ "cmd": "wait_permission", "publish": true, "timeout": 10 }))
+            .await["ok"],
+        true
+    );
+    assert_eq!(
+        c.cmd(json!({ "cmd": "publish", "kind": "audio" })).await["ok"],
+        true
+    );
+    let heard = a
+        .cmd(json!({ "cmd": "wait_subscribed", "count": 2, "timeout": 20 }))
+        .await;
+    assert!(
+        heard["subscribed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["from"] == carol_identity.as_str()),
+        "A hears C after the transfer: {heard}"
+    );
+    assert_eq!(
+        common::scalar_i64(
+            h.conn(),
+            &format!("SELECT count(*) FROM calls WHERE id = '{call}'")
+        )
+        .await,
+        1
+    );
+    println!("enterprise transfer certified: 1502 -> 1503 on one Call with real media");
+
+    // A failed transfer (D declines) returns the SAME Call to CONNECTED, media intact.
+    let carol_participant = cert.a.participant_of(call, carol.id().as_uuid()).await;
+    let r = transfer(carol_participant, "1504", "xf-cert-3").await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let invitation = cert
+        .a
+        .invitation_for(call, dave_desk.endpoint)
+        .await
+        .unwrap();
+    let (_, version) = cert.a.state(call).await;
+    let r = cert.a.decline(call, invitation, &dave_desk, version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(cert.state(call).await, CallState::Connected);
+    for client in [&mut a, &mut c] {
+        assert_eq!(client.status().await["connected"], true);
+    }
+    println!("enterprise failed transfer certified: declined target, the Call stays CONNECTED");
+    let (_, version) = cert.a.state(call).await;
+    let r = cert.a.command(call, "end", version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    for client in [a, b, c] {
+        client.quit().await;
+    }
 }
 
 async fn video_call_and_removal(cert: &Cert) {

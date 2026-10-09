@@ -119,6 +119,10 @@ jobs:
           done
           grep -q '^enterprise queue certified' "$RUNNER_TEMP/cert.log" \
             || { echo "::error::the call-queue certification did not run"; exit 1; }
+          grep -q '^enterprise transfer certified' "$RUNNER_TEMP/cert.log" \
+            || { echo "::error::the enterprise transfer certification did not run"; exit 1; }
+          grep -q '^enterprise failed transfer certified' "$RUNNER_TEMP/cert.log" \
+            || { echo "::error::the failed-transfer certification did not run"; exit 1; }
           grep -q 'test real_livekit_certification ... ok' "$RUNNER_TEMP/cert.log"
 
       - name: LiveKit logs

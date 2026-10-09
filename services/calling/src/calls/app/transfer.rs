@@ -50,6 +50,8 @@ pub struct TransferRequest {
     pub target: PrincipalId,
     pub expected_version: i64,
     pub key: CommandKey,
+    /// Part F: the enterprise destination the target was resolved from (evidence).
+    pub enterprise_destination: Option<crate::enterprise::destinations::Destination>,
 }
 
 fn transfer_body(call: &calls::Model, transfer: &call_transfers::Model) -> Value {
@@ -235,6 +237,13 @@ impl AppCallService {
             .transition_in(&txn, &cmd, &call, call.version, CallAction::BeginTransfer)
             .await?
             .call;
+        self.enterprise_transfer_step_in(
+            &txn,
+            &call,
+            request.enterprise_destination,
+            "TRANSFER_STARTED",
+        )
+        .await?;
         let (target_participant, _) = self
             .calls
             .add_participant_in(&txn, &cmd, &call, &target, None)
@@ -394,6 +403,8 @@ impl AppCallService {
         let transfer = self
             .calls
             .fail_transfer_in(txn, cmd, call, transfer, reason, category)
+            .await?;
+        self.enterprise_transfer_step_in(txn, call, None, "TRANSFER_FAILED")
             .await?;
         for invitation in self.calls.live_invitations(txn, call, None).await? {
             if invitation.transfer_id == Some(transfer.id) {
@@ -637,6 +648,8 @@ impl AppCallService {
         }
         self.calls
             .transfer_completed_in(&txn, &cmd, &call, transfer)
+            .await?;
+        self.enterprise_transfer_step_in(&txn, &call, None, "TRANSFER_COMPLETED")
             .await?;
         let call = self
             .calls

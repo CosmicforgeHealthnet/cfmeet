@@ -371,12 +371,11 @@
       "maxProperties": 0
     },
     "TransferRequest": {
-      "description": "Body of POST /v1/calls/{call_id}/transfer (Idempotency-Key required): the participant who hands its place over, and the principal who takes it. The same Call continues; no second Call is created.",
+      "description": "Body of POST /v1/calls/{call_id}/transfer (Idempotency-Key required): the participant who hands its place over, and the principal who takes it. The same Call continues; no second Call is created. Part F: exactly one target — a principal, an enterprise extension or a typed enterprise destination; an enterprise Call's policy must permit transfers (else 403).",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "transferringParticipantId",
-        "targetPrincipalId",
         "expectedVersion"
       ],
       "properties": {
@@ -390,8 +389,75 @@
           "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
           "type": "integer",
           "minimum": 1
+        },
+        "targetExtension": {
+          "description": "Part F: an enterprise extension number resolved in the credential's scope (requires enterprise.calls.use). It is followed to ONE principal: a member directly, a ring group's first eligible member, a queue's first available agent, a schedule's current route.",
+          "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/ExtensionNumber"
+        },
+        "targetDestination": {
+          "description": "Part F: a typed enterprise destination (ENTERPRISE_MEMBER, PRINCIPAL, EXTENSION, RING_GROUP, QUEUE or SCHEDULE of the same scope; requires enterprise.calls.use), resolved like targetExtension. A PUBLIC_CONTACT is refused: 403 when the enterprise policy forbids public forwarding, 422 CAPABILITY_UNAVAILABLE otherwise (public transfer of an established call is not offered by this deployment).",
+          "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/Destination"
         }
-      }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "targetPrincipalId"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "targetExtension"
+                ]
+              },
+              {
+                "required": [
+                  "targetDestination"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "targetExtension"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "targetPrincipalId"
+                ]
+              },
+              {
+                "required": [
+                  "targetDestination"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "targetDestination"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "targetPrincipalId"
+                ]
+              },
+              {
+                "required": [
+                  "targetExtension"
+                ]
+              }
+            ]
+          }
+        }
+      ]
     },
     "AcceptResult": {
       "description": "The offer was accepted: this endpoint's device won its participant's answer (single winner), the participant's other offers became ANSWERED_ELSEWHERE, and sessionId is the winning session that may now request media credentials. callAnswered is true when this acceptance moved the Call to ANSWERED.",

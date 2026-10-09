@@ -21,9 +21,11 @@ mod queues;
 mod ring_groups;
 mod router;
 mod sip;
+mod transfer;
 
 pub use ivr::IvrInputSource;
 pub use sip::{EnterpriseDialogOffer, EnterpriseKeypad};
+pub use transfer::{ResolvedTransferTarget, TransferTarget};
 
 use sea_orm::{
     ConnectionTrait, DatabaseTransaction, EntityTrait, FromQueryResult, TransactionTrait,
