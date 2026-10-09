@@ -322,6 +322,9 @@ class RealRepository(unittest.TestCase):
             "call_public_parties", "call_telephony_commands", "call_telephony_events",
             "call_public_bridges", "call_spend_policies", "call_spend_reservations",
             "call_inbound_owners",
+            # Part F section 55: the group-level single-winner claim of ring-group / queue
+            # offers (one answering participant per answer group of a Call).
+            "call_answer_group_claims",
         }
         self.assertTrue(call_domain <= calling)
         # Part F sections 52-62: enterprise configuration and continuity are Calling-owned

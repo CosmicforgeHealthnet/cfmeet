@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {
+      "entryId": "31111111-2222-4333-8444-555555555555",
+      "callId": "41111111-2222-4333-8444-555555555555",
+      "state": "WAITING",
+      "position": 1,
+      "enteredAt": "2031-03-01T10:00:30.000Z",
+      "deadlineAt": "2031-03-01T10:10:30.000Z",
+      "offerCount": 0,
+      "assignedPrincipalId": null,
+      "exitedAt": null,
+      "callerNumber": "+2348012345678"
+    }
+  ]
+}

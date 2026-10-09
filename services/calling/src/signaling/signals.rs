@@ -40,6 +40,10 @@ pub enum SignalType {
     Busy,
     AnsweredElsewhere,
     InvitationExpired,
+    /// An enterprise Call joined a queue (to the caller; data: queueId, position).
+    Queued,
+    /// The caller's authoritative position in its queue changed.
+    QueuePosition,
 }
 
 impl SignalType {
@@ -63,6 +67,8 @@ impl SignalType {
         SignalType::Busy,
         SignalType::AnsweredElsewhere,
         SignalType::InvitationExpired,
+        SignalType::Queued,
+        SignalType::QueuePosition,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -86,6 +92,8 @@ impl SignalType {
             SignalType::Busy => "call.busy",
             SignalType::AnsweredElsewhere => "call.answered_elsewhere",
             SignalType::InvitationExpired => "call.invitation_expired",
+            SignalType::Queued => "call.queued",
+            SignalType::QueuePosition => "call.queue_position",
         }
     }
 }

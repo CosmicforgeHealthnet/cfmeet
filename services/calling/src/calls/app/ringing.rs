@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
-use super::{summary, AppCallService, CommandOutcome, PendingSignals};
+use super::{enterprise::Continuation, summary, AppCallService, CommandOutcome, PendingSignals};
 use crate::{
     calls::{
         command::CallCommandContext,
@@ -89,6 +89,8 @@ pub(crate) enum RingOutcome {
     Unchanged,
     /// Enterprise routing continued on the SAME Call (next ordered member, fallback).
     Continued(calls::Model, Vec<call_invitations::Model>),
+    /// Enterprise routing put the Call into a queue (it waits there, RINGING).
+    Queued(calls::Model),
     /// The Call reached a terminal state (DECLINED / NO_ANSWER).
     CallEnded(calls::Model),
     /// A transfer failed and the Call was recovered (or is ending).
@@ -539,6 +541,7 @@ impl AppCallService {
         txn.commit().await?;
         self.publish(pending).await;
         self.settle_media(call.id).await;
+        self.enterprise_after_commit(call.id).await;
         Ok(CommandOutcome {
             body,
             replayed: false,
@@ -571,13 +574,17 @@ impl AppCallService {
                 }
                 // Enterprise routing first: the next ordered ring-group member or a
                 // fallback takes the SAME Call before any no-answer outcome.
-                if let Some((call, offers)) = self.enterprise_continue_in(txn, cmd, call).await? {
-                    if call.current_state.is_terminal() {
+                match self.enterprise_continue_in(txn, cmd, call).await? {
+                    Some(Continuation::Rung(call, _)) if call.current_state.is_terminal() => {
                         return Ok(RingOutcome::CallEnded(call));
                     }
-                    if !offers.is_empty() {
+                    Some(Continuation::Rung(call, offers)) if !offers.is_empty() => {
                         return Ok(RingOutcome::Continued(call, offers));
                     }
+                    Some(Continuation::Queued(call)) => return Ok(RingOutcome::Queued(call)),
+                    // Still waiting in its queue for the next agent.
+                    Some(Continuation::Waiting) => return Ok(RingOutcome::Unchanged),
+                    _ => {}
                 }
                 let call = &self.locked(txn, call).await?;
                 let action = if round.iter().all(|i| i.status == InvitationStatus::Declined) {
@@ -656,6 +663,10 @@ impl AppCallService {
                     self.call_signal(txn, pending, kind, &call, correlation, Map::new())
                         .await?;
                 }
+                Ok(call)
+            }
+            RingOutcome::Queued(call) => {
+                self.queued_signal(txn, pending, &call, correlation).await?;
                 Ok(call)
             }
             RingOutcome::CallEnded(call) => {
@@ -746,6 +757,7 @@ impl AppCallService {
         self.publish(pending).await;
         if !expired.is_empty() {
             self.settle_media(call.id).await;
+            self.enterprise_after_commit(call.id).await;
         }
         Ok(Some(expired.len()))
     }

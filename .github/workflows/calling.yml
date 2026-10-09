@@ -193,7 +193,8 @@ jobs:
           for t in enterprise_call_policies enterprise_departments enterprise_department_members \
                    enterprise_admin_audit enterprise_extensions enterprise_call_contexts \
                    enterprise_routing_steps enterprise_ring_groups enterprise_ring_group_members \
-                   call_answer_group_claims; do
+                   call_answer_group_claims enterprise_call_queues enterprise_queue_members \
+                   enterprise_queue_entries enterprise_queue_offers; do
             test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
               "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename = '$t'")" = "1" \
               || { echo "::error::missing enterprise table $t"; exit 1; }

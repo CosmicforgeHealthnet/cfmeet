@@ -16,7 +16,10 @@ use chrono::Duration;
 use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
-use super::{context_of, exec, record_step, router, update_context, ContextRow, EnterprisePhase};
+use super::{
+    context_of, exec, record_step, router, update_context, ContextRow, Continuation,
+    EnterprisePhase,
+};
 use crate::{
     calls::{
         app::{scope_of, AppCallService},
@@ -322,10 +325,17 @@ impl AppCallService {
         txn: &DatabaseTransaction,
         cmd: &CallCommandContext,
         call: &calls::Model,
-    ) -> CallResult<Option<Rung>> {
+    ) -> CallResult<Option<Continuation>> {
         let Some(context) = context_of(txn, call.id).await? else {
             return Ok(None);
         };
+        if context.phase == EnterprisePhase::Queued.as_str() {
+            // A queue offer ended unanswered: the Call waits for the next agent.
+            return self
+                .queue_offer_ended_in(txn, cmd, call, &context)
+                .await
+                .map(Some);
+        }
         let Some(group_id) = context.ring_group_id else {
             return Ok(None);
         };
@@ -375,7 +385,7 @@ impl AppCallService {
                         )
                         .await?;
                         let call = self.locked(txn, call).await?;
-                        return Ok(Some((call, offers)));
+                        return Ok(Some(Continuation::Rung(call, offers)));
                     }
                 }
             }
@@ -383,11 +393,23 @@ impl AppCallService {
         let rung = self
             .group_fallback(txn, cmd, call, &leg, &context, &policy, &group)
             .await?;
-        if rung.1.is_empty() && !rung.0.current_state.is_terminal() {
-            // No fallback: the ordinary outcome applies.
-            return Ok(None);
+        self.classify(txn, rung).await
+    }
+
+    /// Classifies what a continuation step led to. `None` = no enterprise continuation
+    /// (the ordinary DECLINED / NO_ANSWER outcome applies).
+    pub(crate) async fn classify(
+        &self,
+        txn: &DatabaseTransaction,
+        (call, offers): Rung,
+    ) -> CallResult<Option<Continuation>> {
+        if call.current_state.is_terminal() || !offers.is_empty() {
+            return Ok(Some(Continuation::Rung(call, offers)));
         }
-        Ok(Some(rung))
+        if self.waiting_in(txn, &call).await? {
+            return Ok(Some(Continuation::Queued(call)));
+        }
+        Ok(None)
     }
 
     /// The Call's application leg (the RTC media path).

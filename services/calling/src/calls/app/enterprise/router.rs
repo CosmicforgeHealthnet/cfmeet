@@ -14,7 +14,7 @@ use crate::{
         destinations::{Destination, DestinationType},
         extensions,
         policy::EffectivePolicy,
-        ring_groups,
+        queues, ring_groups,
     },
     platform::principals::{PrincipalReference, PrincipalResolver, ResolvedPrincipal},
 };
@@ -30,6 +30,11 @@ pub(crate) enum RouteAction {
     /// Ring a ring group (simultaneous / ordered).
     RingGroup {
         group: ring_groups::RingGroupRow,
+        destination: Destination,
+    },
+    /// Wait in a call queue (FIFO, offered to available agents).
+    EnterQueue {
+        queue: queues::QueueRow,
         destination: Destination,
     },
     /// Nothing can take the Call.
@@ -119,6 +124,18 @@ pub(crate) async fn resolve(
                         persist(txn, context, &visited, hops, at).await?;
                         Ok(RouteAction::RingGroup {
                             group,
+                            destination: current,
+                        })
+                    }
+                    _ => disabled(txn, context, &visited, hops, current, at).await,
+                };
+            }
+            DestinationType::Queue => {
+                return match queues::queue_row(txn, scope, current.id, false).await {
+                    Ok(queue) if queue.status == "ACTIVE" => {
+                        persist(txn, context, &visited, hops, at).await?;
+                        Ok(RouteAction::EnterQueue {
+                            queue,
                             destination: current,
                         })
                     }

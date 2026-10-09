@@ -66,6 +66,24 @@
     },
     {
       "$ref": "#/$defs/RingGroupList"
+    },
+    {
+      "$ref": "#/$defs/CreateQueueRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdateQueueRequest"
+    },
+    {
+      "$ref": "#/$defs/ReplaceQueueMembersRequest"
+    },
+    {
+      "$ref": "#/$defs/Queue"
+    },
+    {
+      "$ref": "#/$defs/QueueList"
+    },
+    {
+      "$ref": "#/$defs/QueueEntryList"
     }
   ],
   "$defs": {
@@ -962,8 +980,12 @@
             "ABANDONED",
             "FAILED",
             "FORWARDED_PUBLIC",
+            "BUSY",
             null
           ]
+        },
+        "queue": {
+          "$ref": "#/$defs/EnterpriseQueueState"
         }
       }
     },
@@ -1208,6 +1230,407 @@
             "null"
           ],
           "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "AgentStatus": {
+      "description": "ACTIVE agents receive offers; PAUSED agents stay members but receive none.",
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "PAUSED"
+      ]
+    },
+    "QueueEntryState": {
+      "description": "WAITING / OFFERING are active (OFFERING: one agent is being offered the Call); ANSWERED, ABANDONED (the caller hung up), TIMED_OUT (maximum wait, no overflow), OVERFLOWED (sent to the overflow destination) and CANCELLED (the Call ended otherwise) are final.",
+      "type": "string",
+      "enum": [
+        "WAITING",
+        "OFFERING",
+        "ANSWERED",
+        "ABANDONED",
+        "TIMED_OUT",
+        "OVERFLOWED",
+        "CANCELLED"
+      ]
+    },
+    "CreateQueueRequest": {
+      "description": "Body of POST /v1/enterprise/queues. offerTimeoutSeconds is the ring time of one offer to one agent and is at most maxWaitSeconds.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "maxWaitSeconds",
+        "offerTimeoutSeconds",
+        "capacity"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "maxWaitSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 3600
+        },
+        "offerTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 120
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "overflow": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where a Call goes when the queue is full or its maximum wait elapses: an EXTENSION, RING_GROUP, another QUEUE, IVR or VOICEMAIL of the same scope (never the queue itself). Without one a full queue ends the Call BUSY and an elapsed wait NO_ANSWER."
+        }
+      }
+    },
+    "UpdateQueueRequest": {
+      "description": "Body of PATCH /v1/enterprise/queues/{queue_id}; overflow null removes it. Calls already waiting keep their entry time and deadline.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "maxWaitSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 3600
+        },
+        "offerTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 120
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "overflow": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where a Call goes when the queue is full or its maximum wait elapses: an EXTENSION, RING_GROUP, another QUEUE, IVR or VOICEMAIL of the same scope (never the queue itself). Without one a full queue ends the Call BUSY and an elapsed wait NO_ANSWER."
+        }
+      }
+    },
+    "QueueMemberInput": {
+      "description": "An agent: an ACTIVE principal of the same scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "principalId"
+      ],
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "$ref": "#/$defs/AgentStatus"
+        }
+      }
+    },
+    "ReplaceQueueMembersRequest": {
+      "description": "Body of PUT /v1/enterprise/queues/{queue_id}/members: every agent (at most 100, distinct). Waiting Calls are not affected; new or resumed agents receive offers right away.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "members"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QueueMemberInput"
+          },
+          "maxItems": 100
+        }
+      }
+    },
+    "QueueMember": {
+      "description": "An agent and its tie-break position.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position",
+        "principalId",
+        "status"
+      ],
+      "properties": {
+        "position": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "$ref": "#/$defs/AgentStatus"
+        }
+      }
+    },
+    "Queue": {
+      "description": "A call queue. waiting is the number of active entries now.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "queueId",
+        "name",
+        "maxWaitSeconds",
+        "offerTimeoutSeconds",
+        "capacity",
+        "overflow",
+        "members",
+        "waiting",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "queueId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "maxWaitSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 3600
+        },
+        "offerTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 120
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "overflow": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where a Call goes when the queue is full or its maximum wait elapses: an EXTENSION, RING_GROUP, another QUEUE, IVR or VOICEMAIL of the same scope (never the queue itself). Without one a full queue ends the Call BUSY and an elapsed wait NO_ANSWER."
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QueueMember"
+          },
+          "maxItems": 100
+        },
+        "waiting": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "QueueList": {
+      "description": "A page of queues.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "queues",
+        "nextCursor"
+      ],
+      "properties": {
+        "queues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Queue"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "QueueEntry": {
+      "description": "One Call in a queue as the administrator sees it: the Call id, its authoritative FIFO position (1 = offered next; null once finished), timing and the answering agent. Never the caller's contact data.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entryId",
+        "callId",
+        "state",
+        "position",
+        "enteredAt",
+        "deadlineAt",
+        "offerCount",
+        "assignedPrincipalId",
+        "exitedAt"
+      ],
+      "properties": {
+        "entryId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "state": {
+          "$ref": "#/$defs/QueueEntryState"
+        },
+        "position": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "enteredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "deadlineAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "offerCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assignedPrincipalId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exitedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "QueueEntryList": {
+      "description": "Active entries in FIFO order, or the most recent finished ones.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entries"
+      ],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QueueEntry"
+          },
+          "maxItems": 100
+        }
+      }
+    },
+    "EnterpriseQueueState": {
+      "description": "The queue state of a queued enterprise Call (caller view): the queue, the entry state and the authoritative position (null once the entry finished).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "queueId",
+        "state",
+        "position",
+        "enteredAt"
+      ],
+      "properties": {
+        "queueId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "state": {
+          "$ref": "#/$defs/QueueEntryState"
+        },
+        "position": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "enteredAt": {
+          "type": "string",
+          "format": "date-time"
         }
       }
     }

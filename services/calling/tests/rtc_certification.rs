@@ -331,6 +331,7 @@ async fn real_livekit_certification() {
     voice_call(&cert).await;
     enterprise_extension_call(&cert).await;
     enterprise_ring_groups(&cert).await;
+    enterprise_queue(&cert).await;
     video_call_and_removal(&cert).await;
     for round in 0..3 {
         refreshed_privileged_token_cannot_reenter(&cert, round).await;
@@ -967,6 +968,174 @@ async fn enterprise_ring_groups(cert: &Cert) {
         a.quit().await;
         b.quit().await;
     }
+}
+
+/// §56 with real media: a queued caller is offered to the first agent, the offer times
+/// out (server time), the next agent is offered the SAME Call, answers and talks.
+async fn enterprise_queue(cert: &Cert) {
+    use calling::platform::scopes::names;
+    let h = cert.a.h();
+    let admin = common::enterprise::credential(
+        h,
+        &cert.a.w.consumer,
+        cert.a.w.kind,
+        &[
+            names::ENTERPRISE_CONFIG_READ,
+            names::ENTERPRISE_CONFIG_WRITE,
+        ],
+    )
+    .await;
+    let caller_token = common::enterprise::credential(
+        h,
+        &cert.a.w.consumer,
+        cert.a.w.kind,
+        &[
+            names::CALLS_READ,
+            names::CALLS_WRITE,
+            names::ENTERPRISE_CALLS_USE,
+        ],
+    )
+    .await;
+    let member = |reference: &'static str| async move {
+        let (view, _) = h
+            .platform
+            .register_principal(
+                cert.a.w.consumer.env(cert.a.w.kind).id,
+                calling::platform::principals::NewPrincipal::External {
+                    kind: calling::domain::PrincipalKind::EnterpriseMember,
+                    external_reference: reference.to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        h.state
+            .principals
+            .resolve(
+                &cert.a.w.ctx,
+                &calling::platform::principals::PrincipalReference::Id(view.id),
+            )
+            .await
+            .unwrap()
+    };
+    let caller = member("q-caller").await;
+    let first = member("q-agent-1").await;
+    let second = member("q-agent-2").await;
+    let caller_desk = cert.a.device(&caller, "q-caller-desk").await;
+    let d1 = cert.a.device(&first, "q-agent-1-desk").await;
+    let d2 = cert.a.device(&second, "q-agent-2-desk").await;
+    let r = h
+        .request(
+            axum::http::Method::POST,
+            "/v1/enterprise/queues",
+            Some(admin.secret.expose_once()),
+            Some(
+                json!({ "name": "Cert queue", "maxWaitSeconds": 120, "offerTimeoutSeconds": 10,
+                         "capacity": 10 }),
+            ),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let qid = r.json["queueId"].as_str().unwrap().to_string();
+    let r = h
+        .request(
+            axum::http::Method::PUT,
+            &format!("/v1/enterprise/queues/{qid}/members"),
+            Some(admin.secret.expose_once()),
+            Some(json!({ "expectedVersion": 1, "members": [
+                { "principalId": first.id() }, { "principalId": second.id() } ] })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let r = h
+        .request(
+            axum::http::Method::POST,
+            "/v1/enterprise/extensions",
+            Some(admin.secret.expose_once()),
+            Some(
+                json!({ "extensionNumber": "4100", "displayLabel": "Cert queue",
+                         "destination": { "type": "QUEUE", "id": qid } }),
+            ),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let r = h
+        .request_with(
+            axum::http::Method::POST,
+            "/v1/calls",
+            Some(caller_token.secret.expose_once()),
+            Some(
+                json!({ "kind": "VOICE", "initiatorPrincipalId": caller.id(),
+                         "initiatorEndpointId": caller_desk.endpoint, "targetExtension": "4100" }),
+            ),
+            &[("idempotency-key", "queue-cert-4100")],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    assert_eq!(r.json["enterprise"]["phase"], "QUEUED");
+    let call: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+    // The first agent is offered and lets it ring out; server time moves the offer on.
+    assert!(cert.a.invitation_for(call, d1.endpoint).await.is_some());
+    h.clock.advance(chrono::Duration::seconds(11));
+    h.state.app.expire_due(100).await.unwrap();
+    let invitation = cert.a.invitation_for(call, d2.endpoint).await.unwrap();
+    let (_, version) = cert.a.state(call).await;
+    let r = cert.a.accept(call, invitation, &d2, version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let s1 = cert.a.session_on(call, caller_desk.endpoint).await.unwrap();
+    let s2 = cert.a.session_on(call, d2.endpoint).await.unwrap();
+    let c1 = cert.credential(call, s1).await;
+    let c2 = cert.credential(call, s2).await;
+    let mut a = RtcClient::spawn(&cert.cfg).await;
+    let mut b = RtcClient::spawn(&cert.cfg).await;
+    assert_eq!(
+        a.connect(c1["url"].as_str().unwrap(), c1["token"].as_str().unwrap())
+            .await["ok"],
+        true
+    );
+    assert_eq!(
+        b.connect(c2["url"].as_str().unwrap(), c2["token"].as_str().unwrap())
+            .await["ok"],
+        true
+    );
+    eventually(15, "queued call CONNECTED", || async {
+        cert.state(call).await == CallState::Connected
+    })
+    .await;
+    for client in [&mut a, &mut b] {
+        assert_eq!(
+            client
+                .cmd(json!({ "cmd": "wait_permission", "publish": true, "timeout": 10 }))
+                .await["ok"],
+            true
+        );
+        assert_eq!(
+            client
+                .cmd(json!({ "cmd": "publish", "kind": "audio" }))
+                .await["ok"],
+            true
+        );
+    }
+    let heard = a
+        .cmd(json!({ "cmd": "wait_subscribed", "count": 1, "timeout": 15 }))
+        .await;
+    assert_eq!(
+        heard["ok"], true,
+        "real media with the answering agent: {heard}"
+    );
+    assert_eq!(
+        cert.provider_identities(call).await.len(),
+        2,
+        "only the answering agent and the caller are in the media resource"
+    );
+    let (_, version) = cert.a.state(call).await;
+    let r = cert.a.command(call, "end", version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(cert.state(call).await, CallState::Ended);
+    println!(
+        "enterprise queue certified: FIFO offer, agent rotation on timeout, real media, one Call"
+    );
+    a.quit().await;
+    b.quit().await;
 }
 
 async fn video_call_and_removal(cert: &Cert) {

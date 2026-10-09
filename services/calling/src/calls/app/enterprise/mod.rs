@@ -15,6 +15,7 @@
 //! snapshot, the policy version relied on, the current destination, the hop budget and the
 //! visited set; `enterprise_routing_steps` is the append-only routing evidence.
 
+mod queues;
 mod ring_groups;
 mod router;
 
@@ -64,6 +65,17 @@ use crate::{
 };
 
 pub(crate) use router::RouteAction;
+
+/// How enterprise routing continued after a ring round ended without an answer.
+pub(crate) enum Continuation {
+    /// New ring offers on the SAME Call (next ordered member, a fallback), or the Call
+    /// reached a terminal state.
+    Rung(calls::Model, Vec<crate::models::call_invitations::Model>),
+    /// The Call just entered a queue (it waits there, RINGING, without offers).
+    Queued(calls::Model),
+    /// The Call keeps waiting in its queue for the next available agent.
+    Waiting,
+}
 
 /// Authorization policy of enterprise internal calls.
 pub const ENTERPRISE_POLICY: &str = "ENTERPRISE_INTERNAL_V1";
@@ -118,6 +130,7 @@ pub(crate) struct ContextRow {
     pub ring_cursor: Option<i16>,
     pub answer_group_id: Option<Uuid>,
     pub ring_deadline: Option<chrono::DateTime<chrono::Utc>>,
+    pub queue_entry_id: Option<Uuid>,
 }
 
 impl ContextRow {
@@ -132,7 +145,7 @@ impl ContextRow {
 const CONTEXT_COLUMNS: &str = "call_id, entry_extension_id, entry_extension_number, entry_label, \
     policy_id, policy_version, phase, current_destination_type, current_destination_id, hop_count, \
     max_hops, visited, answered_principal_id, outcome, ring_group_id, ring_cursor, answer_group_id, \
-    ring_deadline";
+    ring_deadline, queue_entry_id";
 
 pub(crate) fn stmt(sql: &str, values: Vec<sea_orm::Value>) -> sea_orm::Statement {
     sea_orm::Statement::from_sql_and_values(sea_orm::DbBackend::Postgres, sql, values)
@@ -602,10 +615,49 @@ impl AppCallService {
             now,
         )
         .await?;
-        let outcome = self
+        let (call, offers) = self
             .apply_route_action(txn, cmd, call, leg, &context, &policy, action)
             .await?;
-        Ok(Some(outcome))
+        if offers.is_empty()
+            && !call.current_state.is_terminal()
+            && !self.waiting_in(txn, &call).await?
+        {
+            // Nothing could be rung (e.g. a ring group without an eligible member or a
+            // fallback): fail safe instead of leaving the Call DIALING.
+            let context = context_of(txn, call.id).await?.unwrap_or(context);
+            record_step(
+                txn,
+                &call,
+                "NO_ROUTE",
+                context.destination(),
+                "NO_ELIGIBLE_TARGET",
+                None,
+                now,
+            )
+            .await?;
+            return self
+                .enterprise_no_route(
+                    txn,
+                    cmd,
+                    &call,
+                    &context,
+                    FailureCategory::TargetUnavailable,
+                )
+                .await
+                .map(Some);
+        }
+        Ok(Some((call, offers)))
+    }
+
+    /// Whether the Call legitimately waits without ring offers (queued).
+    pub(crate) async fn waiting_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        call: &calls::Model,
+    ) -> CallResult<bool> {
+        Ok(context_of(db, call.id)
+            .await?
+            .is_some_and(|c| c.phase == EnterprisePhase::Queued.as_str()))
     }
 
     /// Executes a routing action on a DIALING / RINGING Call. Returns the Call as it now
@@ -715,6 +767,10 @@ impl AppCallService {
                 ))
                 .await
             }
+            RouteAction::EnterQueue { queue, destination } => {
+                Box::pin(self.enter_queue(txn, cmd, call, leg, context, policy, queue, destination))
+                    .await
+            }
             RouteAction::NoRoute {
                 reason,
                 destination,
@@ -798,6 +854,9 @@ impl AppCallService {
         if context.answered_principal_id.is_some() {
             return Ok(());
         }
+        if context.phase == EnterprisePhase::Queued.as_str() {
+            self.queue_answered_in(txn, &context, principal_id).await?;
+        }
         let now = self.calls.now();
         exec(
             txn,
@@ -858,17 +917,91 @@ impl AppCallService {
         db: &C,
         call_id: Uuid,
     ) -> CallResult<Option<Value>> {
-        Ok(context_of(db, call_id).await?.map(|c| {
-            json!({
-                "extensionId": c.entry_extension_id,
-                "extensionNumber": c.entry_extension_number,
-                "extensionLabel": c.entry_label,
-                "policyVersion": c.policy_version,
-                "phase": c.phase,
-                "destinationType": c.current_destination_type,
-                "outcome": c.outcome,
-            })
-        }))
+        let Some(c) = context_of(db, call_id).await? else {
+            return Ok(None);
+        };
+        let mut view = json!({
+            "extensionId": c.entry_extension_id,
+            "extensionNumber": c.entry_extension_number,
+            "extensionLabel": c.entry_label,
+            "policyVersion": c.policy_version,
+            "phase": c.phase,
+            "destinationType": c.current_destination_type,
+            "outcome": c.outcome,
+        });
+        if let Some(entry) = c.queue_entry_id {
+            if let Some(row) = db
+                .query_one(stmt(
+                    "SELECT e.queue_id, e.state, e.entered_at, CASE WHEN e.state IN ('WAITING', 'OFFERING') \
+                       THEN (SELECT count(*) FROM enterprise_queue_entries o \
+                              WHERE o.queue_id = e.queue_id AND o.state IN ('WAITING', 'OFFERING') \
+                                AND (o.entered_at, o.seq) <= (e.entered_at, e.seq)) END AS position \
+                       FROM enterprise_queue_entries e WHERE e.id = $1",
+                    vec![entry.into()],
+                ))
+                .await?
+            {
+                let queue_id: Uuid = row.try_get("", "queue_id")?;
+                let state: String = row.try_get("", "state")?;
+                let entered: chrono::DateTime<chrono::Utc> = row.try_get("", "entered_at")?;
+                let position: Option<i64> = row.try_get("", "position")?;
+                view["queue"] = json!({
+                    "queueId": queue_id,
+                    "state": state,
+                    "position": position,
+                    "enteredAt": entered.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                });
+            }
+        }
+        Ok(Some(view))
+    }
+
+    /// Enterprise bookkeeping of a Call that just ended before it was answered by a path
+    /// outside enterprise routing (the caller cancelled, a failure): the business outcome
+    /// is recorded once and a queue entry gets its final state. Returns the queue whose
+    /// waiting callers' positions changed.
+    pub(crate) async fn enterprise_call_ended_in(
+        &self,
+        txn: &DatabaseTransaction,
+        call: &calls::Model,
+    ) -> CallResult<Option<Uuid>> {
+        use crate::calls::state::CallState;
+        let Some(context) = context_of(txn, call.id).await? else {
+            return Ok(None);
+        };
+        let mut queue = None;
+        if context.phase == EnterprisePhase::Queued.as_str()
+            && self.queue_call_ended_in(txn, call, &context).await?
+        {
+            queue = context.destination().map(|d| d.id);
+        }
+        if context.outcome.is_some() || context.answered_principal_id.is_some() {
+            return Ok(queue);
+        }
+        let outcome = match call.current_state {
+            CallState::Cancelled => "ABANDONED",
+            CallState::Failed => "FAILED",
+            CallState::NoAnswer => "NO_ANSWER",
+            CallState::Declined => "DECLINED",
+            CallState::Busy => "BUSY",
+            _ => return Ok(queue),
+        };
+        let now = self.calls.now();
+        update_context(
+            txn,
+            &context,
+            EnterprisePhase::Ended,
+            None,
+            Some(outcome),
+            now,
+        )
+        .await?;
+        record_step(txn, call, "ENDED", None, outcome, None, now).await?;
+        crate::metrics::inc(
+            "calling_enterprise_call_outcomes_total",
+            &[("outcome", outcome)],
+        );
+        Ok(queue)
     }
 
     /// Signals of a committed enterprise ring step.
@@ -895,7 +1028,33 @@ impl AppCallService {
             self.call_signal(db, pending, kind, call, correlation, Map::new())
                 .await?;
         }
+        if invitations.is_empty() {
+            self.queued_signal(db, pending, call, correlation).await?;
+        }
         Ok(())
+    }
+
+    /// `call.queued` to the caller of a Call that waits in a queue (with its position).
+    pub(crate) async fn queued_signal<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        pending: &mut PendingSignals,
+        call: &calls::Model,
+        correlation: &str,
+    ) -> CallResult<()> {
+        let Some(view) = self.enterprise_view(db, call.id).await? else {
+            return Ok(());
+        };
+        let Some(queue) = view.get("queue").filter(|_| view["phase"] == "QUEUED") else {
+            return Ok(());
+        };
+        let mut data = Map::new();
+        data.insert("queueId".into(), queue["queueId"].clone());
+        if let Some(position) = queue["position"].as_i64() {
+            data.insert("position".into(), json!(position));
+        }
+        self.initiator_signal(db, pending, SignalType::Queued, call, correlation, data)
+            .await
     }
 }
 

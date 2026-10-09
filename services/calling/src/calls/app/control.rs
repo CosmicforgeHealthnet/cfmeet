@@ -103,6 +103,9 @@ impl AppCallService {
             .transition_in(&txn, cmd, &call, expected_version, CallAction::Cancel)
             .await?;
         let call = applied.call;
+        // An enterprise Call cancelled before it was answered: abandoned (queue entry
+        // ABANDONED, business outcome recorded).
+        let queue = self.enterprise_call_ended_in(&txn, &call).await?;
         let body = control_body(&call, CommandOperation::Cancel);
         if let Some(key) = key {
             self.calls
@@ -141,6 +144,9 @@ impl AppCallService {
         .await?;
         txn.commit().await?;
         self.publish(pending).await;
+        if let Some(queue) = queue {
+            self.queue_position_signals(queue).await;
+        }
         // Provider teardown after commit; failures are retried by reconciliation.
         self.teardown_media(call.id).await;
         Ok(CommandOutcome {

@@ -25,6 +25,8 @@ pub struct WorkerReport {
     pub transfers_expired: usize,
     pub calls_reconciled: usize,
     pub repairs: usize,
+    pub queue_entries_finished: usize,
+    pub queue_offers: usize,
 }
 
 impl AppCallService {
@@ -65,6 +67,12 @@ impl AppCallService {
                 report.transfers_expired += 1;
             }
         }
+        // Enterprise queues: maximum waits, entries of Calls that ended elsewhere, FIFO
+        // offers to available agents. Runs even with enterprise calling switched off so
+        // waiting Calls always drain (a kill switch never strands a Call).
+        let (finished, offers) = self.queue_tick(limit).await?;
+        report.queue_entries_finished = finished;
+        report.queue_offers = offers;
         Ok(report)
     }
 

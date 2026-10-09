@@ -21,6 +21,7 @@ pub mod destinations;
 pub mod extensions;
 pub mod http;
 pub mod policy;
+pub mod queues;
 pub mod ring_groups;
 
 use std::sync::Arc;

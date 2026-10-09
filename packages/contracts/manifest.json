@@ -60,14 +60,14 @@
     },
     {
       "id": "cfmeet.calling.realtime-signal",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "calling/realtime/v1.schema.json",
       "owner": "calling",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Frames of an endpoint's realtime signaling channel: call signals (call.incoming ... call.invitation_expired) derived from committed state and sent after commit, with event id, call id, version / sequence, target endpoint and principal, safe state, issue time, offer expiry, correlation id and a bounded payload; and the channel control frames. No telephone numbers, provider ids, credentials or tokens."
+      "description": "Frames of an endpoint's realtime signaling channel: call signals (call.incoming ... call.invitation_expired) derived from committed state and sent after commit, with event id, call id, version / sequence, target endpoint and principal, safe state, issue time, offer expiry, correlation id and a bounded payload; and the channel control frames. No telephone numbers, provider ids, credentials or tokens. Part F: call.queued and call.queue_position (to the caller of a queued enterprise Call; data queueId, position)."
     },
     {
       "id": "cfmeet.calling.push-invitation",

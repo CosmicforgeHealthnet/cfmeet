@@ -739,6 +739,10 @@ impl AppCallService {
             txn.commit().await?;
             self.publish(pending).await;
             tracing::info!(call_id = %call.id, invitations = invitations.len(), call_state = %call.current_state, "enterprise call routed");
+            if call.current_state.is_terminal() {
+                self.teardown_media(call.id).await;
+            }
+            self.enterprise_after_commit(call.id).await;
             return Ok(());
         }
         // A public-network Call does not ring application endpoints: Telephony dials

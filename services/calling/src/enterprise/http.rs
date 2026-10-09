@@ -24,6 +24,7 @@ use super::{
     destinations::{Destination, DestinationType},
     extensions::{ExtensionChange, ExtensionFilter, NewExtension},
     policy::{NewPolicy, PolicyChange, PolicyRules, ResourceStatus},
+    queues::{QueueChange, QueueMember, QueueSettings},
     ring_groups::{RingGroupChange, RingGroupSettings, RingStrategy},
     AdminActor, PageRequest,
 };
@@ -83,6 +84,19 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/v1/enterprise/ring-groups/:ring_group_id/members",
             put(replace_ring_group_members),
+        )
+        .route("/v1/enterprise/queues", get(list_queues).post(create_queue))
+        .route(
+            "/v1/enterprise/queues/:queue_id",
+            get(get_queue).patch(update_queue).delete(disable_queue),
+        )
+        .route(
+            "/v1/enterprise/queues/:queue_id/members",
+            put(replace_queue_members),
+        )
+        .route(
+            "/v1/enterprise/queues/:queue_id/entries",
+            get(list_queue_entries),
         )
         .route(
             "/v1/enterprise/extensions/:extension_id",
@@ -772,4 +786,185 @@ async fn disable_ring_group(
         .disable_ring_group(&AdminActor::of(&ctx), id, q.expected_version()?)
         .await?;
     Ok(ok(view))
+}
+
+// ---------------------------------------------------------------------------
+// Call queues (§56)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateQueueBody {
+    name: String,
+    max_wait_seconds: i32,
+    offer_timeout_seconds: i32,
+    capacity: i32,
+    #[serde(default)]
+    overflow: Option<Destination>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UpdateQueueBody {
+    expected_version: i64,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    max_wait_seconds: Option<i32>,
+    #[serde(default)]
+    offer_timeout_seconds: Option<i32>,
+    #[serde(default)]
+    capacity: Option<i32>,
+    /// Present (even `null`) = replace the overflow (`null` removes it).
+    #[serde(default, with = "double_option")]
+    overflow: Option<Option<Destination>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReplaceQueueMembersBody {
+    expected_version: i64,
+    members: Vec<QueueMember>,
+}
+
+async fn create_queue(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    body: Result<Json<CreateQueueBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .create_queue(
+            &AdminActor::of(&ctx),
+            QueueSettings {
+                name: body.name,
+                max_wait_seconds: body.max_wait_seconds,
+                offer_timeout_seconds: body.offer_timeout_seconds,
+                capacity: body.capacity,
+                overflow: body.overflow,
+            },
+        )
+        .await?;
+    Ok(created(view))
+}
+
+async fn list_queues(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let q = QueryParams::parse(query, &["limit", "cursor", "status"])?;
+    let page = state
+        .enterprise
+        .list_queues(CallScope::of_platform(&ctx), q.status()?, &q.page()?)
+        .await?;
+    Ok(ok(page))
+}
+
+async fn get_queue(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let view = state
+        .enterprise
+        .get_queue(CallScope::of_platform(&ctx), uuid_path(&id)?)
+        .await?;
+    Ok(ok(view))
+}
+
+async fn update_queue(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    body: Result<Json<UpdateQueueBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .update_queue(
+            &AdminActor::of(&ctx),
+            id,
+            body.expected_version,
+            QueueChange {
+                name: body.name,
+                max_wait_seconds: body.max_wait_seconds,
+                offer_timeout_seconds: body.offer_timeout_seconds,
+                capacity: body.capacity,
+                overflow: body.overflow,
+            },
+        )
+        .await?;
+    Ok(ok(view))
+}
+
+async fn replace_queue_members(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    body: Result<Json<ReplaceQueueMembersBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let body = parse_body(body)?;
+    let view = state
+        .enterprise
+        .replace_queue_members(
+            &AdminActor::of(&ctx),
+            id,
+            body.expected_version,
+            body.members,
+        )
+        .await?;
+    // New or resumed agents may take waiting Calls right away.
+    state.app.dispatch_queue(id).await;
+    Ok(ok(view))
+}
+
+async fn disable_queue(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE)?;
+    let id = uuid_path(&id)?;
+    let q = QueryParams::parse(query, &["expectedVersion"])?;
+    let view = state
+        .enterprise
+        .disable_queue(&AdminActor::of(&ctx), id, q.expected_version()?)
+        .await?;
+    Ok(ok(view))
+}
+
+async fn list_queue_entries(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
+    let id = uuid_path(&id)?;
+    let q = QueryParams::parse(query, &["state", "limit"])?;
+    let active_only = match q.get("state") {
+        None | Some("ACTIVE") => true,
+        Some("FINISHED") => false,
+        Some(_) => {
+            return Err(CallingError::Validation(
+                "state must be ACTIVE or FINISHED.",
+            ))
+        }
+    };
+    let limit = q.page()?.limit().map_err(CallingError::from)?;
+    let page = state
+        .enterprise
+        .list_queue_entries(CallScope::of_platform(&ctx), id, active_only, limit)
+        .await?;
+    Ok(ok(page))
 }
