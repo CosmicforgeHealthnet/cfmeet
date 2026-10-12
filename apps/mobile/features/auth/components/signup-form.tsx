@@ -45,6 +45,7 @@ export function SignupForm() {
         email: data.email,
         username: data.username,
         password: data.password,
+        confirm_password: data.confirmPassword,
       },
       {
         onError: (error) => {

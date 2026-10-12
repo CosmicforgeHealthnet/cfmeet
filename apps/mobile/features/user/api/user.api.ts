@@ -8,7 +8,7 @@ export const userApi = {
   },
 
   async updateMe(data: UpdateUserRequest): Promise<UpdateUserResponse> {
-    const response = await api.put<UpdateUserResponse>("/users/me", data);
+    const response = await api.patch<UpdateUserResponse>("/users/me", data);
     return response.data;
   },
 };

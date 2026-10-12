@@ -107,19 +107,9 @@ export function ForgotPasswordForm() {
     }
 
     setError(null);
-    verifyResetToken.mutate(
-      { email, code: codeString },
-      {
-        onSuccess: (response) => {
-          setResetToken(response.reset_token);
-          setStep("password");
-        },
-        onError: (err) => {
-          setError(err.message);
-          toast(err.message, "destructive");
-        },
-      }
-    );
+    // Store the code as the token for the password reset step
+    setResetToken(codeString);
+    setStep("password");
   };
 
   const handleResend = () => {
@@ -146,8 +136,9 @@ export function ForgotPasswordForm() {
     resetPassword.mutate(
       {
         email,
-        reset_token: resetToken,
+        token: resetToken,
         new_password: data.password,
+        confirm_password: data.confirmPassword,
       },
       {
         onSuccess: () => {

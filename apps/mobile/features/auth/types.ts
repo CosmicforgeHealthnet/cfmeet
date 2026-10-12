@@ -14,27 +14,23 @@ export interface RegisterRequest {
   email: string;
   username: string;
   password: string;
+  confirm_password: string;
 }
 
 export interface RegisterResponse {
-  message: string;
-  user: {
-    id: string;
-    email: string;
-    username: string;
-  };
+  user_id: string;
+  email: string;
+  role: string;
+  status: string;
 }
 
 export interface VerifyEmailRequest {
   email: string;
-  code: string;
+  token: string;
 }
 
 export interface VerifyEmailResponse {
   message: string;
-  access_token: string;
-  refresh_token: string;
-  user: UserInfo;
 }
 
 export interface ResendVerificationRequest {
@@ -55,18 +51,19 @@ export interface ForgotPasswordResponse {
 
 export interface VerifyResetTokenRequest {
   email: string;
-  code: string;
+  token: string;
 }
 
 export interface VerifyResetTokenResponse {
   message: string;
-  reset_token: string;
+  valid: boolean;
 }
 
 export interface ResetPasswordRequest {
   email: string;
-  reset_token: string;
+  token: string;
   new_password: string;
+  confirm_password: string;
 }
 
 export interface ResetPasswordResponse {

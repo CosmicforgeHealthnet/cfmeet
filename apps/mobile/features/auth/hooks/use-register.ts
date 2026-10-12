@@ -17,7 +17,7 @@ export function useRegister() {
     onSuccess: (response) => {
       router.replace({
         pathname: "/verify",
-        params: { email: response.user.email },
+        params: { email: response.email },
       });
     },
   });

@@ -20,28 +20,29 @@ This monorepo contains the platform's applications, domain services, shared cont
 | **Planned** | Enterprise communications, admin console, developer portal / CPaaS APIs and SDKs |
 | **Future** | Intelligence: transcription, translation and meeting/call assistance |
 
-Planned items are not implemented yet. See [`docs/architecture/platform-overview.md`](docs/architecture/platform-overview.md).
+Planned items are not implemented yet.
 
 ## Repository layout
 
 ```text
 cfmeet/
 ├── apps/
-│   └── web/                  Next.js CF Meet web application                         (current)
+│   ├── web/                  Next.js web application (deploys to Vercel)
+│   └── mobile/               Expo React Native app (deploys via EAS)
 ├── services/
-│   └── meeting-service/      Rust/Axum Meeting & Conference Platform service         (current)
+│   └── meeting-service/      Rust/Axum backend API (deploys to VPS via Docker)
 ├── packages/
-│   └── contracts/            Shared API / event / webhook contracts                  (boundary established)
+│   └── contracts/            Shared API / OpenAPI contracts
 ├── infra/
-│   ├── livekit/              LiveKit configuration
-│   ├── docker/               Container/local orchestration notes
-│   └── deployment/           Deployment guide
+│   └── livekit/              LiveKit local development config
 ├── docs/
-│   ├── architecture/         Platform architecture and service boundaries
-│   ├── api/                  API documentation entry point
-│   ├── decisions/            Architecture decision records
-│   ├── phases/               Delivery-phase specifications and closure reports
-│   └── migration/            Monorepo migration history
+│   ├── README.md             Deployment documentation index
+│   ├── INFRASTRUCTURE.md     Ubuntu VPS deployment guide
+│   ├── BACKEND.md            Backend deployment options
+│   ├── VERCEL.md             Vercel deployment guide
+│   ├── MOBILE.md             Expo/EAS deployment guide
+│   ├── ENVIRONMENT.md        Environment variables reference
+│   └── TROUBLESHOOTING.md    Common issues and solutions
 ├── scripts/
 ├── .github/workflows/
 ├── docker-compose.yml
@@ -89,7 +90,7 @@ services/
 └── workers/               future if extracted
 ```
 
-See [`docs/architecture/platform-boundaries.md`](docs/architecture/platform-boundaries.md).
+See the [docs](docs/README.md) folder for deployment guides.
 
 ## Prerequisites
 
@@ -159,12 +160,12 @@ Workflows under `.github/workflows/` are path-aware:
 
 ## Documentation
 
-- [Platform overview](docs/architecture/platform-overview.md)
-- [Platform boundaries](docs/architecture/platform-boundaries.md)
-- [API docs](docs/api/README.md)
-- [Meeting service guides](services/meeting-service/docs/README.md)
-- [Contracts](packages/contracts/README.md)
-- [Deployment](infra/deployment/README.md)
-- [Architecture decisions](docs/decisions/README.md)
-- [Delivery phases](docs/phases/README.md)
-- [Monorepo migration record](docs/migration/MONOREPO_MIGRATION.md)
+- [Deployment Guide](docs/README.md) - Complete deployment documentation
+- [Infrastructure Setup](docs/INFRASTRUCTURE.md) - Ubuntu VPS deployment guide
+- [Backend Deployment](docs/BACKEND.md) - Meeting service deployment
+- [Vercel Deployment](docs/VERCEL.md) - Web app deployment
+- [Mobile Deployment](docs/MOBILE.md) - Expo/EAS deployment
+- [Environment Variables](docs/ENVIRONMENT.md) - Configuration reference
+- [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues
+- [Meeting Service Docs](services/meeting-service/docs/README.md) - API documentation
+- [OpenAPI Contracts](packages/contracts/README.md) - API contracts

@@ -79,11 +79,14 @@ export function VerifyForm() {
 
     setError(null);
     verifyEmail.mutate(
-      { email, code: codeString },
+      { email, token: codeString },
       {
         onError: (err) => {
           setError(err.message);
           toast(err.message, "destructive");
+        },
+        onSuccess: () => {
+          success("Email verified! Please log in.");
         },
       }
     );
