@@ -19,27 +19,27 @@ on:
     branches: [main, staging]
     paths:
       - "services/telephony/**"
-      - "services/calling/src/telephony/**"
-      - "services/calling/src/calls/app/public/**"
-      - "services/calling/tests/telephony_e2e.rs"
+      # The cross-service e2e builds Calling and Privacy Relay from source.
+      - "services/calling/**"
+      - "services/privacy-relay/**"
       - "packages/service-auth/**"
-      - "packages/contracts/telephony/**"
-      - "packages/contracts/platform/**"
-      - "packages/contracts/privacy-relay/common/**"
-      - "packages/contracts/manifest.json"
+      - "packages/object-storage/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
       - "infra/telephony/**"
       - ".github/workflows/telephony.yml"
   pull_request:
     paths:
       - "services/telephony/**"
-      - "services/calling/src/telephony/**"
-      - "services/calling/src/calls/app/public/**"
-      - "services/calling/tests/telephony_e2e.rs"
+      # The cross-service e2e builds Calling and Privacy Relay from source.
+      - "services/calling/**"
+      - "services/privacy-relay/**"
       - "packages/service-auth/**"
-      - "packages/contracts/telephony/**"
-      - "packages/contracts/platform/**"
-      - "packages/contracts/privacy-relay/common/**"
-      - "packages/contracts/manifest.json"
+      - "packages/object-storage/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
       - "infra/telephony/**"
       - ".github/workflows/telephony.yml"
   workflow_dispatch:
@@ -242,6 +242,18 @@ jobs:
           test "$(q "SELECT string_agg(table_name || '.' || column_name, ',') FROM information_schema.columns \
             WHERE table_schema = 'public' AND column_name ~* '(phone|e164|msisdn|telephone|caller_id|sip_call|dialog_id|password)'")" \
             = "telecom_number_bindings.public_e164"
+
+      # Part K §120: the REAL Telephony migrations apply as the least-privilege migrator role,
+      # the DML-only runtime role reads every table they create, and no role of one service
+      # can connect to another service's database (infra/deployment/postgres).
+      - name: Per-service database roles with the real migrations
+        env:
+          TELEPHONY_MIGRATION_BIN: ${{ github.workspace }}/services/telephony/target/debug/telephony-migration
+        run: |
+          set -euo pipefail
+          test -x "$TELEPHONY_MIGRATION_BIN"
+          "$GITHUB_WORKSPACE/infra/deployment/postgres/verify-service-isolation.sh" \
+            --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres
 
       - name: Service refuses unsafe configuration and serves only authenticated internal routes
         env:

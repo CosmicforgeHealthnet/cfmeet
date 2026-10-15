@@ -127,6 +127,35 @@ enum Command {
     /// Retention policies and holds (Part H §80, ADR 0030). Holds are operator-audited.
     #[command(subcommand)]
     Retention(RetentionCmd),
+    /// Calling operational incidents: list, and resolve (operator-audited; the audit rows
+    /// are the resolution history).
+    #[command(subcommand)]
+    Incidents(IncidentsCmd),
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum IncidentStatusArg {
+    Open,
+    Resolved,
+}
+
+#[derive(Subcommand)]
+enum IncidentsCmd {
+    /// Incidents, newest first (opaque ids, codes and counts only).
+    List {
+        #[arg(long, value_enum)]
+        status: Option<IncidentStatusArg>,
+        /// A category code, e.g. TELEPHONY_COMMAND_DEAD.
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long, default_value_t = 100)]
+        limit: u64,
+    },
+    /// Resolve an incident (audited; idempotent).
+    Resolve {
+        #[arg(long)]
+        incident: Uuid,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -291,6 +320,7 @@ impl Command {
             Command::Retention(c) => {
                 !matches!(c, RetentionCmd::List { .. } | RetentionCmd::Policies)
             }
+            Command::Incidents(c) => !matches!(c, IncidentsCmd::List { .. }),
         }
     }
 }
@@ -1770,6 +1800,45 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                             connectivity: false,
                         })?
                         .ok_or(PlatformError::NotFound("block rule"))?,
+                ),
+            }
+        }
+        Command::Incidents(cmd) => {
+            use calling::calls::app::incidents::{self, IncidentCategory, IncidentStatus};
+            match cmd {
+                IncidentsCmd::List {
+                    status,
+                    category,
+                    limit,
+                } => {
+                    let category = category
+                        .map(|c| {
+                            IncidentCategory::parse(c.trim()).ok_or_else(|| {
+                                PlatformError::Validation("unknown incident category".to_string())
+                            })
+                        })
+                        .transpose()?;
+                    let status = status.map(|s| match s {
+                        IncidentStatusArg::Open => IncidentStatus::Open,
+                        IncidentStatusArg::Resolved => IncidentStatus::Resolved,
+                    });
+                    print(
+                        &incidents::list_incidents(&admin.db, status, category, limit)
+                            .await
+                            .map_err(|e| PlatformError::Database {
+                                summary: summarize_db_error(&e),
+                                connectivity: false,
+                            })?,
+                    )
+                }
+                IncidentsCmd::Resolve { incident } => print(
+                    &incidents::operator_resolve(
+                        &admin.db,
+                        admin.op()?,
+                        incident,
+                        admin.clock.now(),
+                    )
+                    .await?,
                 ),
             }
         }

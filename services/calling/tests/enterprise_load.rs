@@ -2,17 +2,17 @@
 //! paths, with the correctness invariants asserted under concurrency — FIFO queue order
 //! and unique positions under a burst, bounded ring-group fan-out, one winner, index-only
 //! queue / history plans. Sizes scale with `ENTERPRISE_LOAD_SCALE` (default 1: a CI-sized
-//! run); every measurement is printed as `LOAD <name>: <value>`.
+//! run); every measurement is reported through the shared load reporter
+//! (`tests/common/load.rs`) as one machine-readable `LOAD <scenario> env=… …` line.
 
 mod common;
-
-use std::time::Instant;
 
 use axum::http::{Method, StatusCode};
 use calling::calls::{app::history::HistoryFilter, command::CallScope, service::ListCallsQuery};
 use common::{
     app::Device,
     enterprise::{id_of, strings, EnterpriseWorld},
+    load::LoadRun,
 };
 use futures_util::future::join_all;
 use sea_orm::{ConnectionTrait, Statement, TransactionTrait};
@@ -29,13 +29,14 @@ fn scale() -> usize {
         .unwrap_or(1)
 }
 
-fn report(name: &str, count: usize, started: Instant) {
-    let secs = started.elapsed().as_secs_f64();
-    println!(
-        "LOAD {name}: {count} in {:.0} ms ({:.1}/s)",
-        secs * 1000.0,
-        count as f64 / secs.max(1e-6)
-    );
+async fn run(e: &EnterpriseWorld, name: &str, concurrency: usize) -> LoadRun {
+    LoadRun::start(name, concurrency, &e.h().db.url).await
+}
+
+/// Prints the scenario's LOAD line; an enterprise scenario never tolerates errors.
+async fn finish(run: LoadRun) {
+    let report = run.finish(None).await;
+    assert_eq!(report.errors, 0, "{}", report.line());
 }
 
 struct Desk {
@@ -102,32 +103,36 @@ async fn extension_calls_and_history_throughput() {
     let member = desk(&e, "member").await;
     e.extension("5500", "ENTERPRISE_MEMBER", member.principal.id())
         .await;
-    let started = Instant::now();
+    let r = run(&e, "extension_call_sequential", 1).await;
     for _ in 0..n / 2 {
-        let call = dial(&e, &caller, "5500").await;
+        let call = r.op(dial(&e, &caller, "5500"), |_| true).await;
         let (_, v) = e.a.state(call).await;
         e.a.command(call, "cancel", v).await;
     }
-    report("extension_call_sequential", n / 2, started);
-    let started = Instant::now();
-    let calls: Vec<Uuid> = join_all((0..n / 2).map(|_| dial(&e, &caller, "5500"))).await;
-    report("extension_call_concurrent", n / 2, started);
+    finish(r).await;
+    let r = run(&e, "extension_call_concurrent", n / 2).await;
+    let calls: Vec<Uuid> =
+        join_all((0..n / 2).map(|_| r.op(dial(&e, &caller, "5500"), |_| true))).await;
+    finish(r).await;
     assert_eq!(calls.len(), n / 2);
     // History: the member's newest page, then the plan.
     let scope = CallScope::of_platform(&e.a.w.ctx);
-    let started = Instant::now();
+    let measured = run(&e, "history_page_25", 1).await;
     let rounds = 20;
     for _ in 0..rounds {
-        let r =
-            e.a.get(&format!(
-                "/v1/calls?principalId={}&limit=25",
-                member.principal.id()
-            ))
+        let r = measured
+            .op(
+                e.a.get(&format!(
+                    "/v1/calls?principalId={}&limit=25",
+                    member.principal.id()
+                )),
+                |r| r.status == StatusCode::OK,
+            )
             .await;
         assert_eq!(r.status, StatusCode::OK, "{}", r.text);
         assert_eq!(r.json["data"].as_array().unwrap().len(), 25);
     }
-    report("history_page_25", rounds, started);
+    finish(measured).await;
     let statement = calling::calls::app::history::history_statement(
         scope,
         member.principal.id(),
@@ -169,10 +174,12 @@ async fn queue_burst_keeps_fifo_order() {
         .await;
     let queue_id = id_of(&q, "queueId");
     e.extension("8800", "QUEUE", queue_id).await;
-    let started = Instant::now();
-    let calls: Vec<Uuid> =
-        join_all((0..n).map(|i| dial(&e, &callers[i % callers.len()], "8800"))).await;
-    report("queue_insert_burst", n, started);
+    let measured = run(&e, "queue_insert_burst", n).await;
+    let calls: Vec<Uuid> = join_all(
+        (0..n).map(|i| measured.op(dial(&e, &callers[i % callers.len()], "8800"), |_| true)),
+    )
+    .await;
+    finish(measured).await;
     // Positions: 1..n, unique, in (entered_at, seq) order.
     let positions = strings(
         e.h().conn(),
@@ -230,7 +237,7 @@ async fn queue_burst_keeps_fifo_order() {
         .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     let rounds = 3;
-    let started = Instant::now();
+    let measured = run(&e, "queue_assignment", 1).await;
     let mut answered = Vec::new();
     for _ in 0..rounds {
         e.h().state.app.dispatch_queue(queue_id).await;
@@ -251,7 +258,11 @@ async fn queue_burst_keeps_fifo_order() {
                         .await
                         .unwrap();
                 let (_, v) = e.a.state(call).await;
-                let r = e.a.accept(call, invitation, &agent.phone, v).await;
+                let r = measured
+                    .op(e.a.accept(call, invitation, &agent.phone, v), |r| {
+                        r.status == StatusCode::OK
+                    })
+                    .await;
                 assert_eq!(r.status, StatusCode::OK, "{}", r.text);
                 answered.push(call);
                 let (_, v) = e.a.state(call).await;
@@ -259,7 +270,7 @@ async fn queue_burst_keeps_fifo_order() {
             }
         }
     }
-    report("queue_assignment", answered.len(), started);
+    finish(measured).await;
     assert_eq!(answered.len(), rounds * agents.len());
     // FIFO: the answered Calls are exactly the oldest entries, in order.
     let oldest: Vec<String> = positions[..answered.len()]
@@ -306,12 +317,12 @@ async fn ring_fanout_is_bounded() {
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     e.extension("2900", "RING_GROUP", gid).await;
     let n = 10 * scale();
-    let started = Instant::now();
+    let measured = run(&e, "ring_group_fanout_call", 1).await;
     let mut calls = Vec::new();
     for _ in 0..n {
-        calls.push(dial(&e, &caller, "2900").await);
+        calls.push(measured.op(dial(&e, &caller, "2900"), |_| true).await);
     }
-    report("ring_group_fanout_call", n, started);
+    finish(measured).await;
     let policy_fanout = 10; // the default policy's maxRingGroupFanout
     for call in &calls {
         let offers = e
@@ -387,8 +398,9 @@ async fn ivr_and_schedule_evaluation_throughput() {
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     e.extension("7701", "IVR", flow_id).await;
     let n = 20 * scale();
-    let started = Instant::now();
+    let measured = run(&e, "ivr_call_and_transition", 1).await;
     for _ in 0..n {
+        let started = std::time::Instant::now();
         let call = dial(&e, &caller, "7701").await;
         let r = e
             .send(
@@ -398,6 +410,7 @@ async fn ivr_and_schedule_evaluation_throughput() {
                 Some(json!({ "endpointId": caller.phone.endpoint, "digit": "1" })),
             )
             .await;
+        measured.record(started.elapsed(), r.status.is_success());
         assert!(r.status.is_success(), "{}", r.text);
         assert!(e
             .a
@@ -405,7 +418,7 @@ async fn ivr_and_schedule_evaluation_throughput() {
             .await
             .is_some());
     }
-    report("ivr_call_and_transition", n, started);
+    finish(measured).await;
 
     let (status, hours) = {
         let r = e
@@ -423,17 +436,20 @@ async fn ivr_and_schedule_evaluation_throughput() {
     assert_eq!(status, StatusCode::CREATED, "{hours}");
     let hid = id_of(&hours, "businessHoursId");
     let m = 100 * scale();
-    let started = Instant::now();
+    let measured = run(&e, "business_hours_evaluation", 1).await;
     for i in 0..m {
         let at = format!("2031-03-{:02}T{:02}:30:00Z", 1 + i % 28, i % 24);
-        let r = e
-            .admin(
-                Method::POST,
-                &format!("/v1/enterprise/business-hours/{hid}/evaluation"),
-                Some(json!({ "at": at })),
+        let r = measured
+            .op(
+                e.admin(
+                    Method::POST,
+                    &format!("/v1/enterprise/business-hours/{hid}/evaluation"),
+                    Some(json!({ "at": at })),
+                ),
+                |r| r.status == StatusCode::OK,
             )
             .await;
         assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     }
-    report("business_hours_evaluation", m, started);
+    finish(measured).await;
 }

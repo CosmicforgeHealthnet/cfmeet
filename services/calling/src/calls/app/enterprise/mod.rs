@@ -373,6 +373,7 @@ impl AppCallService {
         {
             return self.replay_create(scope, prior).await;
         }
+        self.require_new_calls(false)?;
         if !self.enterprise_flags.enterprise_calling {
             return Err(CallError::CapabilityUnavailable(
                 "enterprise calling is not enabled",

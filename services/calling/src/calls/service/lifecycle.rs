@@ -210,6 +210,7 @@ impl CallService {
             version: Set(1),
             communication_context_ref: Set(request.communication_context_ref),
             privacy_relay_ref: Set(request.privacy_relay_ref),
+            correlation_id: Set(Some(cmd.correlation_id().as_str().to_string())),
             terminal_reason: Set(None),
             failure_category: Set(None),
             requested_at: Set(at),
@@ -613,6 +614,7 @@ impl CallService {
                 missed.max(0) as u64,
             );
         }
+        record_lifecycle_metrics(row, &call, &plan);
         tracing::info!(
             call_id = %call.id,
             call_state = %call.current_state,
@@ -1156,4 +1158,60 @@ async fn close_participation(
     )
     .await?;
     Ok((intervals, sessions, participants))
+}
+
+/// Call lifecycle metrics (§84), bounded labels only (the call kind and a fixed outcome
+/// vocabulary): ring duration when a Call leaves RINGING, setup latency (request →
+/// first CONNECTED), connected duration and the outcome when it ends.
+fn record_lifecycle_metrics(
+    before: &calls::Model,
+    after: &calls::Model,
+    plan: &crate::calls::transitions::TransitionPlan,
+) {
+    let call_kind = after.call_kind.as_str();
+    let seconds = |from: chrono::DateTime<chrono::Utc>| {
+        (plan.at - from).num_milliseconds().max(0) as f64 / 1000.0
+    };
+    if plan.from == CallState::Ringing {
+        if let Some(ringing_at) = before.ringing_at {
+            crate::metrics::observe(
+                "calling_call_ring_seconds",
+                &[("call_kind", call_kind)],
+                seconds(ringing_at),
+            );
+        }
+    }
+    if plan.to == CallState::Connected && before.connected_at.is_none() {
+        crate::metrics::observe(
+            "calling_call_setup_seconds",
+            &[("call_kind", call_kind)],
+            seconds(before.requested_at),
+        );
+    }
+    if plan.to.is_terminal() {
+        if let Some(connected_at) = before.connected_at {
+            crate::metrics::observe(
+                "calling_call_connected_seconds",
+                &[("call_kind", call_kind)],
+                seconds(connected_at),
+            );
+        }
+        let outcome = match plan.to {
+            CallState::Ended => "answered",
+            CallState::Declined => "declined",
+            CallState::Busy => "busy",
+            CallState::NoAnswer => "no_answer",
+            CallState::Cancelled => "cancelled",
+            CallState::Failed
+                if plan.failure_category == Some(crate::calls::kinds::FailureCategory::Timeout) =>
+            {
+                "timeout"
+            }
+            _ => "failed",
+        };
+        crate::metrics::inc(
+            "calling_call_outcomes_total",
+            &[("call_kind", call_kind), ("outcome", outcome)],
+        );
+    }
 }

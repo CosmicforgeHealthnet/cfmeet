@@ -296,6 +296,12 @@ impl CallService {
             out.push(record);
         }
         out.extend(self.participation_usage_in(txn, cmd, call).await?);
+        tracing::info!(
+            call_id = %call.id,
+            correlation_id = %cmd.correlation_id(),
+            facts = out.len(),
+            "call usage finalized"
+        );
         Ok(out)
     }
 
@@ -450,6 +456,42 @@ impl CallService {
     ) -> CallResult<(CallUsageRecord, bool)> {
         if record.finalized_at.is_some() {
             return Ok((record.into(), false));
+        }
+        // §93: ONE finalized time fact per (Call, usage type, subject) — a second fact
+        // under a different idempotency key would bill the same time twice (the partial
+        // unique index `uq_call_usage_records_one_final_fact` refuses it too).
+        if matches!(
+            record.usage_type,
+            UsageType::CallConnectedTime
+                | UsageType::ParticipantConnectedTime
+                | UsageType::SessionConnectedTime
+                | UsageType::LegConnectedTime
+        ) {
+            let subject = record
+                .session_id
+                .or(record.leg_id)
+                .or(record.participant_id)
+                .unwrap_or(record.call_id);
+            let duplicate = call_usage_records::Entity::find()
+                .filter(call_usage_records::Column::CallId.eq(record.call_id))
+                .filter(call_usage_records::Column::UsageType.eq(record.usage_type))
+                .filter(call_usage_records::Column::FinalizedAt.is_not_null())
+                .filter(call_usage_records::Column::Id.ne(record.id))
+                .all(txn)
+                .await?
+                .into_iter()
+                .any(|r| {
+                    r.session_id
+                        .or(r.leg_id)
+                        .or(r.participant_id)
+                        .unwrap_or(r.call_id)
+                        == subject
+                });
+            if duplicate {
+                return Err(CallError::Conflict(
+                    "a finalized usage fact already exists for this subject",
+                ));
+            }
         }
         let at = self.now().max(record.updated_at);
         let mut active: call_usage_records::ActiveModel = record.into();
@@ -631,6 +673,12 @@ impl CallService {
         crate::metrics::inc(
             "calling_usage_facts_total",
             &[("usage_type", usage_type.as_str())],
+        );
+        tracing::info!(
+            call_id = %call.id,
+            correlation_id = %cmd.correlation_id(),
+            usage_type = usage_type.as_str(),
+            "usage fact finalized"
         );
         Ok(true)
     }

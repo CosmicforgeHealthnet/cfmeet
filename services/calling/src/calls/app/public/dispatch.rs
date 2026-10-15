@@ -73,7 +73,7 @@ impl AppCallService {
         let rows = CommandRow::find_by_statement(stmt(
             &format!(
                 "UPDATE call_telephony_commands SET lease_until = $1 + make_interval(secs => {LEASE_SECONDS}), \
-                   updated_at = GREATEST(updated_at, $1) \
+                   lease_claim = gen_random_uuid(), updated_at = GREATEST(updated_at, $1) \
                  WHERE id IN (SELECT id FROM call_telephony_commands \
                    WHERE status = 'PENDING' AND next_attempt_at <= $1 AND (lease_until IS NULL OR lease_until < $1) \
                    ORDER BY next_attempt_at, created_at, idempotency_key LIMIT $2 FOR UPDATE SKIP LOCKED) \
@@ -89,15 +89,37 @@ impl AppCallService {
         });
         let mut done = 0;
         for row in rows {
-            match self.dispatch_one(&row).await {
-                Ok(_) => done += 1,
-                Err(error) => {
-                    tracing::warn!(command_id = %row.id, %error, "telephony command dispatch failed; will retry");
-                    let _ = self.reschedule(&row, "DISPATCH_ERROR").await;
-                }
+            if self.dispatch_claimed(&row).await {
+                done += 1;
             }
         }
         Ok(done)
+    }
+
+    /// Sends one claimed command inside a span naming its Call (and the Call's
+    /// correlation): every log line of the dispatch is attributable without an
+    /// identifier in a metric. A failure reschedules it (bounded by the attempt cap).
+    async fn dispatch_claimed(&self, row: &CommandRow) -> bool {
+        use tracing::Instrument;
+        let span = tracing::info_span!(
+            "telephony_command",
+            call_id = %row.call_id,
+            command_id = %row.id,
+            command_kind = %row.kind,
+            correlation_id = %correlation(&row.payload),
+        );
+        async {
+            match self.dispatch_one(row).await {
+                Ok(_) => true,
+                Err(error) => {
+                    tracing::warn!(command_id = %row.id, %error, "telephony command dispatch failed; will retry");
+                    let _ = self.reschedule(row, "DISPATCH_ERROR").await;
+                    false
+                }
+            }
+        }
+        .instrument(span)
+        .await
     }
 
     /// Sends the due commands of one Call now (after the transaction that wrote them).
@@ -113,7 +135,8 @@ impl AppCallService {
     async fn dispatch_call_inner(&self, call_id: Uuid) {
         let rows = CommandRow::find_by_statement(stmt(
             &format!(
-                "UPDATE call_telephony_commands SET lease_until = $2 + make_interval(secs => {LEASE_SECONDS}) \
+                "UPDATE call_telephony_commands SET lease_until = $2 + make_interval(secs => {LEASE_SECONDS}), \
+                   lease_claim = gen_random_uuid() \
                  WHERE id IN (SELECT id FROM call_telephony_commands \
                    WHERE call_id = $1 AND status = 'PENDING' AND next_attempt_at <= $2 \
                      AND (lease_until IS NULL OR lease_until < $2) \
@@ -130,45 +153,110 @@ impl AppCallService {
             (a.created_at, &a.idempotency_key).cmp(&(b.created_at, &b.idempotency_key))
         });
         for row in rows {
-            if let Err(error) = self.dispatch_one(&row).await {
-                tracing::warn!(command_id = %row.id, %error, "telephony command dispatch failed; will retry");
-                let _ = self.reschedule(&row, "DISPATCH_ERROR").await;
-            }
+            self.dispatch_claimed(&row).await;
         }
     }
 
-    async fn reschedule(&self, row: &CommandRow, code: &str) -> CallResult<()> {
+    /// A claimed command is retried later (bounded backoff). Guarded by the claim: a
+    /// stale worker whose lease expired (and was reclaimed) changes nothing. The attempt
+    /// that reaches the configured cap moves the command to DEAD instead — it stops
+    /// retrying, and ONE deduplicated incident (per command) asks an operator to look:
+    /// an ORIGINATE whose outcome is unknown is never re-invented as a new command.
+    pub(super) async fn reschedule(&self, row: &CommandRow, code: &str) -> CallResult<()> {
+        #[derive(FromQueryResult)]
+        struct Rescheduled {
+            status: String,
+            attempts: i32,
+            tenant_id: Uuid,
+            application_id: Uuid,
+            environment_id: Uuid,
+        }
         let now = self.calls.now();
-        exec(
-            self.db(),
-            "UPDATE call_telephony_commands SET attempts = attempts + 1, lease_until = NULL, \
-               next_attempt_at = $2, last_error_code = $3, updated_at = GREATEST(updated_at, $4) \
-             WHERE id = $1 AND status = 'PENDING'",
+        let max = self.config.telephony_command_max_attempts.max(1);
+        let done = Rescheduled::find_by_statement(stmt(
+            "UPDATE call_telephony_commands SET attempts = attempts + 1, \
+               status = CASE WHEN attempts + 1 >= $6 THEN 'DEAD' ELSE status END, \
+               completed_at = CASE WHEN attempts + 1 >= $6 THEN GREATEST($4, created_at) ELSE completed_at END, \
+               last_error_code = CASE WHEN attempts + 1 >= $6 THEN 'MAX_ATTEMPTS_EXCEEDED' ELSE $3 END, \
+               next_attempt_at = $2, lease_until = NULL, lease_claim = NULL, \
+               updated_at = GREATEST(updated_at, $4) \
+             WHERE id = $1 AND status = 'PENDING' AND lease_claim IS NOT DISTINCT FROM $5 \
+             RETURNING status, attempts, tenant_id, application_id, environment_id",
             vec![
                 row.id.into(),
                 (now + retry_delay(row.attempts)).into(),
                 code.into(),
                 now.into(),
+                row.lease_claim.into(),
+                max.into(),
+            ],
+        ))
+        .one(self.db())
+        .await?;
+        let Some(done) = done.filter(|d| d.status == "DEAD") else {
+            return Ok(());
+        };
+        let kind = CommandKind::parse(&row.kind)
+            .map(|k| k.as_str())
+            .unwrap_or("UNKNOWN");
+        crate::metrics::inc(
+            "calling_telephony_commands_dead_total",
+            &[("kind", kind), ("reason", "MAX_ATTEMPTS_EXCEEDED")],
+        );
+        tracing::error!(
+            call_id = %row.call_id,
+            command_id = %row.id,
+            command_kind = kind,
+            attempts = done.attempts,
+            last_code = code,
+            "telephony command reached its attempt cap; DEAD (operator incident raised)"
+        );
+        let scope = crate::calls::command::CallScope::from_parts(
+            crate::domain::TenantId::from_uuid(done.tenant_id),
+            crate::domain::ApplicationId::from_uuid(done.application_id),
+            crate::domain::EnvironmentId::from_uuid(done.environment_id),
+        );
+        let incident = crate::calls::app::incidents::Incident::new(
+            crate::calls::app::incidents::IncidentCategory::TelephonyCommandDead,
+            crate::calls::app::incidents::IncidentSeverity::High,
+            scope,
+            crate::calls::app::incidents::IncidentResource::TelephonyCommand,
+            row.id,
+        )
+        .call(row.call_id)
+        .evidence(json!({
+            "commandKind": kind,
+            "attempts": done.attempts,
+            "lastErrorCode": &code[..code.len().min(64)],
+        }));
+        crate::calls::app::incidents::raise(self.db(), &incident, now).await;
+        Ok(())
+    }
+
+    /// A claimed command waits until `at` (not an attempt). Guarded by the claim.
+    async fn defer_until(&self, row: &CommandRow, at: DateTime<Utc>, code: &str) -> CallResult<()> {
+        exec(
+            self.db(),
+            "UPDATE call_telephony_commands SET lease_until = NULL, lease_claim = NULL, next_attempt_at = $2, \
+               last_error_code = $3, updated_at = GREATEST(updated_at, $4) \
+             WHERE id = $1 AND status = 'PENDING' AND lease_claim IS NOT DISTINCT FROM $5",
+            vec![
+                row.id.into(),
+                at.into(),
+                code.into(),
+                self.calls.now().into(),
+                row.lease_claim.into(),
             ],
         )
         .await?;
         Ok(())
     }
 
-    async fn defer_until(&self, row: &CommandRow, at: DateTime<Utc>, code: &str) -> CallResult<()> {
-        exec(
-            self.db(),
-            "UPDATE call_telephony_commands SET lease_until = NULL, next_attempt_at = $2, last_error_code = $3, \
-               updated_at = GREATEST(updated_at, $4) WHERE id = $1 AND status = 'PENDING'",
-            vec![row.id.into(), at.into(), code.into(), self.calls.now().into()],
-        )
-        .await?;
-        Ok(())
-    }
-
-    async fn complete(
+    /// Completes a command THIS worker claimed (guarded by its claim: after a lost lease
+    /// it changes nothing and returns `false`).
+    pub(super) async fn complete(
         &self,
-        id: Uuid,
+        row: &CommandRow,
         status: &str,
         code: Option<&str>,
         telephony_ref: Option<Uuid>,
@@ -178,15 +266,38 @@ impl AppCallService {
             self.db(),
             "UPDATE call_telephony_commands SET status = $2, completed_at = GREATEST($3, created_at), \
                last_error_code = COALESCE($4, last_error_code), telephony_ref = COALESCE(telephony_ref, $5), \
-               lease_until = NULL, updated_at = GREATEST(updated_at, $3) \
-             WHERE id = $1 AND status = 'PENDING'",
+               lease_until = NULL, lease_claim = NULL, updated_at = GREATEST(updated_at, $3) \
+             WHERE id = $1 AND status = 'PENDING' AND lease_claim IS NOT DISTINCT FROM $6",
             vec![
-                id.into(),
+                row.id.into(),
                 status.into(),
                 now.into(),
-                code.into(),
+                code.map(|c| c[..c.len().min(64)].to_string()).into(),
                 telephony_ref.into(),
+                row.lease_claim.into(),
             ],
+        )
+        .await?
+            == 1)
+    }
+
+    /// Completes ANOTHER command (not claimed by this worker) — only while no worker
+    /// holds a live lease on it, so a command being sent right now is never declared
+    /// dead underneath its sender.
+    async fn complete_unclaimed(
+        &self,
+        id: Uuid,
+        status: &str,
+        code: Option<&str>,
+    ) -> CallResult<bool> {
+        let now = self.calls.now();
+        Ok(exec(
+            self.db(),
+            "UPDATE call_telephony_commands SET status = $2, completed_at = GREATEST($3, created_at), \
+               last_error_code = COALESCE($4, last_error_code), lease_until = NULL, lease_claim = NULL, \
+               updated_at = GREATEST(updated_at, $3) \
+             WHERE id = $1 AND status = 'PENDING' AND (lease_until IS NULL OR lease_until < $3)",
+            vec![id.into(), status.into(), now.into(), code.into()],
         )
         .await?
             == 1)
@@ -216,7 +327,7 @@ impl AppCallService {
             Some(CommandKind::Bridge) => self.dispatch_bridge(row, &call).await,
             Some(CommandKind::Unbridge) => self.dispatch_unbridge(row, &call).await,
             None => {
-                self.complete(row.id, "DEAD", Some("UNKNOWN_KIND"), None)
+                self.complete(row, "DEAD", Some("UNKNOWN_KIND"), None)
                     .await?;
                 Ok(Dispatched::Dead)
             }
@@ -251,7 +362,7 @@ impl AppCallService {
             if row.attempts == 0 {
                 // Never sent: nothing can exist at Telephony.
                 if self
-                    .complete(row.id, "DEAD", Some("CALL_NOT_ACTIVE"), None)
+                    .complete(row, "DEAD", Some("CALL_NOT_ACTIVE"), None)
                     .await?
                 {
                     self.leg_never_executed(call, leg_id, row.attempt_id, None)
@@ -308,7 +419,7 @@ impl AppCallService {
                 // would not need a new grant, so only a never-sent command is final here.
                 if row.attempts == 0 {
                     if self
-                        .complete(row.id, "REFUSED", Some("CONTACT_RESOLUTION_DENIED"), None)
+                        .complete(row, "REFUSED", Some("CONTACT_RESOLUTION_DENIED"), None)
                         .await?
                     {
                         self.leg_never_executed(
@@ -329,7 +440,7 @@ impl AppCallService {
         // suspension after the Call was authorized refuses the origination definitively.
         if !super::scope_is_active(self.db(), scope_of(call)).await? {
             if self
-                .complete(row.id, "REFUSED", Some("SCOPE_SUSPENDED"), None)
+                .complete(row, "REFUSED", Some("SCOPE_SUSPENDED"), None)
                 .await?
             {
                 self.leg_never_executed(
@@ -352,13 +463,33 @@ impl AppCallService {
         }
         // Count the submission BEFORE sending: a crash after the request leaves
         // attempts > 0, which forbids treating the command as never sent.
-        exec(
+        // The paid effect is decided HERE, atomically with recording the attempt: this
+        // worker must still hold its claim on a still-PENDING command and — for a first
+        // submission of an active Call — the Call must still be active NOW (a revocation /
+        // cancel that committed while the grant was being obtained wins). Otherwise
+        // nothing is sent: a lost claim is left to its new holder; an ended Call releases
+        // the claim at once so the command is re-evaluated (never sent → DEAD, and the
+        // Call's TERMINATE completes as never executed).
+        let recorded = exec(
             self.db(),
             "UPDATE call_telephony_commands SET attempts = attempts + 1, updated_at = GREATEST(updated_at, $2) \
-             WHERE id = $1 AND status = 'PENDING'",
-            vec![row.id.into(), now.into()],
+             WHERE id = $1 AND status = 'PENDING' AND lease_claim IS NOT DISTINCT FROM $3 \
+               AND (NOT $4 OR EXISTS (SELECT 1 FROM calls c WHERE c.id = call_telephony_commands.call_id \
+                     AND c.current_state IN ('DIALING', 'RINGING', 'ANSWERED', 'CONNECTED')))",
+            vec![
+                row.id.into(),
+                now.into(),
+                row.lease_claim.into(),
+                active.into(),
+            ],
         )
         .await?;
+        if recorded != 1 {
+            tracing::info!(call_id = %call.id, command_id = %row.id, "originate not sent: claim lost or the call is no longer active");
+            self.defer_until(row, now, "CALL_NOT_ACTIVE_RECHECK")
+                .await?;
+            return Ok(Dispatched::Retry);
+        }
         let result = self
             .public
             .telephony
@@ -374,7 +505,7 @@ impl AppCallService {
                     self.reschedule(row, "MALFORMED_RESPONSE").await?;
                     return Ok(Dispatched::Retry);
                 };
-                self.complete(row.id, "ACCEPTED", None, Some(telephony_leg))
+                self.complete(row, "ACCEPTED", None, Some(telephony_leg))
                     .await?;
                 self.bind_execution(call, leg_id, telephony_leg).await?;
                 if !active {
@@ -392,7 +523,7 @@ impl AppCallService {
             }
             Err(TelephonyError::Refused { code, .. }) => {
                 if self
-                    .complete(row.id, "REFUSED", Some(&code[..code.len().min(64)]), None)
+                    .complete(row, "REFUSED", Some(&code[..code.len().min(64)]), None)
                     .await?
                 {
                     self.leg_never_executed(
@@ -550,9 +681,10 @@ impl AppCallService {
                 id: Uuid,
                 status: String,
                 attempts: i32,
+                last_error_code: Option<String>,
             }
             let orig = Orig::find_by_statement(stmt(
-                "SELECT id, status, attempts FROM call_telephony_commands \
+                "SELECT id, status, attempts, last_error_code FROM call_telephony_commands \
                  WHERE call_leg_id = $1 AND kind = 'ORIGINATE'",
                 vec![leg_id.into()],
             ))
@@ -560,18 +692,33 @@ impl AppCallService {
             .await?;
             match orig {
                 Some(o) if o.status == "PENDING" && o.attempts == 0 => {
-                    if self
-                        .complete(o.id, "DEAD", Some("CALL_NOT_ACTIVE"), None)
+                    if !self
+                        .complete_unclaimed(o.id, "DEAD", Some("CALL_NOT_ACTIVE"))
                         .await?
                     {
-                        self.leg_never_executed(call, leg_id, None, None).await?;
+                        // Another worker holds the ORIGINATE right now (it may be sending
+                        // it): look again once its outcome is known.
+                        self.reschedule(row, "AWAITING_EXECUTION_BINDING").await?;
+                        return Ok(Dispatched::Retry);
                     }
-                    self.complete(row.id, "ACCEPTED", Some("NEVER_EXECUTED"), None)
+                    self.leg_never_executed(call, leg_id, None, None).await?;
+                    self.complete(row, "ACCEPTED", Some("NEVER_EXECUTED"), None)
                         .await?;
                     return Ok(Dispatched::Accepted);
                 }
+                Some(o)
+                    if o.status == "DEAD"
+                        && o.attempts > 0
+                        && o.last_error_code.as_deref() == Some("MAX_ATTEMPTS_EXCEEDED") =>
+                {
+                    // Submitted, outcome unknown, retries capped: the execution may exist.
+                    // Keep waiting for its binding (this TERMINATE is capped in turn and
+                    // raises its own incident) — never "never executed".
+                    self.reschedule(row, "AWAITING_EXECUTION_BINDING").await?;
+                    return Ok(Dispatched::Retry);
+                }
                 Some(o) if o.status != "PENDING" && o.status != "ACCEPTED" => {
-                    self.complete(row.id, "ACCEPTED", Some("NEVER_EXECUTED"), None)
+                    self.complete(row, "ACCEPTED", Some("NEVER_EXECUTED"), None)
                         .await?;
                     return Ok(Dispatched::Accepted);
                 }
@@ -600,7 +747,7 @@ impl AppCallService {
         {
             // A prompt / answer / capture for a Call that is over has nothing left to do
             // (ending the leg ends a running capture at the edge).
-            self.complete(row.id, "DEAD", Some("CALL_NOT_ACTIVE"), None)
+            self.complete(row, "DEAD", Some("CALL_NOT_ACTIVE"), None)
                 .await?;
             return Ok(Dispatched::Dead);
         }
@@ -626,7 +773,7 @@ impl AppCallService {
             .await
         {
             Ok(_) => {
-                self.complete(row.id, "ACCEPTED", None, Some(telephony_leg))
+                self.complete(row, "ACCEPTED", None, Some(telephony_leg))
                     .await?;
                 Ok(Dispatched::Accepted)
             }
@@ -648,12 +795,12 @@ impl AppCallService {
                 if code == "LEG_NOT_ACTIVE" || code == "LEG_NOT_FOUND" =>
             {
                 // Already over at Telephony: nothing to do.
-                self.complete(row.id, "ACCEPTED", Some(&code), Some(telephony_leg))
+                self.complete(row, "ACCEPTED", Some(&code), Some(telephony_leg))
                     .await?;
                 Ok(Dispatched::Accepted)
             }
             Err(TelephonyError::Refused { code, .. }) => {
-                self.complete(row.id, "REFUSED", Some(&code[..code.len().min(64)]), None)
+                self.complete(row, "REFUSED", Some(&code[..code.len().min(64)]), None)
                     .await?;
                 Ok(Dispatched::Refused)
             }
@@ -684,6 +831,12 @@ impl AppCallService {
 
     /// Asks Telephony to end every live public leg of a Call (idempotent: one TERMINATE
     /// per leg), then sends the commands.
+    ///
+    /// When the Call entered ENDING or a terminal state, the TERMINATE intents were
+    /// already written by the transition's own transaction (deferred trigger
+    /// `trg_calls_release_public_legs`, migration 000043): this post-commit step then only
+    /// finds them (same idempotency key) and sends them. A crash before it leaves durable
+    /// PENDING commands that the dispatch worker sends.
     pub(crate) async fn release_public_legs(&self, call_id: Uuid) -> CallResult<usize> {
         let call = self.call_row(call_id).await?;
         let txn = self.db().begin().await?;
@@ -720,7 +873,7 @@ impl AppCallService {
                 None,
                 None,
                 &format!("terminate:{leg_id}"),
-                json!({ "commandId": Uuid::new_v4(), "correlationId": cf_service_auth::CorrelationId::generate().as_str(), "reason": "CALL_ENDED" }),
+                json!({ "commandId": Uuid::new_v4(), "correlationId": crate::calls::app::call_correlation(&call).as_str(), "reason": "CALL_ENDED" }),
                 self.calls.now(),
             )
             .await?;

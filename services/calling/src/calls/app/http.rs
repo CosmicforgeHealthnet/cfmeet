@@ -175,8 +175,45 @@ struct CreateCallBody {
     target_extension: Option<String>,
 }
 
+/// The bounded request kind of a create-call body (metrics label).
+fn request_kind(body: &CreateCallBody) -> &'static str {
+    if body.target_extension.is_some() {
+        "enterprise"
+    } else if body.callback_requested {
+        "callback_relay"
+    } else if body.target_contact_reference.is_some() {
+        "public_outbound"
+    } else {
+        "application"
+    }
+}
+
+/// `POST /v1/calls` with the call-request metrics (§84): one request per kind, and every
+/// refusal by its bounded public error code (never an identifier).
 async fn create_call(
     State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    headers: HeaderMap,
+    body: Result<Json<CreateCallBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    let kind = match &body {
+        Ok(Json(body)) => request_kind(body),
+        Err(_) => "malformed",
+    };
+    crate::metrics::inc("calling_call_requests_total", &[("kind", kind)]);
+    let result = create_call_inner(state, ctx, headers, body).await;
+    if let Err(error) = &result {
+        let reason = error.code().as_str();
+        crate::metrics::inc(
+            "calling_call_request_refusals_total",
+            &[("kind", kind), ("reason", reason)],
+        );
+    }
+    result
+}
+
+async fn create_call_inner(
+    state: AppState,
     ctx: PlatformAuthContext,
     headers: HeaderMap,
     body: Result<Json<CreateCallBody>, JsonRejection>,
@@ -700,6 +737,10 @@ async fn create_block(
     ctx: PlatformAuthContext,
     body: Result<Json<CreateBlockBody>, JsonRejection>,
 ) -> Result<Response, CallingError> {
+    // Authorization before validation: a credential with neither blocking scope learns
+    // nothing about the body (the blocker-specific scope is checked again below).
+    ctx.require_scope(names::CALLS_WRITE)
+        .or_else(|_| ctx.require_scope(names::ENTERPRISE_CONFIG_WRITE))?;
     let b = parse_body(body)?;
     let (view, created) = state
         .app
@@ -766,6 +807,7 @@ async fn create_abuse_report(
     Path(call_id): Path<String>,
     body: Result<Json<AbuseReportBody>, JsonRejection>,
 ) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
     let call_id = uuid_path(&call_id)?;
     let b = parse_body(body)?;
     let (view, created) = state

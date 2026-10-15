@@ -471,3 +471,11 @@ impl CallMediaProvider for FakeMediaProvider {
         })
     }
 }
+
+/// The provider's callback signature over arbitrary `body` bytes (for malformed-body
+/// probes: a correctly signed body that is not a provider event).
+pub fn sign_raw(body: &[u8]) -> String {
+    let mut mac = Hmac::<Sha256>::new_from_slice(SECRET).unwrap();
+    mac.update(body);
+    hex::encode(mac.finalize().into_bytes())
+}

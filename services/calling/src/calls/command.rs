@@ -236,6 +236,22 @@ impl CallCommandContext {
         }
     }
 
+    /// [`system`](Self::system) continuing the correlation of the request that created
+    /// the Call (`calls.correlation_id`): a fresh request id identifies this run, the
+    /// correlation id links it to the Call's origin. A Call without one (created before it
+    /// was recorded) gets a fresh correlation id.
+    pub(crate) fn system_correlated(
+        scope: CallScope,
+        on_behalf_of: ServiceAccountId,
+        correlation: Option<&str>,
+    ) -> Self {
+        let mut cmd = Self::system(scope, on_behalf_of);
+        if let Some(correlation) = correlation.and_then(|c| CorrelationId::parse(c).ok()) {
+            cmd.correlation_id = correlation;
+        }
+        cmd
+    }
+
     pub fn scope(&self) -> CallScope {
         self.scope
     }

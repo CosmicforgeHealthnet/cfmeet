@@ -24,7 +24,12 @@ RUN cargo build --release --locked -p calling-migration --bin calling-migration 
  && cargo build --release --locked -p calling --bin calling --bin platform_admin
 
 FROM debian:bookworm-slim
-# No package installation: the CA bundle comes from the builder image.
+# Apply pending Debian security updates at build time (verified by the dependency-security
+# workflow); nothing else is installed.
+RUN apt-get update \
+ && apt-get -y --no-install-recommends upgrade \
+ && rm -rf /var/lib/apt/lists/*
+# No package installation beyond security updates: the CA bundle comes from the builder image.
 RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin calling
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 WORKDIR /app

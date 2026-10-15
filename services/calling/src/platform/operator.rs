@@ -76,6 +76,7 @@ text_enum!(
         RetentionHoldReleased = "RETENTION_HOLD_RELEASED",
         PrincipalTombstoned = "PRINCIPAL_TOMBSTONED",
         WebhookKeysResealed = "WEBHOOK_KEYS_RESEALED",
+        IncidentResolved = "INCIDENT_RESOLVED",
     }
 );
 
@@ -93,6 +94,7 @@ text_enum!(
         ComplianceEligibility = "COMPLIANCE_ELIGIBILITY",
         RetentionHold = "RETENTION_HOLD",
         WebhookKeyRing = "WEBHOOK_KEY_RING",
+        Incident = "INCIDENT",
     }
 );
 
@@ -713,9 +715,9 @@ mod tests {
 
     #[test]
     fn the_action_vocabulary_is_the_tables() {
-        // Kept in step with migrations 000034 + 000038 + 000042 (an unknown code is
-        // refused there).
-        assert_eq!(OperatorAction::ALL.len(), 29);
-        assert_eq!(AuditTargetKind::ALL.len(), 11);
+        // Kept in step with migrations 000034 + 000038 + 000042 + 000043 (an unknown
+        // code is refused there).
+        assert_eq!(OperatorAction::ALL.len(), 30);
+        assert_eq!(AuditTargetKind::ALL.len(), 12);
     }
 }

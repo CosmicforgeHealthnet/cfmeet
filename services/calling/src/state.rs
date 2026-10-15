@@ -115,6 +115,7 @@ impl AppState {
             PresenceWindow::default(),
         ));
         let media_gateway = runtime.media_gateway.clone();
+        let auth_failures = runtime.abuse_controls.auth_failure_policy();
         let webhooks = Arc::new(crate::webhooks::WebhookService::new(
             db.clone(),
             clock.clone(),
@@ -144,12 +145,10 @@ impl AppState {
             .with_abuse_controls(runtime.abuse_controls),
         );
         Self {
-            authenticator: Arc::new(CredentialAuthenticator::new(
-                db.clone(),
-                keyring,
-                registry,
-                clock.clone(),
-            )),
+            authenticator: Arc::new(
+                CredentialAuthenticator::new(db.clone(), keyring, registry, clock.clone())
+                    .with_failure_policy(auth_failures),
+            ),
             rate_limiter: Arc::new(RequestRateLimiter::new(
                 db.clone(),
                 limit_defaults,

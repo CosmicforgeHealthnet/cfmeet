@@ -1066,3 +1066,147 @@ async fn retention_holds_tombstones_and_reseals_are_operator_audited() {
     );
     assert!(!rows[0].4.to_string().contains(&key));
 }
+
+/// §86: `platform_admin incidents list|resolve`. Listing is read-only (no operator);
+/// resolving requires an operator and writes exactly one INCIDENT_RESOLVED audit row in
+/// the same transaction (the audit rows are the resolution history). A later occurrence of
+/// the same condition opens a NEW incident.
+#[tokio::test]
+async fn incidents_are_listed_and_resolved_by_an_audited_operator() {
+    let Some(w) = common::app::AppWorld::new().await else {
+        return;
+    };
+    let conn = w.h().conn();
+    let cli = Cli {
+        database_url: w.h().db.url.clone(),
+        pepper: TEST_PEPPER.to_string(),
+    };
+    let scope = w.w.scope();
+    let scoped = uuid::Uuid::new_v4();
+    let platform = uuid::Uuid::new_v4();
+    common::exec(
+        conn,
+        &format!(
+            "INSERT INTO calling_incidents (id, tenant_id, application_id, environment_id, dedupe_key, \
+               category, severity, status, resource_type, resource_id, occurrences, restricted_evidence, \
+               first_seen_at, last_seen_at) VALUES \
+             ('{scoped}', '{}', '{}', '{}', 'telephony_command_dead:telephony_command:{}', \
+              'TELEPHONY_COMMAND_DEAD', 'HIGH', 'OPEN', 'TELEPHONY_COMMAND', '{}', 3, \
+              '{{\"commandKind\": \"TERMINATE\"}}', now(), now()), \
+             ('{platform}', NULL, NULL, NULL, 'worker_backlog:00000000000000000000000000000000:outbox', \
+              'WORKER_BACKLOG', 'HIGH', 'OPEN', NULL, NULL, 1, '{{\"queue\": \"outbox\"}}', now(), now())",
+            scope.tenant_id().as_uuid(),
+            scope.application_id().as_uuid(),
+            scope.environment_id().as_uuid(),
+            scoped.simple(),
+            scoped,
+        ),
+    )
+    .await
+    .unwrap();
+
+    // Read-only listing: no operator, filters by status / category, bounded.
+    let all = cli.run_raw(&["incidents", "list"], &[]);
+    assert_eq!(all.code, 0, "{}", all.stderr);
+    assert_eq!(all.json().as_array().unwrap().len(), 2);
+    let dead = cli.run_raw(
+        &[
+            "incidents",
+            "list",
+            "--category",
+            "TELEPHONY_COMMAND_DEAD",
+            "--status",
+            "open",
+        ],
+        &[],
+    );
+    assert_eq!(dead.code, 0, "{}", dead.stderr);
+    let dead = dead.json();
+    assert_eq!(dead.as_array().unwrap().len(), 1);
+    assert_eq!(dead[0]["id"], scoped.to_string());
+    assert_eq!(dead[0]["occurrences"], 3);
+    assert_ne!(
+        cli.run_raw(&["incidents", "list", "--category", "NOPE"], &[])
+            .code,
+        0
+    );
+
+    // Resolving needs an operator: refused, nothing changed, nothing audited.
+    let id = scoped.to_string();
+    let out = cli.run_raw(&["incidents", "resolve", "--incident", &id], &[]);
+    assert_eq!(out.code, 2, "{}", out.stderr);
+    assert!(out.stderr.contains("--operator"), "{}", out.stderr);
+    assert_eq!(
+        common::scalar_i64(
+            conn,
+            "SELECT count(*) FROM calling_incidents WHERE status = 'OPEN'"
+        )
+        .await,
+        2
+    );
+    assert_eq!(
+        common::scalar_i64(conn, "SELECT count(*) FROM platform_operator_audit").await,
+        0
+    );
+
+    // With an operator: RESOLVED + one audit row (scope, category, previous status).
+    let resolved = cli.ok(&["incidents", "resolve", "--incident", &id]).json();
+    assert_eq!(resolved["status"], "RESOLVED");
+    assert!(resolved["resolvedAt"].is_string());
+    let rows = audit_rows(conn, "INCIDENT_RESOLVED").await;
+    assert_eq!(rows.len(), 1);
+    let (actor, correlation, target_kind, target_id, detail) = &rows[0];
+    assert_eq!(actor, OPERATOR);
+    assert!(correlation.starts_with("op_"));
+    assert_eq!(target_kind, "INCIDENT");
+    assert_eq!(*target_id, Some(scoped));
+    assert_eq!(detail["category"], "TELEPHONY_COMMAND_DEAD");
+    assert_eq!(detail["previousStatus"], "OPEN");
+    // The platform-wide incident resolves the same way (unscoped audit row).
+    cli.ok(&["incidents", "resolve", "--incident", &platform.to_string()]);
+    assert_eq!(
+        common::scalar_i64(
+            conn,
+            &format!(
+                "SELECT count(*) FROM platform_operator_audit WHERE action = 'INCIDENT_RESOLVED' \
+                 AND target_id = '{platform}' AND tenant_id IS NULL"
+            )
+        )
+        .await,
+        1
+    );
+    // Idempotent: resolving again changes nothing (audited like every operator command).
+    let again = cli.ok(&["incidents", "resolve", "--incident", &id]).json();
+    assert_eq!(again["resolvedAt"], resolved["resolvedAt"]);
+    assert_eq!(audit_rows(conn, "INCIDENT_RESOLVED").await.len(), 3);
+    // Unknown incident: refused, nothing audited.
+    let unknown = uuid::Uuid::new_v4().to_string();
+    assert_ne!(
+        cli.run(&["incidents", "resolve", "--incident", &unknown])
+            .code,
+        0
+    );
+    assert_eq!(audit_rows(conn, "INCIDENT_RESOLVED").await.len(), 3);
+    let open = cli.run_raw(&["incidents", "list", "--status", "open"], &[]);
+    assert_eq!(open.json().as_array().unwrap().len(), 0);
+
+    // A later occurrence of the same condition opens a NEW incident (the resolved one is
+    // history): the open-key uniqueness only covers OPEN rows.
+    common::exec(
+        conn,
+        &format!(
+            "INSERT INTO calling_incidents (id, tenant_id, application_id, environment_id, dedupe_key, \
+               category, severity, status, resource_type, resource_id, occurrences, restricted_evidence, \
+               first_seen_at, last_seen_at) VALUES \
+             (gen_random_uuid(), '{}', '{}', '{}', 'telephony_command_dead:telephony_command:{}', \
+              'TELEPHONY_COMMAND_DEAD', 'HIGH', 'OPEN', 'TELEPHONY_COMMAND', '{}', 1, '{{}}', now(), now())",
+            scope.tenant_id().as_uuid(),
+            scope.application_id().as_uuid(),
+            scope.environment_id().as_uuid(),
+            scoped.simple(),
+            scoped,
+        ),
+    )
+    .await
+    .unwrap();
+}

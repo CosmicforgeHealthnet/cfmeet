@@ -122,6 +122,8 @@ impl AppCallService {
         {
             return Ok(answer(e.call_id, e.id));
         }
+        crate::metrics::inc("calling_call_requests_total", &[("kind", "enterprise_sip")]);
+        self.require_new_calls(false)?;
         if !self.enterprise_flags.enterprise_calling {
             return Err(CallError::CapabilityUnavailable(
                 "enterprise calling is not enabled",
@@ -208,9 +210,10 @@ impl AppCallService {
                 "the extension routes to the calling device's own principal.",
             ));
         }
-        let cmd = CallCommandContext::system(
+        let cmd = CallCommandContext::system_correlated(
             scope,
             ServiceAccountId::from_uuid(owner.service_account_id),
+            Some(&offer.correlation_id),
         );
         let creator = CallCreator {
             cmd: cmd.clone(),
@@ -352,7 +355,7 @@ impl AppCallService {
             None,
             &format!("answer:{}", leg.id),
             json!({
-                "correlationId": cf_service_auth::CorrelationId::generate().as_str(),
+                "correlationId": crate::calls::app::call_correlation(call).as_str(),
             }),
             self.calls.now(),
         )
@@ -390,7 +393,7 @@ impl AppCallService {
             None,
             &format!("prompt:{}:{n:05}:{step}", leg.id),
             json!({
-                "correlationId": cf_service_auth::CorrelationId::generate().as_str(),
+                "correlationId": crate::calls::app::call_correlation(call).as_str(),
                 "prompt": prompt.as_str(),
             }),
             self.calls.now(),

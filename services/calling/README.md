@@ -506,6 +506,82 @@ there is no fallback), `CF_RUNTIME_ENVIRONMENT`, `CF_SERVICE_AUTH_KEY_ID`,
 at startup if its identity, key, trust bundle or runtime environment is missing or
 inconsistent. The Calling service owns its own database.
 
+### Feature switches (§95)
+
+Every Calling switch is server-side and stops NEW calls of its capability only. Live
+Calls keep their authoritative state and end cleanly: end, leave, decline, cancel,
+reconciliation, Telephony leg release, cleanup, retention and artifact deletion never
+consult a switch (`tests/feature_rollback.rs`).
+
+| Variable | Default | Stops (new only) |
+|---|---|---|
+| `CALLING_NEW_CALLS_ENABLED` | `true` | Master switch: every new call — application, app-to-phone, callback relay, enterprise, inbound public and enterprise SIP offers |
+| `CALLING_APP_CALLING_ENABLED` | `true` | New application (app-to-app RTC) calls |
+| `CALLING_PUBLIC_OUTBOUND_ENABLED` | `false` | App-to-phone calls (and the outbound legs of every public class) |
+| `CALLING_PUBLIC_INBOUND_ENABLED` | `false` | Phone-to-app / phone-to-phone inbound calls |
+| `CALLING_CALLBACK_RELAY_ENABLED` | `false` | Callback relay (requires public outbound too) |
+| `ENTERPRISE_CALLING_ENABLED` | `false` | New enterprise routing (extensions, SIP desk offers) |
+| `VOICEMAIL_ENABLED` | `false` | New voicemail routing / capture |
+| `CALL_RECORDING_ENABLED` | `false` | New call recordings |
+
+A refused new call answers `CAPABILITY_UNAVAILABLE` (422) or, for the public classes,
+`PUBLIC_ROUTE_DENIED` (403); `calling_new_calls_refused_total{reason}` counts master /
+app refusals.
+
+### Durable work and operations (§81–§87, §109)
+
+* **Leg release with the transition** — when a Call enters ENDING or a terminal state, a
+  deferred constraint trigger (`trg_calls_release_public_legs`, migration 000043) writes the
+  durable TERMINATE of every live public leg (and bound enterprise SIP leg) in the SAME
+  transaction as the transition; the post-commit step only sends it. A crash between the
+  two never leaves a paid leg without a durable TERMINATE.
+* **Telephony commands** — leased with `FOR UPDATE SKIP LOCKED` and a per-claim
+  `lease_claim`; completion, rescheduling and the pre-send attempt count are guarded by
+  the claim, so a worker whose lease expired can never overwrite the reclaiming worker.
+  `CALLING_TELEPHONY_COMMAND_MAX_ATTEMPTS` (default 40) moves a command to DEAD (code
+  `MAX_ATTEMPTS_EXCEEDED`) with one `TELEPHONY_COMMAND_DEAD` incident; an ORIGINATE is
+  never re-invented as a new paid command (same id and idempotency key on every retry).
+* **Outbox** — a claim whose publisher died is reclaimed after its lease; one that dies at
+  the attempt cap is dead-lettered (`LEASE_EXPIRED_AT_CAP`) instead of looping, and every
+  dead letter counts on one open `OUTBOX_DEAD_LETTER` incident per environment.
+* **Setup deadline** — `CALLING_CALL_SETUP_DEADLINE_SECONDS` (default 7200, minimum 3900 —
+  above one maximum queue wait of 3600 s; ring windows ≤ 300 s and IVR inputs ≤ 60 s produce
+  Call events): a pre-connect Call with no Call event for that long fails (TIMEOUT)
+  through the canonical transition — ring offers cancelled, media marked for teardown,
+  public / SIP legs released in the same transaction. `SKIP LOCKED`, multi-instance safe.
+* **Backlog** — the worker loop samples `calling_outbox_pending`,
+  `calling_outbox_oldest_pending_age_seconds`, `calling_telephony_commands_pending`,
+  `calling_telephony_commands_oldest_pending_age_seconds`,
+  `calling_telephony_commands_dead` and `calling_webhook_deliveries_pending`; an oldest
+  pending item older than `CALLING_WORKER_BACKLOG_INCIDENT_SECONDS` (default 600) raises
+  one platform-wide `WORKER_BACKLOG` incident per queue.
+* **Incidents** — `calling_incidents` (OPEN / RESOLVED, deduplicated while open):
+  `platform_admin incidents list [--status open|resolved] [--category …] [--limit n]`
+  and `platform_admin incidents resolve --incident <id>` (operator required; one
+  `INCIDENT_RESOLVED` operator-audit row in the same transaction — the audit is the
+  resolution history; a later occurrence opens a new incident).
+* **Credential guessing** — failed authentications (wrong secret / unknown key id) are
+  counted per presented key id in `platform_auth_failure_windows` (unknown ids share one
+  bucket; windows are pruned); above `CALLING_AUTH_FAILURE_THRESHOLD` (default 20) per
+  `CALLING_AUTH_FAILURE_WINDOW_SECONDS` (default 300) further failures answer 429 and one
+  `CREDENTIAL_GUESSING` incident is raised. A correct secret is always accepted.
+  `calling_authentication_failures_total{reason}`.
+* **Metrics** (bounded labels only, `tests/metric_safety.rs`) —
+  `calling_call_requests_total{kind}`, `calling_call_request_refusals_total{kind,reason}`,
+  `calling_call_setup_seconds`, `calling_call_ring_seconds`,
+  `calling_call_connected_seconds` (`call_kind`), `calling_call_outcomes_total{call_kind,outcome}`
+  (answered / declined / busy / no_answer / cancelled / failed / timeout),
+  `calling_media_admissions_total{source,result,reason}`, `calling_media_reconnects_total`.
+  No jitter / RTT / packet loss is invented; the end-of-call quality summary records the
+  admitted sessions, reconnects and connected participants Calling observed.
+* **Correlation** — `calls.correlation_id` keeps the creating request's correlation id;
+  Calling's own later commands for the Call (worker / event-driven transitions,
+  TERMINATE / BRIDGE / ANSWER / PROMPT to Telephony, usage) carry it, and worker / event
+  logs run in spans with `call_id` (`tests/trace_correlation.rs`).
+* **Independent degradation** — `tests/degradation_matrix.rs`: carrier / route, SIP edge
+  / Telephony, RTC provider, Privacy Relay, Contact Vault, spend authority and realtime
+  fanout each fail without affecting unrelated calling.
+
 ## Running locally (no Docker required)
 
 ```bash
@@ -565,6 +641,9 @@ $A retention list [--all]
 $A retention release --hold <id>
 $A principal tombstone --principal <id>       # DEACTIVATED for ever, reference replaced
 $A webhooks reseal --batch 100                # one WEBHOOK_KEYS_RESEALED audit row
+# Operational incidents (§86): list is read-only; resolve is operator-audited.
+$A incidents list --status open --category TELEPHONY_COMMAND_DEAD
+$A incidents resolve --incident <id>           # one INCIDENT_RESOLVED audit row
 ```
 
 `$A --help` lists every command (suspend / reactivate for tenants, applications,
@@ -617,7 +696,10 @@ incidents, metrics, failure injection), `enterprise_security` (scope matrix, con
 scans), `enterprise_load` (measured throughput with burst invariants; scale with
 `ENTERPRISE_LOAD_SCALE`), `enterprise_certification` (§212 organization isolation) and the real-stack `enterprise_sip_certification` (skipped
 unless `ENTERPRISE_SIP_CERT_REQUIRED=1` and the Telephony binaries / Asterisk / SIPp are
-present).
+present). Operations (§81–§109): `durable_workers` (leg release committed with the
+transition, command claims / leases / attempt cap, outbox lease recovery, setup deadline,
+backlog incident), `call_metrics`, `trace_correlation`, `degradation_matrix` and
+`feature_rollback`.
 
 Real-provider certification (`rtc_certification`) runs against a real LiveKit server and
 real WebRTC clients (`tests/rtc/rtc_client.py`); it is skipped unless the

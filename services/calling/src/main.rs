@@ -115,6 +115,10 @@ async fn main() -> anyhow::Result<()> {
     };
     tracing::info!(
         application_media = media.provider.is_some(),
+        new_calls_enabled = app_config.new_calls_enabled,
+        app_calling_enabled = app_config.app_calling_enabled,
+        telephony_command_max_attempts = app_config.telephony_command_max_attempts,
+        setup_deadline_secs = app_config.setup_deadline.num_seconds(),
         "application calling configured"
     );
     // Cross-instance realtime fanout over PostgreSQL LISTEN / NOTIFY.
@@ -310,6 +314,8 @@ async fn main() -> anyhow::Result<()> {
         compliance_required_everywhere = compliance_overlay.all,
         blocked_attempts_incident_threshold = abuse_controls.blocked_attempts_incident_threshold,
         abuse_reports_incident_threshold = abuse_controls.abuse_reports_incident_threshold,
+        auth_failure_threshold = abuse_controls.auth_failure_threshold,
+        auth_failure_window_seconds = abuse_controls.auth_failure_window_seconds,
         "abuse and compliance controls configured"
     );
 
@@ -386,12 +392,20 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let pruner = state.rate_limiter.clone();
+    let auth_windows = state.authenticator.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
             interval.tick().await;
             if let Err(err) = pruner.prune(clock.now() - RATE_WINDOW_RETENTION).await {
                 tracing::warn!(summary = %summarize_db_error(&err), "rate window pruning failed");
+            }
+            // Failed-authentication windows (§109) are at most one hour long.
+            if let Err(err) = auth_windows
+                .prune_failure_windows(clock.now() - chrono::Duration::hours(2))
+                .await
+            {
+                tracing::warn!(summary = %summarize_db_error(&err), "auth failure window pruning failed");
             }
         }
     });

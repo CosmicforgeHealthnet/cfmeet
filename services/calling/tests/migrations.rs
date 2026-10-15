@@ -128,7 +128,8 @@ const PART_G_TABLES: &[&str] = &[
 ];
 
 /// Part H (security closure): operator audit, block rules, compliance eligibility and
-/// abuse reports — added after Part G, so a call-domain rollback removes them.
+/// abuse reports — added after Part G, so a call-domain rollback removes them. Migration
+/// 000043 adds the failed-authentication windows (§109).
 const PART_H_TABLES: &[&str] = &[
     "calling_abuse_reports",
     "calling_abuse_windows",
@@ -136,6 +137,7 @@ const PART_H_TABLES: &[&str] = &[
     "calling_orphan_objects",
     "calling_retention_audit",
     "calling_retention_holds",
+    "platform_auth_failure_windows",
     "platform_compliance_eligibility",
     "platform_operator_audit",
 ];

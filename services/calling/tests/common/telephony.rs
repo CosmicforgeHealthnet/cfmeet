@@ -3,7 +3,7 @@
 //! answers like Telephony's internal API: it never holds a number, and it lets a test
 //! decide outages, refusals and lost responses.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use calling::{
@@ -24,8 +24,18 @@ pub enum Answer {
     Unavailable,
 }
 
+/// Holds one control request inside the fake until the test releases it (a worker that
+/// is "still sending" while its lease expires).
+#[derive(Default)]
+pub struct ControlGate {
+    pub entered: tokio::sync::Notify,
+    pub release: tokio::sync::Notify,
+}
+
 #[derive(Default)]
 struct State {
+    /// Answers of the next control requests (default: Accept), each optionally gated.
+    control_answers: Vec<(Option<Arc<ControlGate>>, Answer)>,
     answers: Vec<Answer>,
     routes: Option<Evidence<Vec<CandidateRoute>>>,
     /// Accepted originate commands by idempotency key -> telephony leg id.
@@ -71,6 +81,27 @@ impl FakeTelephony {
             .unwrap()
             .answers
             .extend_from_slice(answers);
+    }
+
+    /// Answers of the next control (TERMINATE / HOLD / …) requests (default: Accept).
+    pub fn script_controls(&self, answers: &[Answer]) {
+        self.state
+            .lock()
+            .unwrap()
+            .control_answers
+            .extend(answers.iter().cloned().map(|a| (None, a)));
+    }
+
+    /// The next control request blocks inside the fake (after it was recorded) until
+    /// the returned gate is released, then answers `answer`.
+    pub fn gate_next_control(&self, answer: Answer) -> Arc<ControlGate> {
+        let gate = Arc::new(ControlGate::default());
+        self.state
+            .lock()
+            .unwrap()
+            .control_answers
+            .push((Some(gate.clone()), answer));
+        gate
     }
 
     pub fn originates(&self) -> Vec<(DelegatedPlatformContext, Value)> {
@@ -175,12 +206,27 @@ impl TelephonyPort for FakeTelephony {
         _: &CorrelationId,
         command: &Value,
     ) -> Result<Value, TelephonyError> {
-        self.state
-            .lock()
-            .unwrap()
-            .controls
-            .push((telephony_leg_id, action, command.clone()));
-        Ok(json!({ "leg": { "telephonyLegId": telephony_leg_id } }))
+        let (gate, answer) = {
+            let mut s = self.state.lock().unwrap();
+            s.controls.push((telephony_leg_id, action, command.clone()));
+            if s.control_answers.is_empty() {
+                (None, Answer::Accept)
+            } else {
+                s.control_answers.remove(0)
+            }
+        };
+        if let Some(gate) = gate {
+            gate.entered.notify_one();
+            gate.release.notified().await;
+        }
+        match answer {
+            Answer::Accept => Ok(json!({ "leg": { "telephonyLegId": telephony_leg_id } })),
+            Answer::Refuse(code) => Err(TelephonyError::Refused {
+                status: 409,
+                code: code.into(),
+            }),
+            Answer::Unavailable | Answer::AcceptButLoseResponse => Err(TelephonyError::Unavailable),
+        }
     }
 
     async fn create_bridge(

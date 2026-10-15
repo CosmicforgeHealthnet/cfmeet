@@ -89,6 +89,22 @@ pub struct AppCallingConfig {
     /// Failed storage deletes of one voicemail / recording artifact after which an
     /// incident is raised (once; the deletion keeps being retried).
     pub artifact_delete_incident_attempts: i32,
+    /// Attempts of one durable Telephony command before it is DEAD (an incident is
+    /// raised; it is never retried again).
+    pub telephony_command_max_attempts: i32,
+    /// Generic setup deadline: a Call still pre-connect (REQUESTED … RINGING) with no
+    /// Call event for this long ends FAILED (TIMEOUT). Above every legitimate wait without
+    /// events (ring windows ≤ 300 s, one queue wait ≤ 3600 s, IVR inputs ≤ 60 s each).
+    pub setup_deadline: Duration,
+    /// Age of the oldest pending outbox event / Telephony command above which a
+    /// WORKER_BACKLOG incident is raised.
+    pub worker_backlog_incident_age: Duration,
+    /// `CALLING_NEW_CALLS_ENABLED` (default ON): the master switch for NEW calls of every
+    /// kind. Off refuses new calls only — ending, leaving, declining, reconciliation,
+    /// cleanup and artifact deletion keep working.
+    pub new_calls_enabled: bool,
+    /// `CALLING_APP_CALLING_ENABLED` (default ON): new application (app-to-app RTC) calls.
+    pub app_calling_enabled: bool,
 }
 
 impl Default for AppCallingConfig {
@@ -102,6 +118,11 @@ impl Default for AppCallingConfig {
             media_ensure_deadline: Duration::seconds(60),
             transfer_join_deadline: Duration::seconds(60),
             artifact_delete_incident_attempts: 5,
+            telephony_command_max_attempts: 40,
+            setup_deadline: Duration::seconds(7200),
+            worker_backlog_incident_age: Duration::seconds(600),
+            new_calls_enabled: true,
+            app_calling_enabled: true,
         }
     }
 }
@@ -111,8 +132,20 @@ impl AppCallingConfig {
     /// `CALLING_MAX_GROUP_PARTICIPANTS` (2–64, default 16),
     /// `CALLING_MAX_ENDPOINTS_PER_PARTICIPANT` (1–50, default 10),
     /// `CALLING_MEDIA_RECONCILE_INTERVAL_SECONDS` (2–300, default 15),
-    /// `CALLING_ARTIFACT_DELETE_INCIDENT_ATTEMPTS` (1–100, default 5).
+    /// `CALLING_ARTIFACT_DELETE_INCIDENT_ATTEMPTS` (1–100, default 5),
+    /// `CALLING_TELEPHONY_COMMAND_MAX_ATTEMPTS` (3–1000, default 40),
+    /// `CALLING_CALL_SETUP_DEADLINE_SECONDS` (3900–86400, default 7200),
+    /// `CALLING_WORKER_BACKLOG_INCIDENT_SECONDS` (60–86400, default 600),
+    /// `CALLING_NEW_CALLS_ENABLED` / `CALLING_APP_CALLING_ENABLED` (true / false, default
+    /// true).
     pub fn from_lookup(get: &impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
+        let switch = |var: &'static str| -> Result<bool, ConfigError> {
+            match get(var).map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+                None | Some("") | Some("true") | Some("1") => Ok(true),
+                Some("false") | Some("0") => Ok(false),
+                Some(_) => Err(ConfigError::invalid(var, "must be true or false".into())),
+            }
+        };
         let number =
             |var: &'static str, default: i64, min: i64, max: i64| -> Result<i64, ConfigError> {
                 match get(var) {
@@ -157,6 +190,27 @@ impl AppCallingConfig {
                 1,
                 100,
             )? as i32,
+            telephony_command_max_attempts: number(
+                "CALLING_TELEPHONY_COMMAND_MAX_ATTEMPTS",
+                40,
+                3,
+                1000,
+            )? as i32,
+            // Never below one maximum queue wait (3600 s) plus margin.
+            setup_deadline: Duration::seconds(number(
+                "CALLING_CALL_SETUP_DEADLINE_SECONDS",
+                7200,
+                3900,
+                86_400,
+            )?),
+            worker_backlog_incident_age: Duration::seconds(number(
+                "CALLING_WORKER_BACKLOG_INCIDENT_SECONDS",
+                600,
+                60,
+                86_400,
+            )?),
+            new_calls_enabled: switch("CALLING_NEW_CALLS_ENABLED")?,
+            app_calling_enabled: switch("CALLING_APP_CALLING_ENABLED")?,
             ..defaults
         })
     }
@@ -263,6 +317,30 @@ impl AppCallService {
         self
     }
 
+    /// The server-side Calling switches for NEW calls (§95): the master switch refuses
+    /// every new call; `application` also requires the app-calling switch. Existing
+    /// Calls are never touched — ending, leaving, declining, reconciliation, cleanup and
+    /// artifact deletion do not consult them.
+    pub(crate) fn require_new_calls(&self, application: bool) -> CallResult<()> {
+        if !self.config.new_calls_enabled {
+            crate::metrics::inc(
+                "calling_new_calls_refused_total",
+                &[("reason", "CALLING_DISABLED")],
+            );
+            return Err(CallError::CapabilityUnavailable("new calls are disabled"));
+        }
+        if application && !self.config.app_calling_enabled {
+            crate::metrics::inc(
+                "calling_new_calls_refused_total",
+                &[("reason", "APP_CALLING_DISABLED")],
+            );
+            return Err(CallError::CapabilityUnavailable(
+                "application calling is disabled",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn config(&self) -> &AppCallingConfig {
         &self.config
     }
@@ -303,10 +381,20 @@ pub(crate) fn scope_of(call: &calls::Model) -> CallScope {
 
 /// A command Calling issues itself for `call` (workers, callbacks, reconciliation).
 pub(crate) fn system_cmd(call: &calls::Model) -> CallCommandContext {
-    CallCommandContext::system(
+    CallCommandContext::system_correlated(
         scope_of(call),
         ServiceAccountId::from_uuid(call.created_by_service_account_id),
+        call.correlation_id.as_deref(),
     )
+}
+
+/// The correlation id of the request that created `call` (fresh for a Call created
+/// before it was recorded): every command Calling sends for the Call carries it.
+pub(crate) fn call_correlation(call: &calls::Model) -> cf_service_auth::CorrelationId {
+    call.correlation_id
+        .as_deref()
+        .and_then(|c| cf_service_auth::CorrelationId::parse(c).ok())
+        .unwrap_or_else(cf_service_auth::CorrelationId::generate)
 }
 
 /// Safe public summary of a Call row.

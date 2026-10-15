@@ -91,7 +91,7 @@ pub(crate) async fn request_bridge_in<C: ConnectionTrait>(
         &format!("bridge:{id}"),
         json!({
             "commandId": command_id,
-            "correlationId": cf_service_auth::CorrelationId::generate().as_str(),
+            "correlationId": crate::calls::app::call_correlation(call).as_str(),
             "kind": kind,
             "telephonyLegIds": telephony_legs,
         }),
@@ -116,7 +116,7 @@ impl AppCallService {
         .await?
         .ok_or(CallError::NotFound)?;
         if bridge.status != "REQUESTED" || call.current_state.is_terminal() {
-            self.complete_bridge_command(row.id, "DEAD", Some("NOT_REQUESTED"), None)
+            self.complete(row, "DEAD", Some("NOT_REQUESTED"), None)
                 .await?;
             return Ok(Dispatched::Dead);
         }
@@ -160,9 +160,10 @@ impl AppCallService {
                 exec(
                     &txn,
                     "UPDATE call_telephony_commands SET status = 'ACCEPTED', telephony_ref = $2, \
-                       completed_at = GREATEST($3, created_at), lease_until = NULL, updated_at = GREATEST(updated_at, $3) \
-                     WHERE id = $1 AND status = 'PENDING'",
-                    vec![row.id.into(), telephony_bridge.into(), now.into()],
+                       completed_at = GREATEST($3, created_at), lease_until = NULL, lease_claim = NULL, \
+                       updated_at = GREATEST(updated_at, $3) \
+                     WHERE id = $1 AND status = 'PENDING' AND lease_claim IS NOT DISTINCT FROM $4",
+                    vec![row.id.into(), telephony_bridge.into(), now.into(), row.lease_claim.into()],
                 )
                 .await?;
                 txn.commit().await?;
@@ -173,50 +174,15 @@ impl AppCallService {
                 Ok(Dispatched::Accepted)
             }
             Err(TelephonyError::Refused { code, .. }) => {
-                self.complete_bridge_command(row.id, "REFUSED", Some(&code), None)
-                    .await?;
+                self.complete(row, "REFUSED", Some(&code), None).await?;
                 self.bridge_failed(call, bridge_id).await?;
                 Ok(Dispatched::Refused)
             }
             Err(TelephonyError::Unavailable) => {
-                exec(
-                    self.db(),
-                    "UPDATE call_telephony_commands SET attempts = attempts + 1, lease_until = NULL, \
-                       next_attempt_at = $2, last_error_code = 'TELEPHONY_UNAVAILABLE' WHERE id = $1 AND status = 'PENDING'",
-                    vec![
-                        row.id.into(),
-                        (self.calls.now() + super::retry_delay(row.attempts)).into(),
-                    ],
-                )
-                .await?;
+                self.reschedule(row, "TELEPHONY_UNAVAILABLE").await?;
                 Ok(Dispatched::Retry)
             }
         }
-    }
-
-    async fn complete_bridge_command(
-        &self,
-        id: Uuid,
-        status: &str,
-        code: Option<&str>,
-        telephony_ref: Option<Uuid>,
-    ) -> CallResult<()> {
-        let now = self.calls.now();
-        exec(
-            self.db(),
-            "UPDATE call_telephony_commands SET status = $2, completed_at = GREATEST($3, created_at), \
-               last_error_code = COALESCE($4, last_error_code), telephony_ref = COALESCE(telephony_ref, $5), \
-               lease_until = NULL, updated_at = GREATEST(updated_at, $3) WHERE id = $1 AND status = 'PENDING'",
-            vec![
-                id.into(),
-                status.into(),
-                now.into(),
-                code.map(|c| c[..c.len().min(64)].to_string()).into(),
-                telephony_ref.into(),
-            ],
-        )
-        .await?;
-        Ok(())
     }
 
     /// Attaches the RTC side with the single-use join code (used here once, dropped).
@@ -321,17 +287,19 @@ impl AppCallService {
     pub(super) async fn dispatch_unbridge(
         &self,
         row: &CommandRow,
-        _call: &calls::Model,
+        call: &calls::Model,
     ) -> CallResult<Dispatched> {
         let Some(telephony_bridge) = row.payload["telephonyBridgeId"]
             .as_str()
             .and_then(|s| Uuid::parse_str(s).ok())
         else {
-            self.complete_bridge_command(row.id, "DEAD", Some("NO_BRIDGE"), None)
-                .await?;
+            self.complete(row, "DEAD", Some("NO_BRIDGE"), None).await?;
             return Ok(Dispatched::Dead);
         };
-        let correlation = cf_service_auth::CorrelationId::generate();
+        let correlation = row.payload["correlationId"]
+            .as_str()
+            .and_then(|c| cf_service_auth::CorrelationId::parse(c).ok())
+            .unwrap_or_else(|| crate::calls::app::call_correlation(call));
         match self
             .public
             .telephony
@@ -339,26 +307,16 @@ impl AppCallService {
             .await
         {
             Ok(()) => {
-                self.complete_bridge_command(row.id, "ACCEPTED", None, Some(telephony_bridge))
+                self.complete(row, "ACCEPTED", None, Some(telephony_bridge))
                     .await?;
                 Ok(Dispatched::Accepted)
             }
             Err(TelephonyError::Refused { code, .. }) => {
-                self.complete_bridge_command(row.id, "REFUSED", Some(&code), None)
-                    .await?;
+                self.complete(row, "REFUSED", Some(&code), None).await?;
                 Ok(Dispatched::Refused)
             }
             Err(TelephonyError::Unavailable) => {
-                exec(
-                    self.db(),
-                    "UPDATE call_telephony_commands SET attempts = attempts + 1, lease_until = NULL, \
-                       next_attempt_at = $2 WHERE id = $1 AND status = 'PENDING'",
-                    vec![
-                        row.id.into(),
-                        (self.calls.now() + super::retry_delay(row.attempts)).into(),
-                    ],
-                )
-                .await?;
+                self.reschedule(row, "TELEPHONY_UNAVAILABLE").await?;
                 Ok(Dispatched::Retry)
             }
         }

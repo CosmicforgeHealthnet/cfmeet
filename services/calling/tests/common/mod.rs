@@ -12,8 +12,11 @@
 pub mod app;
 pub mod calls;
 pub mod contracts;
+pub mod deployment;
 pub mod enterprise;
 pub mod fake_media;
+pub mod gates;
+pub mod load;
 pub mod privacy;
 pub mod provider_contract;
 pub mod public;

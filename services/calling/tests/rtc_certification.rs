@@ -691,6 +691,25 @@ async fn voice_call(cert: &Cert) {
     assert!(usage
         .iter()
         .any(|u| u.usage_type.as_str() == "CALL_CONNECTED_TIME" && u.quantity > 0));
+    // Part K §102: the end-of-call quality summary is recorded from the REAL media
+    // evidence of this call — both sessions admitted by LiveKit, both parties connected.
+    let quality = cert
+        .a
+        .w
+        .calls()
+        .quality_records(cert.a.w.scope(), CallId::from_uuid(call))
+        .await
+        .unwrap();
+    let summary = quality
+        .iter()
+        .find(|q| q.metrics.get("media_sessions_admitted").is_some())
+        .expect("an end-of-call quality summary");
+    assert_eq!(summary.metrics.get("media_sessions_admitted"), Some(2.0));
+    assert_eq!(summary.metrics.get("connected_participants"), Some(2.0));
+    println!(
+        "rtc certification: quality summary recorded (admitted sessions 2, connected participants 2, reconnects {})",
+        summary.metrics.get("session_reconnects").unwrap_or_default()
+    );
     a.quit().await;
     b.quit().await;
 }

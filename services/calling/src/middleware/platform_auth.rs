@@ -85,6 +85,10 @@ fn bearer_credential(headers: &HeaderMap) -> Option<Zeroizing<String>> {
 }
 
 fn reject(reason: AuthFailureReason, public_id: Option<&str>) -> Response {
+    crate::metrics::inc(
+        "calling_authentication_failures_total",
+        &[("reason", reason.as_str())],
+    );
     tracing::info!(
         reason = reason.as_str(),
         public_id = public_id.unwrap_or(""),
@@ -120,6 +124,31 @@ pub async fn require_platform_credential(
     {
         Ok(ctx) => ctx,
         Err(AuthenticationError::Rejected { reason, public_id }) => {
+            // §109: a key id above its failed-authentication window is answered 429 (a
+            // correct secret is never refused by it). A window store fault keeps the
+            // normal 401 (authentication itself already failed closed).
+            match state
+                .authenticator
+                .note_failure(reason, public_id.as_deref())
+                .await
+            {
+                Ok(Some(retry_after_secs)) => {
+                    crate::metrics::inc(
+                        "calling_authentication_failures_total",
+                        &[("reason", "throttled")],
+                    );
+                    tracing::warn!(
+                        reason = reason.as_str(),
+                        public_id = public_id.as_deref().unwrap_or(""),
+                        "repeated failed authentication throttled"
+                    );
+                    return CallingError::RateLimited { retry_after_secs }.into_response();
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    tracing::warn!(summary = %summarize_db_error(&err), "failed-authentication window unavailable");
+                }
+            }
             return reject(reason, public_id.as_deref());
         }
         Err(AuthenticationError::Unavailable { summary }) => {

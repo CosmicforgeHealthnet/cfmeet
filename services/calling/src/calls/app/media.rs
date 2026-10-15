@@ -533,6 +533,14 @@ impl AppCallService {
                     )
                     .await?;
                 txn.commit().await?;
+                crate::metrics::inc(
+                    "calling_media_admissions_total",
+                    &[
+                        ("source", "provider"),
+                        ("result", "evicted"),
+                        ("reason", reason.as_str()),
+                    ],
+                );
                 tracing::info!(call_id = %call.id, reason = reason.as_str(), "media connection evicted");
                 Ok(Some(reason))
             }
@@ -542,6 +550,10 @@ impl AppCallService {
                     .await
                     .map_err(|_| CallError::MediaUnavailable)?;
                 let session = session.expect("admitted sessions exist");
+                crate::metrics::inc(
+                    "calling_media_admissions_total",
+                    &[("source", "provider"), ("result", "admitted")],
+                );
                 if participant.active {
                     self.record_joined(&call, session.id).await?;
                 }
@@ -926,12 +938,26 @@ impl ConnectionAdmission for AppCallService {
                 Err(ConnectionDenied::Unavailable)
             }
         };
-        if let Err(denied) = decision {
-            tracing::info!(
-                reason = denied.as_str(),
-                resource = %claims.resource_name,
-                "media connection refused before admission to the media server"
-            );
+        match &decision {
+            Ok(()) => crate::metrics::inc(
+                "calling_media_admissions_total",
+                &[("source", "gateway"), ("result", "admitted")],
+            ),
+            Err(denied) => {
+                crate::metrics::inc(
+                    "calling_media_admissions_total",
+                    &[
+                        ("source", "gateway"),
+                        ("result", "refused"),
+                        ("reason", denied.as_str()),
+                    ],
+                );
+                tracing::info!(
+                    reason = denied.as_str(),
+                    resource = %claims.resource_name,
+                    "media connection refused before admission to the media server"
+                );
+            }
         }
         decision
     }

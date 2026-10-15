@@ -29,6 +29,15 @@ text_enum!(
         RepeatedRouteDenials = "REPEATED_ROUTE_DENIALS",
         // Part H §69: several participants reported the same principal.
         AbuseReportsBurst = "ABUSE_REPORTS_BURST",
+        // §81: a durable Telephony command reached its attempt cap (DEAD, not retried).
+        TelephonyCommandDead = "TELEPHONY_COMMAND_DEAD",
+        // §81: outbox events were dead-lettered (one open incident per environment).
+        OutboxDeadLetter = "OUTBOX_DEAD_LETTER",
+        // §86: the oldest pending outbox event / Telephony command is older than the
+        // configured age (platform-wide, one open incident per queue).
+        WorkerBacklog = "WORKER_BACKLOG",
+        // §109: repeated failed authentications for one presented credential key id.
+        CredentialGuessing = "CREDENTIAL_GUESSING",
     }
 );
 
@@ -48,6 +57,18 @@ text_enum!(
         CallRecording = "CALL_RECORDING",
         Destination = "DESTINATION",
         Principal = "PRINCIPAL",
+        TelephonyCommand = "TELEPHONY_COMMAND",
+        OutboxEvent = "OUTBOX_EVENT",
+        Credential = "CREDENTIAL",
+    }
+);
+
+text_enum!(
+    /// Lifecycle of an incident (no ACKNOWLEDGED: an operator resolves, and the
+    /// resolution history is the operator audit).
+    IncidentStatus {
+        Open = "OPEN",
+        Resolved = "RESOLVED",
     }
 );
 
@@ -56,7 +77,9 @@ text_enum!(
 pub struct Incident {
     pub category: IncidentCategory,
     pub severity: IncidentSeverity,
-    pub scope: CallScope,
+    /// `None`: a platform-wide incident (worker backlog, guessing of unknown credential
+    /// key ids) — only those categories may be unscoped (the table's CHECK).
+    pub scope: Option<CallScope>,
     pub call_id: Option<Uuid>,
     pub resource: Option<(IncidentResource, Uuid)>,
     pub evidence: Value,
@@ -75,12 +98,52 @@ impl Incident {
         Self {
             category,
             severity,
-            scope,
+            scope: Some(scope),
             call_id: None,
             resource: Some((resource, id)),
             evidence: Value::Object(Default::default()),
             bucket: None,
         }
+    }
+
+    /// One open incident per environment for `category` (no resource).
+    pub fn scoped(
+        category: IncidentCategory,
+        severity: IncidentSeverity,
+        scope: CallScope,
+    ) -> Self {
+        Self {
+            category,
+            severity,
+            scope: Some(scope),
+            call_id: None,
+            resource: None,
+            evidence: Value::Object(Default::default()),
+            bucket: Some(scope.environment_id().as_uuid().simple().to_string()),
+        }
+    }
+
+    /// A platform-wide incident (no tenant scope), deduplicated per `bucket`.
+    pub fn platform(
+        category: IncidentCategory,
+        severity: IncidentSeverity,
+        bucket: &'static str,
+    ) -> Self {
+        Self {
+            category,
+            severity,
+            scope: None,
+            call_id: None,
+            resource: None,
+            evidence: Value::Object(Default::default()),
+            bucket: Some(bucket.to_string()),
+        }
+    }
+
+    /// The resource the incident is about.
+    pub fn resource(mut self, resource: IncidentResource, id: Uuid) -> Self {
+        self.resource = Some((resource, id));
+        self
     }
 
     /// Dedupes per `bucket` (a bounded label such as a window start) instead of once
@@ -151,9 +214,9 @@ pub(crate) async fn raise<C: ConnectionTrait + TransactionTrait>(
                restricted_evidence = EXCLUDED.restricted_evidence",
         vec![
             Uuid::new_v4().into(),
-            incident.scope.tenant_id().as_uuid().into(),
-            incident.scope.application_id().as_uuid().into(),
-            incident.scope.environment_id().as_uuid().into(),
+            incident.scope.map(|s| s.tenant_id().as_uuid()).into(),
+            incident.scope.map(|s| s.application_id().as_uuid()).into(),
+            incident.scope.map(|s| s.environment_id().as_uuid()).into(),
             incident.dedupe_key().into(),
             incident.category.as_str().into(),
             incident.severity.as_str().into(),
@@ -187,6 +250,118 @@ pub(crate) async fn raise<C: ConnectionTrait + TransactionTrait>(
             "calling incident could not be recorded"
         ),
     }
+}
+
+/// Operator view of one incident: opaque ids, bounded codes and counts only (the
+/// restricted evidence holds opaque ids and codes too — never a number or a secret).
+#[derive(Debug, Clone, serde::Serialize, sea_orm::FromQueryResult)]
+#[serde(rename_all = "camelCase")]
+pub struct IncidentView {
+    pub id: Uuid,
+    pub category: String,
+    pub severity: String,
+    pub status: String,
+    pub tenant_id: Option<Uuid>,
+    pub application_id: Option<Uuid>,
+    pub environment_id: Option<Uuid>,
+    pub call_id: Option<Uuid>,
+    pub resource_type: Option<String>,
+    pub resource_id: Option<Uuid>,
+    pub occurrences: i32,
+    pub restricted_evidence: Value,
+    pub first_seen_at: DateTime<Utc>,
+    pub last_seen_at: DateTime<Utc>,
+    pub resolved_at: Option<DateTime<Utc>>,
+}
+
+const VIEW_COLUMNS: &str = "id, category, severity, status, tenant_id, application_id, \
+    environment_id, call_id, resource_type, resource_id, occurrences, restricted_evidence, \
+    first_seen_at, last_seen_at, resolved_at";
+
+/// `platform_admin incidents list`: newest first, optionally one status / category,
+/// bounded (1–500).
+pub async fn list_incidents<C: ConnectionTrait>(
+    db: &C,
+    status: Option<IncidentStatus>,
+    category: Option<IncidentCategory>,
+    limit: u64,
+) -> Result<Vec<IncidentView>, sea_orm::DbErr> {
+    use sea_orm::FromQueryResult;
+    IncidentView::find_by_statement(stmt(
+        &format!(
+            "SELECT {VIEW_COLUMNS} FROM calling_incidents \
+             WHERE ($1::text IS NULL OR status = $1) AND ($2::text IS NULL OR category = $2) \
+             ORDER BY last_seen_at DESC, id LIMIT $3"
+        ),
+        vec![
+            status.map(|s| s.as_str()).into(),
+            category.map(|c| c.as_str()).into(),
+            (limit.clamp(1, 500) as i64).into(),
+        ],
+    ))
+    .all(db)
+    .await
+}
+
+/// `platform_admin incidents resolve`: OPEN → RESOLVED by an operator, with exactly one
+/// operator audit row (INCIDENT_RESOLVED) in the same transaction — the audit rows ARE
+/// the resolution history. Resolving a RESOLVED incident changes nothing (idempotent;
+/// still audited, like every operator command). A later occurrence opens a NEW incident.
+pub async fn operator_resolve(
+    db: &sea_orm::DatabaseConnection,
+    operator: &crate::platform::operator::OperatorContext,
+    id: Uuid,
+    now: DateTime<Utc>,
+) -> crate::platform::PlatformResult<IncidentView> {
+    use sea_orm::FromQueryResult;
+
+    use crate::platform::{
+        operator::{self, AuditEntry, AuditTargetKind, OperatorAction},
+        PlatformError,
+    };
+    operator::audited(db, operator, now, move |txn| {
+        Box::pin(async move {
+            let current = IncidentView::find_by_statement(stmt(
+                &format!("SELECT {VIEW_COLUMNS} FROM calling_incidents WHERE id = $1 FOR UPDATE"),
+                vec![id.into()],
+            ))
+            .one(txn)
+            .await?
+            .ok_or(PlatformError::NotFound("incident"))?;
+            let view = if current.status == IncidentStatus::Open.as_str() {
+                IncidentView::find_by_statement(stmt(
+                    &format!(
+                        "UPDATE calling_incidents SET status = 'RESOLVED', \
+                           resolved_at = GREATEST($2, last_seen_at) \
+                         WHERE id = $1 AND status = 'OPEN' RETURNING {VIEW_COLUMNS}"
+                    ),
+                    vec![id.into(), now.into()],
+                ))
+                .one(txn)
+                .await?
+                .ok_or(PlatformError::NotFound("incident"))?
+            } else {
+                current.clone()
+            };
+            let entry = AuditEntry::new(
+                OperatorAction::IncidentResolved,
+                AuditTargetKind::Incident,
+                id,
+            )
+            .scope(
+                current.tenant_id,
+                current.application_id,
+                current.environment_id,
+            )
+            .detail(serde_json::json!({
+                "category": current.category,
+                "previousStatus": current.status,
+                "occurrences": current.occurrences,
+            }));
+            Ok((view, entry))
+        })
+    })
+    .await
 }
 
 #[cfg(test)]

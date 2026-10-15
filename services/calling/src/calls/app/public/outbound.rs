@@ -245,6 +245,7 @@ impl AppCallService {
         {
             return self.replay_create(scope, prior).await;
         }
+        self.require_new_calls(false)?;
         let provider = self.provider()?;
         if !provider.capabilities().supports_app_calls() {
             return Err(CallError::CapabilityUnavailable(

@@ -183,12 +183,36 @@ struct AuthorityRow {
     scopes: Vec<String>,
 }
 
+/// Bounded failed-authentication windows (§109): more than `threshold` FAILED
+/// authentications of one presented credential key id within one `window` are answered
+/// 429 instead of 401. A CORRECT secret is always accepted (the window never locks a
+/// credential out). Unknown key ids share one bucket, so guessing ids never grows the
+/// table; windows are pruned with the request-rate windows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthFailurePolicy {
+    pub threshold: i64,
+    pub window: chrono::Duration,
+}
+
+impl Default for AuthFailurePolicy {
+    fn default() -> Self {
+        Self {
+            threshold: 20,
+            window: chrono::Duration::seconds(300),
+        }
+    }
+}
+
+/// The failure bucket of every presented key id that names no credential.
+const UNKNOWN_KEY_BUCKET: &str = "unknown";
+
 /// Verifies presented credentials against the persisted authority chain.
 pub struct CredentialAuthenticator {
     db: DatabaseConnection,
     keyring: Arc<VerifierKeyring>,
     registry: Arc<ScopeRegistry>,
     clock: SharedClock,
+    failures: AuthFailurePolicy,
 }
 
 impl CredentialAuthenticator {
@@ -203,7 +227,138 @@ impl CredentialAuthenticator {
             keyring,
             registry,
             clock,
+            failures: AuthFailurePolicy::default(),
         }
+    }
+
+    /// Uses `policy` for the failed-authentication windows.
+    pub fn with_failure_policy(mut self, policy: AuthFailurePolicy) -> Self {
+        self.failures = policy;
+        self
+    }
+
+    /// Counts one FAILED authentication of a presented credential key id (a secret that
+    /// did not verify, or a key id that names no credential). Returns the Retry-After
+    /// seconds when the key id is above the threshold of its window — the caller answers
+    /// 429 instead of 401. Failures after the secret verified (revoked, expired, …) and
+    /// requests without a key id are not guessing and are not counted. Crossing the
+    /// threshold raises ONE deduplicated CREDENTIAL_GUESSING incident.
+    pub async fn note_failure(
+        &self,
+        reason: AuthFailureReason,
+        public_id: Option<&str>,
+    ) -> Result<Option<u64>, DbErr> {
+        use sea_orm::ConnectionTrait;
+        let key = match (reason, public_id) {
+            (AuthFailureReason::UnknownCredential, _) => UNKNOWN_KEY_BUCKET,
+            (
+                AuthFailureReason::SecretMismatch | AuthFailureReason::UnsupportedVerifier,
+                Some(id),
+            ) if id.len() == 24
+                && id
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) =>
+            {
+                id
+            }
+            _ => return Ok(None),
+        };
+        let now = self.clock.now();
+        let window = self.failures.window.num_seconds().max(1);
+        let start_secs = now.timestamp().div_euclid(window) * window;
+        let window_start = DateTime::<Utc>::from_timestamp(start_secs, 0).unwrap_or(now);
+        let failures: i64 = self
+            .db
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "INSERT INTO platform_auth_failure_windows (subject_key, window_start, failures) \
+                 VALUES ($1, $2, 1) \
+                 ON CONFLICT (subject_key, window_start) \
+                 DO UPDATE SET failures = platform_auth_failure_windows.failures + 1 \
+                 RETURNING failures",
+                [key.into(), window_start.into()],
+            ))
+            .await?
+            .map(|r| r.try_get_by_index::<i64>(0))
+            .transpose()?
+            .unwrap_or(0);
+        if failures <= self.failures.threshold {
+            return Ok(None);
+        }
+        if failures == self.failures.threshold + 1 {
+            self.guessing_incident(key, now).await;
+        }
+        let retry = (start_secs + window - now.timestamp()).max(1) as u64;
+        Ok(Some(retry))
+    }
+
+    async fn guessing_incident(&self, key: &str, now: DateTime<Utc>) {
+        use sea_orm::ConnectionTrait;
+
+        use crate::calls::app::incidents::{
+            self, Incident, IncidentCategory, IncidentResource, IncidentSeverity,
+        };
+        let incident = if key == UNKNOWN_KEY_BUCKET {
+            Some(Incident::platform(
+                IncidentCategory::CredentialGuessing,
+                IncidentSeverity::High,
+                "unknown_key_ids",
+            ))
+        } else {
+            let row = self
+                .db
+                .query_one(Statement::from_sql_and_values(
+                    DbBackend::Postgres,
+                    "SELECT id, tenant_id, application_id, environment_id \
+                     FROM platform_api_credentials WHERE public_id = $1",
+                    [key.into()],
+                ))
+                .await
+                .ok()
+                .flatten();
+            row.and_then(|r| {
+                let ids: (uuid::Uuid, uuid::Uuid, uuid::Uuid, uuid::Uuid) = (
+                    r.try_get_by_index(0).ok()?,
+                    r.try_get_by_index(1).ok()?,
+                    r.try_get_by_index(2).ok()?,
+                    r.try_get_by_index(3).ok()?,
+                );
+                Some(
+                    Incident::new(
+                        IncidentCategory::CredentialGuessing,
+                        IncidentSeverity::High,
+                        crate::calls::command::CallScope::from_parts(
+                            TenantId::from_uuid(ids.1),
+                            ApplicationId::from_uuid(ids.2),
+                            EnvironmentId::from_uuid(ids.3),
+                        ),
+                        IncidentResource::Credential,
+                        ids.0,
+                    )
+                    .evidence(serde_json::json!({
+                        "threshold": self.failures.threshold,
+                        "windowSeconds": self.failures.window.num_seconds(),
+                    })),
+                )
+            })
+        };
+        if let Some(incident) = incident {
+            incidents::raise(&self.db, &incident, now).await;
+        }
+    }
+
+    /// Deletes failed-authentication windows that started before `before`.
+    pub async fn prune_failure_windows(&self, before: DateTime<Utc>) -> Result<u64, DbErr> {
+        use sea_orm::ConnectionTrait;
+        Ok(self
+            .db
+            .execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "DELETE FROM platform_auth_failure_windows WHERE window_start < $1",
+                [before.into()],
+            ))
+            .await?
+            .rows_affected())
     }
 
     /// Authenticates a presented credential string (the bearer token).

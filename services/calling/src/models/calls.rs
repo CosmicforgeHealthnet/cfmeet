@@ -24,6 +24,10 @@ pub struct Model {
     pub version: i64,
     pub communication_context_ref: Option<Uuid>,
     pub privacy_relay_ref: Option<Uuid>,
+    /// Correlation id of the request that created the Call (immutable; `None` only for
+    /// Calls created before it was recorded). Calling's own later commands for the Call
+    /// carry it.
+    pub correlation_id: Option<String>,
     /// APPLICATION or PUBLIC_INBOUND (immutable).
     pub origin: String,
     pub terminal_reason: Option<TerminalReason>,

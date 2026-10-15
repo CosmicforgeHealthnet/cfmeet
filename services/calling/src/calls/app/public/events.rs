@@ -172,8 +172,23 @@ async fn party_role<C: ConnectionTrait>(db: &C, leg_id: Uuid) -> CallResult<Opti
 }
 
 impl AppCallService {
-    /// Applies one Telephony event (idempotent).
+    /// Applies one Telephony event (idempotent), inside a span naming its Call.
     pub async fn apply_telephony_event(
+        &self,
+        event: &TelephonyEvent,
+    ) -> CallResult<EventDisposition> {
+        use tracing::Instrument;
+        let span = tracing::info_span!(
+            "telephony_event",
+            call_id = %event.call_id,
+            event_type = %event.event_type,
+        );
+        self.apply_telephony_event_inner(event)
+            .instrument(span)
+            .await
+    }
+
+    async fn apply_telephony_event_inner(
         &self,
         event: &TelephonyEvent,
     ) -> CallResult<EventDisposition> {
@@ -232,6 +247,15 @@ impl AppCallService {
         .await?;
         txn.commit().await?;
         self.publish(pending).await;
+        if let Some(call) = &call {
+            tracing::info!(
+                call_id = %call.id,
+                correlation_id = call.correlation_id.as_deref().unwrap_or(""),
+                event_type = %event.event_type,
+                disposition = disposition.as_str(),
+                "telephony event processed"
+            );
+        }
         if disposition != EventDisposition::Applied
             && disposition != EventDisposition::IgnoredTerminal
         {

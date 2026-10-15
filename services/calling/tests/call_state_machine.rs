@@ -748,3 +748,75 @@ async fn canonical_paths_cover_every_state() {
         .unwrap();
     assert_eq!(video.call.state, CallState::Requested);
 }
+
+/// §100: the Call-LEG state machine, written out as a table. Every one of the 11 × 11
+/// (from, to) pairs is checked against it in Rust, and the database trigger guarding
+/// `call_legs.state` allows exactly the same edges.
+#[tokio::test]
+async fn the_leg_transition_table_is_exhaustive_in_rust_and_in_the_database() {
+    use LegState::*;
+    const TABLE: &[(LegState, &[LegState])] = &[
+        (Created, &[Dialing, Ringing, Failed, Cancelled]),
+        (
+            Dialing,
+            &[
+                Ringing, Answered, Declined, Busy, NoAnswer, Failed, Cancelled,
+            ],
+        ),
+        (
+            Ringing,
+            &[Answered, Declined, Busy, NoAnswer, Failed, Cancelled],
+        ),
+        (Answered, &[Connected, Ended, Failed]),
+        (Connected, &[Ended, Failed]),
+        (Ended, &[]),
+        (Declined, &[]),
+        (Busy, &[]),
+        (NoAnswer, &[]),
+        (Failed, &[]),
+        (Cancelled, &[]),
+    ];
+    assert_eq!(TABLE.len(), LegState::ALL.len(), "every state has a row");
+    let mut edges = std::collections::BTreeSet::new();
+    let mut pairs = 0;
+    for from in LegState::ALL {
+        let allowed = TABLE
+            .iter()
+            .find(|(f, _)| f == from)
+            .map(|(_, to)| *to)
+            .unwrap_or_else(|| panic!("{from} has no row"));
+        for to in LegState::ALL {
+            pairs += 1;
+            let expected = allowed.contains(to);
+            assert_eq!(from.can_transition_to(*to), expected, "{from} -> {to}");
+            if expected {
+                edges.insert(format!("{}>{}", from.as_str(), to.as_str()));
+            }
+        }
+        assert_eq!(from.is_terminal(), allowed.is_empty(), "{from}");
+    }
+    assert_eq!(pairs, 121);
+
+    let Some(w) = CallWorld::new().await else {
+        return;
+    };
+    let args: String =
+        w.h.conn()
+            .query_one(Statement::from_string(
+                DbBackend::Postgres,
+                "SELECT encode(tgargs, 'escape') FROM pg_trigger \
+             WHERE tgname = 'trg_call_legs_state_transition'",
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get_by_index(0)
+            .unwrap();
+    let mut args: Vec<&str> = args.split("\\000").filter(|a| !a.is_empty()).collect();
+    assert_eq!(args.remove(0), "state");
+    let db: std::collections::BTreeSet<String> = args.into_iter().map(str::to_string).collect();
+    assert_eq!(
+        db, edges,
+        "the database guard allows exactly the table's edges"
+    );
+}

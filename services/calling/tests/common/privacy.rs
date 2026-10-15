@@ -40,6 +40,9 @@ pub struct FakePrivacyRelay {
     pub relay_identities: Mutex<Vec<(Uuid, String)>>,
     /// Privacy Relay refuses relay identities (e.g. its pool is exhausted).
     pub refuse_relay_identity: Mutex<bool>,
+    /// Contact Vault is down: Privacy Relay answers "unavailable" to every protected
+    /// contact resolution (execution grants) while still deciding authorizations.
+    pub grants_unavailable: Mutex<bool>,
 }
 
 impl FakePrivacyRelay {
@@ -57,6 +60,7 @@ impl FakePrivacyRelay {
             grants: Mutex::new(Vec::new()),
             relay_identities: Mutex::new(Vec::new()),
             refuse_relay_identity: Mutex::new(false),
+            grants_unavailable: Mutex::new(false),
         }
     }
 
@@ -190,6 +194,9 @@ impl PrivacyRelayAuthority for FakePrivacyRelay {
             Mode::Unavailable => return Err(PrivacyRelayError::Unavailable),
             Mode::Policy => {}
             _ => return Err(PrivacyRelayError::NotFound),
+        }
+        if *self.grants_unavailable.lock().unwrap() {
+            return Err(PrivacyRelayError::Unavailable);
         }
         let id = Uuid::new_v4();
         self.grants.lock().unwrap().push((id, request.clone()));

@@ -23,11 +23,8 @@ on:
       - "packages/service-auth/**"
       - "packages/object-storage/**"
       - "packages/webhooks/**"
-      - "packages/contracts/calling/**"
-      - "packages/contracts/privacy-relay/**"
-      - "packages/contracts/telephony/**"
-      - "packages/contracts/platform/**"
-      - "packages/contracts/manifest.json"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
       - ".github/workflows/calling.yml"
   pull_request:
     paths:
@@ -35,11 +32,8 @@ on:
       - "packages/service-auth/**"
       - "packages/object-storage/**"
       - "packages/webhooks/**"
-      - "packages/contracts/calling/**"
-      - "packages/contracts/privacy-relay/**"
-      - "packages/contracts/telephony/**"
-      - "packages/contracts/platform/**"
-      - "packages/contracts/manifest.json"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
       - ".github/workflows/calling.yml"
   workflow_dispatch:
 
@@ -116,6 +110,9 @@ jobs:
     env:
       # Each test clones its own database from a migrated template.
       TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      # Part K §88: the disaster-recovery certification must run (pg_dump / pg_restore are
+      # on the runner), never print SKIPPED.
+      DISASTER_RECOVERY_CERT_REQUIRED: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -179,8 +176,10 @@ jobs:
           cargo run -q --locked -p calling-migration -- status
           cargo run -q --locked -p calling-migration -- reset
           cargo run -q --locked -p calling-migration -- up
+          # Platform tables: 11 (Part B) + tenant / service-account / principal limits,
+          # compliance eligibility, operator audit + the failed-authentication windows (000043).
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
-            "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'platform\_%'")" = "16"
+            "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'platform\_%'")" = "17"
           # Call domain (Part C §15–§25, Part D §26–§30 evidence, Part E §37–§51 routing,
           # public-network parties / bridges / telephony commands and events, spend): calls
           # + 28 call_* tables + the outbox; Part F §55 adds call_answer_group_claims (the
@@ -224,6 +223,18 @@ jobs:
                'calling_block_rules', 'calling_abuse_windows', 'calling_abuse_reports', 'calling_orphan_objects', \
                'calling_retention_holds', 'calling_retention_audit') OR tablename LIKE 'enterprise\_%' \
                OR tablename LIKE 'voicemail\_%' OR tablename LIKE 'webhook\_%')")" = "0"
+
+      # Part K §120: the REAL Calling migrations apply as the least-privilege migrator role,
+      # the DML-only runtime role reads every table they create, and no role of one service
+      # can connect to another service's database (infra/deployment/postgres).
+      - name: Per-service database roles with the real migrations
+        env:
+          CALLING_MIGRATION_BIN: ${{ github.workspace }}/services/calling/target/debug/calling-migration
+        run: |
+          set -euo pipefail
+          test -x "$CALLING_MIGRATION_BIN"
+          "$GITHUB_WORKSPACE/infra/deployment/postgres/verify-service-isolation.sh" \
+            --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres
 
       - name: Service starts against the migrated database and refuses unsafe configuration
         env:

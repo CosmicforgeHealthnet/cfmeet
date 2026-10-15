@@ -34,7 +34,10 @@ use serde_json::json;
 use crate::{
     error::CallingError,
     internal_auth::{middleware::require_internal_service, INTERNAL_PREFIX},
-    middleware::{platform_auth::require_platform_credential, request_id::request_id_middleware},
+    middleware::{
+        json_body::require_object_body, platform_auth::require_platform_credential,
+        request_id::request_id_middleware,
+    },
     state::AppState,
 };
 
@@ -63,18 +66,22 @@ pub fn internal_api() -> Router<AppState> {
 pub fn app(state: AppState, protected: Router<AppState>, internal: Router<AppState>) -> Router {
     // `route_layer` on a router without routes is rejected by axum; with no protected
     // routes there is nothing to wrap.
+    // Authentication first (outer), then the JSON-object body rule (inner): a request
+    // that does not authenticate learns nothing about body validation.
     let protected = if protected.has_routes() {
-        protected.route_layer(from_fn_with_state(
-            state.clone(),
-            require_platform_credential,
-        ))
+        protected
+            .route_layer(from_fn(require_object_body))
+            .route_layer(from_fn_with_state(
+                state.clone(),
+                require_platform_credential,
+            ))
     } else {
         protected
     };
     let customer = Router::new()
         .route("/health", get(health))
         .merge(protected)
-        .merge(crate::signaling::http::routes())
+        .merge(crate::signaling::http::routes().route_layer(from_fn(require_object_body)))
         .merge(crate::calls::app::http::callback_routes())
         .merge(crate::media::gateway::routes())
         .fallback(not_found)

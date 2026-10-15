@@ -36,6 +36,11 @@ jobs:
       - name: guard
         run: python3 scripts/service-boundaries/check_service_boundaries.py
 
+      # Part I §82: every durable worker responsibility has one owning service, an entry
+      # point that exists and tests that prove it.
+      - name: operations registry
+        run: python3 scripts/service-boundaries/check_operations_registry.py
+
       - name: no phase-03 path
         run: |
           set -euo pipefail

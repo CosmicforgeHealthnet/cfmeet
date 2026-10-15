@@ -110,6 +110,19 @@ struct ClaimedOutbox {
     id: Uuid,
     envelope: Value,
     attempt_count: i32,
+    tenant_id: Uuid,
+    application_id: Uuid,
+    environment_id: Uuid,
+    aggregate_id: Uuid,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct DeadLettered {
+    id: Uuid,
+    tenant_id: Uuid,
+    application_id: Uuid,
+    environment_id: Uuid,
+    aggregate_id: Uuid,
 }
 
 /// A delivery claimed by this worker (its lease is held until the outcome is written).
@@ -142,24 +155,50 @@ impl WebhookService {
         limit: u64,
     ) -> WebhookResult<PublishReport> {
         let now = self.now();
+        let mut report = PublishReport::default();
+        // A claim that reached the attempt cap and whose worker died (lease expired, no
+        // outcome written) is dead-lettered instead of being reclaimed forever: a poison
+        // event that crashes its publisher cannot loop. Same terminal state as a failed
+        // last attempt.
+        let crashed = DeadLettered::find_by_statement(stmt(
+            "UPDATE calling_outbox_events SET status = 'DEAD_LETTER', lease_until = NULL, \
+               last_error_code = 'LEASE_EXPIRED_AT_CAP', updated_at = GREATEST(updated_at, $1) \
+             WHERE id IN (SELECT id FROM calling_outbox_events \
+                           WHERE status = 'PENDING' AND lease_until IS NOT NULL AND lease_until <= $1 \
+                             AND attempt_count >= $2 \
+                           ORDER BY next_attempt_at LIMIT $3 FOR UPDATE SKIP LOCKED) \
+             RETURNING id, tenant_id, application_id, environment_id, aggregate_id",
+            vec![now.into(), OUTBOX_MAX_ATTEMPTS.into(), (limit as i64).into()],
+        ))
+        .all(self.db())
+        .await
+        .db()?;
+        for row in &crashed {
+            tracing::error!(outbox_id = %row.id, call_id = %row.aggregate_id, "outbox event dead-lettered (claim expired at the attempt cap)");
+            self.outbox_dead_letter_incident(row, "LEASE_EXPIRED_AT_CAP")
+                .await;
+        }
+        report.dead_lettered += crashed.len();
         let claimed = ClaimedOutbox::find_by_statement(stmt(
             "UPDATE calling_outbox_events o SET lease_until = $1, attempt_count = o.attempt_count + 1, \
                updated_at = $2 \
              WHERE o.id IN (SELECT id FROM calling_outbox_events \
                              WHERE status = 'PENDING' AND next_attempt_at <= $2 \
                                AND (lease_until IS NULL OR lease_until <= $2) \
+                               AND attempt_count < $4 \
                              ORDER BY next_attempt_at, created_at LIMIT $3 FOR UPDATE SKIP LOCKED) \
-             RETURNING o.id, o.envelope, o.attempt_count",
+             RETURNING o.id, o.envelope, o.attempt_count, o.tenant_id, o.application_id, \
+               o.environment_id, o.aggregate_id",
             vec![
                 (now + Duration::seconds(OUTBOX_LEASE_SECONDS)).into(),
                 now.into(),
                 (limit as i64).into(),
+                OUTBOX_MAX_ATTEMPTS.into(),
             ],
         ))
         .all(self.db())
         .await
         .db()?;
-        let mut report = PublishReport::default();
         for row in claimed {
             let outcome = transport
                 .publish(super::worker::PRODUCER_CALLING, &row.envelope)
@@ -188,7 +227,18 @@ impl WebhookService {
                         ))
                         .await
                         .db()?;
-                    tracing::error!(outbox_id = %row.id, code, "outbox event dead-lettered");
+                    tracing::error!(outbox_id = %row.id, call_id = %row.aggregate_id, code, "outbox event dead-lettered");
+                    self.outbox_dead_letter_incident(
+                        &DeadLettered {
+                            id: row.id,
+                            tenant_id: row.tenant_id,
+                            application_id: row.application_id,
+                            environment_id: row.environment_id,
+                            aggregate_id: row.aggregate_id,
+                        },
+                        code,
+                    )
+                    .await;
                     report.dead_lettered += 1;
                 }
                 Err(code) => {
@@ -224,6 +274,28 @@ impl WebhookService {
             );
         }
         Ok(report)
+    }
+
+    /// One open OUTBOX_DEAD_LETTER incident per environment (repeats count occurrences;
+    /// the evidence names the latest dead-lettered event and its bounded code).
+    async fn outbox_dead_letter_incident(&self, row: &DeadLettered, code: &'static str) {
+        use crate::calls::app::incidents::{self, Incident, IncidentCategory, IncidentSeverity};
+        let scope = crate::calls::command::CallScope::from_parts(
+            crate::domain::TenantId::from_uuid(row.tenant_id),
+            crate::domain::ApplicationId::from_uuid(row.application_id),
+            crate::domain::EnvironmentId::from_uuid(row.environment_id),
+        );
+        let incident = Incident::scoped(
+            IncidentCategory::OutboxDeadLetter,
+            IncidentSeverity::High,
+            scope,
+        )
+        .evidence(serde_json::json!({
+            "outboxEventId": row.id,
+            "callId": row.aggregate_id,
+            "code": code,
+        }));
+        incidents::raise(self.db(), &incident, self.now()).await;
     }
 
     /// Operator replay of a dead-lettered outbox event (it is published again; consumers

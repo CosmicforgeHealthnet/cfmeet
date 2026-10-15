@@ -22,20 +22,20 @@ on:
       - "services/privacy-relay/**"
       - "services/calling/**"
       - "packages/service-auth/**"
-      - "packages/contracts/privacy-relay/**"
-      - "packages/contracts/calling/**"
-      - "packages/contracts/platform/**"
-      - "packages/contracts/manifest.json"
+      - "packages/object-storage/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
       - ".github/workflows/privacy-relay.yml"
   pull_request:
     paths:
       - "services/privacy-relay/**"
       - "services/calling/**"
       - "packages/service-auth/**"
-      - "packages/contracts/privacy-relay/**"
-      - "packages/contracts/calling/**"
-      - "packages/contracts/platform/**"
-      - "packages/contracts/manifest.json"
+      - "packages/object-storage/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
       - ".github/workflows/privacy-relay.yml"
   workflow_dispatch:
 
@@ -208,6 +208,18 @@ jobs:
             AND (table_name, column_name) NOT IN (('protected_contacts', 'ciphertext'), \
               ('contact_fingerprints', 'fingerprint'), ('contact_fingerprints', 'fingerprint_key_version'), \
               ('privacy_relay_commands', 'request_fingerprint'), ('relay_number_inventory', 'canonical_public_e164'))")" = "0"
+
+      # Part K §120: the REAL Privacy Relay migrations apply as the least-privilege migrator role,
+      # the DML-only runtime role reads every table they create, and no role of one service
+      # can connect to another service's database (infra/deployment/postgres).
+      - name: Per-service database roles with the real migrations
+        env:
+          PRIVACY_RELAY_MIGRATION_BIN: ${{ github.workspace }}/services/privacy-relay/target/debug/privacy-relay-migration
+        run: |
+          set -euo pipefail
+          test -x "$PRIVACY_RELAY_MIGRATION_BIN"
+          "$GITHUB_WORKSPACE/infra/deployment/postgres/verify-service-isolation.sh" \
+            --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres
 
       - name: Service starts against the migrated database and refuses unsafe configuration
         env:

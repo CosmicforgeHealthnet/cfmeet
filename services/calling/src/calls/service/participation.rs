@@ -565,6 +565,11 @@ impl CallService {
         let event_type = if from == SessionState::Created {
             CallEventType::CallSessionConnected
         } else {
+            // §84: a verified reconnection of an admitted session (server-observed).
+            crate::metrics::inc(
+                "calling_media_reconnects_total",
+                &[("call_kind", call.call_kind.as_str())],
+            );
             CallEventType::CallSessionReconnected
         };
         self.append_event(

@@ -48,6 +48,7 @@ mod m20261015_000038_platform_operator_audit_actions;
 mod m20261015_000040_webhook_secret_key_ids;
 mod m20261015_000041_calling_orphan_objects;
 mod m20261015_000042_calling_retention;
+mod m20261015_000043_calling_operational_safeguards;
 
 /// Name of the table recording which Calling migrations have been applied.
 pub const MIGRATION_TABLE: &str = "calling_seaql_migrations";
@@ -99,6 +100,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261015_000040_webhook_secret_key_ids::Migration),
             Box::new(m20261015_000041_calling_orphan_objects::Migration),
             Box::new(m20261015_000042_calling_retention::Migration),
+            Box::new(m20261015_000043_calling_operational_safeguards::Migration),
         ]
     }
 

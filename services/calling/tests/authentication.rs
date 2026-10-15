@@ -436,3 +436,144 @@ async fn health_is_public_and_unauthenticated_routes_do_not_exist() {
     assert_eq!(missing.status, StatusCode::NOT_FOUND);
     assert_eq!(missing.json["error"]["code"], "NOT_FOUND");
 }
+
+/// §109: failed authentications are throttled per presented credential key id. Above the
+/// threshold of a window further FAILURES of that key id are answered 429 (and one
+/// CREDENTIAL_GUESSING incident is raised), while the correct secret keeps working (no
+/// lock-out). Unknown key ids share one bucket, so guessing ids never grows the table.
+#[tokio::test]
+async fn repeated_failed_authentications_are_throttled_without_locking_out_the_owner() {
+    use std::sync::Arc;
+    let Some(db) = common::TestDb::new().await else {
+        return;
+    };
+    let media = Arc::new(common::fake_media::FakeMediaProvider::default());
+    let bus = Arc::new(calling::signaling::InMemorySignalBus::new());
+    let mut runtime = common::test_runtime(Some(media.clone()), bus.clone());
+    runtime.abuse_controls.auth_failure_threshold = 3;
+    let h = Harness::with_runtime(
+        Arc::new(db),
+        common::TEST_PEPPER,
+        calling::domain::ManualClock::new(common::t0()),
+        media,
+        bus,
+        runtime,
+    );
+    let c = h.consumer("acme", TenantClassification::External).await;
+    let issued = h
+        .issue(c.sa(EnvironmentKind::Production), &[names::PRINCIPALS_READ])
+        .await;
+    let token = issued.secret.expose_once().to_string();
+    let wrong = format!("{}0000", &token[..token.len() - 4]);
+    assert_ne!(wrong, token);
+    let mismatches_before = calling::metrics::counter(
+        "calling_authentication_failures_total",
+        &[("reason", "secret_mismatch")],
+    );
+    for _ in 0..3 {
+        assert_rejected(&h, &wrong).await;
+    }
+    for _ in 0..2 {
+        let throttled = h.whoami(&wrong).await;
+        assert_eq!(
+            throttled.status,
+            StatusCode::TOO_MANY_REQUESTS,
+            "{}",
+            throttled.text
+        );
+        assert!(!throttled.text.contains(&wrong));
+    }
+    // The owner is never locked out.
+    assert_eq!(h.whoami(&token).await.status, StatusCode::OK);
+    assert_eq!(
+        common::scalar_i64(
+            h.conn(),
+            &format!(
+                "SELECT count(*) FROM calling_incidents WHERE category = 'CREDENTIAL_GUESSING' \
+             AND resource_type = 'CREDENTIAL' AND resource_id = '{}' AND occurrences = 1 \
+             AND tenant_id = '{}'",
+                issued.credential.id.as_uuid(),
+                c.tenant.id.as_uuid()
+            )
+        )
+        .await,
+        1
+    );
+    assert!(
+        calling::metrics::counter(
+            "calling_authentication_failures_total",
+            &[("reason", "secret_mismatch")]
+        ) >= mismatches_before + 3
+    );
+    assert!(
+        calling::metrics::counter(
+            "calling_authentication_failures_total",
+            &[("reason", "throttled")]
+        ) >= 2
+    );
+    // The next window starts afresh.
+    h.clock.advance(Duration::seconds(301));
+    assert_rejected(&h, &wrong).await;
+
+    // Guessing key ids: every unknown id lands in ONE bucket (bounded table), which is
+    // throttled like a known id and raises one platform-wide incident.
+    let parts: Vec<&str> = token.splitn(4, '_').collect();
+    for n in 0..6 {
+        let unknown = format!(
+            "{}_{}_{}_{}",
+            parts[0],
+            parts[1],
+            &uuid::Uuid::new_v4().simple().to_string()[..24],
+            parts[3]
+        );
+        let r = h.whoami(&unknown).await;
+        let expected = if n < 3 {
+            StatusCode::UNAUTHORIZED
+        } else {
+            StatusCode::TOO_MANY_REQUESTS
+        };
+        assert_eq!(r.status, expected, "{n}: {}", r.text);
+    }
+    assert_eq!(
+        common::scalar_i64(
+            h.conn(),
+            "SELECT count(*) FROM platform_auth_failure_windows WHERE subject_key = 'unknown'"
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        common::scalar_i64(
+            h.conn(),
+            "SELECT count(*) FROM platform_auth_failure_windows WHERE subject_key <> 'unknown'"
+        )
+        .await,
+        2,
+        "one row per (known key id, window)"
+    );
+    assert_eq!(
+        common::scalar_i64(
+            h.conn(),
+            "SELECT count(*) FROM calling_incidents WHERE category = 'CREDENTIAL_GUESSING' \
+             AND tenant_id IS NULL"
+        )
+        .await,
+        1
+    );
+    // Old windows are pruned.
+    let pruned = h
+        .state
+        .authenticator
+        .prune_failure_windows(h.clock.now() + Duration::hours(1))
+        .await
+        .unwrap();
+    assert_eq!(pruned, 3);
+    assert_eq!(
+        common::scalar_i64(
+            h.conn(),
+            "SELECT count(*) FROM platform_auth_failure_windows"
+        )
+        .await,
+        0
+    );
+}

@@ -18,7 +18,7 @@ CONTRACTS       := packages/contracts
         privacy-relay privacy-relay-migrate privacy-relay-test privacy-relay-lint privacy-relay-build \
         privacy-relay-integration \
         telephony telephony-migrate telephony-test telephony-lint telephony-build telephony-sip-cert \
-        telephony-integration \
+        telephony-integration database-isolation \
         service-auth-test service-auth-lint contracts-validate contracts-test contracts-lint \
         service-boundaries secret-scan
 
@@ -127,9 +127,13 @@ contracts-lint: ## fmt + clippy for the contract validator
 	cd $(CONTRACTS)/validator && cargo fmt --all -- --check
 	cd $(CONTRACTS)/validator && cargo clippy --all-targets -- -D warnings
 
-service-boundaries: ## Repository service-boundary guard + its mutation tests (Python stdlib)
+service-boundaries: ## Repository service-boundary guard, operations registry + their mutation tests (Python stdlib)
 	python3 -m unittest discover -s scripts/service-boundaries
 	python3 scripts/service-boundaries/check_service_boundaries.py
+	python3 scripts/service-boundaries/check_operations_registry.py
+
+database-isolation: ## Per-service database roles: least privilege and no cross-service connect (ADMIN_URL=postgres://... superuser)
+	infra/deployment/postgres/verify-service-isolation.sh --admin-url "$(ADMIN_URL)"
 
 secret-scan: ## Repository secret scan (keys, keyrings, credentials) + its mutation tests; `--tree DIR` scans an exported image
 	python3 -m unittest discover -s scripts/secret-scan

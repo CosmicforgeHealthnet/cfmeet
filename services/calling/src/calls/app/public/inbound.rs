@@ -125,6 +125,8 @@ impl AppCallService {
         {
             return Ok(answer(e.call_id, e.id));
         }
+        crate::metrics::inc("calling_call_requests_total", &[("kind", "public_inbound")]);
+        self.require_new_calls(false)?;
         let s = &offer.scope;
         let scope = CallScope::from_parts(
             TenantId::from_uuid(s.tenant_id),
@@ -362,9 +364,10 @@ impl AppCallService {
         };
         plan.policy_version = policy.version_label();
 
-        let cmd = CallCommandContext::system(
+        let cmd = CallCommandContext::system_correlated(
             scope,
             ServiceAccountId::from_uuid(owner.service_account_id),
+            Some(correlation.as_str()),
         );
         let creator = CallCreator {
             cmd: cmd.clone(),
@@ -785,9 +788,10 @@ impl AppCallService {
         plan.policy_version = policy.version_label();
         let candidate_routes = plan.candidate_routes.clone();
 
-        let cmd = CallCommandContext::system(
+        let cmd = CallCommandContext::system_correlated(
             scope,
             ServiceAccountId::from_uuid(owner.service_account_id),
+            Some(correlation.as_str()),
         );
         let creator = CallCreator {
             cmd: cmd.clone(),

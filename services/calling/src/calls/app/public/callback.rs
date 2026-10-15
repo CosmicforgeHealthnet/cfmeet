@@ -95,6 +95,7 @@ impl AppCallService {
         {
             return self.replay_create(scope, prior).await;
         }
+        self.require_new_calls(false)?;
         if request.initiator_contact == request.target_contact {
             return Err(CallError::Validation(
                 "initiatorContactReference and targetContactReference must differ.",

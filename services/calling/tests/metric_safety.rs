@@ -682,6 +682,13 @@ async fn the_rendered_registry_never_carries_identifiers() {
         .await;
     assert!(!r.status.is_success(), "{}", r.text);
 
+    // 7. §84 / §109: a failed authentication, and the worker loop's backlog sample.
+    assert_eq!(
+        w.h().whoami("cfmk_not_a_credential").await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    w.h().state.app.sample_worker_backlog().await.unwrap();
+
     // The registry now holds every series these flows emit (and whatever concurrently
     // running tests of this binary emitted): all bounded.
     let rendered = calling::metrics::render();
@@ -689,6 +696,21 @@ async fn the_rendered_registry_never_carries_identifiers() {
         "calling_webhook_deliveries_total",
         "calling_abuse_reports_total",
         "calling_block_rules_total",
+        // §84 call lifecycle, RTC admission, worker backlog and authentication series.
+        "calling_call_requests_total",
+        "calling_call_request_refusals_total",
+        "calling_call_setup_seconds",
+        "calling_call_ring_seconds",
+        "calling_call_connected_seconds",
+        "calling_call_outcomes_total",
+        "calling_media_admissions_total",
+        "calling_outbox_pending",
+        "calling_outbox_oldest_pending_age_seconds",
+        "calling_telephony_commands_pending",
+        "calling_telephony_commands_oldest_pending_age_seconds",
+        "calling_telephony_commands_dead",
+        "calling_webhook_deliveries_pending",
+        "calling_authentication_failures_total",
     ] {
         assert!(
             rendered.contains(expected),

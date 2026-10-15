@@ -153,10 +153,13 @@ pub(crate) struct CommandRow {
     pub payload: Value,
     pub attempts: i32,
     pub created_at: DateTime<Utc>,
+    /// The claim of the worker that leased the row (`None` only for a row read without a
+    /// claim). Every completion / reschedule of a claimed row is guarded by it.
+    pub lease_claim: Option<Uuid>,
 }
 
 pub(crate) const COMMAND_COLUMNS: &str = "id, call_id, call_leg_id, attempt_id, bridge_id, kind, \
-    idempotency_key, payload, attempts, created_at";
+    idempotency_key, payload, attempts, created_at, lease_claim";
 
 /// A protected public party of a Call.
 #[derive(Debug, Clone, FromQueryResult)]

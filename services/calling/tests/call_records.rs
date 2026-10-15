@@ -680,3 +680,71 @@ async fn usage_records_are_idempotent_and_finalization_is_set_once() {
     );
     assert_eq!(w.event_count(call.id).await, events);
 }
+
+/// §93: the idempotency key is unique per Call, but billing must not depend on every
+/// writer choosing the same key — at most ONE finalized time fact exists per (Call,
+/// usage type, subject). A second fact under a different key is refused when finalized
+/// (service check), and the partial unique index refuses it even for a direct write.
+#[tokio::test]
+async fn a_different_idempotency_key_can_never_bill_the_same_subject_twice() {
+    let Some(w) = CallWorld::new().await else {
+        return;
+    };
+    let call = w.call_in(CallState::Connected).await;
+    let usage = |key: &str| NewUsage {
+        usage_type: UsageType::CallConnectedTime,
+        participant_id: None,
+        session_id: None,
+        leg_id: None,
+        quantity: 61_000,
+        unit: UsageUnit::Milliseconds,
+        usage_started_at: None,
+        usage_ended_at: None,
+        idempotency_key: IdempotencyKey::parse(key).unwrap(),
+    };
+    let (first, _) = w
+        .calls()
+        .record_usage(&w.cmd, call.id, usage("call-time-a"))
+        .await
+        .unwrap();
+    w.calls()
+        .finalize_usage(&w.cmd, call.id, first.id)
+        .await
+        .unwrap();
+    let (second, created) = w
+        .calls()
+        .record_usage(&w.cmd, call.id, usage("call-time-b"))
+        .await
+        .unwrap();
+    assert!(created, "an unfinalized draft is not a billed fact");
+    assert!(matches!(
+        w.calls()
+            .finalize_usage(&w.cmd, call.id, second.id)
+            .await
+            .unwrap_err(),
+        CallError::Conflict(_)
+    ));
+    let finalized = w
+        .count(&format!(
+            "SELECT count(*) FROM call_usage_records WHERE call_id = '{}' \
+             AND usage_type = 'CALL_CONNECTED_TIME' AND finalized_at IS NOT NULL",
+            call.id
+        ))
+        .await;
+    assert_eq!(finalized, 1);
+    // The database refuses it too (a writer bypassing the service).
+    let err = common::exec(
+        w.h.conn(),
+        &format!(
+            "UPDATE call_usage_records SET finalized_at = updated_at WHERE id = '{}'",
+            second.id
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.contains("uq_call_usage_records_one_final_fact"),
+        "{err}"
+    );
+}
