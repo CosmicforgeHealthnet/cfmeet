@@ -27,8 +27,11 @@ Notes on the model:
 
 * **Each service has its own database.** Calling's is configured by its own
   `DATABASE_URL`; its tables are the platform foundation (`platform_*`), the call
-  domain (`calls`, `call_*`, `calling_outbox_events`) and, since Part F, enterprise
-  configuration and continuity (`enterprise_*`, `voicemail_*`, `calling_incidents`).
+  domain (`calls`, `call_*`, `calling_outbox_events`), since Part F enterprise
+  configuration and continuity (`enterprise_*`, `voicemail_*`, `calling_incidents`),
+  since Part G customer webhooks (`webhook_*`), and since Parts H–I its operational
+  records (`calling_abuse_*`, `calling_block_rules`, `calling_retention_*`,
+  `calling_orphan_objects`).
   Enterprise calls are ordinary Calls: there is no `services/pbx`, no
   `services/enterprise-calling`, no `services/voicemail` / `services/ivr`, and no second
   Call table. Telephony remains execution only. Calling's `call_legs` is the
@@ -53,7 +56,9 @@ Notes on the model:
   `privacy_relay_session_participants`, `privacy_relay_session_channels`,
   `privacy_relay_session_directions`, `relay_authorization_decisions`,
   `relay_audit_events`, `privacy_relay_outbox`, `privacy_relay_commands`,
-  `privacy_relay_enforcement_jobs`; the Contact Vault's `protected_contacts`,
+  `privacy_relay_enforcement_jobs`, `privacy_relay_incidents`,
+  `privacy_relay_operator_audit`, `privacy_relay_retention_holds`,
+  `privacy_relay_retention_audit`; the Contact Vault's `protected_contacts`,
   `contact_fingerprints`, `contact_access_audit`, `contact_verification_events`,
   `contact_resolution_grants`; the relay pool's `relay_number_inventory`,
   `relay_number_events`, `relay_number_assignments`, `relay_inbound_resolutions`. A
@@ -96,10 +101,10 @@ Identity is also owned:
 Table ownership is **derived from migrations**, so it cannot drift: the guard collects
 every `CREATE TABLE` and SeaORM `X::Table` in `services/<name>/**/migration/**`. Two
 services may each own a table with the same name in their own databases (for example an
-outbox); that is not shared data. Planned services are already known to the guard
-through the service identities registered in `packages/service-auth` (`telephony`), so
-Calling cannot read their database locations even before they exist;
-Numbering becomes known when it is registered or created.
+outbox); that is not shared data. Known services are the directories under `services/`
+(`calling`, `meeting-service`, `privacy-relay`, `telephony`) plus the service identities
+registered in `packages/service-auth`, so no service can read another's database
+location; Numbering becomes known when it is registered or created.
 
 ## How to use another service's data
 
@@ -126,6 +131,12 @@ entities / migrations into your crate.
 | `CROSS_SERVICE_DATABASE_URL` | code, tests or deployment configuration of S name another service's database location, e.g. `MEETING_DATABASE_URL`, `LEGACY_MEETING_DB_URL`, `TELEPHONY_DATABASE_URL` (known services = `services/*` plus identities registered in `packages/service-auth`) |
 | `CROSS_SERVICE_TABLE_ACCESS` | production SQL of S names a table only another service's migrations create |
 | `CROSS_SERVICE_DB_HELPER` | production code of S defines or calls a helper named for another service's data store, e.g. `load_user_from_meeting_db`, `telephony_pool` |
+| `PRIVACY_RELAY_DOMAIN_ELSEWHERE` | another service's migrations create a Contact Vault, relay-number or inbound-relay table |
+| `CONTACT_VAULT_OUTSIDE_OWNER` | Contact Vault code or crates (AES-GCM, `phonenumber`, the plaintext accessor, keyrings) appear outside Privacy Relay |
+| `PLAINTEXT_CONTACT_FIELD` | Calling's production code declares a plaintext telephone field |
+| `NUMBERING_IN_PRIVACY_RELAY` | permanent Numbering concepts (porting, ownership, purchase, marketplace) appear inside Privacy Relay |
+| `FUTURE_SERVICE_IMPLEMENTED` | `services/numbering` or `services/contact-vault` exists before its phase |
+| `FOREIGN_SECRET_REFERENCE` | production code or deployment configuration of S names a secret that belongs to T (Telephony provider / ARI credentials, Contact Vault keyrings, Calling's media, signaling, webhook and credential-pepper secrets) |
 
 Comments are ignored (documentation may discuss the rules); the data rules apply to
 production code with `#[cfg(test)]` items removed, except database-location names, which

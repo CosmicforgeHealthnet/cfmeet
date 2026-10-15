@@ -48,9 +48,9 @@ cfmeet/
 │   ├── architecture/         Platform architecture and service boundaries
 │   ├── api/                  API documentation entry point
 │   ├── decisions/            Architecture decision records
-│   ├── phases/               Delivery-phase specifications and closure reports
+│   ├── phases/               Meeting-platform delivery specifications and closure reports
 │   └── migration/            Monorepo migration history
-├── scripts/                  dev helpers; service-boundaries/ data-ownership guard
+├── scripts/                  dev helpers; service-boundaries/ data-ownership guard; secret-scan/
 ├── .github/workflows/
 ├── docker-compose.yml
 └── Makefile
@@ -62,7 +62,9 @@ cfmeet/
 |---|---|---|
 | `apps/web/` | CF Meet web experience | Vercel |
 | `services/meeting-service/` | Meeting/conference control plane: auth, meetings, participants, waiting room, chat, LiveKit token/control integration, API keys, webhooks, workers and related meeting-domain functionality | Docker image |
-| `services/calling/` | Calling domain service: the platform trust foundation (tenant / application / environment / service-account model, API credentials, scopes, limits, communication principals) and the Calling core — the canonical, provider-independent Call aggregate, state machine, participants / sessions, legs / routes / attempts, authorizations, immutable events with a transactional outbox, the call API, and application calling (endpoints, signaling, ringing / arbitration, media provider boundary, call control) ([README](services/calling/README.md)) | Docker image (context: repository root, `-f services/calling/Dockerfile`) |
+| `services/calling/` | Calling domain service: the platform trust foundation (tenant / application / environment / service-account model, API credentials, scopes, limits, communication principals) and the Calling core — the canonical, provider-independent Call aggregate, state machine, participants / sessions, legs / routes / attempts, authorizations, immutable events with a transactional outbox, the call API, application calling (endpoints, signaling, ringing / arbitration, media provider boundary, call control), routing, Calling's side of public-network calls, enterprise calling, webhooks, usage and limits ([README](services/calling/README.md)) | Docker image (context: repository root, `-f services/calling/Dockerfile`) |
+| `services/privacy-relay/` | Communication Contexts, Privacy Relay Sessions, Contact Vault, temporary relay numbers ([README](services/privacy-relay/README.md)) | Docker image (context: repository root, `-f services/privacy-relay/Dockerfile`) |
+| `services/telephony/` | Public-network leg execution, provider adapters, provider events, reconciliation; drives the SIP / media edge in `infra/telephony/` ([README](services/telephony/README.md)) | Docker image (context: repository root, `-f services/telephony/Dockerfile`) |
 
 The current Rust service is intentionally named **meeting-service** because it is the backend for the meeting/conferencing domain, not the universal backend for all future CF Meet capabilities.
 
@@ -89,10 +91,10 @@ Future domain services are created only when a real boundary exists, for example
 ```text
 services/
 ├── meeting-service/       current
-├── calling/               active (platform trust foundation + Calling core)
-├── privacy-relay/         future
+├── calling/               active
+├── privacy-relay/         active
 ├── messaging/             future
-├── telephony/             future
+├── telephony/             active
 ├── numbering/             future
 ├── webhook-delivery/      future if extracted
 └── workers/               future if extracted
@@ -111,6 +113,8 @@ See [`docs/architecture/platform-boundaries.md`](docs/architecture/platform-boun
 ```bash
 cp services/meeting-service/.env.example services/meeting-service/.env
 cp services/calling/.env.example         services/calling/.env
+cp services/privacy-relay/.env.example   services/privacy-relay/.env
+cp services/telephony/.env.example       services/telephony/.env
 cp apps/web/.env.example                 apps/web/.env.local
 ```
 
@@ -184,8 +188,12 @@ Workflows under `.github/workflows/` are path-aware:
 - [API docs](docs/api/README.md)
 - [Meeting service guides](services/meeting-service/docs/README.md)
 - [Calling service](services/calling/README.md)
+- [Privacy Relay service](services/privacy-relay/README.md)
+- [Telephony service](services/telephony/README.md) and [SIP / media edge](infra/telephony/README.md)
 - [Contracts](packages/contracts/README.md)
 - [Deployment](infra/deployment/README.md)
+- Part III certification: [Part F](docs/architecture/part-f-certification.md) · [Part G](docs/architecture/part-g-certification.md) · [Part H](docs/architecture/part-h-security-certification.md) · [Part I](docs/architecture/part-i-reliability-certification.md) · [Part J](docs/architecture/part-j-persistence-deployment-certification.md) · [Part K](docs/architecture/part-k-production-acceptance.md) · [Part L closure register](docs/architecture/part-l-final-closure-register.md)
+- Runbooks: [provider / carrier outage](docs/architecture/provider-outage-runbook.md) · [secret rotation](docs/architecture/secret-rotation-runbook.md) · [security deployment checklist](docs/architecture/security-deployment-checklist.md)
 - [Architecture decisions](docs/decisions/README.md)
 - [Delivery phases](docs/phases/README.md)
 - [Monorepo migration record](docs/migration/MONOREPO_MIGRATION.md)

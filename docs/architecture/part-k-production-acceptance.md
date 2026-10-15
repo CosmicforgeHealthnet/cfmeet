@@ -18,7 +18,8 @@ The evidence is kept in five separate classes, never merged into one green:
 
 ## 1. Final gates
 
-Final code tree: see the closure report (git section). Every suite was run in full on the
+Final code tree: `8b830e34d73eaee3f2b3a0f41439337335ca3eb9` (§14; Part L closure register:
+[`part-l-final-closure-register.md`](part-l-final-closure-register.md)). Every suite was run in full on the
 stabilized tree (targeted runs during development are not counted here).
 
 | Gate | Result |

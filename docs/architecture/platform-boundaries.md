@@ -7,10 +7,10 @@ This document defines where each CF Meet capability belongs. Anything marked *pl
 ```text
 services/
 ├── meeting-service/     ✅ current Meeting & Conference Platform backend
-├── calling/             ◐ active: trust foundation, internal service auth, Calling core (Part C §15–§19), application calling (§20–§25) and the Privacy Relay ingress / protected calls (Part D §26–§30) implemented; telephony execution planned
-├── privacy-relay/       ◐ active: Communication Contexts, reassignment / revocation, Privacy Relay Sessions, authorization and active-call enforcement (Part D §26–§30); Contact Vault, verification and resolution grants (§31–§33); temporary relay numbers and inbound mapping (§34–§35)
+├── calling/             ✅ active: trust foundation, internal service auth, Calling core (Part C §15–§19), application calling (§20–§25), the Privacy Relay ingress / protected calls (Part D §26–§30), routing and Calling's side of public-network calls (Part E), enterprise calling (Part F), API / webhooks / usage / limits (Part G)
+├── privacy-relay/       ✅ active: Communication Contexts, reassignment / revocation, Privacy Relay Sessions, authorization and active-call enforcement (Part D §26–§30); Contact Vault, verification and resolution grants (§31–§33); temporary relay numbers and inbound mapping (§34–§35)
 ├── messaging/           ◻ planned: unified messaging
-├── telephony/           ◻ planned: SIP/PSTN telephony
+├── telephony/           ✅ active: SIP/PSTN execution, provider abstraction, CF-owned SIP / media edge (Part E §39–§51); real lawful carrier certification pending (ADR 0016)
 ├── numbering/           ◻ planned: Digital Communications Numbers
 ├── webhook-delivery/    ◻ future extraction if needed
 └── workers/             ◻ future extraction if needed
@@ -56,7 +56,8 @@ transactional outbox, and the call API. Application calling (Part C §20–§25)
 implemented too: endpoints and signaling credentials, realtime signaling, multi-device
 ringing with single-winner arbitration, app voice / video / group calls through
 Calling's own provider-neutral media boundary (LiveKit adapter; no Meeting Service
-dependency), and call control / transfer. Telephony execution is later work. See
+dependency), and call control / transfer. Public-network calls are decided by Calling
+(Routing Engine, ADR 0013) and executed by the separate Telephony service. See
 [ADR 0003](../decisions/0003-calling-platform-trust-model.md),
 [ADR 0004](../decisions/0004-internal-service-authentication.md),
 [ADR 0006](../decisions/0006-canonical-call-aggregate-and-state-machine.md),
@@ -64,6 +65,18 @@ dependency), and call control / transfer. Telephony execution is later work. See
 [ADR 0008](../decisions/0008-calling-endpoints-ringing-and-answer-arbitration.md),
 [ADR 0009](../decisions/0009-calling-call-control-idempotency-and-transfer.md) and
 [`services/calling/README.md`](../../services/calling/README.md).
+
+## Privacy Relay and Telephony services
+
+`services/privacy-relay` owns Communication Contexts, Privacy Relay Sessions, the Contact
+Vault and the temporary relay-number pool ([ADR 0010](../decisions/0010-communication-context-and-privacy-relay-session-architecture.md)–[ADR 0012](../decisions/0012-temporary-relay-number-assignment-and-cooldown.md),
+[`services/privacy-relay/README.md`](../../services/privacy-relay/README.md)).
+`services/telephony` executes the public-network legs Calling asks for, through
+replaceable provider adapters and the CF-owned SIP / media edge
+([ADR 0014](../decisions/0014-telephony-service-core.md)–[ADR 0017](../decisions/0017-provider-failover.md),
+[`services/telephony/README.md`](../../services/telephony/README.md)). Neither owns or
+redefines the Call; each has its own database, image and secrets
+([service data ownership](service-data-ownership.md)).
 
 ## When to create or extract another service
 
@@ -95,7 +108,9 @@ Applications communicate with services through published HTTP/WebSocket/event co
 ```text
 packages/
 ├── contracts/           ✅ contract authority: manifest, JSON Schema 2020-12 / OpenAPI contracts, offline validator
-└── service-auth/        ✅ internal service authentication library (Ed25519 service tokens, trust bundles)
+├── service-auth/        ✅ internal service authentication library (Ed25519 service tokens, trust bundles)
+├── webhooks/            ✅ webhook signing, SSRF guard and retry primitives
+└── object-storage/      ✅ protected S3-compatible object storage client
 ```
 
 `packages/contracts` is the authority for APIs, event schemas, webhook schemas, permission identifiers and future SDK generation inputs that cross component boundaries ([ADR 0005](../decisions/0005-contract-authority-and-runtime-boundaries.md)). `packages/service-auth` is linked by every Rust service that calls or is called by another service ([ADR 0004](../decisions/0004-internal-service-authentication.md)). Packages never depend on services.
@@ -125,7 +140,8 @@ provider for other services. Enforced by `make service-boundaries`
 |---|---|
 | `infra/livekit/` | LiveKit/media-plane configuration |
 | `infra/docker/` | local/container orchestration guidance |
-| `infra/deployment/` | deployment guidance; web root `apps/web`, meeting-service context `services/meeting-service/` |
+| `infra/telephony/` | SIP / media edge (Asterisk + ARI) configuration and certification harness |
+| `infra/deployment/` | deployment guidance; web root `apps/web`, meeting-service context `services/meeting-service/`; per-service database roles (`postgres/`) and backup / restore (`backup/`) |
 
 ## Phase 2 ownership map
 

@@ -142,7 +142,9 @@ Public → app fallback never reveals a number (Part D/E routing unchanged).
 * Provider outage playbook: disable route / provider (`telephony-admin`, audited) → app
   calling continues (`degradation_matrix`, `public_failover`) → unknown legs reconciled
   (`reconciliation::*`) → re-enable after health validation (provider health refresh,
-  `SIP_EDGE_UNAVAILABLE` resolves on healthy). Documented in `infra/deployment/README.md`.
+  `SIP_EDGE_UNAVAILABLE` resolves on healthy). Documented in
+  [`provider-outage-runbook.md`](provider-outage-runbook.md) (added in Part L; the
+  operator switches are listed in `infra/deployment/README.md`).
 * Environment-level items not certifiable here: object-storage bucket versioning /
   lifecycle and cross-region replication, PITR / WAL archiving of the managed PostgreSQL
   instances, secret-store backup of keyrings — operator responsibilities listed in
