@@ -29,7 +29,7 @@ change (no targeted re-run substitutes for it).
 | Gate | Result |
 |---|---|
 | Calling — `fmt --check`, `check`, `clippy -D warnings`, `build` (`--workspace --locked`) | clean |
-| Calling — `cargo test --workspace --locked --no-fail-fast` | **632 passed, 0 failed, 0 ignored (77 test binaries; run with the real-binary e2e enabled: `privacy_relay_e2e` 3, `telephony_e2e` 2, `enterprise_sip_certification` with `ENTERPRISE_SIP_CERT_REQUIRED=1` against a local S3-compatible store: IVR, voicemail, recording and org-isolation sections certified). Only the RTC (LiveKit) certification section prints SKIPPED locally (no LiveKit server here) and is **not** counted; CI runs it (RTC certification workflow)** |
+| Calling — `cargo test --workspace --locked --no-fail-fast` | **633 passed, 0 failed, 0 ignored (77 test binaries; run with the real-binary e2e enabled: `privacy_relay_e2e` 3, `telephony_e2e` 2, `enterprise_sip_certification` with `ENTERPRISE_SIP_CERT_REQUIRED=1` against a local S3-compatible store: IVR, voicemail, recording and org-isolation sections certified). Only the RTC (LiveKit) certification section prints SKIPPED locally (no LiveKit server here) and is **not** counted; CI runs it (RTC certification workflow)** |
 | Privacy Relay — fmt, check, clippy, full suite | **149 passed, 0 failed, 0 ignored (35 test binaries)** |
 | Telephony — fmt, check, clippy, full suite with `TELEPHONY_SIP_CERT_REQUIRED=1` (real Asterisk + SIPp; carrier RFC 4733 DTMF exercised) | **130 passed, 0 failed, 0 ignored (24 test binaries); `sip_certification::real_sip_media_edge_certification` ran and passed** |
 | `packages/service-auth` (core + client features) | 114 passed, 0 failed |
@@ -216,7 +216,7 @@ Baseline before Part H: Calling 546, Privacy Relay 126, Telephony 87.
 
 ## 14. External items (kept separate from implementation correctness)
 
-* **GITHUB ACTIONS** — Actions now execute (the earlier runner / billing blocker is gone). The `81d05bb` runs failed on real CI defects that this closure fixes: stale table / migration counts, the e2e harnesses calling `telephony-admin` without an operator, the Calling-down e2e race, the `minio/minio` image no longer pullable, and two secret-scan false positives. Results for the closure commit are recorded in the final report.
+* **GITHUB ACTIONS** — Actions execute. The `81d05bb` runs failed on real CI defects that this closure fixes (stale table / migration counts, the e2e harnesses calling `telephony-admin` without an operator, the Calling-down e2e race, the `minio/minio` image no longer pullable, two secret-scan false positives). On the closure tree every workflow is green: `1ff4b22` — Telephony, Telephony SIP certification, Webhooks, Object storage, Contracts and service auth; `cef031a` — Calling service, Enterprise calling certification, Calling RTC certification, Privacy Relay service, Service boundaries.
 * **PART E REAL LAWFUL TELECOM INTERCONNECT CERTIFICATION — PENDING — EXTERNAL CARRIER
   CREDENTIAL BLOCKER** (ADR 0016). Asterisk + SIPp certify the CF-owned SIP / media edge
   only; no carrier credentials or interconnect exist in this environment.
