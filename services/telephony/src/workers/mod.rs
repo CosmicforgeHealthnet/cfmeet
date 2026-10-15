@@ -6,8 +6,14 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
+use sea_orm::TransactionTrait;
+use tracing::Instrument;
+
 use crate::{
-    domain::Health, error::TelephonyResult, events::outbox, ports::PortError,
+    domain::Health,
+    error::TelephonyResult,
+    events::outbox,
+    incidents::{self, Incident, Severity},
     service::TelephonyService,
 };
 
@@ -29,29 +35,89 @@ pub struct SweepReport {
 }
 
 impl TelephonyService {
-    /// Delivers due outbox events to Calling in per-leg order.
+    /// Delivers due outbox events to Calling in per-leg order. A transient failure is
+    /// retried with capped backoff until [`outbox::MAX_DELIVERY_ATTEMPTS`]; a permanent
+    /// refusal (or the exhausted cap) dead-letters the event and raises one deduplicated
+    /// `OUTBOX_DEAD_LETTER` incident per reason. Returns (delivered, failed) where failed
+    /// counts retries and dead letters.
     pub async fn deliver_outbox_once(&self, limit: u64) -> TelephonyResult<(usize, usize)> {
         let now = self.now();
         let rows = outbox::claim_due(&self.db, now, limit).await?;
         let (mut ok, mut failed) = (0, 0);
         for row in rows {
-            match self.calling.deliver_event(&row.payload).await {
-                Ok(()) => {
-                    outbox::mark_delivered(&self.db, row.id, self.now()).await?;
-                    ok += 1;
-                }
-                Err(e) => {
-                    let code = match &e {
-                        PortError::Denied(c) => c.clone(),
-                        PortError::NotFound => "NOT_FOUND".to_string(),
-                        PortError::Unavailable => "UNAVAILABLE".to_string(),
-                    };
-                    outbox::mark_failed(&self.db, &row, &code, self.now()).await?;
-                    failed += 1;
-                }
+            let span = tracing::info_span!(
+                "telephony_outbox_delivery",
+                telephony_leg_id = %row.telephony_leg_id.map(|l| l.to_string()).unwrap_or_default(),
+                correlation_id = row.correlation_id.as_deref().unwrap_or(""),
+                event_type = %row.event_type,
+            );
+            if self.deliver_outbox_row(row).instrument(span).await? {
+                ok += 1;
+            } else {
+                failed += 1;
             }
         }
         Ok((ok, failed))
+    }
+
+    async fn deliver_outbox_row(&self, row: outbox::OutboxRow) -> TelephonyResult<bool> {
+        let failure = match self
+            .calling
+            .deliver_event(&row.payload, row.correlation_id.as_deref())
+            .await
+        {
+            Ok(()) => {
+                outbox::mark_delivered(&self.db, row.id, self.now()).await?;
+                crate::metrics::inc(
+                    "telephony_outbox_deliveries_total",
+                    &[("result", "DELIVERED")],
+                );
+                tracing::debug!("telephony event delivered to Calling");
+                return Ok(true);
+            }
+            Err(e) => outbox::DeliveryFailure::classify(&e),
+        };
+        let now = self.now();
+        let exhausted = row.attempts + 1 >= outbox::MAX_DELIVERY_ATTEMPTS;
+        if let (outbox::DeliveryFailure::Transient(code), false) = (&failure, exhausted) {
+            outbox::mark_failed(&self.db, &row, code, now).await?;
+            crate::metrics::inc("telephony_outbox_deliveries_total", &[("result", "RETRY")]);
+            tracing::warn!(
+                code = code.as_str(),
+                attempts = row.attempts + 1,
+                "telephony event delivery failed; retrying"
+            );
+            return Ok(false);
+        }
+        let reason = outbox::dead_letter_reason(&failure);
+        let txn = self.db.begin().await?;
+        if outbox::mark_dead_letter(&txn, &row, failure.code(), now).await? {
+            let mut incident = Incident::new(
+                "OUTBOX_DEAD_LETTER",
+                Severity::High,
+                format!("outbox-dead-letter:{reason}"),
+            )
+            .evidence(json!({
+                "reason": reason,
+                "code": failure.code(),
+                "eventType": row.event_type,
+                "attempts": row.attempts + 1,
+            }));
+            incident.telephony_leg_id = row.telephony_leg_id;
+            incidents::raise(&txn, &incident, now).await?;
+        }
+        txn.commit().await?;
+        crate::metrics::inc(
+            "telephony_outbox_deliveries_total",
+            &[("result", "DEAD_LETTER")],
+        );
+        crate::metrics::inc("telephony_outbox_dead_letters_total", &[("reason", reason)]);
+        tracing::warn!(
+            reason,
+            code = failure.code(),
+            "telephony event dead-lettered; it will not be retried"
+        );
+        Ok(false)
     }
 
     /// One full sweep (deterministic for tests).
@@ -124,6 +190,7 @@ impl TelephonyService {
 
     /// Refreshes the normalized health of every configured provider.
     pub async fn refresh_provider_health(&self) -> TelephonyResult<()> {
+        self.observe_sip_edge_health().await?;
         let now = self.now();
         for id in self.providers.ids().cloned().collect::<Vec<_>>() {
             let Some(p) = self.providers.get(&id).cloned() else {

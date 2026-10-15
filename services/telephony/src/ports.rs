@@ -126,8 +126,13 @@ pub trait PrivacyRelayPort: Send + Sync {
 
 #[async_trait]
 pub trait CallingPort: Send + Sync {
-    /// Delivers one normalized event (Calling deduplicates by event id).
-    async fn deliver_event(&self, payload: &Value) -> Result<(), PortError>;
+    /// Delivers one normalized event (Calling deduplicates by event id), continuing
+    /// `correlation_id` (the originating command's) when there is one.
+    async fn deliver_event(
+        &self,
+        payload: &Value,
+        correlation_id: Option<&str>,
+    ) -> Result<(), PortError>;
 
     /// Offers an inbound public call; Calling answers with the canonical Call and leg.
     async fn offer_inbound(&self, offer: &Value) -> Result<Value, PortError>;
@@ -141,14 +146,22 @@ pub trait CallingPort: Send + Sync {
     /// Part F: delivers ONE key of an enterprise leg's caller to Calling's IVR. Never
     /// persisted (no outbox), never logged: a lost key is like an unheard one (the IVR
     /// times out and retries).
-    async fn deliver_keypad(&self, _payload: &Value) -> Result<(), PortError> {
+    async fn deliver_keypad(
+        &self,
+        _payload: &Value,
+        _correlation_id: Option<&str>,
+    ) -> Result<(), PortError> {
         Err(PortError::Unavailable)
     }
 
     /// Part F: delivers a finished / failed edge media capture (base64 audio + integrity,
     /// or a bounded failure). Unavailable (incl. Calling's 503 when its artifact storage
     /// is down) is retried by the caller; Denied / NotFound are final.
-    async fn deliver_capture(&self, _report: &Value) -> Result<Value, PortError> {
+    async fn deliver_capture(
+        &self,
+        _report: &Value,
+        _correlation_id: Option<&str>,
+    ) -> Result<Value, PortError> {
         Err(PortError::Unavailable)
     }
 }
@@ -189,7 +202,7 @@ impl PrivacyRelayPort for Unconfigured {
 
 #[async_trait]
 impl CallingPort for Unconfigured {
-    async fn deliver_event(&self, _: &Value) -> Result<(), PortError> {
+    async fn deliver_event(&self, _: &Value, _: Option<&str>) -> Result<(), PortError> {
         Err(PortError::Unavailable)
     }
 
@@ -200,6 +213,12 @@ impl CallingPort for Unconfigured {
 
 fn correlation(raw: &str) -> CorrelationId {
     CorrelationId::parse(raw).unwrap_or_else(|_| CorrelationId::generate())
+}
+
+/// The correlation an outbound call continues: the originating command's, else a fresh
+/// one (a leg no command touched, or a row written before correlations were stored).
+fn continued(raw: Option<&str>) -> CorrelationId {
+    raw.map(correlation).unwrap_or_else(CorrelationId::generate)
 }
 
 fn port_error(e: InternalCallError) -> PortError {
@@ -361,8 +380,12 @@ impl HttpCalling {
 
 #[async_trait]
 impl CallingPort for HttpCalling {
-    async fn deliver_event(&self, payload: &Value) -> Result<(), PortError> {
-        let correlation_id = CorrelationId::generate();
+    async fn deliver_event(
+        &self,
+        payload: &Value,
+        correlation_id: Option<&str>,
+    ) -> Result<(), PortError> {
+        let correlation_id = continued(correlation_id);
         let outbound = OutboundServiceRequest::continuing(ServiceId::calling(), &correlation_id);
         self.auth
             .client()
@@ -402,8 +425,12 @@ impl CallingPort for HttpCalling {
         response.json().map_err(|_| PortError::Unavailable)
     }
 
-    async fn deliver_keypad(&self, payload: &Value) -> Result<(), PortError> {
-        let correlation_id = CorrelationId::generate();
+    async fn deliver_keypad(
+        &self,
+        payload: &Value,
+        correlation_id: Option<&str>,
+    ) -> Result<(), PortError> {
+        let correlation_id = continued(correlation_id);
         let outbound = OutboundServiceRequest::continuing(ServiceId::calling(), &correlation_id);
         self.auth
             .client()
@@ -417,8 +444,12 @@ impl CallingPort for HttpCalling {
             .map_err(port_error)
     }
 
-    async fn deliver_capture(&self, report: &Value) -> Result<Value, PortError> {
-        let correlation_id = CorrelationId::generate();
+    async fn deliver_capture(
+        &self,
+        report: &Value,
+        correlation_id: Option<&str>,
+    ) -> Result<Value, PortError> {
+        let correlation_id = continued(correlation_id);
         let outbound = OutboundServiceRequest::continuing(ServiceId::calling(), &correlation_id);
         let response = self
             .auth

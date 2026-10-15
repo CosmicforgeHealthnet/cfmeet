@@ -91,6 +91,9 @@ pub struct RelayConfig {
     database_url: String,
     pub database_max_connections: u32,
     pub bind_address: SocketAddr,
+    /// `PRIVACY_RELAY_METRICS_ADDRESS`: optional separate listener for `GET /metrics`
+    /// (never the public or internal API listener). Unset = no metrics listener.
+    pub metrics_address: Option<SocketAddr>,
     pub enabled: bool,
     pub worker_interval: Duration,
     pub json_logs: bool,
@@ -144,6 +147,16 @@ impl RelayConfig {
             .unwrap_or_else(|| "127.0.0.1:8091".to_string())
             .parse::<SocketAddr>()
             .map_err(|_| invalid("PRIVACY_RELAY_BIND_ADDRESS", "must be host:port"))?;
+        let metrics_address = value("PRIVACY_RELAY_METRICS_ADDRESS")
+            .map(|v| v.parse::<SocketAddr>())
+            .transpose()
+            .map_err(|_| invalid("PRIVACY_RELAY_METRICS_ADDRESS", "must be host:port"))?;
+        if metrics_address.is_some_and(|m| m == bind_address) {
+            return Err(invalid(
+                "PRIVACY_RELAY_METRICS_ADDRESS",
+                "must differ from PRIVACY_RELAY_BIND_ADDRESS",
+            ));
+        }
         let enabled = match value("PRIVACY_RELAY_ENABLED").as_deref() {
             None | Some("false") => false,
             Some("true") => true,
@@ -196,6 +209,7 @@ impl RelayConfig {
             database_url,
             database_max_connections,
             bind_address,
+            metrics_address,
             enabled,
             worker_interval,
             json_logs,

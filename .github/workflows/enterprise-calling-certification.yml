@@ -17,6 +17,7 @@ on:
       - "infra/telephony/**"
       - "packages/service-auth/**"
       - "packages/object-storage/**"
+      - "packages/webhooks/**"
       - "packages/contracts/**"
       - ".github/workflows/enterprise-calling-certification.yml"
   pull_request:
@@ -26,6 +27,7 @@ on:
       - "infra/telephony/**"
       - "packages/service-auth/**"
       - "packages/object-storage/**"
+      - "packages/webhooks/**"
       - "packages/contracts/**"
       - ".github/workflows/enterprise-calling-certification.yml"
   workflow_dispatch:

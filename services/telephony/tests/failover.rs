@@ -288,3 +288,58 @@ async fn circuit_breaker_health_and_capacity_steer_new_calls() {
         "CAPACITY_EXHAUSTED"
     );
 }
+
+/// Regression (found by the SIP signalling load scenario): a transaction that updates a
+/// leg row twice — event ingestion transitions the leg, then bumps its event sequence —
+/// holds the foreign-key `KEY SHARE` locks of the leg's route and provider until it
+/// commits. Capacity reservation must not conflict with them: with `FOR UPDATE` (provider,
+/// then route) against the FK order (route, then provider) the two deadlocked under
+/// concurrent calls. With `FOR NO KEY UPDATE` an origination on the same route proceeds
+/// while such a transaction is open.
+#[tokio::test]
+async fn capacity_reservation_is_not_blocked_by_a_legs_foreign_key_locks() {
+    use sea_orm::{ConnectionTrait, TransactionTrait};
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let (busy_leg, _) = h.originate().await;
+    h.run().await;
+    assert_eq!(route_of(&h, busy_leg).await.as_deref(), Some("ng-a"));
+    // An open ingestion-like transaction: the leg row updated twice (the second update
+    // re-checks the foreign keys: KEY SHARE on the route and provider rows).
+    let open = h.db.conn.begin().await.unwrap();
+    for _ in 0..2 {
+        open.execute_unprepared(&format!(
+            "UPDATE telephony_legs SET updated_at = updated_at WHERE id = '{busy_leg}'"
+        ))
+        .await
+        .unwrap();
+    }
+    assert_eq!(
+        open.query_one(sea_orm::Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            "SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid() AND mode = 'RowShareLock' \
+             AND relation IN ('telecom_routes'::regclass, 'telecom_providers'::regclass)"
+                .to_string(),
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get_by_index::<i64>(0)
+        .unwrap(),
+        2,
+        "the foreign keys of both rows were re-checked (row-share on route and provider)"
+    );
+    // Another origination on the same route reserves capacity meanwhile.
+    let (leg, _) = h.originate().await;
+    let executed = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        h.svc.run_commands_once(10),
+    )
+    .await
+    .expect("capacity reservation blocked by a leg's foreign-key locks")
+    .unwrap();
+    assert_eq!(executed.len(), 1);
+    assert_eq!(h.leg_status(leg).await, "ORIGINATING");
+    open.commit().await.unwrap();
+}

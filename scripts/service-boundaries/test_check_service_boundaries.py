@@ -556,6 +556,40 @@ class RealRepository(unittest.TestCase):
             lambda r: write(r, "services/numbering/Cargo.toml", '[package]\nname = "numbering"\nversion = "0.1.0"\n'),
         )
 
+    # Part J section 98 / Part K section 109: secret blast radius.
+    def test_calling_reading_telephony_provider_secrets(self):
+        self.assertMutationFails(
+            "FOREIGN_SECRET_REFERENCE",
+            lambda r: append(r, "services/calling/src/main.rs", '\nconst D: &str = "TELECOM_PROVIDER_SECRETS_DIR";\n'),
+        )
+
+    def test_calling_mounting_a_contact_vault_keyring(self):
+        self.assertMutationFails(
+            "FOREIGN_SECRET_REFERENCE",
+            lambda r: append(r, "services/calling/.env.example", "\nCONTACT_VAULT_KEYRING_FILE=/run/secrets/keyring\n"),
+        )
+
+    def test_telephony_reading_a_calling_webhook_key(self):
+        self.assertMutationFails(
+            "FOREIGN_SECRET_REFERENCE",
+            lambda r: append(r, "services/telephony/src/main.rs", '\nconst K: &str = "CALLING_WEBHOOK_SECRET_KEY_FILE";\n'),
+        )
+
+    def test_privacy_relay_reading_the_ari_password(self):
+        self.assertMutationFails(
+            "FOREIGN_SECRET_REFERENCE",
+            lambda r: append(r, "services/privacy-relay/src/main.rs", '\nconst P: &str = "TELEPHONY_ARI_PASSWORD";\n'),
+        )
+
+    def test_test_harnesses_may_start_another_service_with_its_secrets(self):
+        # An e2e harness passes Telephony's secrets to the Telephony binary it starts;
+        # a comment in deployment config may name another service's secret.
+        found = self.mutated(lambda r: (
+            write(r, "services/calling/tests/harness_secret_probe.rs", 'const D: &str = "TELECOM_PROVIDER_SECRETS_DIR";\n'),
+            append(r, "services/calling/.env.example", "\n# CONTACT_VAULT_KEYRING_FILE is mounted into Privacy Relay only\n"),
+        ))
+        self.assertFalse([v for v in found if v.rule == "FOREIGN_SECRET_REFERENCE"], found)
+
 
 if __name__ == "__main__":
     unittest.main()

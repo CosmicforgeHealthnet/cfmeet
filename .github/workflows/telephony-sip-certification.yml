@@ -19,12 +19,18 @@ on:
       - "services/telephony/**"
       - "infra/telephony/**"
       - "packages/service-auth/**"
+      - "packages/contracts/telephony/**"
+      - "packages/contracts/platform/**"
+      - "packages/contracts/manifest.json"
       - ".github/workflows/telephony-sip-certification.yml"
   pull_request:
     paths:
       - "services/telephony/**"
       - "infra/telephony/**"
       - "packages/service-auth/**"
+      - "packages/contracts/telephony/**"
+      - "packages/contracts/platform/**"
+      - "packages/contracts/manifest.json"
       - ".github/workflows/telephony-sip-certification.yml"
   workflow_dispatch:
 
@@ -94,6 +100,17 @@ jobs:
           if grep -q "SKIPPED" "$RUNNER_TEMP/sip.log"; then
             echo "::error::the SIP certification was skipped"; exit 1
           fi
+
+      # Part K §108: concurrent SIP signalling (setup + teardown) against the same real edge.
+      - name: SIP signalling load
+        run: |
+          set -euo pipefail
+          cargo test --locked --test load sip_signalling -- --nocapture 2>&1 | tee "$RUNNER_TEMP/sip-load.log"
+          grep -q "test result: ok. 1 passed" "$RUNNER_TEMP/sip-load.log"
+          if grep -q "SKIPPED" "$RUNNER_TEMP/sip-load.log"; then
+            echo "::error::the SIP signalling load scenario was skipped"; exit 1
+          fi
+          grep "^LOAD " "$RUNNER_TEMP/sip-load.log"
 
       - name: SIP-trunk adapter against the same provider contract suite
         run: cargo test --locked --test provider_contract

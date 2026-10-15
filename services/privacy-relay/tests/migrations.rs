@@ -17,6 +17,8 @@ const TABLES: &[&str] = &[
     "contact_verification_events",
     "privacy_relay_commands",
     "privacy_relay_enforcement_jobs",
+    "privacy_relay_incidents",
+    "privacy_relay_operator_audit",
     "privacy_relay_outbox",
     "privacy_relay_retention_audit",
     "privacy_relay_retention_holds",
@@ -60,8 +62,9 @@ async fn up_down_up_creates_exactly_the_privacy_relay_tables() {
         )
         .await,
         // Part G §67 adds the outbox publication state (000012); Part H §80 adds
-        // retention holds / audit and contact erasure (000013).
-        13
+        // retention holds / audit and contact erasure (000013); §81 / §86 add incidents,
+        // operator audit and the enforcement dead letter (000014).
+        14
     );
     Migrator::down(&db.conn, None).await.unwrap();
     assert_eq!(tables(&db.conn).await, ["privacy_relay_seaql_migrations"]);
@@ -97,6 +100,10 @@ async fn up_down_up_creates_exactly_the_privacy_relay_tables() {
         // optional).
         "privacy_relay_retention_audit",
         "privacy_relay_retention_holds",
+        // Operational incidents and operator actions are platform-level and carry no
+        // tenant scope (their summaries are fixed safe sentences).
+        "privacy_relay_incidents",
+        "privacy_relay_operator_audit",
     ];
     for table in TABLES.iter().filter(|t| !PLATFORM_OWNED.contains(t)) {
         for column in ["tenant_id", "application_id", "environment_id"] {

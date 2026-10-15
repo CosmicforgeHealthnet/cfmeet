@@ -148,6 +148,27 @@ pub async fn load<C: ConnectionTrait>(db: &C, id: Uuid) -> TelephonyResult<Optio
     .await
 }
 
+#[derive(Debug, FromQueryResult)]
+struct CorrelationRow {
+    correlation_id: String,
+}
+
+/// The correlation id of the leg's current Calling flow: the command executing on it
+/// now, else its latest command (`None`: no command touched the leg).
+pub async fn command_correlation<C: ConnectionTrait>(
+    db_: &C,
+    id: Uuid,
+) -> TelephonyResult<Option<String>> {
+    Ok(db::one::<CorrelationRow, _>(
+        db_,
+        "SELECT correlation_id FROM telephony_commands WHERE telephony_leg_id = $1 \
+         ORDER BY (status IN ('CLAIMED', 'RUNNING')) DESC, created_at DESC LIMIT 1",
+        vec![id.into()],
+    )
+    .await?
+    .map(|r| r.correlation_id))
+}
+
 pub async fn lock<C: ConnectionTrait>(db: &C, id: Uuid) -> TelephonyResult<LegRow> {
     db::one(
         db,

@@ -411,7 +411,15 @@ async fn assign_relay_number(
     let cmd = authorize_caller(&caller, InternalPermission::RelayNumberAssign)?;
     let id = session_id(&id)?;
     let request = body(raw)?;
-    let (status, body) = relay(&state).assign_relay_number(&cmd, id, request).await?;
+    let (status, body) = relay(&state)
+        .assign_relay_number(&cmd, id, request)
+        .await
+        .inspect_err(|e| {
+            crate::metrics::inc(
+                "privacy_relay_relay_number_assignment_refusals_total",
+                &[("reason", e.code().as_str())],
+            )
+        })?;
     Ok(respond(
         StatusCode::from_u16(status).unwrap_or(StatusCode::OK),
         body,

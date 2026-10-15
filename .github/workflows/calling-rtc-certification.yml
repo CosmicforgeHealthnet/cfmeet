@@ -27,13 +27,19 @@ on:
     branches: [main, staging]
     paths:
       - "services/calling/**"
-      - "packages/contracts/calling/**"
+      - "packages/service-auth/**"
+      - "packages/object-storage/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
       - "infra/livekit/**"
       - ".github/workflows/calling-rtc-certification.yml"
   pull_request:
     paths:
       - "services/calling/**"
-      - "packages/contracts/calling/**"
+      - "packages/service-auth/**"
+      - "packages/object-storage/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
       - "infra/livekit/**"
       - ".github/workflows/calling-rtc-certification.yml"
   workflow_dispatch:

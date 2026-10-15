@@ -6,8 +6,11 @@
 //! capacity. Business authorization never happens here.
 //!
 //! Capacity is enforced under row locks: the route and provider rows are locked
-//! (`FOR UPDATE`) while the live legs on them are counted and the new leg is bound to
-//! the route — two concurrent originations can never both take the last slot.
+//! (`FOR NO KEY UPDATE`) while the live legs on them are counted and the new leg is bound
+//! to the route — two concurrent originations can never both take the last slot. The
+//! lock mode does not conflict with the `FOR KEY SHARE` locks the leg foreign keys take
+//! (route, then provider) when a leg row is updated twice in one transaction (event
+//! ingestion), which `FOR UPDATE` in the opposite order deadlocked against under load.
 
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{ConnectionTrait, FromQueryResult};
@@ -137,7 +140,8 @@ impl TelephonyService {
     }
 
     /// Reserves capacity on `route` for one more live leg (call inside the transaction
-    /// that binds the leg to the route). Locks provider then route.
+    /// that binds the leg to the route). Locks provider then route (`FOR NO KEY UPDATE`:
+    /// serializes reservations without blocking foreign-key checks of leg updates).
     pub async fn reserve_capacity<C: ConnectionTrait>(
         &self,
         txn: &C,
@@ -145,13 +149,13 @@ impl TelephonyService {
     ) -> TelephonyResult<()> {
         let provider_max: i64 = db::scalar_i64(
             txn,
-            "SELECT max_concurrent_legs::bigint FROM telecom_providers WHERE id = $1 FOR UPDATE",
+            "SELECT max_concurrent_legs::bigint FROM telecom_providers WHERE id = $1 FOR NO KEY UPDATE",
             vec![route.provider_id.clone().into()],
         )
         .await?;
         let route_max: i64 = db::scalar_i64(
             txn,
-            "SELECT max_concurrent_legs::bigint FROM telecom_routes WHERE id = $1 FOR UPDATE",
+            "SELECT max_concurrent_legs::bigint FROM telecom_routes WHERE id = $1 FOR NO KEY UPDATE",
             vec![route.id.clone().into()],
         )
         .await?;

@@ -318,6 +318,10 @@ impl RelayService {
         });
         commands::complete(&txn, cmd, &key, Some(id), Some(1), 201, &body, now).await?;
         txn.commit().await?;
+        crate::metrics::inc(
+            "privacy_relay_session_events_total",
+            &[("event", "CREATED")],
+        );
         tracing::info!(context_id = %context_id, relay_session_id = %id, "privacy relay session created");
         Ok(CommandOutcome {
             status: 201,
@@ -523,6 +527,14 @@ impl RelayService {
         )
         .await?;
         txn.commit().await?;
+        let event: &'static str = match target {
+            S::Active => "RESUMED",
+            S::Suspended => "SUSPENDED",
+            S::Completed => "COMPLETED",
+            S::Revoked => "REVOKED",
+            S::Expired => "EXPIRED",
+        };
+        crate::metrics::inc("privacy_relay_session_events_total", &[("event", event)]);
         tracing::info!(relay_session_id = %session_id, session_version = version, status = target.as_str(), "privacy relay session lifecycle changed");
         body["enforcement"] = enforcement_body(&jobs, self.deliver_all(&jobs).await);
         Ok(CommandOutcome {

@@ -365,13 +365,37 @@ impl ContactVault {
         Ok(json!({ "contact": row.view(now)? }))
     }
 
-    /// Decrypts a stored contact (resolution and maintenance paths only).
-    pub(crate) fn open_row(
+    /// Decrypts a stored contact (resolution and maintenance paths only). A key version
+    /// the keyring cannot read, or a ciphertext that does not open, fails closed (never a
+    /// plaintext fallback) and raises a deduplicated CONTACT_KEY_UNAVAILABLE incident on
+    /// the vault's own connection (the caller's transaction may roll back).
+    pub(crate) async fn open_row(
         &self,
         keys: &VaultKeys,
         row: &ContactRow,
     ) -> RelayResult<CanonicalNumber> {
-        crypto::open(keys.encryption(), row.scope(), row.id, &row.sealed()?).map_err(crypto_error)
+        let sealed = row.sealed()?;
+        match crypto::open(keys.encryption(), row.scope(), row.id, &sealed) {
+            Ok(number) => Ok(number),
+            Err(e) => {
+                let reason = match e {
+                    CryptoError::UnknownKeyVersion => "UNKNOWN_KEY_VERSION",
+                    _ => "DECRYPTION_FAILED",
+                };
+                let category = crate::incidents::IncidentCategory::ContactKeyUnavailable;
+                crate::incidents::raise_best_effort(
+                    &self.db,
+                    category,
+                    &crate::incidents::dedupe_key(
+                        category,
+                        &["ENCRYPTION", reason, sealed.key_version.as_str()],
+                    ),
+                    self.now(),
+                )
+                .await;
+                Err(crypto_error(e))
+            }
+        }
     }
 
     /// One bounded re-encryption batch: rows under a readable, non-active key version are
@@ -394,7 +418,7 @@ impl ContactVault {
         let mut report = RewrapReport::default();
         for row in &rows {
             let actor = ContactActor::system(row.scope());
-            let opened = match self.open_row(keys, row) {
+            let opened = match self.open_row(keys, row).await {
                 Ok(n) => n,
                 Err(e) => {
                     report.failed += 1;
@@ -461,6 +485,25 @@ impl ContactVault {
             .keys_any()
             .map_err(|_| RotationGuardError::Unconfigured)?;
         let status = self.rotation_status().await?;
+        // Every unreadable referenced version is an operator incident (deduplicated).
+        let category = crate::incidents::IncidentCategory::ContactKeyUnavailable;
+        for (purpose, versions) in [
+            ("ENCRYPTION", &status.unreadable_encryption),
+            ("FINGERPRINT", &status.unreadable_fingerprint),
+        ] {
+            for version in versions {
+                crate::incidents::raise_best_effort(
+                    &self.db,
+                    category,
+                    &crate::incidents::dedupe_key(
+                        category,
+                        &[purpose, "UNKNOWN_KEY_VERSION", version],
+                    ),
+                    self.now(),
+                )
+                .await;
+            }
+        }
         if let Some(v) = status.unreadable_encryption.first() {
             return Err(RotationGuardError::Unreadable {
                 purpose: KeyPurpose::Encryption.as_str(),
@@ -559,7 +602,7 @@ impl ContactVault {
                 let actor = ContactActor::system(row.scope());
                 let entry = AccessEntry::new(ContactOperation::FingerprintBackfill, Some(row.id))
                     .purpose("KEY_ROTATION");
-                let number = match self.open_row(keys, row) {
+                let number = match self.open_row(keys, row).await {
                     Ok(n) => n,
                     Err(e) => {
                         report.failed += 1;

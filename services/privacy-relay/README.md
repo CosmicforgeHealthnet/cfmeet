@@ -115,14 +115,48 @@ privacy-relay-admin contact-vault rotation-status | reencrypt | backfill-fingerp
 privacy-relay-admin relay-number add --number +44... --capabilities VOICE_INBOUND,VOICE_OUTBOUND --binding REF [--available true]
 privacy-relay-admin relay-number activate|enable|drain|disable --id UUID
 privacy-relay-admin relay-number list
+# Incidents (safe summaries only); resolving names the operator and is audited
+privacy-relay-admin incidents list [--all true]
+privacy-relay-admin incidents resolve --id UUID --operator ops.alice   # or CF_OPERATOR_ID
 ```
+
+### Metrics, retries and incidents
+
+* **Metrics** (`PRIVACY_RELAY_METRICS_ADDRESS`, a separate listener with `GET /metrics`
+  only; never on the API listener): context / session lifecycle events, relay-number
+  assignments / releases / cooldowns and assignment refusals, authorization decisions
+  by `decision` / `reason` / `route`, inbound resolutions by outcome, protected-contact
+  resolution failures by error code, outbox published / retried / dead-lettered,
+  enforcement attempts and dead letters, retention batches and rows, incidents raised;
+  gauges for outbox pending / dead letter / oldest pending age, enforcement jobs by
+  status and oldest pending age, relay numbers and assignments by status, open
+  incidents by category. Labels are bounded vocabularies only (guarded by
+  `tests/metric_safety.rs`, source and rendered scrape).
+* **Retries / dead letter.** The outbox classifies publication failures: Calling
+  refusing an envelope as malformed (400/413/415/422) or the call as forbidden (403),
+  or an envelope without its correlation id, is PERMANENT and dead-lettered at once;
+  timeouts, 5xx, 401, 408, 429 and other refusals are retried with capped backoff and
+  dead-lettered after 10 attempts. Enforcement jobs are retried with capped backoff
+  (≤ 5 min) and become `DEAD_LETTER` after 20 unconfirmed attempts (final; visible in
+  `privacy_relay_enforcement_jobs` and the metrics). A crashed worker's lease (60 s)
+  expires and another instance completes the work exactly once.
+* **Incidents** (`privacy_relay_incidents`, deduplicated while OPEN, safe fixed
+  summaries): `OUTBOX_DEAD_LETTER`, `ENFORCEMENT_DEAD_LETTER`, `CONTACT_KEY_UNAVAILABLE`
+  (a stored contact names a key version the keyring cannot read, or decryption failed:
+  fails closed, never a plaintext fallback), `RELAY_MAPPING_AMBIGUOUS` (more than one
+  ACTIVE assignment for one number: inbound resolution refused). Resolving writes an
+  append-only `privacy_relay_operator_audit` row in the same transaction.
+* **Correlation.** Every record and outbound hop of a command (audit, outbox envelope,
+  enforcement job, synchronous and retried enforcement delivery, outbox publication)
+  continues the inbound request's correlation id.
 
 ## Configuration
 
 See [`.env.example`](.env.example). Required: `DATABASE_URL`, `CF_RUNTIME_ENVIRONMENT`,
 `CF_SERVICE_AUTH_KEY_ID`, `CF_SERVICE_AUTH_PRIVATE_KEY_FILE`,
 `CF_SERVICE_TRUST_BUNDLE_FILE`. Optional: `PRIVACY_RELAY_BIND_ADDRESS` (default
-`127.0.0.1:8091`), `PRIVACY_RELAY_ENABLED` (default `false`),
+`127.0.0.1:8091`), `PRIVACY_RELAY_METRICS_ADDRESS` (separate `GET /metrics` listener;
+unset = none), `PRIVACY_RELAY_ENABLED` (default `false`),
 `PRIVACY_RELAY_WORKER_INTERVAL_MS` (default 1000), `PRIVACY_RELAY_DATABASE_MAX_CONNECTIONS`,
 `CALLING_INTERNAL_BASE_URL` (enforcement delivery; without it jobs stay PENDING),
 `CF_SERVICE_TOKEN_TTL_SECONDS`, `CF_INTERNAL_HTTP_TIMEOUT_MS`, `LOG_FORMAT`, `RUST_LOG`,
@@ -162,8 +196,14 @@ Calling mock), `internal_auth`, `migrations`, `contracts`, `contact_safety`,
 `contact_equality` (dedup races, fingerprint rotation), `contact_resolution`
 (verification, grants, Telephony-only resolution), `contact_logging` (TRACE log canary),
 `relay_numbers` (allocation races, cooldown, drain, containment, kill switch),
-`relay_inbound` (inbound mapping, delayed callbacks, inbound caller protection) and
-`part_d_certification` (flows, cross-tenant, failure injection, rotations). `make privacy-relay-integration` runs Calling's
+`relay_inbound` (inbound mapping, delayed callbacks, inbound caller protection),
+`part_d_certification` (flows, cross-tenant, failure injection, rotations),
+`outbox_publication` (classification, dead letter, lease expiry), `incidents`,
+`metric_safety`, `correlation_propagation`, `migration_upgrade` (previous head → head →
+down → up with data), `disaster_recovery` (backup.sh / restore.sh; needs `pg_dump`,
+`pg_restore`, `psql` — prints `SKIPPED` without them unless
+`DISASTER_RECOVERY_CERT_REQUIRED=1`) and `relay_load` (prints one `LOAD …` line per
+scenario; asserts correctness only — run with `-- --nocapture`). `make privacy-relay-integration` runs Calling's
 `privacy_relay_e2e` against the real binary.
 
 CI: [`.github/workflows/privacy-relay.yml`](../../.github/workflows/privacy-relay.yml).

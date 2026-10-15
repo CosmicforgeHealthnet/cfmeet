@@ -58,6 +58,17 @@ go to `POST /internal/v1/telephony/inbound-calls`. Telephony → Privacy Relay: 
 contact resolution with a single-use grant, inbound relay resolution and inbound caller
 protection.
 
+Every outbox row carries the correlation id of the command whose flow produced it, and
+event, keypad and capture deliveries continue it (worker log spans carry the leg id and
+the correlation id). Delivery retries with capped backoff; an event Calling refuses
+permanently (4xx other than an authentication / permission / rate-limit / conflict
+refusal, or 404) or one that exhausted its attempts (360, about six hours at the 60 s cap)
+is dead-lettered once and raises one `OUTBOX_DEAD_LETTER` incident per reason. Commands
+stop at their `max_attempts`: an untransmitted command becomes `DEAD_LETTER` (an
+ORIGINATE's leg fails as `NOT_SENT`), a transmitted one is `UNKNOWN_OUTCOME` and goes to
+reconciliation, and a TERMINATE is never abandoned (its leg is held in `ENDING` and
+reconciled). Concurrent workers keep each leg's commands in creation order.
+
 ## Configuration
 
 See `src/config.rs` for the full table. Highlights:
@@ -77,11 +88,22 @@ See `src/config.rs` for the full table. Highlights:
   Trunk usernames and passwords live in the edge's secret store. Database rows hold
   references only.
 * `TELEPHONY_METRICS_ADDRESS` (optional): a separate listener for `GET /metrics`, with
-  bounded counters and gauges whose labels are never identifiers.
+  bounded counters and gauges whose labels are never identifiers: provider response
+  classes (`telephony_provider_responses_total{operation,class}`) and SIP response
+  classes (`telephony_sip_responses_total{class}`: 1XX / 2XX / 4XX / 5XX /
+  NORMAL_CLEARING / UNSPECIFIED, never a cause text), inbound offers by result, the
+  command queue (pending, retrying, in flight, unknown outcome, dead-lettered, oldest
+  pending age), the outbox (pending, oldest pending age, dead-lettered), dependency
+  failures and the SIP / media edge health.
 
 Interconnects, routes, SIP peer references and relay-number bindings are managed with
 `telephony-admin provider | route | sip-peer | number`. `telephony-admin incidents` lists
-open incidents. The deterministic test adapter is refused in `staging` and `production`.
+open incidents; `telephony-admin --operator <id> incidents resolve <incident-id>
+[--note ...]` resolves one (audited in the same transaction). Incidents include
+`PRIVACY_RELAY_UNAVAILABLE` (resolution could not reach Privacy Relay; resolves when it
+answers again) and `SIP_EDGE_UNAVAILABLE` (the provider health refresh saw the edge
+degraded / unavailable; resolves when healthy). The deterministic test adapter is refused
+in `staging` and `production`.
 
 ## Development
 
@@ -96,15 +118,21 @@ make telephony-integration  # Calling <-> Telephony <-> Privacy Relay against re
 
 | Test | What it proves |
 |---|---|
-| `telephony_core` | Only Calling may command; authorization proof required; durable before any provider action; one effect per command; kill switches; Privacy Relay down fails closed; caller identity only the relay identity bound to the chosen interconnect (`CALLER_IDENTITY_UNAVAILABLE` otherwise), its assignment reference kept on the leg |
+| `telephony_core` | Only Calling may command; authorization proof required; durable before any provider action; one effect per command; kill switches; Privacy Relay down fails closed (one `PRIVACY_RELAY_UNAVAILABLE` incident); caller identity only the relay identity bound to the chosen interconnect (`CALLER_IDENTITY_UNAVAILABLE` otherwise), its assignment reference kept on the leg; a rolled-back transaction leaves no leg / command / outbox intent; every leg state pair agrees between the Rust graph and the database trigger |
 | `provider_contract` | Both interconnect adapters follow the neutral contract (capabilities, read-back, absence only with evidence, idempotent termination, hold / resume, callbacks authenticated before parsing, no numbers in diagnostics) |
-| `unknown_outcome` | Timeout before send = safe retry; timeout / reset / malformed after send = UNKNOWN, never re-sent; crash after accept → reconciliation; late success binds |
+| `unknown_outcome` | Timeout before send = safe retry; timeout / reset / malformed after send = UNKNOWN, never re-sent; crash after accept → reconciliation; late success binds; attempt caps: DEAD_LETTER before the fence, UNKNOWN after it, a TERMINATE never abandoned |
 | `provider_events` | Callback authentication (valid / invalid / missing signature, previous-secret overlap), body limit, malformed provider ids and payloads, strict parser, dedupe, replay bursts, out-of-order and late events, quarantine of unknown objects, incident thresholds, no token / signature / secret / body in logs, retention, event contract. A DISABLED provider's callbacks are still authenticated and applied to its in-flight legs (disable stops new originations only) |
 | `reconciliation` | Every drift case, unresolved terminations, provider inventory, orphan bridges, usage once, two reconcilers → one repair |
-| `failover` | Definite → other interconnect; UNKNOWN → refused until reconciled; late primary success suppresses B; circuits, health, capacity |
+| `failover` | Definite → other interconnect; UNKNOWN → refused until reconciled; late primary success suppresses B; circuits, health, capacity; capacity reservation never blocked by a leg's foreign-key locks |
 | `paid_safety` | Duration limit, operator disable, transmit-time re-check (route / provider disabled, circuit opened, destination class blocked between route choice and the fence → nothing sent), abuse signals, metrics label safety |
 | `destination_classes` | Pre-toll classification: STANDARD proceeds; PREMIUM / HIGH_RISK refused; SATELLITE / SHARED_COST per the configured list; unclassified per `ALLOW` / `DENY`; longest prefix wins; other countries' rules never apply; the metric carries the class only |
 | `sip_ingress` | Inbound dialogs: bound relay number accepted; unbound number / unknown peer → `SIP_PEER_REJECTED`; source outside `allowed_source_cidrs`; dialog bound; disabled route / provider; rate-limited burst → one `SIP_INGRESS_RATE_LIMITED` incident; no number in incident evidence |
+| `outbox_delivery` | Permanent refusals and exhausted retries dead-lettered once (one incident per reason), never retried, never blocking the leg's later events; capped backoff; an expired outbox lease reclaimed and delivered exactly once; delivered events continue the originating command's correlation (also in worker log spans) |
+| `operator_admin` | `telephony-admin` provider / route disable and incident resolve each write exactly one operator audit row; refusals write none |
+| `sip_edge_outage` | SIP / media edge down (deterministic): public SIP originations fail definitely with nothing dialled and no usage, one `SIP_EDGE_UNAVAILABLE` incident, gauge and readiness; enterprise commands stop at their cap; a TERMINATE completes once the edge is back |
+| `disaster_recovery` | Backup (`backup.sh --service telephony`) and restore into a fresh database; the restored workers run PENDING commands exactly once, never re-send a post-fence command, create no unauthorized leg or usage duplicate; no secret or destination number in the dump (SKIPPED without `pg_dump` unless `DISASTER_RECOVERY_CERT_REQUIRED=1`); a stopped-worker backlog drained by two workers exactly once in per-leg order |
+| `migration_upgrade` | Previous head (all migrations but the newest) with data → head → one step down → head |
+| `load` | Intake / execution, event ingestion and duplicate dedupe, reconciliation (and SIP signalling on the certification edge when installed) with `LOAD` lines: percentiles, error rate, DB connections, lock waits, worker lag |
 | `http_contract` | The OpenAPI lists exactly the routes; real bodies validate |
 | `sip_certification` | The real edge against SIPp (requires asterisk + sipp) |
 | `real_interconnect_certification` | Real carrier: `NOT RUN` without protected credentials |

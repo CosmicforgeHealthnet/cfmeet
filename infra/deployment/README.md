@@ -25,6 +25,73 @@ The image contains the API server and SeaORM migration binary. Runtime configura
 
 `services/meeting-service/docker-compose.yml` remains available for service-local workflows. The root `docker-compose.yml` is the preferred local platform orchestration file.
 
+## Calling, Privacy Relay and Telephony (Docker, one image each)
+
+Three independent deployables. Each scales, restarts and fails on its own; none shares a
+database, a secret or source with another (enforced by `scripts/service-boundaries`).
+
+| Service | Image (context = repository root) | Listener | Database | Secrets it alone receives |
+|---|---|---|---|---|
+| Calling | `docker build -f services/calling/Dockerfile .` → `calling`, `calling-migration`, `platform_admin` | `CALLING_BIND_ADDRESS` (8090): public API + gateway; `/internal/v1` cluster-only | `cfmeet_calling` | API credential pepper, signaling / media-edge signing keys, LiveKit API secret, webhook secret-box keys, contact-delegation key, object-storage credentials |
+| Privacy Relay | `docker build -f services/privacy-relay/Dockerfile .` → `privacy-relay`, `privacy-relay-migration`, `privacy-relay-admin` | `PRIVACY_RELAY_BIND_ADDRESS` (8091), cluster-internal only | `cfmeet_privacy_relay` | Contact Vault and fingerprint keyrings |
+| Telephony | `docker build -f services/telephony/Dockerfile .` → `telephony`, `telephony-migration`, `telephony-admin` | `TELEPHONY_BIND_ADDRESS` (8092): `/internal/v1` cluster-only, `/provider-callbacks/*` path-filtered public ingress | `cfmeet_telephony` | provider secrets directory, ARI password |
+
+Every service also has its own service-auth signing key. Public SIP, carrier signalling and
+provider callbacks terminate only in Telephony and its SIP / media edge (`infra/telephony`);
+neither Calling nor the Meeting Service proxies telecom ingress. Network planes and secret
+delivery: [`security-deployment-checklist.md`](../../docs/architecture/security-deployment-checklist.md).
+
+**Configuration and feature flags** are environment-driven and server-side; each
+`services/<service>/.env.example` and README documents every variable, including the kill
+switches (public outbound / inbound, callback relay, enterprise, voicemail, recording,
+Privacy Relay, Contact Vault, relay numbers) that disable a capability without touching
+authoritative state. Provider / route enable-disable and circuits are operator actions
+(`telephony-admin`, operator-audited), not flags.
+
+**Health.** `GET /health` on each service checks its database. Each service refuses to start
+while its migrations are pending, so a release runs the migration binary first.
+
+**Release order.** For each service independently: back up its database → run its
+`*-migration up` as the migrator role → roll out the new image → enable any new flag. All
+migrations are additive and can be deployed before the flag that uses them. Rollback: turn
+the flag off (state is preserved; safety operations such as ending calls, cleanup and
+artifact deletion keep working), then roll back the image; schema rollback (`down`) is a
+last resort after a backup.
+
+### Database roles (least privilege)
+
+`infra/deployment/postgres/provision-service-database.sh --service <name> --admin-url <url>
+--migrator-password-file F --runtime-password-file F` creates the service's database, a
+`<name>_migrator` role that owns it (used only by the migration binary) and the runtime
+role the service connects with (`calling`, `privacy_relay`, `telephony`, as in each
+`.env.example`): CONNECT to its own database only, data access only (no DDL, no TRUNCATE,
+no temporary tables). CONNECT is revoked from PUBLIC, so no role of one service can open
+another service's database. `verify-service-isolation.sh --admin-url <url>` certifies this
+on throwaway databases (CI: Service boundaries → per-service database roles; with
+`*_MIGRATION_BIN` set it also applies each service's real migrations as the migrator role).
+
+### Backup and restore (per service)
+
+* `infra/deployment/backup/backup.sh --service <name> --database-url <url> --out F` —
+  `pg_dump` custom format of exactly one service database (refuses a database that is not
+  that service's), plus `F.sha256`. There is no shared platform dump.
+* `infra/deployment/backup/restore.sh --database-url <empty db url> --in F` — verifies the
+  checksum, refuses a non-empty target, restores in one transaction.
+* After a restore: run the service's migrator (it must report nothing pending for the same
+  release), then start the service and its workers. Leases in the restored rows have
+  expired, so pending durable work (outbox events, Telephony commands, enforcement jobs,
+  webhook deliveries) is reclaimed exactly as after a crash; paid Telephony actions keep
+  their idempotency keys, and a command past the transmit fence is never re-sent (it goes
+  to reconciliation).
+* **Key material is never in a database backup.** Contact Vault keyrings, provider
+  secrets and signing keys are backed up through the secret store. Restoring Privacy Relay
+  without the keyring versions its rows reference makes it refuse to start / fail closed
+  (no plaintext fallback). Protected objects (voicemail, recordings) live in the private
+  bucket with its own versioning / lifecycle; the restored Calling rows keep their
+  authorization, deletion and retention state.
+* Each service's `tests/disaster_recovery.rs` exercises this end to end against
+  PostgreSQL (`DISASTER_RECOVERY_CERT_REQUIRED=1` makes a missing `pg_dump` a failure).
+
 ## Environment-driven configuration
 
 | Variable | Component | Notes |

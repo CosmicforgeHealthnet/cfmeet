@@ -168,6 +168,22 @@ jobs:
         run: cargo test --locked --test failover
       - name: Paid-action safety (duration limit, operator disable, abuse signals, metrics)
         run: cargo test --locked --test paid_safety
+      - name: Outbox to Calling (dead letter, capped backoff, lease recovery, correlation continuity)
+        run: cargo test --locked --test outbox_delivery
+      - name: Operator actions (telephony-admin disable / incident resolve audited exactly once)
+        run: cargo test --locked --test operator_admin
+      - name: SIP / media edge outage (deterministic; no paid effect, incident, metric)
+        run: cargo test --locked --test sip_edge_outage
+      - name: Migration upgrade (previous head with data -> head -> down one -> head)
+        run: cargo test --locked --test migration_upgrade
+      - name: Disaster recovery (backup / restore, resumed workers, worker backlog)
+        env:
+          DISASTER_RECOVERY_CERT_REQUIRED: "1"
+        run: cargo test --locked --test disaster_recovery
+      - name: Load (LOAD lines; SIP signalling scenario SKIPPED without asterisk / sipp)
+        env:
+          LOAD_ENV: ci
+        run: cargo test --locked --test load -- --nocapture
       - name: Contracts (internal OpenAPI = routes; real bodies validate)
         run: cargo test --locked --test http_contract
       - name: Real interconnect certification (NOT RUN without protected credentials)

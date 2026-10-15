@@ -106,6 +106,8 @@ pub enum InboundRejection {
     PeerCapacity,
     RateLimited,
     NoActiveMapping,
+    /// Privacy Relay could not be reached (fails closed; incident).
+    PrivacyRelayUnavailable,
     AnonymousCaller,
     CallingUnavailable,
     Internal,
@@ -121,10 +123,20 @@ impl InboundRejection {
             InboundRejection::PeerCapacity => "PEER_CAPACITY",
             InboundRejection::RateLimited => "RATE_LIMITED",
             InboundRejection::NoActiveMapping => "NO_ACTIVE_MAPPING",
+            InboundRejection::PrivacyRelayUnavailable => "PRIVACY_RELAY_UNAVAILABLE",
             InboundRejection::AnonymousCaller => "ANONYMOUS_CALLER",
             InboundRejection::CallingUnavailable => "CALLING_UNAVAILABLE",
             InboundRejection::Internal => "INTERNAL",
         }
+    }
+}
+
+/// A Privacy Relay failure during inbound resolution: unreachable is its own (incident)
+/// rejection; any answer refusing the mapping reveals nothing beyond "no mapping".
+fn relay_rejection(error: crate::ports::PortError) -> InboundRejection {
+    match error {
+        crate::ports::PortError::Unavailable => InboundRejection::PrivacyRelayUnavailable,
+        _ => InboundRejection::NoActiveMapping,
     }
 }
 
@@ -143,12 +155,25 @@ impl TelephonyService {
     ) -> TelephonyResult<()> {
         match self.accept_inbound(event, &inbound).await {
             Ok(leg_id) => {
+                crate::metrics::inc("telephony_inbound_offers_total", &[("result", "OFFERED")]);
                 tracing::info!(telephony_leg_id = %leg_id, "inbound public call offered to Calling");
                 Ok(())
             }
             Err(rejection) => {
+                crate::metrics::inc(
+                    "telephony_inbound_offers_total",
+                    &[("result", rejection.as_str())],
+                );
                 tracing::info!(reason = rejection.as_str(), "inbound public call rejected");
                 let _ = self.edge.reject(&event.channel).await;
+                match rejection {
+                    InboundRejection::PrivacyRelayUnavailable => {
+                        self.privacy_relay_unavailable("RESOLVE_INBOUND").await?
+                    }
+                    // Privacy Relay answered (no active mapping): it is reachable.
+                    InboundRejection::NoActiveMapping => self.privacy_relay_available().await?,
+                    _ => {}
+                }
                 Ok(())
             }
         }
@@ -272,7 +297,7 @@ impl TelephonyService {
                 correlation.as_str(),
             )
             .await
-            .map_err(|_| InboundRejection::NoActiveMapping)?;
+            .map_err(relay_rejection)?;
         let caller = inbound
             .caller
             .clone()
@@ -281,7 +306,10 @@ impl TelephonyService {
             .privacy
             .protect_inbound_caller(mapping.decision_id, &caller, correlation.as_str())
             .await
-            .map_err(|_| InboundRejection::NoActiveMapping)?;
+            .map_err(relay_rejection)?;
+        self.privacy_relay_available()
+            .await
+            .map_err(|_| InboundRejection::Internal)?;
         drop(caller);
         let leg_id = Uuid::new_v4();
         let offer = json!({

@@ -25,10 +25,16 @@
 //! A worker that dies holding a lease is recovered: before the fence the command is
 //! safely retried; after it the outcome is UNKNOWN and goes to reconciliation — never a
 //! blind retry (also enforced by a database trigger).
+//!
+//! Retries are capped by the command's `max_attempts`: an untransmitted command that
+//! reaches it is DEAD_LETTER (final; an ORIGINATE's leg fails as NOT_SENT), except a
+//! TERMINATE, which is never abandoned (unresolved, its leg is held in ENDING and
+//! reconciled). Concurrent workers keep each leg's commands in creation order.
 
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde_json::{json, Value};
+use tracing::Instrument;
 use uuid::Uuid;
 
 use super::{CommandRow, COMMAND_COLUMNS};
@@ -73,10 +79,20 @@ impl TelephonyService {
         let claimed: Vec<CommandRow> = db::all(
             &self.db,
             &format!(
-                "UPDATE telephony_commands SET status = 'CLAIMED', lease_owner = $1, \
+                "WITH due AS ( \
+                   SELECT id, kind, telephony_leg_id, created_at FROM telephony_commands \
+                   WHERE status = 'PENDING' AND next_attempt_at <= $3 \
+                   ORDER BY next_attempt_at, created_at LIMIT $4 FOR UPDATE SKIP LOCKED), \
+                 ready AS ( \
+                   SELECT d.id FROM due d WHERE d.kind = 'TERMINATE' OR d.telephony_leg_id IS NULL \
+                     OR NOT EXISTS (SELECT 1 FROM telephony_commands e \
+                       WHERE e.telephony_leg_id = d.telephony_leg_id \
+                         AND e.status IN ('PENDING', 'CLAIMED', 'RUNNING') \
+                         AND (e.created_at, e.id) < (d.created_at, d.id) \
+                         AND e.id NOT IN (SELECT id FROM due))) \
+                 UPDATE telephony_commands SET status = 'CLAIMED', lease_owner = $1, \
                    lease_until = $2, attempts = attempts + 1, updated_at = GREATEST(updated_at, $3) \
-                 WHERE id IN (SELECT id FROM telephony_commands WHERE status = 'PENDING' AND next_attempt_at <= $3 \
-                   ORDER BY next_attempt_at, created_at LIMIT $4 FOR UPDATE SKIP LOCKED) \
+                 WHERE id IN (SELECT id FROM ready) \
                  RETURNING {COMMAND_COLUMNS}"
             ),
             vec![
@@ -88,30 +104,22 @@ impl TelephonyService {
         )
         .await?;
         // RETURNING has no order: execute in creation order (Part F: the prompts of one
-        // enterprise leg play in sequence).
+        // enterprise leg play in sequence). Per leg, a command is claimed only together
+        // with — or after — every earlier unfinished command of that leg, so concurrent
+        // workers never run one leg's commands out of order (a TERMINATE never waits).
         let mut claimed = claimed;
-        claimed.sort_by_key(|c| c.created_at);
+        claimed.sort_by_key(|c| (c.created_at, c.id));
         let mut out = Vec::new();
         for command in claimed {
             let id = command.id;
-            let result = match CommandKind::parse(&command.kind) {
-                Some(CommandKind::Originate) => self.execute_originate(command).await,
-                Some(CommandKind::Terminate) => {
-                    self.execute_control(command, CommandKind::Terminate).await
-                }
-                Some(CommandKind::Hold) => self.execute_control(command, CommandKind::Hold).await,
-                Some(CommandKind::Resume) => {
-                    self.execute_control(command, CommandKind::Resume).await
-                }
-                Some(
-                    k @ (CommandKind::Answer
-                    | CommandKind::Prompt
-                    | CommandKind::Capture
-                    | CommandKind::CaptureStop),
-                ) => self.execute_control(command, k).await,
-                Some(other) => self.execute_bridge_command(command, other).await,
-                None => Ok(Executed::Skipped),
-            };
+            let span = tracing::info_span!(
+                "telephony_command",
+                command_id = %id,
+                kind = %command.kind,
+                telephony_leg_id = %command.telephony_leg_id.map(|l| l.to_string()).unwrap_or_default(),
+                correlation_id = %command.correlation_id,
+            );
+            let result = self.execute_claimed(command).instrument(span).await;
             match result {
                 Ok(r) => out.push((id, r)),
                 Err(e) => {
@@ -121,6 +129,112 @@ impl TelephonyService {
             }
         }
         Ok(out)
+    }
+
+    /// Executes one claimed command. A command already past its attempt cap is
+    /// dead-lettered before anything runs (a TERMINATE is never abandoned: it keeps going
+    /// and, unresolved, ends in reconciliation).
+    async fn execute_claimed(&self, command: CommandRow) -> TelephonyResult<Executed> {
+        if command.attempts > command.max_attempts
+            && command.kind != CommandKind::Terminate.as_str()
+        {
+            return self
+                .dead_letter_command(&command, "ATTEMPTS_EXHAUSTED")
+                .await;
+        }
+        match CommandKind::parse(&command.kind) {
+            Some(CommandKind::Originate) => self.execute_originate(command).await,
+            Some(CommandKind::Terminate) => {
+                self.execute_control(command, CommandKind::Terminate).await
+            }
+            Some(CommandKind::Hold) => self.execute_control(command, CommandKind::Hold).await,
+            Some(CommandKind::Resume) => self.execute_control(command, CommandKind::Resume).await,
+            Some(
+                k @ (CommandKind::Answer
+                | CommandKind::Prompt
+                | CommandKind::Capture
+                | CommandKind::CaptureStop),
+            ) => self.execute_control(command, k).await,
+            Some(other) => self.execute_bridge_command(command, other).await,
+            None => Ok(Executed::Skipped),
+        }
+    }
+
+    /// Dead-letters a command that never left this process (attempt cap reached): final,
+    /// never retried. An ORIGINATE's leg fails as NOT_SENT (Calling learns it definitely
+    /// never rang). Post-fence commands are never dead-lettered here — their outcome is
+    /// UNKNOWN and belongs to reconciliation.
+    pub(crate) async fn dead_letter_command(
+        &self,
+        command: &CommandRow,
+        code: &'static str,
+    ) -> TelephonyResult<Executed> {
+        let now = self.now();
+        let txn = self.db.begin().await?;
+        let finished = self
+            .dead_letter_command_in(&txn, command, code, now)
+            .await?;
+        txn.commit().await?;
+        if !finished {
+            return Ok(Executed::Skipped);
+        }
+        Ok(Executed::DefiniteFailure(code))
+    }
+
+    async fn dead_letter_command_in<C: ConnectionTrait>(
+        &self,
+        txn: &C,
+        command: &CommandRow,
+        code: &'static str,
+        now: DateTime<Utc>,
+    ) -> TelephonyResult<bool> {
+        let n = db::exec(
+            txn,
+            "UPDATE telephony_commands SET status = 'DEAD_LETTER', result_code = $2, failure_category = 'INTERNAL', \
+               grant_secret = NULL, lease_owner = NULL, lease_until = NULL, updated_at = GREATEST(updated_at, $3), \
+               finished_at = GREATEST(created_at, $3) \
+             WHERE id = $1 AND transmitted_at IS NULL AND status IN ('PENDING', 'CLAIMED', 'RUNNING')",
+            vec![command.id.into(), code.into(), now.into()],
+        )
+        .await?;
+        if n == 0 {
+            return Ok(false);
+        }
+        if command.kind == CommandKind::Originate.as_str() {
+            if let Some(leg_id) = command.telephony_leg_id {
+                let leg = legs::lock(txn, leg_id).await?;
+                if leg.status()? == LegStatus::Planned {
+                    legs::transition_in(
+                        txn,
+                        &leg,
+                        &Change::ended(NormalizedEvent::LegFailed, EndReason::NotSent, now)
+                            .category(FailureCategory::Internal),
+                    )
+                    .await?;
+                }
+                db::exec(
+                    txn,
+                    "UPDATE provider_call_bindings SET status = 'ABSENT', updated_at = GREATEST(updated_at, $2) \
+                     WHERE telephony_leg_id = $1 AND status = 'PREPARED'",
+                    vec![leg_id.into(), now.into()],
+                )
+                .await?;
+            }
+        }
+        let kind = CommandKind::parse(&command.kind)
+            .map(|k| k.as_str())
+            .unwrap_or("UNKNOWN");
+        crate::metrics::inc(
+            "telephony_commands_dead_lettered_total",
+            &[("kind", kind), ("reason", code)],
+        );
+        tracing::warn!(
+            command_id = %command.id,
+            attempts = command.attempts,
+            code,
+            "command dead-lettered after its attempt cap; it will not be retried"
+        );
+        Ok(true)
     }
 
     /// Recovers commands whose lease expired (their worker died or lost the database).
@@ -137,7 +251,14 @@ impl TelephonyService {
         )
         .await?;
         for c in &stale {
-            if c.transmitted_at.is_none() {
+            if c.transmitted_at.is_none()
+                && c.attempts >= c.max_attempts
+                && c.kind != CommandKind::Terminate.as_str()
+            {
+                // Its worker died on every attempt (a poison command): stop, never loop.
+                self.dead_letter_command_in(&txn, c, "ATTEMPTS_EXHAUSTED", now)
+                    .await?;
+            } else if c.transmitted_at.is_none() {
                 // Nothing left this process: a retry is safe.
                 db::exec(
                     &txn,
@@ -254,7 +375,22 @@ impl TelephonyService {
         self.reschedule(command, code).await
     }
 
+    /// Puts an untransmitted command back for a later attempt — until its attempt cap:
+    /// then a TERMINATE becomes an unresolved termination (never abandoned: the leg is held
+    /// in ENDING and reconciled) and any other command is dead-lettered.
     async fn reschedule(&self, command: &CommandRow, code: &str) -> TelephonyResult<Executed> {
+        if command.attempts >= command.max_attempts {
+            if command.kind == CommandKind::Terminate.as_str() {
+                if let Some(leg_id) = command.telephony_leg_id {
+                    return self
+                        .termination_unresolved(command, leg_id, "ATTEMPTS_EXHAUSTED")
+                        .await;
+                }
+            }
+            return self
+                .dead_letter_command(command, "ATTEMPTS_EXHAUSTED")
+                .await;
+        }
         let now = self.now();
         db::exec(
             &self.db,
@@ -350,8 +486,13 @@ impl TelephonyService {
             })
             .await
         {
-            Ok(r) => r,
+            Ok(r) => {
+                self.privacy_relay_available().await?;
+                r
+            }
             Err(PortError::Unavailable) => {
+                self.privacy_relay_unavailable("RESOLVE_FOR_EXECUTION")
+                    .await?;
                 if command.attempts < command.max_attempts
                     && grant_expires_at > now + Duration::seconds(2)
                 {
@@ -366,6 +507,8 @@ impl TelephonyService {
                     .await;
             }
             Err(PortError::NotFound) | Err(PortError::Denied(_)) => {
+                // Privacy Relay answered (and refused): it is reachable.
+                self.privacy_relay_available().await?;
                 return self
                     .fail_before_send(&command, FailureCategory::Policy, "RESOLUTION_DENIED")
                     .await;
@@ -845,6 +988,13 @@ impl TelephonyService {
             }
         };
         txn.commit().await?;
+        crate::metrics::inc(
+            "telephony_provider_responses_total",
+            &[
+                ("operation", "ORIGINATE"),
+                ("class", originate_class(outcome)),
+            ],
+        );
         match outcome {
             OriginateOutcome::Accepted { .. } => {
                 crate::metrics::inc("telephony_originations_total", &[("outcome", "ACCEPTED")])
@@ -1209,6 +1359,13 @@ impl TelephonyService {
             CommandKind::Hold => provider.hold(&provider_ref).await,
             _ => provider.resume(&provider_ref).await,
         };
+        crate::metrics::inc(
+            "telephony_provider_responses_total",
+            &[
+                ("operation", kind.as_str()),
+                ("class", control_class(outcome)),
+            ],
+        );
         let txn = self.db.begin().await?;
         let locked = legs::lock(&txn, leg_id).await?;
         let result = match (kind, outcome) {
@@ -1310,6 +1467,30 @@ struct BindingRef {
     provider_id: String,
     provider_call_ref: Option<String>,
     correlation_key: String,
+}
+
+/// The neutral response class of an origination (metrics; never a provider status).
+pub fn originate_class(outcome: &OriginateOutcome) -> &'static str {
+    match outcome {
+        OriginateOutcome::Accepted { .. } => "ACCEPTED",
+        OriginateOutcome::DefiniteFailure { reason, .. } => match reason {
+            EndReason::Busy => "BUSY",
+            EndReason::NoAnswer => "NO_ANSWER",
+            EndReason::Declined => "DECLINED",
+            _ => "REFUSED",
+        },
+        OriginateOutcome::UnknownOutcome { .. } => "NO_DEFINITE_RESPONSE",
+    }
+}
+
+/// The neutral response class of a control action (metrics).
+pub fn control_class(outcome: ControlOutcome) -> &'static str {
+    match outcome {
+        ControlOutcome::Done => "ACCEPTED",
+        ControlOutcome::AlreadyGone => "ALREADY_GONE",
+        ControlOutcome::DefiniteFailure => "REFUSED",
+        ControlOutcome::Unknown => "NO_DEFINITE_RESPONSE",
+    }
 }
 
 /// Bounded stored detail of a command outcome (never a number or provider payload).

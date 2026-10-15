@@ -394,6 +394,10 @@ impl RelayService {
             .await?
             .ok_or(RelayError::Refused(ErrorCode::InternalError))?;
         txn.commit().await?;
+        crate::metrics::inc(
+            "privacy_relay_relay_number_events_total",
+            &[("event", "ASSIGNED")],
+        );
         tracing::info!(relay_session_id = %session_id, assignment_id = %id, assignment_generation = generation.generation, "relay number assigned");
         Ok((201, json!({ "assignment": assignment.view()? })))
     }
@@ -566,6 +570,14 @@ impl RelayService {
             now,
         )
         .await?;
+        crate::metrics::inc(
+            "privacy_relay_relay_number_events_total",
+            &[("event", "RELEASED"), ("reason", reason.as_str())],
+        );
+        crate::metrics::inc(
+            "privacy_relay_relay_number_events_total",
+            &[("event", "COOLDOWN_STARTED")],
+        );
         tracing::info!(relay_session_id = %at.session_id, assignment_id = %a.id, end_reason = reason.as_str(), "relay number assignment ended; cooldown started");
         Ok(Some(a.id))
     }
@@ -719,6 +731,11 @@ impl RelayService {
             }
         }
         txn.commit().await?;
+        crate::metrics::add(
+            "privacy_relay_relay_number_events_total",
+            &[("event", "COOLDOWN_COMPLETED")],
+            due.len() as u64,
+        );
         Ok(due.len())
     }
 

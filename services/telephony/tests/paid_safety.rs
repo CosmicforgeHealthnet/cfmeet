@@ -322,9 +322,54 @@ async fn metrics_are_bounded_and_never_carry_identifiers() {
         "telephony_route_circuits{state=\"CLOSED\"} 2",
         "telephony_live_legs{state=\"UNKNOWN\"} 1",
         "telephony_outbox_backlog",
+        // Part I §84: provider response classes, command queue and outbox gauges.
+        "telephony_provider_responses_total{operation=\"ORIGINATE\",class=\"ACCEPTED\"}",
+        "telephony_provider_responses_total{operation=\"ORIGINATE\",class=\"NO_DEFINITE_RESPONSE\"}",
+        "telephony_command_queue{state=\"PENDING\"} 0",
+        "telephony_command_queue{state=\"RETRYING\"} 0",
+        "telephony_command_queue{state=\"IN_FLIGHT\"} 0",
+        "telephony_command_queue{state=\"UNKNOWN_OUTCOME\"} 1",
+        "telephony_command_queue{state=\"DEAD_LETTER\"} 0",
+        "telephony_command_oldest_pending_age_seconds 0",
+        "telephony_outbox_oldest_pending_age_seconds ",
+        "telephony_outbox_dead_lettered 0",
+        "telephony_outbox_deliveries_total{result=\"DELIVERED\"}",
     ] {
         assert!(text.contains(expected), "{expected} missing:\n{text}");
     }
+    assert_bounded_labels(&text);
+    // The queue gauges move with the queues: a backlog of commands while the workers
+    // are stopped (its age grows with the clock) and an undeliverable event.
+    h.calling.set_available(false);
+    h.originate().await;
+    h.advance(42);
+    h.svc.deliver_outbox_once(10).await.unwrap();
+    let text = h.svc.metrics_text().await.unwrap();
+    for expected in [
+        "telephony_command_queue{state=\"PENDING\"} 1",
+        "telephony_command_oldest_pending_age_seconds 42",
+    ] {
+        assert!(text.contains(expected), "{expected} missing:\n{text}");
+    }
+    let gauge = |text: &str, name: &str| -> i64 {
+        text.lines()
+            .find_map(|l| l.strip_prefix(&format!("{name} ")))
+            .unwrap_or_else(|| panic!("{name} missing:\n{text}"))
+            .parse()
+            .unwrap()
+    };
+    assert!(gauge(&text, "telephony_outbox_backlog") >= 1, "{text}");
+    assert!(
+        gauge(&text, "telephony_outbox_oldest_pending_age_seconds") >= 42,
+        "{text}"
+    );
+    h.run().await;
+    let text = h.svc.metrics_text().await.unwrap();
+    assert!(
+        text.contains("telephony_command_queue{state=\"PENDING\"} 0"),
+        "{text}"
+    );
+    assert_bounded_labels(&text);
     // No identifier of any kind is a label value.
     let uuid = regex_lite_uuid(&text);
     assert!(uuid.is_none(), "an id leaked into metrics: {uuid:?}");
@@ -347,6 +392,63 @@ async fn metrics_are_bounded_and_never_carry_identifiers() {
         .raw(Request::builder().method(Method::GET).uri("/metrics"), None)
         .await;
     assert_eq!(r.status, StatusCode::NOT_FOUND, "not on the service router");
+}
+
+/// Label keys a Telephony metric may carry (bounded vocabularies only).
+const LABEL_KEYS: &[&str] = &[
+    "route_class",
+    "outcome",
+    "category",
+    "code",
+    "reason",
+    "status",
+    "disposition",
+    "state",
+    "class",
+    "scope",
+    "kind",
+    "result",
+    "operation",
+    "dependency",
+    "cost_known",
+    "case",
+    "action",
+    "data_class",
+    "le",
+];
+
+/// Every label of every series: an allow-listed key and an UPPER_SNAKE vocabulary value
+/// (histogram bounds: digits / +Inf) — never an id, number, URI or name.
+pub fn assert_bounded_labels(text: &str) {
+    for line in text
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.is_empty())
+    {
+        let Some((_, rest)) = line.split_once('{') else {
+            continue;
+        };
+        let labels = rest.split_once('}').map(|(l, _)| l).unwrap_or("");
+        for pair in labels.split(',') {
+            let (key, value) = pair
+                .split_once('=')
+                .unwrap_or_else(|| panic!("malformed label in {line}"));
+            assert!(LABEL_KEYS.contains(&key), "label key {key} in {line}");
+            let value = value.trim_matches('"');
+            let ok = if key == "le" {
+                value == "+Inf" || value.bytes().all(|b| b.is_ascii_digit())
+            } else if key == "cost_known" {
+                value == "true" || value == "false"
+            } else {
+                !value.is_empty()
+                    && value.len() <= 48
+                    && value
+                        .bytes()
+                        .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+                    && !value.bytes().all(|b| b.is_ascii_digit())
+            };
+            assert!(ok, "unbounded label value {value:?} in {line}");
+        }
+    }
 }
 
 /// The first UUID-shaped token in `text`, if any.

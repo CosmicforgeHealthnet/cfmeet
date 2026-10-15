@@ -30,6 +30,12 @@ crosses another service's boundary:
                                   purchase, marketplace) inside Privacy Relay
   FUTURE_SERVICE_IMPLEMENTED      services/numbering or services/contact-vault exists
                                   before its phase (Telephony is a Part E service)
+  FOREIGN_SECRET_REFERENCE        production code or deployment config of S names a
+                                  secret that belongs to T: Telephony provider / ARI
+                                  credentials, Contact Vault keyrings, Calling's media,
+                                  signaling, webhook and credential-pepper secrets
+                                  (security blast radius: each secret is mounted into its
+                                  owner only)
 
 Table ownership is derived from each service's own migrations (raw ``CREATE TABLE`` and
 SeaORM ``X::Table`` idents), so it cannot drift from the schema. Known service names are
@@ -209,6 +215,19 @@ NUMBERING_RE = re.compile(
     re.I,
 )
 FUTURE_SERVICES = {"numbering", "contact-vault"}
+# Secret material each service alone may read (environment variable names, `_FILE`
+# variants included). Shared service-auth signing keys are per-service values of the same
+# variable and are not listed. Test code may start another service's binary with that
+# service's secrets, so only production code and deployment configuration are checked.
+SECRET_OWNERS = {
+    "telephony": re.compile(r"\b(?:TELECOM_PROVIDER_SECRETS_DIR|TELEPHONY_ARI_PASSWORD(?:_FILE)?)\b"),
+    "privacy-relay": re.compile(r"\bCONTACT_[A-Z_]*KEYRING[A-Z_]*\b"),
+    "calling": re.compile(
+        r"\b(?:CALLING_LIVEKIT_API_SECRET|CALLING_MEDIA_EDGE_SIGNING_KEY|CALLING_SIGNALING_SIGNING_KEY|"
+        r"CALLING_WEBHOOK_SECRET_KEY(?:_PREVIOUS)?|API_CREDENTIAL_(?:PREVIOUS_)?PEPPER|"
+        r"CONTACT_DELEGATION_PRIVATE_KEY)(?:_FILE)?\b"
+    ),
+}
 PRIVACY_RELAY_DOMAIN_PREFIXES = (
     "protected_contact", "contact_fingerprint", "contact_access", "contact_verification",
     "contact_resolution", "relay_number", "relay_inbound",
@@ -383,6 +402,14 @@ def db_location_violations(repo, path, text, service, out):
             out.append(Violation("CROSS_SERVICE_DATABASE_URL", repo.rel(path), line_of(text, m.start()), f"`{m.group(0)}` locates the database of {hit}; services never connect to another service's database"))
 
 
+def foreign_secret_violations(repo, path, text, service, out):
+    for owner, pattern in SECRET_OWNERS.items():
+        if owner == service:
+            continue
+        for m in pattern.finditer(text):
+            out.append(Violation("FOREIGN_SECRET_REFERENCE", repo.rel(path), line_of(text, m.start()), f"`{m.group(0)}` is a secret of {owner}; it is mounted into {owner} only"))
+
+
 def check_rust(repo: Repository, path: Path, out: list[Violation]):
     kind, name = repo.owner(path)
     source = path.read_text(encoding="utf-8", errors="replace")
@@ -420,6 +447,7 @@ def check_rust(repo: Repository, path: Path, out: list[Violation]):
     if not is_production_rust(repo, path):
         return
     production = remove_cfg_test_items(with_strings)
+    foreign_secret_violations(repo, path, production, name, out)
     own_tables = repo.tables.get(name, set())
     foreign_tables = {t: s for s, ts in repo.tables.items() if s != name for t in ts if t not in own_tables}
     lowered = production.lower()
@@ -467,6 +495,7 @@ def check_config(repo: Repository, path: Path, out: list[Violation]):
         # full-line comments may discuss other services
         text = "\n".join("" if l.lstrip().startswith("#") else l for l in text.splitlines())
     db_location_violations(repo, path, text, name, out)
+    foreign_secret_violations(repo, path, text, name, out)
 
 
 def check(root: Path) -> list[Violation]:

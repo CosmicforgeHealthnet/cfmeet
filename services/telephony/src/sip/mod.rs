@@ -135,6 +135,29 @@ impl fmt::Debug for EdgeEventKind {
     }
 }
 
+/// The bounded SIP response class of an edge signalling event (metrics): ringing is a
+/// 1xx, an answer a 2xx, and a hang-up's Q.850 cause maps to the class of the SIP final
+/// response it corresponds to (RFC 3398 §8.2.1) — `NORMAL_CLEARING` for an ordinary end
+/// of an established dialog, `UNSPECIFIED` for no / an unmapped cause. Never the raw
+/// cause text or number. `None`: not a signalling outcome.
+pub fn response_class(kind: &EdgeEventKind) -> Option<&'static str> {
+    match kind {
+        EdgeEventKind::Ringing => Some("1XX"),
+        EdgeEventKind::Answered | EdgeEventKind::OriginatedAnswered => Some("2XX"),
+        EdgeEventKind::Hangup { cause, .. } => Some(match cause {
+            16 => "NORMAL_CLEARING",
+            // 404 / 486 / 408 / 480 / 403 / 410 / 484 / 488 / 400
+            1 | 2 | 3 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 25 | 26 | 28 | 31 | 55 | 57 | 65
+            | 70 | 87 | 95 => "4XX",
+            // 502 / 501 / 503 / 504 / 500
+            27 | 29 | 34 | 38 | 41 | 42 | 44 | 47 | 58 | 79 | 88 | 102 | 111 | 127 => "5XX",
+            // 0, unmapped and interworking causes (a 6xx arrives as 17 / 21 / 58 above).
+            _ => "UNSPECIFIED",
+        }),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct EdgeEvent {
     /// Stable, unique event id (dedupe key at the edge provider).
@@ -391,5 +414,32 @@ pub fn edge_from_lookup(
             "TELEPHONY_SIP_EDGE",
             "must be none or asterisk-ari".into(),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn response_classes_are_bounded_and_never_the_raw_cause() {
+        let hangup = |cause| EdgeEventKind::Hangup {
+            reason: EndReason::Failed,
+            cause,
+        };
+        assert_eq!(response_class(&EdgeEventKind::Ringing), Some("1XX"));
+        assert_eq!(response_class(&EdgeEventKind::Answered), Some("2XX"));
+        assert_eq!(response_class(&hangup(16)), Some("NORMAL_CLEARING"));
+        assert_eq!(response_class(&hangup(17)), Some("4XX"));
+        assert_eq!(response_class(&hangup(34)), Some("5XX"));
+        assert_eq!(response_class(&hangup(0)), Some("UNSPECIFIED"));
+        assert_eq!(response_class(&EdgeEventKind::Held), None);
+        for cause in 0..=u16::MAX {
+            let class = response_class(&hangup(cause)).unwrap();
+            assert!(class
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_'));
+            assert!(class.len() <= 16);
+        }
     }
 }

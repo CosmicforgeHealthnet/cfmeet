@@ -75,6 +75,9 @@ impl TelephonyService {
             EdgeEventKind::CaptureFinished { name } => self.capture_edge_event(name, true).await,
             EdgeEventKind::CaptureFailed { name } => self.capture_edge_event(name, false).await,
             kind => {
+                if let Some(class) = crate::sip::response_class(kind) {
+                    crate::metrics::inc("telephony_sip_responses_total", &[("class", class)]);
+                }
                 let normalized = match kind {
                     EdgeEventKind::Ringing => Some(NormalizedEvent::LegRinging),
                     EdgeEventKind::Answered | EdgeEventKind::OriginatedAnswered => {

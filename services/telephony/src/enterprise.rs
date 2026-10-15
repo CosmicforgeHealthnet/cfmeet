@@ -278,7 +278,13 @@ impl TelephonyService {
                     "callLegId": leg.calling_call_leg_id,
                     "digit": digit.to_string(),
                 });
-                let result = match self.calling.deliver_keypad(&payload).await {
+                // The leg's current Calling flow (its latest command) is continued.
+                let correlation = crate::legs::command_correlation(&self.db, leg.id).await?;
+                let result = match self
+                    .calling
+                    .deliver_keypad(&payload, correlation.as_deref())
+                    .await
+                {
                     Ok(()) => "DELIVERED",
                     Err(_) => "NOT_DELIVERED",
                 };
@@ -464,6 +470,12 @@ impl TelephonyService {
                 .await?;
                 txn.commit().await?;
                 Ok(true)
+            }
+            // An unresolved termination (its TERMINATE exhausted its attempts while the
+            // edge was unreachable): hang the live channel up again; its end follows.
+            ChannelState::Active(_) if leg.status()? == LegStatus::Ending => {
+                let _ = self.edge.hangup(channel).await;
+                Ok(false)
             }
             _ => Ok(false),
         }

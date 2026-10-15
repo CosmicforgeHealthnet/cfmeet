@@ -56,6 +56,12 @@ pub fn current_request_id() -> Option<RequestId> {
     CURRENT.try_with(|c| c.request_id.clone()).ok()
 }
 
+/// Correlation id of the request being served, if any (one per logical operation:
+/// every record and outbound hop of the request continues it).
+pub fn current_correlation_id() -> Option<CorrelationId> {
+    CURRENT.try_with(|c| c.correlation_id.clone()).ok()
+}
+
 /// Runs `fut` with `context` as the current request context.
 pub async fn scoped<F: Future>(context: RequestContext, fut: F) -> F::Output {
     CURRENT.scope(context, fut).await

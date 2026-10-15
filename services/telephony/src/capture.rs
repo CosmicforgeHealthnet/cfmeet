@@ -106,11 +106,15 @@ struct CaptureRow {
     status: String,
     failure_code: Option<String>,
     delivery_attempts: i32,
+    /// The CAPTURE command's correlation (continued on delivery).
+    correlation_id: Option<String>,
 }
 
 const CAPTURE_COLUMNS: &str =
     "id, telephony_leg_id, calling_call_id, calling_call_leg_id, spool_name, \
-    status, failure_code, delivery_attempts";
+    status, failure_code, delivery_attempts, \
+    (SELECT c.correlation_id FROM telephony_commands c WHERE c.id = telephony_captures.command_id) \
+      AS correlation_id";
 
 /// What one capture pass did (tests and metrics).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -452,7 +456,11 @@ impl TelephonyService {
             report["outcome"] = json!("FAILED");
             report["failureCode"] = json!(code);
         }
-        match self.calling.deliver_capture(&report).await {
+        match self
+            .calling
+            .deliver_capture(&report, row.correlation_id.as_deref())
+            .await
+        {
             Ok(_) => {
                 let now = self.now();
                 db::exec(

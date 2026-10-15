@@ -6,8 +6,11 @@
 //! a telephone number, ContactReference, Call / leg id, provider call id or SIP Call-ID
 //! cannot become a label (they are runtime values), so cardinality stays bounded by the
 //! normalized vocabularies. Gauges (route / provider health, circuits, live legs, open
-//! incidents, outbox backlog) are computed from Telephony's own tables at scrape time,
-//! as counts per normalized state — never per route or provider identity.
+//! incidents, the command queue — pending, retrying, in flight, unknown outcome,
+//! dead-lettered, oldest pending age — and the outbox — pending, oldest pending age,
+//! dead-lettered) are computed from Telephony's own tables at scrape time, as counts per
+//! normalized state — never per route or provider identity. The SIP / media edge health
+//! gauge is the instance's last observation.
 
 use std::{
     collections::BTreeMap,
@@ -153,14 +156,99 @@ impl TelephonyService {
                 let _ = writeln!(out, "{name}{{state=\"{}\"}} {}", r.state, r.n);
             }
         }
+        // Command queue: never-tried PENDING, PENDING retries, in flight, awaiting
+        // reconciliation, dead-lettered; and the age of the oldest PENDING command.
+        let now = self.now();
+        let queue: Vec<StateCount> = db::all(
+            &self.db,
+            "SELECT CASE WHEN status = 'PENDING' AND attempts = 0 THEN 'PENDING' \
+                         WHEN status = 'PENDING' THEN 'RETRYING' \
+                         WHEN status IN ('CLAIMED', 'RUNNING') THEN 'IN_FLIGHT' \
+                         ELSE 'UNKNOWN_OUTCOME' END AS state, count(*) AS n \
+             FROM telephony_commands \
+             WHERE status IN ('PENDING', 'CLAIMED', 'RUNNING', 'UNKNOWN_OUTCOME', 'RECONCILING') \
+             GROUP BY 1",
+            vec![],
+        )
+        .await?;
+        let dead_commands = db::scalar_i64(
+            &self.db,
+            "SELECT count(*) FROM telephony_commands WHERE status = 'DEAD_LETTER'",
+            vec![],
+        )
+        .await?;
+        let _ = writeln!(out, "# TYPE telephony_command_queue gauge");
+        for state in ["PENDING", "RETRYING", "IN_FLIGHT", "UNKNOWN_OUTCOME"] {
+            let n = queue
+                .iter()
+                .find(|r| r.state == state)
+                .map(|r| r.n)
+                .unwrap_or(0);
+            let _ = writeln!(out, "telephony_command_queue{{state=\"{state}\"}} {n}");
+        }
+        let _ = writeln!(
+            out,
+            "telephony_command_queue{{state=\"DEAD_LETTER\"}} {dead_commands}"
+        );
+        let oldest_command = db::scalar_i64(
+            &self.db,
+            "SELECT COALESCE(GREATEST(0, EXTRACT(EPOCH FROM ($1 - min(created_at))))::bigint, 0) \
+             FROM telephony_commands WHERE status = 'PENDING'",
+            vec![now.into()],
+        )
+        .await?;
+        let _ = writeln!(
+            out,
+            "# TYPE telephony_command_oldest_pending_age_seconds gauge"
+        );
+        let _ = writeln!(
+            out,
+            "telephony_command_oldest_pending_age_seconds {oldest_command}"
+        );
+        // Outbox to Calling: pending (the backlog), its oldest age, dead-lettered.
         let backlog = db::scalar_i64(
             &self.db,
-            "SELECT count(*) FROM telephony_outbox WHERE delivered_at IS NULL",
+            "SELECT count(*) FROM telephony_outbox WHERE delivered_at IS NULL AND dead_lettered_at IS NULL",
             vec![],
+        )
+        .await?;
+        let dead_events = db::scalar_i64(
+            &self.db,
+            "SELECT count(*) FROM telephony_outbox WHERE dead_lettered_at IS NOT NULL",
+            vec![],
+        )
+        .await?;
+        let oldest_event = db::scalar_i64(
+            &self.db,
+            "SELECT COALESCE(GREATEST(0, EXTRACT(EPOCH FROM ($1 - min(created_at))))::bigint, 0) \
+             FROM telephony_outbox WHERE delivered_at IS NULL AND dead_lettered_at IS NULL",
+            vec![now.into()],
         )
         .await?;
         let _ = writeln!(out, "# TYPE telephony_outbox_backlog gauge");
         let _ = writeln!(out, "telephony_outbox_backlog {backlog}");
+        let _ = writeln!(
+            out,
+            "# TYPE telephony_outbox_oldest_pending_age_seconds gauge"
+        );
+        let _ = writeln!(
+            out,
+            "telephony_outbox_oldest_pending_age_seconds {oldest_event}"
+        );
+        let _ = writeln!(out, "# TYPE telephony_outbox_dead_lettered gauge");
+        let _ = writeln!(out, "telephony_outbox_dead_lettered {dead_events}");
+        // The SIP / media edge health this instance last observed (absent: no edge).
+        if let Some(health) = self.dependencies.sip_edge_health() {
+            let _ = writeln!(out, "# TYPE telephony_sip_edge_health gauge");
+            for state in crate::domain::Health::ALL {
+                let _ = writeln!(
+                    out,
+                    "telephony_sip_edge_health{{state=\"{}\"}} {}",
+                    state.as_str(),
+                    u8::from(*state == health)
+                );
+            }
+        }
         Ok(out)
     }
 }

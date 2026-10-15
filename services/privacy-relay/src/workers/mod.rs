@@ -138,6 +138,11 @@ impl RelayService {
             tracing::info!(context_id = %row.id, context_version = version, "communication context expired");
         }
         txn.commit().await?;
+        crate::metrics::add(
+            "privacy_relay_context_events_total",
+            &[("event", "EXPIRED")],
+            count as u64,
+        );
         self.deliver_all(&jobs).await;
         Ok(count)
     }
@@ -239,6 +244,10 @@ impl RelayService {
             .await?;
             txn.commit().await?;
             expired += 1;
+            crate::metrics::inc(
+                "privacy_relay_session_events_total",
+                &[("event", "EXPIRED")],
+            );
             tracing::info!(relay_session_id = %session.id, session_version = version, "privacy relay session expired");
             self.deliver_all(&[job]).await;
         }

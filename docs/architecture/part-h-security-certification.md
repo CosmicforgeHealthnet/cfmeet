@@ -96,7 +96,7 @@ Baseline before Part H: Calling 546, Privacy Relay 126, Telephony 87.
 | Executable rotation tests | I + N | service-auth `policy::g_key_rotation_overlap_without_downtime`; API credentials `tests/rotation.rs`; Contact Vault / fingerprint CLI tests above; webhook key above; provider callback secret `provider_events::a_callback_signed_with_the_previous_secret_is_accepted_during_the_overlap` |
 | Service isolation, LiveKit admin secret server-only | I | architecture tests, boundary guard |
 | Runbooks honest about restarts | N | `docs/architecture/secret-rotation-runbook.md` |
-| Repository / image secret scan | N | `scripts/secret-scan/` + CI job; per-service CI image scans |
+| Repository / image secret scan | N | `scripts/secret-scan/` + CI job; each service's Docker job greps its image for private keys. (Part K adds the full image scan: the exported root filesystem of every service image through `scan_secrets.py --tree`, in `dependency-security.yml`.) |
 
 ## 6. §75 SIP / telecom security — PASS
 

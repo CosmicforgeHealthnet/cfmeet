@@ -347,6 +347,10 @@ impl ContactVault {
         match self.resolve_inner(actor, contact, &request).await {
             Ok(v) => Ok(v),
             Err(e) => {
+                crate::metrics::inc(
+                    "privacy_relay_contact_resolution_failures_total",
+                    &[("reason", e.code().as_str())],
+                );
                 // No refusal without its audit row (fail closed on an audit failure); a
                 // success is audited inside its own transaction.
                 record_refusal_required(&self.db, actor, entry, &e, self.now()).await?;
@@ -414,7 +418,7 @@ impl ContactVault {
             .await?
             .ok_or_else(denied)?;
         require_verified(&row, now)?;
-        let number = self.open_row(keys, &row)?;
+        let number = self.open_row(keys, &row).await?;
         // The caller identity this leg presents: the relay number lent to THIS session
         // (its active relay identity binding, outbound-capable). Selected here, from the
         // session's own assignment — never by a client, never a customer number.

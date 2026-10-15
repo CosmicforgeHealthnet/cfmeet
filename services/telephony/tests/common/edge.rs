@@ -51,6 +51,12 @@ struct State {
     spool_available: bool,
     /// Recordings stopped early (by name).
     stopped: Vec<String>,
+    /// The whole edge is down (unreachable): every operation is `Unavailable`.
+    down: bool,
+    /// Origination requests that reached the edge while it was up or down.
+    originate_calls: usize,
+    /// Sounds played, in order: (channel, sound).
+    plays: Vec<(ChannelRef, String)>,
 }
 
 #[derive(Clone)]
@@ -88,6 +94,32 @@ impl ScriptedEdge {
 
     pub fn set_health(&self, health: Health) {
         self.lock().health = Some(health);
+    }
+
+    /// Failure injection: the edge is unreachable (control plane down). Its health is
+    /// UNAVAILABLE and every operation fails with `Unavailable` (nothing is dialled).
+    pub fn set_down(&self, down: bool) {
+        let mut s = self.lock();
+        s.down = down;
+        s.health = Some(if down {
+            Health::Unavailable
+        } else {
+            Health::Healthy
+        });
+    }
+
+    /// How many origination requests Telephony sent to the edge.
+    pub fn originate_calls(&self) -> usize {
+        self.lock().originate_calls
+    }
+
+    fn unreachable(&self) -> bool {
+        self.lock().down
+    }
+
+    /// The sounds played on the edge, in order: (channel, sound).
+    pub fn plays(&self) -> Vec<(ChannelRef, String)> {
+        self.lock().plays.clone()
     }
 
     pub fn dialled(&self) -> usize {
@@ -196,6 +228,10 @@ impl SipMediaEdge for ScriptedEdge {
 
     async fn originate(&self, request: &EdgeOriginate) -> EdgeResult<ChannelRef> {
         let mut s = self.lock();
+        s.originate_calls += 1;
+        if s.down {
+            return Err(EdgeError::Unavailable);
+        }
         let step = s.script.pop_front().unwrap_or(EdgeScript::Accept);
         let channel = request.correlation_key.clone();
         let create = |s: &mut State| {
@@ -218,6 +254,9 @@ impl SipMediaEdge for ScriptedEdge {
     }
 
     async fn ring(&self, channel: &ChannelRef) -> EdgeResult<()> {
+        if self.unreachable() {
+            return Err(EdgeError::Unavailable);
+        }
         if self.lock().live.contains_key(channel) {
             Ok(())
         } else {
@@ -226,6 +265,9 @@ impl SipMediaEdge for ScriptedEdge {
     }
 
     async fn answer(&self, channel: &ChannelRef) -> EdgeResult<()> {
+        if self.unreachable() {
+            return Err(EdgeError::Unavailable);
+        }
         match self.lock().live.get_mut(channel) {
             Some(st) => {
                 *st = LegStatus::Connected;
@@ -236,6 +278,9 @@ impl SipMediaEdge for ScriptedEdge {
     }
 
     async fn hangup(&self, channel: &ChannelRef) -> EdgeResult<()> {
+        if self.unreachable() {
+            return Err(EdgeError::Unavailable);
+        }
         self.control(channel, None)
     }
 
@@ -256,10 +301,16 @@ impl SipMediaEdge for ScriptedEdge {
     }
 
     async fn hold(&self, channel: &ChannelRef) -> EdgeResult<()> {
+        if self.unreachable() {
+            return Err(EdgeError::Unavailable);
+        }
         self.control(channel, Some(LegStatus::Held))
     }
 
     async fn resume(&self, channel: &ChannelRef) -> EdgeResult<()> {
+        if self.unreachable() {
+            return Err(EdgeError::Unavailable);
+        }
         self.control(channel, Some(LegStatus::Connected))
     }
 
@@ -323,6 +374,18 @@ impl SipMediaEdge for ScriptedEdge {
         Ok(())
     }
 
+    async fn play(&self, channel: &ChannelRef, sound: &str) -> EdgeResult<()> {
+        let mut s = self.lock();
+        if s.down {
+            return Err(EdgeError::Unavailable);
+        }
+        if !s.live.contains_key(channel) {
+            return Err(EdgeError::NotFound);
+        }
+        s.plays.push((channel.clone(), sound.to_string()));
+        Ok(())
+    }
+
     async fn send_dtmf(&self, channel: &ChannelRef, _: &str) -> EdgeResult<()> {
         self.ring(channel).await
     }
@@ -332,6 +395,9 @@ impl SipMediaEdge for ScriptedEdge {
     }
 
     async fn query(&self, channel: &ChannelRef) -> ChannelState {
+        if self.unreachable() {
+            return ChannelState::Unknown;
+        }
         match self.lock().live.get(channel) {
             Some(st) => ChannelState::Active(*st),
             None => ChannelState::Gone,
@@ -343,6 +409,9 @@ impl SipMediaEdge for ScriptedEdge {
         correlation_key: &str,
     ) -> EdgeResult<Option<ChannelSummary>> {
         let s = self.lock();
+        if s.down {
+            return Err(EdgeError::Unavailable);
+        }
         if let Some(st) = s.live.get(correlation_key) {
             return Ok(Some(ChannelSummary {
                 channel: correlation_key.to_string(),
@@ -362,6 +431,9 @@ impl SipMediaEdge for ScriptedEdge {
     }
 
     async fn list(&self) -> EdgeResult<Vec<ChannelSummary>> {
+        if self.unreachable() {
+            return Err(EdgeError::Unavailable);
+        }
         Ok(self
             .lock()
             .live

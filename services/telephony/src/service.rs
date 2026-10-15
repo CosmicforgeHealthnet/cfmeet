@@ -171,6 +171,8 @@ pub struct TelephonyService {
     pub(crate) last_inventory: Arc<std::sync::Mutex<Option<DateTime<Utc>>>>,
     /// When this instance last ran the abuse-signal scan.
     pub(crate) last_abuse_scan: Arc<std::sync::Mutex<Option<DateTime<Utc>>>>,
+    /// Dependency health this instance observed (incidents / gauges).
+    pub(crate) dependencies: Arc<crate::incidents::DependencyState>,
 }
 
 impl TelephonyService {
@@ -187,6 +189,7 @@ impl TelephonyService {
             settings: ExecutionSettings::default(),
             last_inventory: Arc::default(),
             last_abuse_scan: Arc::default(),
+            dependencies: Arc::default(),
         }
     }
 

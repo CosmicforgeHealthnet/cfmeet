@@ -11,7 +11,8 @@
 //! and writes a `telephony_operator_audit` row in the SAME transaction as its effect.
 //! `destination-classes` manages the pre-toll class rules, `retention` the retention
 //! holds, `peers verify` compares the declared peer networks with the edge's mounted
-//! trunk `identify` sections.
+//! trunk `identify` sections. `incidents resolve <id>` closes an OPEN incident (audited
+//! in the same transaction).
 //!
 //! Operator `disable` is the LASTING stop of a route / provider (it stays off until
 //! `enable`); `circuit --state OPEN` is the circuit breaker's 60 s probe hold — after it
@@ -57,8 +58,12 @@ enum Command {
     /// Part F: enterprise SIP devices on the own edge (internal; never paid).
     #[command(subcommand)]
     EnterpriseDevice(EnterpriseDeviceCmd),
-    /// Open incidents (restricted operational view; never numbers).
-    Incidents,
+    /// Incidents (restricted operational view; never numbers). Without a subcommand:
+    /// the open incidents.
+    Incidents {
+        #[command(subcommand)]
+        command: Option<IncidentsCmd>,
+    },
     /// Part H: destination class rules (pre-toll refusal of premium / shared-cost /
     /// satellite / high-risk ranges).
     #[command(subcommand)]
@@ -69,6 +74,20 @@ enum Command {
     /// Part H: edge peer configuration consistency.
     #[command(subcommand)]
     Peers(PeersCmd),
+}
+
+#[derive(Subcommand)]
+enum IncidentsCmd {
+    /// The open incidents (default).
+    List,
+    /// Marks an OPEN incident RESOLVED (its condition was handled); audited. A repeat of
+    /// the condition opens a new incident.
+    Resolve {
+        id: uuid::Uuid,
+        /// Why it is resolved (a short operational note; never a number or secret).
+        #[arg(long)]
+        note: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -313,6 +332,25 @@ async fn rows(db: &DatabaseConnection, sql: &str) -> Result<Vec<serde_json::Valu
         .collect())
 }
 
+async fn rows_in<C: ConnectionTrait>(
+    db: &C,
+    sql: &str,
+    values: Vec<sea_orm::Value>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let rows = db
+        .query_all(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            format!("SELECT to_jsonb(t) FROM ({sql}) t"),
+            values,
+        ))
+        .await
+        .map_err(|e| telephony::error::summarize_db_error(&e).0)?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| r.try_get_by_index::<serde_json::Value>(0).ok())
+        .collect())
+}
+
 /// Applies one mutation and its audit row in ONE transaction.
 async fn mutate(
     db: &DatabaseConnection,
@@ -459,7 +497,26 @@ async fn run(
             }
             EnterpriseDeviceCmd::List => Ok(json!(rows(db, "SELECT device_ref, edge_endpoint, tenant_id, application_id, environment_id, status FROM telephony_enterprise_devices ORDER BY device_ref").await?)),
         },
-        Command::Incidents => Ok(json!(rows(db, "SELECT id, severity, category, status, provider_id, route_id, telephony_leg_id, occurrences, escalation_count, first_seen_at, last_seen_at FROM telephony_incidents WHERE status = 'OPEN' ORDER BY last_seen_at DESC LIMIT 200").await?)),
+        Command::Incidents { command: None | Some(IncidentsCmd::List) } => Ok(json!(rows(db, "SELECT id, severity, category, status, provider_id, route_id, telephony_leg_id, occurrences, escalation_count, first_seen_at, last_seen_at FROM telephony_incidents WHERE status = 'OPEN' ORDER BY last_seen_at DESC LIMIT 200").await?)),
+        Command::Incidents { command: Some(IncidentsCmd::Resolve { id, note }) } => {
+            let note = note.map(|n| n.chars().filter(|c| !c.is_control()).take(200).collect::<String>());
+            if note.as_deref().is_some_and(|n| n.bytes().filter(u8::is_ascii_digit).count() >= 7) {
+                return Err("the note must not carry a number".into());
+            }
+            let a = audit(operator, "INCIDENT_RESOLVE", "INCIDENT", &id.to_string(), json!({ "incident": id, "note": note }))?;
+            let txn = db.begin().await.map_err(|e| telephony::error::summarize_db_error(&e).0)?;
+            let category = rows_in(&txn, "SELECT category, status FROM telephony_incidents WHERE id = $1 FOR UPDATE", vec![id.into()]).await?;
+            let Some(found) = category.into_iter().next() else {
+                return Err(format!("incident {id} not found"));
+            };
+            if found["status"] != "OPEN" {
+                return Err(format!("incident {id} is not OPEN"));
+            }
+            exec(&txn, "UPDATE telephony_incidents SET status = 'RESOLVED', resolved_at = GREATEST($2, last_seen_at) WHERE id = $1 AND status = 'OPEN'", vec![id.into(), now.into()]).await?;
+            operator_audit::record(&txn, &a, now).await.map_err(|e| e.to_string())?;
+            txn.commit().await.map_err(|e| telephony::error::summarize_db_error(&e).0)?;
+            Ok(json!({ "incident": id, "category": found["category"], "status": "RESOLVED" }))
+        }
         Command::DestinationClasses(cmd) => match cmd {
             DestinationClassCmd::Upsert { country, prefix, class, source } => {
                 let country = country.trim().to_ascii_uppercase();

@@ -12,7 +12,8 @@ Conventions used by every service:
   ARI passwords are refused. No secret has a production fallback: an absent mandatory
   secret stops the process at startup (exit 2) in every runtime environment.
 * Nothing secret is written to a database row, a log, a metric label, a public contract or
-  a container image (`make secret-scan`, the per-service CI image scans).
+  a container image (`make secret-scan`; CI scans every service image's exported root
+  filesystem in `dependency-security.yml`).
 * Every rotation below is recorded by the operator (change ticket / operator audit where
   the CLI supports `--operator`).
 

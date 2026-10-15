@@ -313,3 +313,157 @@ async fn http_enforcer_uses_service_auth_and_the_delegated_owner_scope() {
     assert_eq!(out.body["enforcement"]["status"], "PENDING");
     assert_eq!(h.count("SELECT count(*) FROM privacy_relay_enforcement_jobs WHERE last_error_category = 'NOT_CONFIGURED'").await, 1);
 }
+
+/// Never confirms: blocks until its worker task is aborted (a crashed instance).
+struct HangingCalling(tokio::sync::Notify);
+
+#[async_trait::async_trait]
+impl privacy_relay::enforcement::CallingEnforcer for HangingCalling {
+    async fn enforce(
+        &self,
+        _: &privacy_relay::enforcement::EnforcementDelivery,
+    ) -> Result<privacy_relay::enforcement::EnforcementAck, DeliveryFailure> {
+        self.0.notify_one();
+        std::future::pending::<()>().await;
+        Err(DeliveryFailure::Timeout)
+    }
+}
+
+#[tokio::test]
+async fn a_crashed_workers_lease_expires_and_another_instance_applies_exactly_once() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = Consumer::new(Kind::Production);
+    let [a, b] = principals(2).try_into().unwrap();
+    let ctx = h.bidirectional(&c, &[a, b]).await;
+    let id = ctx["contextId"].as_str().unwrap().to_string();
+    h.calling.fail_with(Some(DeliveryFailure::Unavailable));
+    let r = h.lifecycle(&c, &id, "revoke", 1).await;
+    let event_id = r.json["enforcement"]["enforcementEventIds"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    h.calling.fail_with(None);
+    h.clock.advance(Duration::seconds(5));
+    // Instance A claims the due job under its lease and dies while delivering.
+    let hanging = Arc::new(HangingCalling(tokio::sync::Notify::new()));
+    let crashed = RelayService::new(
+        h.conn().clone(),
+        Arc::new(h.clock.clone()),
+        h.feature.clone(),
+        RuntimeEnvironment::Test,
+        hanging.clone(),
+    );
+    let task = tokio::spawn(async move { crashed.run_enforcement_sweep(10).await });
+    hanging.0.notified().await;
+    task.abort();
+    let _ = task.await;
+    assert_eq!(
+        h.count("SELECT count(*) FROM privacy_relay_enforcement_jobs WHERE status = 'PENDING' AND lease_owner IS NOT NULL").await,
+        1
+    );
+    // The lease still holds: nobody else delivers (no duplicate termination).
+    let survivor = h.sibling();
+    assert_eq!(survivor.run_enforcement_sweep(10).await.unwrap(), 0);
+    assert_eq!(
+        survivor
+            .deliver_enforcement(event_id.parse().unwrap())
+            .await
+            .unwrap()
+            .as_str(),
+        "PENDING"
+    );
+    assert!(h.calling.delivered().is_empty());
+    // Lease expiry: the survivor takes over and applies the job exactly once.
+    h.clock.advance(Duration::seconds(
+        privacy_relay::enforcement::ENFORCEMENT_LEASE_SECONDS + 1,
+    ));
+    assert_eq!(survivor.run_enforcement_sweep(10).await.unwrap(), 1);
+    assert_eq!(survivor.run_enforcement_sweep(10).await.unwrap(), 0);
+    assert_eq!(h.calling.delivered_event_ids(), vec![event_id]);
+    assert_eq!(
+        h.count("SELECT count(*) FROM privacy_relay_enforcement_jobs WHERE status = 'APPLIED' AND lease_owner IS NULL").await,
+        1
+    );
+    assert_eq!(
+        h.count("SELECT count(*) FROM relay_audit_events WHERE event_type = 'ENFORCEMENT_APPLIED'")
+            .await,
+        1
+    );
+}
+
+#[tokio::test]
+async fn enforcement_is_dead_lettered_after_its_attempt_cap_stops_retrying_and_is_visible() {
+    use privacy_relay::enforcement::ENFORCEMENT_MAX_ATTEMPTS;
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = Consumer::new(Kind::Production);
+    let [a, b] = principals(2).try_into().unwrap();
+    let ctx = h.bidirectional(&c, &[a, b]).await;
+    let id = ctx["contextId"].as_str().unwrap().to_string();
+    h.calling.fail_with(Some(DeliveryFailure::Unavailable));
+    let r = h.lifecycle(&c, &id, "revoke", 1).await;
+    assert_eq!(r.json["enforcement"]["status"], "PENDING");
+    let event_id: uuid::Uuid = r.json["enforcement"]["enforcementEventIds"][0]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    // Capped backoff: every retry is due within 5 minutes.
+    for _ in 1..ENFORCEMENT_MAX_ATTEMPTS {
+        h.clock.advance(Duration::minutes(6));
+        assert_eq!(h.relay.run_enforcement_sweep(10).await.unwrap(), 0);
+    }
+    assert_eq!(
+        h.count(&format!(
+            "SELECT count(*) FROM privacy_relay_enforcement_jobs WHERE status = 'DEAD_LETTER' \
+             AND attempt_count = {ENFORCEMENT_MAX_ATTEMPTS} AND dead_lettered_at IS NOT NULL \
+             AND lease_owner IS NULL AND last_error_category = 'UNAVAILABLE'"
+        ))
+        .await,
+        1
+    );
+    // Visible: audit evidence, one incident, the metrics gauge.
+    assert_eq!(
+        h.count("SELECT count(*) FROM relay_audit_events WHERE event_type = 'ENFORCEMENT_FAILED' AND data->>'dead_lettered' = 'true'").await,
+        1
+    );
+    assert_eq!(
+        h.count("SELECT count(*) FROM privacy_relay_incidents WHERE category = 'ENFORCEMENT_DEAD_LETTER' AND status = 'OPEN' AND occurrences = 1").await,
+        1
+    );
+    let text = h.relay.metrics_text().await.unwrap();
+    assert!(
+        text.contains("privacy_relay_enforcement_jobs{status=\"DEAD_LETTER\"} 1"),
+        "{text}"
+    );
+    // It stops retrying, even once Calling recovers; no path brings it back to APPLIED.
+    h.calling.fail_with(None);
+    for _ in 0..3 {
+        h.clock.advance(Duration::minutes(30));
+        assert_eq!(h.relay.run_enforcement_sweep(10).await.unwrap(), 0);
+    }
+    assert_eq!(
+        h.relay
+            .deliver_enforcement(event_id)
+            .await
+            .unwrap()
+            .as_str(),
+        "PENDING"
+    );
+    assert!(h.calling.delivered().is_empty());
+    assert_eq!(
+        h.count("SELECT attempt_count::bigint FROM privacy_relay_enforcement_jobs")
+            .await,
+        ENFORCEMENT_MAX_ATTEMPTS as i64
+    );
+    // The database refuses to revive or complete a dead letter behind the service.
+    assert!(exec(
+        h.conn(),
+        "UPDATE privacy_relay_enforcement_jobs SET status = 'APPLIED', completed_at = now()"
+    )
+    .await
+    .is_err());
+}

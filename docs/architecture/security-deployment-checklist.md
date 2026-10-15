@@ -18,7 +18,7 @@ this page is the contract the operator signs off.
 | Internal media peer | Asterisk `5070/udp` on the private media IP | the RTC media gateway CIDR | public exposure |
 | SIP control (ARI) | Asterisk HTTP `8088` on the private control IP | Telephony instances only; TLS (`https`/`wss`) outside single-host deployments | public exposure (Telephony refuses a public ARI URL in staging/production) |
 | Metrics | every service's `*_METRICS_ADDRESS` | monitoring network | the public or internal API listeners |
-| Databases | one PostgreSQL per service | that service only | cross-service access, read replicas for other services |
+| Databases | one PostgreSQL database per service, a migrator role (DDL, release time only) and a DML-only runtime role (`infra/deployment/postgres/provision-service-database.sh`) | that service only (CONNECT revoked from PUBLIC; certified by `verify-service-isolation.sh`) | cross-service access, read replicas for other services, the runtime role running DDL |
 | Object storage | Calling's private artifact bucket | Calling only (SigV4), server-side encryption on | public bucket policy, permanent public URLs |
 | LiveKit | signalling + RTC ports | clients reach RTC ports; **signalling only through Calling's gateway**; the API key/secret only on Calling and the LiveKit server | the admin key in any client, bundle or mobile config |
 | Operator CLIs | `platform_admin`, `privacy-relay-admin`, `telephony-admin` | an operator bastion with the service's database credentials | a network-reachable "admin API" (none exists by design) |
@@ -37,7 +37,9 @@ rule set with the environment's change ticket.
 * Each service receives **only** its own secrets: Calling never gets SIP / ARI / provider /
   carrier secrets or the Contact Vault keyrings; Privacy Relay never gets carrier or
   LiveKit secrets; Telephony never gets Contact Vault keyrings or object-storage
-  credentials (enforced by the architecture tests and the service-boundary guard).
+  credentials (enforced by the architecture tests and the service-boundary guard's
+  `FOREIGN_SECRET_REFERENCE` rule: production code and deployment configuration of one
+  service never name another service's secret variables).
 * Verify before go-live: start each service with its production configuration and an
   intentionally missing mandatory secret — it must exit 2 (the CI "startup refusal" jobs
   do the same with placeholder values).
@@ -71,7 +73,8 @@ rule set with the environment's change ticket.
 ## 5. Go-live gates (per environment)
 
 1. `make secret-scan`, `make service-boundaries`, per-service CI green on the deployed SHA.
-2. Image scans (CI) on the deployed images.
+2. Dependency and image security (CI, `dependency-security.yml`) green on the deployed SHA:
+   RustSec advisories, image root-filesystem secret scan, no pending Debian security updates.
 3. Startup-refusal rehearsal (§2) and public-ARI refusal (`TELEPHONY_ARI_URL` must be
    private in staging/production).
 4. Firewall / security-group rules recorded against §1.

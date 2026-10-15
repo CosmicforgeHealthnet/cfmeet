@@ -3,12 +3,17 @@
 //! `last_seen_at`). Evidence is bounded and restricted; it never contains a telephone
 //! number. Provider ids may appear only here, as restricted operational evidence.
 
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
+
 use chrono::{DateTime, Utc};
 use sea_orm::ConnectionTrait;
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::{db, error::TelephonyResult};
+use crate::{db, domain::Health, error::TelephonyResult, service::TelephonyService};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
@@ -161,4 +166,125 @@ pub async fn resolve<C: ConnectionTrait>(
 #[derive(Debug, sea_orm::FromQueryResult)]
 struct IdRow {
     id: Uuid,
+}
+
+/// Dedupe key of the Privacy Relay unavailability incident (one per deployment).
+pub const PRIVACY_RELAY_UNAVAILABLE_KEY: &str = "privacy-relay-unavailable";
+/// Dedupe key of the SIP / media edge health incident.
+pub const SIP_EDGE_HEALTH_KEY: &str = "sip-edge-health";
+
+/// Dependency health one instance observed.
+#[derive(Debug)]
+pub struct DependencyState {
+    /// Whether an open Privacy Relay incident may need resolving (starts `true`: another
+    /// instance or an earlier run may have opened one).
+    privacy_relay_maybe_open: AtomicBool,
+    /// The last SIP / media edge health observed (`None`: no edge, or not yet).
+    sip_edge_health: Mutex<Option<Health>>,
+}
+
+impl Default for DependencyState {
+    fn default() -> Self {
+        Self {
+            privacy_relay_maybe_open: AtomicBool::new(true),
+            sip_edge_health: Mutex::new(None),
+        }
+    }
+}
+
+impl DependencyState {
+    /// The last observed SIP / media edge health (metrics).
+    pub fn sip_edge_health(&self) -> Option<Health> {
+        *self
+            .sip_edge_health
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+    }
+}
+
+impl TelephonyService {
+    /// Privacy Relay could not be reached for `operation` (protected-contact resolution
+    /// for an execution, inbound mapping resolution): bounded metric and ONE open
+    /// `PRIVACY_RELAY_UNAVAILABLE` incident (repeats bump its occurrences). Telephony
+    /// fails closed meanwhile — nothing is dialled or offered.
+    pub(crate) async fn privacy_relay_unavailable(
+        &self,
+        operation: &'static str,
+    ) -> TelephonyResult<()> {
+        crate::metrics::inc(
+            "telephony_dependency_failures_total",
+            &[("dependency", "PRIVACY_RELAY"), ("operation", operation)],
+        );
+        self.dependencies
+            .privacy_relay_maybe_open
+            .store(true, Ordering::SeqCst);
+        raise(
+            &self.db,
+            &Incident::new(
+                "PRIVACY_RELAY_UNAVAILABLE",
+                Severity::High,
+                PRIVACY_RELAY_UNAVAILABLE_KEY.to_string(),
+            )
+            .evidence(serde_json::json!({ "operation": operation })),
+            self.now(),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// Privacy Relay answered again: its unavailability incident (if open) resolves.
+    pub(crate) async fn privacy_relay_available(&self) -> TelephonyResult<()> {
+        if self
+            .dependencies
+            .privacy_relay_maybe_open
+            .swap(false, Ordering::SeqCst)
+        {
+            resolve(&self.db, PRIVACY_RELAY_UNAVAILABLE_KEY, self.now()).await?;
+        }
+        Ok(())
+    }
+
+    /// Records the SIP / media edge's health (provider health refresh): a degraded or
+    /// unavailable edge opens ONE `SIP_EDGE_UNAVAILABLE` incident (public SIP routes are
+    /// then unavailable for routing; enterprise SIP commands retry and dead-letter); a
+    /// healthy edge resolves it. Without a configured edge nothing is observed.
+    pub async fn observe_sip_edge_health(&self) -> TelephonyResult<Option<Health>> {
+        if self.edge.name() == "none" {
+            return Ok(None);
+        }
+        let health = self.edge.health().await;
+        *self
+            .dependencies
+            .sip_edge_health
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(health);
+        let now = self.now();
+        match health {
+            Health::Healthy => resolve(&self.db, SIP_EDGE_HEALTH_KEY, now).await?,
+            Health::Degraded | Health::Unavailable => {
+                let severity = if health == Health::Unavailable {
+                    Severity::High
+                } else {
+                    Severity::Medium
+                };
+                raise(
+                    &self.db,
+                    &Incident::new(
+                        "SIP_EDGE_UNAVAILABLE",
+                        severity,
+                        SIP_EDGE_HEALTH_KEY.to_string(),
+                    )
+                    .evidence(serde_json::json!({ "health": health.as_str() })),
+                    now,
+                )
+                .await?;
+                crate::metrics::inc(
+                    "telephony_sip_edge_unhealthy_total",
+                    &[("state", health.as_str())],
+                );
+            }
+            Health::Unknown => {}
+        }
+        Ok(Some(health))
+    }
 }

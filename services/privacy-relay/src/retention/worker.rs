@@ -146,6 +146,21 @@ impl RetentionWorker {
         if count == 0 {
             return Ok(());
         }
+        crate::metrics::inc(
+            "privacy_relay_retention_batches_total",
+            &[
+                ("data_class", policy.class.as_str()),
+                ("action", policy.action.as_str()),
+            ],
+        );
+        crate::metrics::add(
+            "privacy_relay_retention_rows_total",
+            &[
+                ("data_class", policy.class.as_str()),
+                ("action", policy.action.as_str()),
+            ],
+            count as u64,
+        );
         audit::record(
             txn,
             &RetentionAuditEntry::batch(policy.class, policy.action, policy.label(), count),

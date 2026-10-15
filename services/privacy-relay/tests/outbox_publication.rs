@@ -153,3 +153,155 @@ async fn committed_events_are_published_once_retried_and_dead_lettered() {
     assert_eq!(one.publish_outbox(100).await.unwrap(), 1);
     assert_eq!(recorder.published.lock().unwrap().len(), before + 1);
 }
+
+/// A transport that refuses with a fixed code (permanent or transient).
+struct Refusing(&'static str, Mutex<usize>);
+
+#[async_trait]
+impl EventPublisher for Refusing {
+    async fn publish(&self, _correlation: &str, _envelope: &Value) -> Result<(), &'static str> {
+        *self.1.lock().unwrap() += 1;
+        Err(self.0)
+    }
+}
+
+#[test]
+fn http_failures_are_classified_permanent_or_transient() {
+    use privacy_relay::events::{classify_status, is_permanent};
+    for (status, code, permanent) in [
+        (400, "MALFORMED", true),
+        (422, "MALFORMED", true),
+        (413, "MALFORMED", true),
+        (403, "FORBIDDEN", true),
+        (401, "UNAUTHENTICATED", false),
+        (404, "REJECTED", false),
+        (408, "TIMEOUT", false),
+        (429, "THROTTLED", false),
+        (500, "UNAVAILABLE", false),
+        (503, "UNAVAILABLE", false),
+    ] {
+        assert_eq!(classify_status(status), code, "{status}");
+        assert_eq!(is_permanent(code), permanent, "{status}");
+    }
+    assert!(is_permanent("MALFORMED_ENVELOPE"));
+    assert!(!is_permanent("TIMEOUT") && !is_permanent("PUBLISHER_NOT_CONFIGURED"));
+}
+
+#[tokio::test]
+async fn a_permanent_refusal_is_dead_lettered_at_once_and_raises_one_incident() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = Consumer::new(Kind::Production);
+    let [a, b] = principals(2).try_into().unwrap();
+    h.create_context(&c, context_request(&[a, b], "BIDIRECTIONAL", &[]))
+        .await;
+    h.create_context(&c, context_request(&[a, b], "BIDIRECTIONAL", &[]))
+        .await;
+    let pending = count(
+        &h,
+        "SELECT count(*) FROM privacy_relay_outbox WHERE status = 'PENDING'",
+    )
+    .await;
+    assert_eq!(pending, 2);
+    // Calling refuses the envelope as malformed: no retry can fix it.
+    let refusing = Arc::new(Refusing("MALFORMED", Mutex::new(0)));
+    let worker = h.relay.clone().with_event_publisher(refusing.clone());
+    assert_eq!(worker.publish_outbox(100).await.unwrap(), 0);
+    assert_eq!(*refusing.1.lock().unwrap(), 2, "one attempt each");
+    assert_eq!(
+        count(&h, "SELECT count(*) FROM privacy_relay_outbox WHERE status = 'DEAD_LETTER' AND attempt_count = 1 AND last_error_code = 'MALFORMED'").await,
+        2
+    );
+    // One deduplicated OPEN incident with two occurrences, a safe summary only.
+    let incident = rows(
+        h.conn(),
+        "SELECT category, dedupe_key, occurrences::text, status, summary FROM privacy_relay_incidents",
+    )
+    .await;
+    assert_eq!(incident.len(), 1, "{incident:?}");
+    assert_eq!(incident[0][0], "OUTBOX_DEAD_LETTER");
+    assert_eq!(incident[0][1], "OUTBOX_DEAD_LETTER:MALFORMED");
+    assert_eq!(
+        (incident[0][2].as_str(), incident[0][3].as_str()),
+        ("2", "OPEN")
+    );
+    assert!(!incident[0][4].contains("evt_"));
+    // A transient refusal is retried, never dead-lettered on its first attempt.
+    h.create_context(&c, context_request(&[a, b], "BIDIRECTIONAL", &[]))
+        .await;
+    let transient = Arc::new(Refusing("THROTTLED", Mutex::new(0)));
+    let worker = h.relay.clone().with_event_publisher(transient.clone());
+    worker.publish_outbox(100).await.unwrap();
+    assert_eq!(
+        count(&h, "SELECT count(*) FROM privacy_relay_outbox WHERE status = 'PENDING' AND last_error_code = 'THROTTLED'").await,
+        1
+    );
+    // Later, with a healthy transport: the transient row is published, the dead letters
+    // are never retried (only an operator replay brings them back).
+    h.clock.set(at(600));
+    let recorder = Arc::new(Recorder::default());
+    let healthy = h.relay.clone().with_event_publisher(recorder.clone());
+    assert_eq!(healthy.publish_outbox(100).await.unwrap(), 1);
+    assert_eq!(*refusing.1.lock().unwrap(), 2);
+    assert_eq!(
+        count(&h, "SELECT count(*) FROM privacy_relay_outbox WHERE status = 'DEAD_LETTER' AND attempt_count = 1").await,
+        2
+    );
+}
+
+/// Publishes nothing: blocks until its worker task is aborted (a crashed instance).
+struct Hanging(tokio::sync::Notify);
+
+#[async_trait]
+impl EventPublisher for Hanging {
+    async fn publish(&self, _correlation: &str, _envelope: &Value) -> Result<(), &'static str> {
+        self.0.notify_one();
+        std::future::pending::<()>().await;
+        Err("UNAVAILABLE")
+    }
+}
+
+#[tokio::test]
+async fn a_crashed_publishers_lease_expires_and_another_instance_publishes_exactly_once() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = Consumer::new(Kind::Production);
+    let [a, b] = principals(2).try_into().unwrap();
+    for _ in 0..3 {
+        h.create_context(&c, context_request(&[a, b], "BIDIRECTIONAL", &[]))
+            .await;
+    }
+    // Instance A claims every row (lease) and dies mid-publication.
+    let hanging = Arc::new(Hanging(tokio::sync::Notify::new()));
+    let crashed = h.relay.clone().with_event_publisher(hanging.clone());
+    let task = tokio::spawn(async move { crashed.publish_outbox(100).await });
+    hanging.0.notified().await;
+    task.abort();
+    let _ = task.await;
+    assert_eq!(
+        count(&h, "SELECT count(*) FROM privacy_relay_outbox WHERE status = 'PENDING' AND lease_until IS NOT NULL AND attempt_count = 1").await,
+        3,
+        "claimed under a lease"
+    );
+    // While the lease holds, another instance does not touch the rows.
+    let recorder = Arc::new(Recorder::default());
+    let survivor = h.sibling().with_event_publisher(recorder.clone());
+    assert_eq!(survivor.publish_outbox(100).await.unwrap(), 0);
+    assert!(recorder.published.lock().unwrap().is_empty());
+    // The lease expires: the survivor publishes each row exactly once.
+    h.clock.set(t0() + chrono::Duration::seconds(61));
+    assert_eq!(survivor.publish_outbox(100).await.unwrap(), 3);
+    assert_eq!(survivor.publish_outbox(100).await.unwrap(), 0);
+    let published = recorder.published.lock().unwrap().clone();
+    let ids: std::collections::BTreeSet<&str> = published
+        .iter()
+        .map(|e| e["event_id"].as_str().unwrap())
+        .collect();
+    assert_eq!((published.len(), ids.len()), (3, 3));
+    assert_eq!(
+        count(&h, "SELECT count(*) FROM privacy_relay_outbox WHERE status = 'PUBLISHED' AND lease_until IS NULL AND attempt_count = 2").await,
+        3
+    );
+}

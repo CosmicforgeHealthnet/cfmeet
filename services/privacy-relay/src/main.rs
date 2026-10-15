@@ -190,6 +190,17 @@ async fn main() -> anyhow::Result<()> {
         RetentionWorker::new(relay.db().clone(), clock.clone(), retention_settings)
             .run(retention_interval),
     );
+    // Metrics (§84): a separate operational listener, never the API router.
+    if let Some(address) = config.metrics_address {
+        let metrics = privacy_relay::metrics::router(relay.clone());
+        let listener = tokio::net::TcpListener::bind(address).await?;
+        tracing::info!(address = %address, "privacy relay metrics listening");
+        tokio::spawn(async move {
+            if let Err(e) = axum::serve(listener, metrics).await {
+                tracing::warn!(error = %e, "metrics listener stopped");
+            }
+        });
+    }
     let state =
         AppState::new(relay, service_auth).with_contact_vault(contacts, vault_material.delegation);
     let app = routes::app(state, internal::routes());

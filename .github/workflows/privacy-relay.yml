@@ -142,6 +142,20 @@ jobs:
         run: cargo test --locked --test relay_inbound
       - name: Part D certification (flows, cross-tenant, failure injection, rotations)
         run: cargo test --locked --test part_d_certification
+      - name: Outbox / enforcement retries, dead letters and lease-expiry recovery
+        run: cargo test --locked --test outbox_publication --test enforcement
+      - name: Incidents, metric label safety and correlation propagation
+        run: cargo test --locked --test incidents --test metric_safety --test correlation_propagation
+      - name: Migration upgrade from the previous head (data kept, down / re-up)
+        run: cargo test --locked --test migration_upgrade
+      # The runner image ships the PostgreSQL client tools (pg_dump / pg_restore / psql):
+      # the certification must run here, never skip.
+      - name: Disaster recovery (backup.sh / restore.sh, fail closed without keyrings)
+        env:
+          DISASTER_RECOVERY_CERT_REQUIRED: "1"
+        run: cargo test --locked --test disaster_recovery -- --nocapture
+      - name: Relay load (correctness under concurrency; LOAD lines are informational)
+        run: cargo test --locked --test relay_load -- --nocapture 2>&1 | tee "$RUNNER_TEMP/load.log"; grep -c '^LOAD ' "$RUNNER_TEMP/load.log" | grep -qx 4
       - name: cargo test (whole workspace)
         run: cargo test --workspace --no-fail-fast --locked
 
@@ -184,8 +198,9 @@ jobs:
           q() { psql -h 127.0.0.1 -U postgres -d privacy_relay_migration_smoke -tAc "$1"; }
           # Applied = registered migrations (derived from the migrator, never hand-counted).
           test "$(q "SELECT count(*) FROM privacy_relay_seaql_migrations")" = "$(grep -c 'Box::new(m20' migration/src/lib.rs)"
-          # 22 Part D tables + Part H retention holds and retention audit.
-          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'privacy_relay_seaql_migrations'")" = "24"
+          # 22 Part D tables + Part H retention holds and retention audit + incidents and
+          # operator audit.
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'privacy_relay_seaql_migrations'")" = "26"
           # Contact-shaped columns exist only where they belong: the vault's ciphertext and
           # fingerprints, and CF Meet's own PUBLIC relay numbers in the relay inventory.
           test "$(q "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' \
@@ -234,6 +249,8 @@ jobs:
           refuses "invalid Contact Vault flag" CONTACT_VAULT_ENABLED=maybe
           refuses "invalid relay-number pool flag" RELAY_NUMBER_POOL_ENABLED=maybe
           refuses "zero relay-number cooldown" RELAY_NUMBER_COOLDOWN_SECONDS=0
+          refuses "invalid metrics address" PRIVACY_RELAY_METRICS_ADDRESS=not-an-address
+          refuses "metrics on the API listener" PRIVACY_RELAY_METRICS_ADDRESS=127.0.0.1:8091
           ./target/debug/privacy-relay-admin contact-vault generate-keyring --purpose encryption --version ck-ci-1 --out "$K/enc.json"
           test "$(stat -c %a "$K/enc.json")" = "600"
           if grep -q '"key"' <(./target/debug/privacy-relay-admin contact-vault generate-keyring --purpose fingerprint --version fk-ci-1 --out "$K/fp.json" 2>&1); then
@@ -245,7 +262,7 @@ jobs:
           refuses "insecure Calling URL outside local" CF_RUNTIME_ENVIRONMENT=staging \
             CF_SERVICE_TRUST_BUNDLE_FILE="$K/staging-bundle.json" CALLING_INTERNAL_BASE_URL=http://calling.example.com
 
-          ./target/debug/privacy-relay > "$K/run.log" 2>&1 &
+          PRIVACY_RELAY_METRICS_ADDRESS=127.0.0.1:9191 ./target/debug/privacy-relay > "$K/run.log" 2>&1 &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true' EXIT
           for _ in $(seq 1 30); do
@@ -253,6 +270,9 @@ jobs:
             sleep 1
           done
           curl -fsS http://127.0.0.1:8091/health | grep -q '"status":"ok"'
+          # Metrics on their own listener only (bounded labels; never on the API listener).
+          curl -fsS http://127.0.0.1:9191/metrics | grep -q '^privacy_relay_outbox_pending '
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8091/metrics)" = "404"
           # Every internal route requires a service token; a customer credential is refused.
           for path in /internal/v1/contexts /internal/v1/communication/authorize /internal/v1/anything; do
             code=$(curl -s -o "$K/a.json" -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{}' "http://127.0.0.1:8091$path")

@@ -5,9 +5,19 @@
 //! LOCKED` + a lease (multi-instance safe; a crashed worker's claim expires), hands each
 //! envelope to an [`EventPublisher`] (transport-neutral; the HTTP adapter delivers it to
 //! Calling's authenticated platform-event ingress, which normalizes it for customer
-//! webhooks), retries with bounded backoff and dead-letters after
-//! [`OUTBOX_MAX_ATTEMPTS`]. Without a configured publisher rows simply stay PENDING
-//! (authoritative, never lost).
+//! webhooks) and classifies every failure (§81):
+//!
+//! * PERMANENT ([`is_permanent`]: Calling refused the envelope as malformed or the call
+//!   as forbidden, or the stored envelope itself is unusable) — dead-lettered
+//!   immediately; retrying cannot succeed;
+//! * TRANSIENT (timeouts, unavailability, throttling, authentication races) — retried
+//!   with capped exponential backoff and dead-lettered after [`OUTBOX_MAX_ATTEMPTS`].
+//!
+//! Every dead letter raises (deduplicated) an `OUTBOX_DEAD_LETTER` incident. The
+//! publication hop continues the correlation id the envelope was committed with (the
+//! one of the inbound request that caused the event); an envelope without a valid one
+//! is a permanent failure, never a freshly minted id. Without a configured publisher
+//! rows simply stay PENDING (authoritative, never lost).
 
 use std::sync::Arc;
 
@@ -20,13 +30,51 @@ use chrono::Duration;
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::{db, error::RelayResult, service::RelayService};
+use crate::{
+    db,
+    error::RelayResult,
+    incidents::{self, IncidentCategory},
+    metrics,
+    service::RelayService,
+};
 
 /// Calling's platform-event ingress.
 pub const PLATFORM_EVENTS_PATH: &str = "/internal/v1/platform/events";
 /// Publication attempts before an event is dead-lettered.
 pub const OUTBOX_MAX_ATTEMPTS: i32 = 10;
 const LEASE_SECONDS: i64 = 60;
+
+/// Failure codes that no retry can fix (dead-lettered on the first occurrence).
+pub const PERMANENT_PUBLISH_FAILURES: &[&str] = &["MALFORMED", "FORBIDDEN", "MALFORMED_ENVELOPE"];
+
+/// Whether a bounded publication failure code is permanent.
+pub fn is_permanent(code: &str) -> bool {
+    PERMANENT_PUBLISH_FAILURES.contains(&code)
+}
+
+/// The bounded code of an HTTP publication failure (`MALFORMED` / `FORBIDDEN` are
+/// permanent; everything else is retried).
+pub fn classify_http_failure(error: &InternalCallError) -> &'static str {
+    match error {
+        InternalCallError::UnknownTarget(_) => "PUBLISHER_NOT_CONFIGURED",
+        InternalCallError::Timeout { .. } => "TIMEOUT",
+        InternalCallError::Status { status, .. } => classify_status(*status),
+        _ => "UNAVAILABLE",
+    }
+}
+
+/// HTTP status -> bounded failure code.
+pub fn classify_status(status: u16) -> &'static str {
+    match status {
+        400 | 413 | 415 | 422 => "MALFORMED",
+        403 => "FORBIDDEN",
+        401 => "UNAUTHENTICATED",
+        408 => "TIMEOUT",
+        429 => "THROTTLED",
+        s if s >= 500 => "UNAVAILABLE",
+        _ => "REJECTED",
+    }
+}
 
 /// The neutral publication boundary. `Err` is a bounded failure code.
 #[async_trait]
@@ -66,19 +114,15 @@ impl HttpEventPublisher {
 #[async_trait]
 impl EventPublisher for HttpEventPublisher {
     async fn publish(&self, correlation_id: &str, envelope: &Value) -> Result<(), &'static str> {
+        // The hop continues the committed correlation id; never a fresh one.
         let correlation = cf_service_auth::CorrelationId::parse(correlation_id)
-            .unwrap_or_else(|_| cf_service_auth::CorrelationId::generate());
+            .map_err(|_| "MALFORMED_ENVELOPE")?;
         let request = OutboundServiceRequest::continuing(ServiceId::calling(), &correlation);
         self.client
             .post_json(&request, PLATFORM_EVENTS_PATH, envelope)
             .await
             .map(|_| ())
-            .map_err(|e| match e {
-                InternalCallError::UnknownTarget(_) => "PUBLISHER_NOT_CONFIGURED",
-                InternalCallError::Timeout { .. } => "TIMEOUT",
-                InternalCallError::Status { status, .. } if status < 500 => "REJECTED",
-                _ => "UNAVAILABLE",
-            })
+            .map_err(|e| classify_http_failure(&e))
     }
 }
 
@@ -122,13 +166,18 @@ impl RelayService {
                 .envelope
                 .get("correlation_id")
                 .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            let outcome = self.events.publish(&correlation, &row.envelope).await;
+                .filter(|c| cf_service_auth::CorrelationId::parse(c).is_ok())
+                .map(str::to_string);
+            let outcome = match &correlation {
+                Some(correlation) => self.events.publish(correlation, &row.envelope).await,
+                // A stored envelope without its correlation id cannot be published
+                // faithfully: permanent.
+                None => Err("MALFORMED_ENVELOPE"),
+            };
             let now = self.now();
             match outcome {
                 Ok(()) => {
-                    db::exec(
+                    let updated = db::exec(
                         &self.db,
                         "UPDATE privacy_relay_outbox SET status = 'PUBLISHED', published_at = $2, \
                            lease_until = NULL, last_error_code = NULL, updated_at = $2 \
@@ -136,10 +185,18 @@ impl RelayService {
                         vec![row.id.into(), now.into(), row.attempt_count.into()],
                     )
                     .await?;
-                    published += 1;
+                    if updated == 1 {
+                        published += 1;
+                        metrics::inc("privacy_relay_outbox_published_total", &[]);
+                    }
                 }
-                Err(code) if row.attempt_count >= OUTBOX_MAX_ATTEMPTS => {
-                    db::exec(
+                Err(code) if is_permanent(code) || row.attempt_count >= OUTBOX_MAX_ATTEMPTS => {
+                    let kind = if is_permanent(code) {
+                        "PERMANENT"
+                    } else {
+                        "EXHAUSTED"
+                    };
+                    let updated = db::exec(
                         &self.db,
                         "UPDATE privacy_relay_outbox SET status = 'DEAD_LETTER', lease_until = NULL, \
                            last_error_code = $2, updated_at = $3 \
@@ -147,9 +204,23 @@ impl RelayService {
                         vec![row.id.into(), code.into(), now.into(), row.attempt_count.into()],
                     )
                     .await?;
-                    tracing::error!(outbox_id = %row.id, code, "privacy relay event dead-lettered");
+                    if updated == 1 {
+                        metrics::inc(
+                            "privacy_relay_outbox_dead_lettered_total",
+                            &[("reason", code), ("kind", kind)],
+                        );
+                        incidents::raise_best_effort(
+                            &self.db,
+                            IncidentCategory::OutboxDeadLetter,
+                            &incidents::dedupe_key(IncidentCategory::OutboxDeadLetter, &[code]),
+                            now,
+                        )
+                        .await;
+                        tracing::error!(outbox_id = %row.id, code, kind, "privacy relay event dead-lettered");
+                    }
                 }
                 Err(code) => {
+                    metrics::inc("privacy_relay_outbox_retries_total", &[("reason", code)]);
                     db::exec(
                         &self.db,
                         "UPDATE privacy_relay_outbox SET next_attempt_at = $2, lease_until = NULL, \

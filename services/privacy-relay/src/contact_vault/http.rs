@@ -32,7 +32,7 @@ use super::{
 };
 use crate::{
     error::{ErrorCode, RelayError},
-    middleware::current_request_id,
+    middleware::{current_correlation_id, current_request_id},
     state::AppState,
 };
 
@@ -102,9 +102,11 @@ pub async fn require_contact_delegation(
     };
     match verifier.verify_headers(request.headers()) {
         Ok(access) => {
+            // The request's own correlation id (one per request, set by the request
+            // middleware) — never a second, unrelated one for the same operation.
             request.extensions_mut().insert(ContactCaller {
                 access,
-                correlation_id: CorrelationId::generate(),
+                correlation_id: current_correlation_id().unwrap_or_else(CorrelationId::generate),
             });
             next.run(request).await
         }

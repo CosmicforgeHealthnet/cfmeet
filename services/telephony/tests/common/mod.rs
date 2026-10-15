@@ -348,6 +348,14 @@ pub struct FakeCalling {
     pub captures: StdMutex<Vec<Value>>,
     /// How the capture receiver answers: OK, UNAVAILABLE (503), DENIED (400), NOT_FOUND.
     pub capture_mode: StdMutex<&'static str>,
+    /// How the event receiver answers when available: OK, DENIED (400 VALIDATION_ERROR),
+    /// NOT_FOUND (404), AUTH (401 INTERNAL_AUTHENTICATION_FAILED).
+    pub event_mode: StdMutex<&'static str>,
+    /// The correlation id each delivered event / keypad / capture continued (event id or
+    /// capture id -> correlation; `None`: a fresh one would be minted).
+    pub correlations: StdMutex<Vec<(Value, Option<String>)>>,
+    /// Every delivery attempt of an event (event ids, including refused ones).
+    pub event_attempts: StdMutex<Vec<Value>>,
 }
 
 impl FakeCalling {
@@ -360,7 +368,25 @@ impl FakeCalling {
             enterprise_offers: StdMutex::default(),
             captures: StdMutex::default(),
             capture_mode: StdMutex::new("OK"),
+            event_mode: StdMutex::new("OK"),
+            correlations: StdMutex::default(),
+            event_attempts: StdMutex::default(),
         }
+    }
+
+    pub fn set_event_mode(&self, mode: &'static str) {
+        *self.event_mode.lock().unwrap() = mode;
+    }
+
+    /// The correlation id the delivery of `id` (an event id / capture id) continued.
+    pub fn correlation_of(&self, id: &Value) -> Option<Option<String>> {
+        self.correlations
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|(k, _)| k == id)
+            .map(|(_, c)| c.clone())
     }
 
     pub fn captures(&self) -> Vec<Value> {
@@ -390,11 +416,44 @@ impl FakeCalling {
 
 #[async_trait::async_trait]
 impl CallingPort for FakeCalling {
-    async fn deliver_event(&self, payload: &Value) -> Result<(), PortError> {
+    async fn deliver_event(
+        &self,
+        payload: &Value,
+        correlation_id: Option<&str>,
+    ) -> Result<(), PortError> {
+        self.event_attempts
+            .lock()
+            .unwrap()
+            .push(payload["eventId"].clone());
         if !*self.available.lock().unwrap() {
             return Err(PortError::Unavailable);
         }
+        match *self.event_mode.lock().unwrap() {
+            "DENIED" => return Err(PortError::Denied("VALIDATION_ERROR".into())),
+            "NOT_FOUND" => return Err(PortError::NotFound),
+            "AUTH" => return Err(PortError::Denied("INTERNAL_AUTHENTICATION_FAILED".into())),
+            _ => {}
+        }
+        self.correlations.lock().unwrap().push((
+            payload["eventId"].clone(),
+            correlation_id.map(str::to_string),
+        ));
         self.events.lock().unwrap().push(payload.clone());
+        Ok(())
+    }
+
+    async fn deliver_keypad(
+        &self,
+        payload: &Value,
+        correlation_id: Option<&str>,
+    ) -> Result<(), PortError> {
+        if !*self.available.lock().unwrap() {
+            return Err(PortError::Unavailable);
+        }
+        self.correlations.lock().unwrap().push((
+            payload["telephonyLegId"].clone(),
+            correlation_id.map(str::to_string),
+        ));
         Ok(())
     }
 
@@ -422,13 +481,21 @@ impl CallingPort for FakeCalling {
         }))
     }
 
-    async fn deliver_capture(&self, report: &Value) -> Result<Value, PortError> {
+    async fn deliver_capture(
+        &self,
+        report: &Value,
+        correlation_id: Option<&str>,
+    ) -> Result<Value, PortError> {
         match *self.capture_mode.lock().unwrap() {
             "UNAVAILABLE" => return Err(PortError::Unavailable),
             "DENIED" => return Err(PortError::Denied("VALIDATION_ERROR".into())),
             "NOT_FOUND" => return Err(PortError::NotFound),
             _ => {}
         }
+        self.correlations.lock().unwrap().push((
+            report["captureId"].clone(),
+            correlation_id.map(str::to_string),
+        ));
         self.captures.lock().unwrap().push(report.clone());
         Ok(json!({
             "captureId": report["captureId"],

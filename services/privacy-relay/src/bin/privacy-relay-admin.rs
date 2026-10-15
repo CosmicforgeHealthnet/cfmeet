@@ -17,7 +17,14 @@
 //!                                    [--class CLASS|*] [--resource UUID] [--tenant UUID [--application UUID [--environment UUID]]]
 //! privacy-relay-admin retention release --id UUID
 //! privacy-relay-admin retention list [--all true]
+//! privacy-relay-admin incidents list [--all true]
+//! privacy-relay-admin incidents resolve --id UUID [--operator OPERATOR]   (or CF_OPERATOR_ID)
 //! ```
+//!
+//! `incidents resolve` changes state: it names its operator (`--operator`, else
+//! `CF_OPERATOR_ID`; refused with exit 2 and nothing changed without one) and writes a
+//! `privacy_relay_operator_audit` row in the SAME transaction as the resolution.
+//! Incident output is the safe summary only (never a number, reference or secret).
 //!
 //! Relay-number commands need DATABASE_URL and CF_RUNTIME_ENVIRONMENT
 //! (RELAY_NUMBER_COOLDOWN_SECONDS applies to a disable that ends an assignment). The
@@ -44,6 +51,7 @@ use privacy_relay::{
         secret_file, ContactVault,
     },
     enforcement::UnconfiguredCallingEnforcer,
+    incidents,
     relay_numbers::inventory::NewRelayNumber,
     retention::{
         holds::{self, HoldReason, HoldScope},
@@ -68,7 +76,9 @@ fn usage() -> ExitCode {
          privacy-relay-admin relay-number list\n  \
          privacy-relay-admin retention hold --reason R --by OPERATOR [--class C|*] [--resource UUID] [--tenant UUID [--application UUID [--environment UUID]]]\n  \
          privacy-relay-admin retention release --id UUID\n  \
-         privacy-relay-admin retention list [--all true]"
+         privacy-relay-admin retention list [--all true]\n  \
+         privacy-relay-admin incidents list [--all true]\n  \
+         privacy-relay-admin incidents resolve --id UUID [--operator OPERATOR]   (or CF_OPERATOR_ID)"
     );
     ExitCode::from(2)
 }
@@ -255,6 +265,75 @@ async fn retention(command: &str, f: &HashMap<String, String>) -> ExitCode {
     }
 }
 
+/// `incidents list|resolve` (DATABASE_URL).
+async fn incidents_command(command: &str, f: &HashMap<String, String>) -> ExitCode {
+    // Validate the operator before touching the database (a refused resolve changes
+    // nothing).
+    let operator = f
+        .get("operator")
+        .cloned()
+        .or_else(|| std::env::var("CF_OPERATOR_ID").ok())
+        .unwrap_or_default();
+    if command == "resolve" && !incidents::valid_operator(&operator) {
+        eprintln!(
+            "privacy-relay-admin: this command changes state: --operator <id> (or CF_OPERATOR_ID) is required"
+        );
+        return ExitCode::from(2);
+    }
+    let db = match database().await {
+        Ok(db) => db,
+        Err(e) => {
+            eprintln!("privacy-relay-admin: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    match command {
+        "list" => {
+            match incidents::list(&db, f.get("all").map(String::as_str) == Some("true")).await {
+                Ok(rows) => {
+                    for r in rows {
+                        println!(
+                            "{}\t{}\t{}\t{}\toccurrences {}\tfirst {}\tlast {}\t{}\t{}",
+                            r.id,
+                            r.category,
+                            r.severity,
+                            r.status,
+                            r.occurrences,
+                            r.first_seen_at.to_rfc3339(),
+                            r.last_seen_at.to_rfc3339(),
+                            r.resolved_by
+                                .map(|by| format!("resolved by {by}"))
+                                .unwrap_or_else(|| "-".into()),
+                            r.summary,
+                        );
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("privacy-relay-admin: {}", e.code().as_str());
+                    ExitCode::from(1)
+                }
+            }
+        }
+        "resolve" => {
+            let Some(Ok(id)) = f.get("id").map(|v| uuid::Uuid::parse_str(v)) else {
+                return usage();
+            };
+            match incidents::resolve(&db, id, &operator, chrono::Utc::now()).await {
+                Ok(row) => {
+                    println!("incident {id} ({}) resolved by {operator}", row.category);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("privacy-relay-admin: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        _ => usage(),
+    }
+}
+
 async fn relay_number(command: &str, f: &HashMap<String, String>) -> ExitCode {
     let service = match relay_service().await {
         Ok(s) => s,
@@ -327,6 +406,12 @@ async fn main() -> ExitCode {
             return usage();
         };
         return relay_number(&args[1], &f).await;
+    }
+    if args.len() >= 2 && args[0] == "incidents" {
+        let Some(f) = flags(&args[2..]) else {
+            return usage();
+        };
+        return incidents_command(&args[1], &f).await;
     }
     if args.len() >= 2 && args[0] == "retention" {
         let Some(f) = flags(&args[2..]) else {

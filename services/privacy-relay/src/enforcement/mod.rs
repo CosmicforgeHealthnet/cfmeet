@@ -10,8 +10,15 @@
 //! 2. after commit, delivery is attempted synchronously through the authenticated Calling
 //!    enforcement API (`POST /internal/v1/privacy-relay/enforcement`, service token with
 //!    the delegated platform context of the context's owner);
-//! 3. on failure the job keeps a backoff schedule and is retried by any instance under a
-//!    `FOR UPDATE SKIP LOCKED` lease; APPLIED only when Calling confirms.
+//! 3. on failure the job keeps a capped backoff schedule and is retried by any instance
+//!    under a `FOR UPDATE SKIP LOCKED` lease (a crashed worker's lease expires and another
+//!    instance takes the job over); APPLIED only when Calling confirms;
+//! 4. after [`ENFORCEMENT_MAX_ATTEMPTS`] unconfirmed attempts (or at once for a job that
+//!    cannot be delivered faithfully) the job is DEAD_LETTER: it stops retrying, stays
+//!    visible, and raises an `ENFORCEMENT_DEAD_LETTER` incident (§81, §86).
+//!
+//! Delivery continues the correlation id of the authority change that created the job
+//! (the inbound request's); it is never replaced by a fresh one.
 //!
 //! The command carries ids, versions, a reason and the terminate flag — never contacts or
 //! provider data. Enforcement is restrictive only: it can terminate protected calls,
@@ -33,6 +40,8 @@ use crate::{
     audit::{self, AuditDraft},
     db,
     error::RelayResult,
+    incidents::{self, IncidentCategory},
+    metrics,
     models::{EnforcementJobRow, ENFORCEMENT_JOB_COLUMNS},
     scope::{environment_kind_str, parse_environment_kind, CommandContext, RelayScope},
     service::RelayService,
@@ -42,7 +51,11 @@ use crate::{
 /// Calling's enforcement route.
 pub const ENFORCEMENT_PATH: &str = "/internal/v1/privacy-relay/enforcement";
 /// Lease held by an instance while it delivers a job.
-const LEASE: i64 = 60;
+pub const ENFORCEMENT_LEASE_SECONDS: i64 = 60;
+const LEASE: i64 = ENFORCEMENT_LEASE_SECONDS;
+/// Unconfirmed delivery attempts before a job is dead-lettered (with the capped
+/// backoff of at most 5 minutes this is roughly an hour of retries).
+pub const ENFORCEMENT_MAX_ATTEMPTS: i32 = 20;
 
 /// One enforcement delivery.
 #[derive(Debug, Clone)]
@@ -66,6 +79,8 @@ pub enum DeliveryFailure {
     Rejected,
     InvalidResponse,
     NotConfigured,
+    /// The stored job cannot be delivered faithfully (permanent).
+    MalformedJob,
 }
 
 impl DeliveryFailure {
@@ -76,7 +91,13 @@ impl DeliveryFailure {
             DeliveryFailure::Rejected => "REJECTED",
             DeliveryFailure::InvalidResponse => "INVALID_RESPONSE",
             DeliveryFailure::NotConfigured => "NOT_CONFIGURED",
+            DeliveryFailure::MalformedJob => "MALFORMED_JOB",
         }
+    }
+
+    /// Whether no retry can fix this failure.
+    pub fn is_permanent(&self) -> bool {
+        matches!(self, DeliveryFailure::MalformedJob)
     }
 }
 
@@ -332,25 +353,32 @@ impl RelayService {
         let Some(kind) = parse_environment_kind(&job.environment_kind) else {
             return Ok(EnforcementState::Pending);
         };
-        let correlation =
-            CorrelationId::parse(&job.correlation_id).unwrap_or_else(|_| CorrelationId::generate());
-        let delegated = DelegatedPlatformContext::new(
-            job.tenant_id,
-            job.application_id,
-            job.environment_id,
-            kind,
-            job.on_behalf_of_service_account_id,
-        );
-        let outcome = self
-            .enforcer
-            .enforce(&EnforcementDelivery {
-                delegated,
-                correlation_id: correlation.clone(),
-                payload: job.payload.clone(),
-            })
-            .await;
-        let cmd = CommandContext::system(scope, kind, job.on_behalf_of_service_account_id)
-            .with_correlation(correlation);
+        // The delivery continues the authority change's correlation id; a job without a
+        // valid one is not delivered under a fresh id (permanent: dead-lettered below).
+        let correlation = CorrelationId::parse(&job.correlation_id).ok();
+        let outcome = match &correlation {
+            Some(correlation) => {
+                let delegated = DelegatedPlatformContext::new(
+                    job.tenant_id,
+                    job.application_id,
+                    job.environment_id,
+                    kind,
+                    job.on_behalf_of_service_account_id,
+                );
+                self.enforcer
+                    .enforce(&EnforcementDelivery {
+                        delegated,
+                        correlation_id: correlation.clone(),
+                        payload: job.payload.clone(),
+                    })
+                    .await
+            }
+            None => Err(DeliveryFailure::MalformedJob),
+        };
+        let mut cmd = CommandContext::system(scope, kind, job.on_behalf_of_service_account_id);
+        if let Some(correlation) = correlation {
+            cmd = cmd.with_correlation(correlation);
+        }
         let now = self.now();
         let txn = self.db.begin().await?;
         // Context lock first (same order as every command), then the job.
@@ -388,6 +416,10 @@ impl RelayService {
                 )
                 .await?;
                 if updated == 1 {
+                    metrics::inc(
+                        "privacy_relay_enforcement_attempts_total",
+                        &[("outcome", "APPLIED")],
+                    );
                     audit::append(
                         &txn,
                         &cmd,
@@ -420,10 +452,13 @@ impl RelayService {
             }
             Err(failure) => {
                 let attempts = job.attempt_count + 1;
-                db::exec(
+                let dead = failure.is_permanent() || attempts >= ENFORCEMENT_MAX_ATTEMPTS;
+                let updated = db::exec(
                     &txn,
                     "UPDATE privacy_relay_enforcement_jobs SET attempt_count = $3, next_attempt_at = $4, \
-                       lease_owner = NULL, lease_expires_at = NULL, last_error_category = $5, updated_at = $6 \
+                       lease_owner = NULL, lease_expires_at = NULL, last_error_category = $5, updated_at = $6, \
+                       status = CASE WHEN $7 THEN 'DEAD_LETTER' ELSE status END, \
+                       dead_lettered_at = CASE WHEN $7 THEN $6 ELSE NULL END \
                      WHERE id = $1 AND lease_owner = $2 AND status = 'PENDING'",
                     vec![
                         job.id.into(),
@@ -432,9 +467,65 @@ impl RelayService {
                         (now + backoff(attempts)).into(),
                         failure.as_str().into(),
                         now.into(),
+                        dead.into(),
                     ],
                 )
                 .await?;
+                if updated == 1 {
+                    metrics::inc(
+                        "privacy_relay_enforcement_attempts_total",
+                        &[("outcome", failure.as_str())],
+                    );
+                }
+                if dead && updated == 1 {
+                    metrics::inc(
+                        "privacy_relay_enforcement_dead_lettered_total",
+                        &[("reason", failure.as_str())],
+                    );
+                    audit::append(
+                        &txn,
+                        &cmd,
+                        self.runtime,
+                        AuditDraft {
+                            event_type: AuditEventType::EnforcementFailed,
+                            context_id: job.context_id,
+                            context_version: ctx.version,
+                            context_status,
+                            session,
+                            session_status: None,
+                            enforcement_job_id: Some(job.id),
+                            data: audit::data(vec![
+                                ("enforcement_event_id", json!(job.enforcement_event_id)),
+                                ("reason", json!(job.reason)),
+                                ("error_category", json!(failure.as_str())),
+                                ("attempt", json!(attempts)),
+                                ("retrying", json!(false)),
+                                ("dead_lettered", json!(true)),
+                            ]),
+                        },
+                        now,
+                    )
+                    .await?;
+                    incidents::raise(
+                        &txn,
+                        IncidentCategory::EnforcementDeadLetter,
+                        &incidents::dedupe_key(
+                            IncidentCategory::EnforcementDeadLetter,
+                            &[failure.as_str()],
+                        ),
+                        now,
+                    )
+                    .await?;
+                    tracing::error!(
+                        context_id = %job.context_id,
+                        enforcement_event_id = %job.enforcement_event_id,
+                        attempt = attempts,
+                        error_category = failure.as_str(),
+                        "active-call enforcement dead-lettered; it will not be retried"
+                    );
+                    txn.commit().await?;
+                    return Ok(EnforcementState::Pending);
+                }
                 if attempts == 1 {
                     audit::append(
                         &txn,

@@ -296,6 +296,10 @@ impl RelayService {
             ],
         )
         .await?;
+        crate::metrics::inc(
+            "privacy_relay_inbound_resolutions_total",
+            &[("outcome", outcome_code), ("reason", reason)],
+        );
         match outcome {
             Ok(_) => {
                 let mut body = body.unwrap_or(Value::Null);
@@ -473,9 +477,21 @@ impl RelayService {
         ))
     }
 
-    /// Fail-closed incident signal: the ledger records the ambiguity (never a choice).
+    /// Fail-closed incident signal: the ledger records the ambiguity (never a choice) and
+    /// a deduplicated RELAY_MAPPING_AMBIGUOUS incident is raised for the operator.
     async fn ambiguity_incident(&self, number: Uuid, generation: i64, now: DateTime<Utc>) {
         tracing::error!(relay_number_id = %number, "INCIDENT: more than one active relay mapping; inbound resolution refused");
+        let inventory = number.simple().to_string();
+        crate::incidents::raise_best_effort(
+            &self.db,
+            crate::incidents::IncidentCategory::RelayMappingAmbiguous,
+            &crate::incidents::dedupe_key(
+                crate::incidents::IncidentCategory::RelayMappingAmbiguous,
+                &[&inventory],
+            ),
+            now,
+        )
+        .await;
         let _ = ledger(
             &self.db,
             number,

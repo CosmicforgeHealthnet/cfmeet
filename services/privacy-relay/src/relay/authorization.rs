@@ -325,6 +325,14 @@ impl RelayService {
         )
         .await?;
         txn.commit().await?;
+        crate::metrics::inc(
+            "privacy_relay_authorization_decisions_total",
+            &[
+                ("decision", decision.as_str()),
+                ("reason", evaluation.reason.as_str()),
+                ("route", req.route.as_str()),
+            ],
+        );
         tracing::info!(
             decision_id = %id,
             context_id = %ctx.id(),

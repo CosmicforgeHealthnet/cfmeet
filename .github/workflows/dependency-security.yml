@@ -1,0 +1,103 @@
+name: Dependency and image security
+
+# Part K section 109 / Part J section 97: supply-chain gates for the Part III services.
+#
+#  * RustSec advisories for every Calling / Privacy Relay / Telephony / shared-package
+#    lockfile (cargo-audit). A vulnerability fails the job; an advisory is ignored only
+#    with a written, reviewed justification below.
+#  * Each service image: built from the repository-root context exactly as in its
+#    service workflow, its exported root filesystem scanned by the repository secret
+#    scanner (key material, keyrings, credentials), and its Debian base checked for
+#    pending security updates (the runtime stage applies them at build time).
+#
+# The Meeting Service lockfile is owned by its own workflow and is not gated here.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/calling/**"
+      - "services/privacy-relay/**"
+      - "services/telephony/**"
+      - "packages/**"
+      - "scripts/secret-scan/**"
+      - ".github/workflows/dependency-security.yml"
+  pull_request:
+    paths:
+      - "services/calling/**"
+      - "services/privacy-relay/**"
+      - "services/telephony/**"
+      - "packages/**"
+      - "scripts/secret-scan/**"
+      - ".github/workflows/dependency-security.yml"
+  schedule:
+    # Weekly, so new advisories against unchanged lockfiles are noticed.
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: dependency-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust-advisories:
+    name: RustSec advisories (${{ matrix.lockfile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lockfile:
+          - services/calling
+          - services/privacy-relay
+          - services/telephony
+          - packages/service-auth
+          - packages/webhooks
+          - packages/object-storage
+          - packages/contracts/validator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: install cargo-audit
+        run: cargo install cargo-audit --locked
+      # RUSTSEC-2023-0071 (rsa, Marvin timing attack; no fixed release exists): `rsa` is
+      # linked only through jsonwebtoken's rust_crypto backend. No Part III code loads,
+      # accepts or uses an RSA key: service tokens are EdDSA-only (RS256 is rejected by
+      # packages/service-auth, tested), signaling / media credentials are HS256.
+      - name: cargo audit
+        working-directory: ${{ matrix.lockfile }}
+        run: cargo audit --ignore RUSTSEC-2023-0071
+
+  image:
+    name: image security (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [calling, privacy-relay, telephony]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: docker build
+        run: docker build -f services/${{ matrix.service }}/Dockerfile -t cfmeet-${{ matrix.service }}:security .
+      - name: secret scan of the exported image filesystem
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/rootfs"
+          mkdir -p "$root"
+          container="$(docker create cfmeet-${{ matrix.service }}:security)"
+          docker export "$container" | tar -x -C "$root"
+          docker rm "$container" >/dev/null
+          python3 scripts/secret-scan/scan_secrets.py --tree "$root"
+      - name: no pending Debian security updates in the runtime image
+        run: |
+          set -euo pipefail
+          pending="$(docker run --rm --user 0 --entrypoint /bin/sh cfmeet-${{ matrix.service }}:security -c \
+            'apt-get update -qq >/dev/null && apt-get -s upgrade | grep "^Inst" | grep -i "security" || true')"
+          if [ -n "$pending" ]; then
+            echo "$pending"
+            echo "::error::the ${{ matrix.service }} runtime image has pending Debian security updates"
+            exit 1
+          fi
+          echo "no pending Debian security updates"

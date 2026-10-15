@@ -2,7 +2,9 @@
 //! durable commands before provider action, idempotency, feature flags, provider ids
 //! never becoming CF Meet ids, and (Part H §78) the caller identity: only the session's
 //! relay identity Privacy Relay selected, bound to the chosen interconnect, with its
-//! assignment reference kept on the leg as identity evidence.
+//! assignment reference kept on the leg as identity evidence. Part I §81 / §100: a
+//! rolled-back transaction leaves no leg, command or outbox intent, and the leg state
+//! graph in Rust and the database trigger agree on every (from, to) pair.
 
 mod common;
 
@@ -387,15 +389,42 @@ async fn privacy_relay_down_fails_closed_before_any_destination_exists() {
         return;
     };
     h.privacy.set_mode(PrMode::Unavailable);
+    let failures = || {
+        telephony::metrics::counter(
+            "telephony_dependency_failures_total",
+            &[
+                ("dependency", "PRIVACY_RELAY"),
+                ("operation", "RESOLVE_FOR_EXECUTION"),
+            ],
+        )
+    };
+    let before = failures();
     let (leg, _) = h.originate().await;
     // Retries while the grant is valid, never sends.
     h.run().await;
     assert!(h.provider_a.requests().is_empty());
     assert_eq!(h.leg_status(leg).await, "PLANNED");
-    // Denied: definite, not sent.
+    // Telephony observed the outage: ONE open incident (repeats are occurrences) and a
+    // bounded metric.
+    h.advance(2);
+    h.run().await;
+    let relay_incidents =
+        "SELECT count(*) FROM telephony_incidents WHERE category = 'PRIVACY_RELAY_UNAVAILABLE' \
+                           AND status = 'OPEN' AND dedupe_key = 'privacy-relay-unavailable'";
+    assert_eq!(h.scalar(relay_incidents).await, 1);
+    assert_eq!(
+        h.scalar(
+            "SELECT occurrences::bigint FROM telephony_incidents WHERE category = 'PRIVACY_RELAY_UNAVAILABLE'"
+        )
+        .await,
+        2
+    );
+    assert!(failures() >= before + 2);
+    // Denied: definite, not sent — and Privacy Relay answered, so the incident resolves.
     h.privacy.set_mode(PrMode::Deny);
     h.advance(5);
     h.run().await;
+    assert_eq!(h.scalar(relay_incidents).await, 0);
     assert_eq!(h.leg_status(leg).await, "FAILED");
     assert!(h.provider_a.requests().is_empty());
     assert_eq!(
@@ -552,4 +581,237 @@ async fn health_and_readiness_are_safe() {
         .collect();
     assert_eq!(refs, ["ng-a", "ng-b"]);
     assert!(!a.text.contains("dp-"));
+}
+
+#[tokio::test]
+async fn a_rolled_back_transaction_leaves_no_leg_command_or_outbox_intent() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    // Intake: the command row (written after the leg, in the same transaction) fails.
+    h.sql(
+        "CREATE FUNCTION test_refuse_command() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN \
+           RAISE EXCEPTION 'database failure (injected)'; END $$",
+    )
+    .await;
+    h.sql(
+        "CREATE TRIGGER test_refuse_command BEFORE INSERT ON telephony_commands \
+         FOR EACH ROW EXECUTE FUNCTION test_refuse_command()",
+    )
+    .await;
+    let contact = h.privacy.add_contact("+2348031234567", "NG");
+    let call_leg = Uuid::new_v4();
+    let body = h.originate_body(contact, call_leg, 1);
+    let r = h.calling(Method::POST, ORIGINATE, Some(body.clone())).await;
+    assert!(r.status.is_server_error(), "{} {}", r.status, r.text);
+    for table in [
+        "telephony_legs",
+        "telephony_commands",
+        "telephony_outbox",
+        "provider_call_bindings",
+    ] {
+        assert_eq!(
+            h.scalar(&format!("SELECT count(*) FROM {table}")).await,
+            0,
+            "{table}"
+        );
+    }
+    h.run().await;
+    assert!(h.provider_a.requests().is_empty());
+    assert!(h.calling.events().is_empty());
+    // The same command succeeds once the database accepts it (nothing half-written
+    // blocks it: no live execution, no idempotency row).
+    h.sql("DROP TRIGGER test_refuse_command ON telephony_commands")
+        .await;
+    let r = h.calling(Method::POST, ORIGINATE, Some(body)).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{}", r.text);
+    let leg: Uuid = r.json["leg"]["telephonyLegId"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    h.run().await;
+    assert_eq!(h.calling.event_types_for(leg), vec!["LEG_ACCEPTED"]);
+
+    // A state transition: the outbox write of a provider fact fails, so the provider
+    // event record, the leg change and the event intent all roll back together.
+    h.sql(
+        "CREATE FUNCTION test_refuse_ringing() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN \
+           IF NEW.event_type = 'LEG_RINGING' THEN RAISE EXCEPTION 'database failure (injected)'; END IF; \
+           RETURN NEW; END $$",
+    )
+    .await;
+    h.sql(
+        "CREATE TRIGGER test_refuse_ringing BEFORE INSERT ON telephony_outbox \
+         FOR EACH ROW EXECUTE FUNCTION test_refuse_ringing()",
+    )
+    .await;
+    let correlation = h.correlation_of(leg).await;
+    let ringing = h.provider_a.progress(
+        &correlation,
+        telephony::domain::NormalizedEvent::LegRinging,
+        h.now(),
+    );
+    assert!(h
+        .svc
+        .ingest_provider_event("dp-a", ringing.clone())
+        .await
+        .is_err());
+    assert_eq!(h.leg_status(leg).await, "ORIGINATING");
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM provider_events WHERE provider_event_id = '{}'",
+            ringing.provider_event_id
+        ))
+        .await,
+        0
+    );
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM telephony_outbox WHERE telephony_leg_id = '{leg}' AND event_type = 'LEG_RINGING'"
+        ))
+        .await,
+        0
+    );
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT event_sequence FROM telephony_legs WHERE id = '{leg}'"
+        ))
+        .await,
+        1,
+        "no sequence number was consumed"
+    );
+    // The provider's redelivery then applies exactly once.
+    h.sql("DROP TRIGGER test_refuse_ringing ON telephony_outbox")
+        .await;
+    h.svc
+        .ingest_provider_event("dp-a", ringing.clone())
+        .await
+        .unwrap();
+    h.svc.ingest_provider_event("dp-a", ringing).await.unwrap();
+    h.run().await;
+    assert_eq!(h.leg_status(leg).await, "RINGING");
+    assert_eq!(
+        h.calling.event_types_for(leg),
+        vec!["LEG_ACCEPTED", "LEG_RINGING"]
+    );
+}
+
+/// Every (from, to) pair of leg states: the Rust graph (`LegStatus::allowed_targets`)
+/// and the database trigger `trg_telephony_legs_transition` agree — both as declared
+/// (the trigger's edge list) and as enforced (an UPDATE of a real row per pair).
+#[tokio::test]
+async fn every_leg_state_pair_agrees_between_the_rust_graph_and_the_database() {
+    use sea_orm::{ConnectionTrait, TransactionTrait};
+    use std::collections::BTreeSet;
+    use telephony::domain::LegStatus;
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    // Declared: the trigger's arguments are exactly the Rust edges.
+    let declared: BTreeSet<String> = h
+        .text(
+            "SELECT array_to_string(string_to_array(substring(encode(tgargs, 'escape') from position('\\000' in encode(tgargs, 'escape')) + 4), '\\000'), ',') \
+             FROM pg_trigger WHERE tgname = 'trg_telephony_legs_transition'",
+        )
+        .await
+        .unwrap()
+        .split(',')
+        .filter(|e| !e.is_empty())
+        .map(str::to_string)
+        .collect();
+    let rust: BTreeSet<String> = LegStatus::ALL
+        .iter()
+        .flat_map(|from| {
+            from.allowed_targets()
+                .iter()
+                .map(move |to| format!("{}>{}", from.as_str(), to.as_str()))
+        })
+        .collect();
+    assert_eq!(declared, rust, "trigger edges vs Rust graph");
+
+    // Enforced: one row per source state, every target attempted (rolled back).
+    let now = h.clock_now();
+    let mut table = Vec::new();
+    for from in LegStatus::ALL {
+        let id = Uuid::new_v4();
+        let terminal = from.is_terminal();
+        let (ended_at, end_reason) = if terminal {
+            (format!("'{now}'"), "'COMPLETED'")
+        } else {
+            ("NULL".to_string(), "NULL")
+        };
+        let failure = if *from == LegStatus::Failed {
+            "'EXECUTION'"
+        } else {
+            "NULL"
+        };
+        h.sql(&format!(
+            "INSERT INTO telephony_legs (id, calling_call_id, calling_call_leg_id, tenant_id, application_id, \
+               environment_id, direction, route_class, status, generation, inbound_resolution_id, \
+               max_duration_seconds, media_attachment, usage_status, ended_at, end_reason, failure_category, \
+               created_at, updated_at) \
+             VALUES ('{id}', gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), \
+               gen_random_uuid(), 'INBOUND', 'PSTN_TO_APP', '{}', 1, gen_random_uuid(), 3600, 'NONE', 'PENDING', \
+               {ended_at}, {end_reason}, {failure}, '{now}', '{now}')",
+            from.as_str()
+        ))
+        .await;
+        for to in LegStatus::ALL {
+            if to == from {
+                continue;
+            }
+            // The target's own row invariants (terminal stamps), so only the graph decides.
+            let stamps = match (from.is_terminal(), to) {
+                (false, LegStatus::Ended) => {
+                    format!(", ended_at = '{now}', end_reason = 'COMPLETED'")
+                }
+                (false, LegStatus::Failed) => format!(
+                    ", ended_at = '{now}', end_reason = 'FAILED', failure_category = 'EXECUTION'"
+                ),
+                _ => String::new(),
+            };
+            // Each attempt in its own transaction, always rolled back.
+            let txn = h.db.conn.begin().await.unwrap();
+            let attempt = txn
+                .execute_unprepared(&format!(
+                    "UPDATE telephony_legs SET status = '{}'{stamps} WHERE id = '{id}'",
+                    to.as_str()
+                ))
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string());
+            txn.rollback().await.unwrap();
+            let refused_by_graph = attempt
+                .as_ref()
+                .err()
+                .is_some_and(|e| e.contains("is not allowed"));
+            if let Err(e) = &attempt {
+                assert!(
+                    refused_by_graph,
+                    "{} -> {}: refused by something other than the graph: {e}",
+                    from.as_str(),
+                    to.as_str()
+                );
+            }
+            table.push((*from, *to, !refused_by_graph));
+        }
+    }
+    assert_eq!(
+        table.len(),
+        LegStatus::ALL.len() * (LegStatus::ALL.len() - 1)
+    );
+    for (from, to, database) in &table {
+        assert_eq!(
+            *database,
+            from.can_transition_to(*to),
+            "{} -> {}: database {} vs Rust {}",
+            from.as_str(),
+            to.as_str(),
+            database,
+            from.can_transition_to(*to)
+        );
+    }
+    // Both directions are exercised: allowed and refused pairs exist.
+    assert!(table.iter().any(|(_, _, ok)| *ok) && table.iter().any(|(_, _, ok)| !*ok));
 }

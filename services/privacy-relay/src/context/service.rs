@@ -314,6 +314,10 @@ impl RelayService {
         });
         commands::complete(&txn, cmd, &key, Some(id), Some(1), 201, &body, now).await?;
         txn.commit().await?;
+        crate::metrics::inc(
+            "privacy_relay_context_events_total",
+            &[("event", "CREATED")],
+        );
         tracing::info!(context_id = %id, context_version = 1, "communication context created");
         Ok(CommandOutcome {
             status: 201,
@@ -890,6 +894,10 @@ impl RelayService {
                 now,
             )
             .await?;
+            crate::metrics::inc(
+                "privacy_relay_session_events_total",
+                &[("event", to.as_str())],
+            );
             // A relay identity ends with its session (a completed session keeps it only
             // while its grace lasts; the assignment never outlives that grace).
             let reason = match to {
@@ -1127,6 +1135,14 @@ impl RelayService {
         )
         .await?;
         txn.commit().await?;
+        let event: &'static str = match target {
+            S::Active => "RESUMED",
+            S::Suspended => "SUSPENDED",
+            S::Completed => "COMPLETED",
+            S::Revoked => "REVOKED",
+            S::Expired => "EXPIRED",
+        };
+        crate::metrics::inc("privacy_relay_context_events_total", &[("event", event)]);
         tracing::info!(context_id = %context_id, context_version = version, status = target.as_str(), "communication context lifecycle changed");
         body["enforcement"] = enforcement_body(&jobs, self.deliver_all(&jobs).await);
         Ok(CommandOutcome {

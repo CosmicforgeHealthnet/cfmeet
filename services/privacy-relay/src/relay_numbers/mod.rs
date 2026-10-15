@@ -55,6 +55,26 @@ impl Default for RelayNumberPoolSettings {
     }
 }
 
+#[derive(Debug, FromQueryResult)]
+struct PoolStatusCount {
+    state: String,
+    n: i64,
+}
+
+/// Relay numbers per operational status (metrics gauge; counts only, never a number).
+pub(crate) async fn pool_status_counts<C: sea_orm::ConnectionTrait>(
+    conn: &C,
+) -> RelayResult<Vec<(String, i64)>> {
+    let rows: Vec<PoolStatusCount> = crate::db::all(
+        conn,
+        "SELECT operational_status AS state, count(*) AS n FROM relay_number_inventory \
+         GROUP BY operational_status ORDER BY operational_status",
+        vec![],
+    )
+    .await?;
+    Ok(rows.into_iter().map(|r| (r.state, r.n)).collect())
+}
+
 fn corrupt(what: &'static str) -> RelayError {
     tracing::error!(what, "corrupt relay number row");
     RelayError::Refused(ErrorCode::InternalError)
