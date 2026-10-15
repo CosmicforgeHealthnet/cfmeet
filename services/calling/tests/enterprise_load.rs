@@ -65,6 +65,17 @@ async fn dial(e: &EnterpriseWorld, from: &Desk, number: &str) -> Uuid {
 }
 
 async fn explain(e: &EnterpriseWorld, sql: &str, values: Vec<sea_orm::Value>) -> String {
+    explain_with(e, "", sql, values).await
+}
+
+/// EXPLAIN with extra transaction-local planner settings (`settings` is a list of
+/// `SET LOCAL ...;` statements).
+async fn explain_with(
+    e: &EnterpriseWorld,
+    settings: &str,
+    sql: &str,
+    values: Vec<sea_orm::Value>,
+) -> String {
     // Fresh statistics first: otherwise the plan depends on whether autovacuum has
     // analyzed the freshly loaded tables yet, and the assertion becomes timing-dependent.
     e.h()
@@ -76,6 +87,9 @@ async fn explain(e: &EnterpriseWorld, sql: &str, values: Vec<sea_orm::Value>) ->
     txn.execute_unprepared("SET LOCAL enable_seqscan = off")
         .await
         .unwrap();
+    if !settings.is_empty() {
+        txn.execute_unprepared(settings).await.unwrap();
+    }
     let rows = txn
         .query_all(Statement::from_sql_and_values(
             sea_orm::DbBackend::Postgres,
@@ -144,13 +158,24 @@ async fn extension_calls_and_history_throughput() {
         None,
         25,
     );
-    let plan = explain(
+    // The history index exists so that a page is ONE ordered index range (keyset by
+    // created-at, id) with no sort, whatever the volume (ADR 0025). On a table this small
+    // the cost-based planner may legitimately prefer sorting a few rows (seen in CI with
+    // fresh statistics), so the property is asserted directly: with sorting priced out,
+    // the page is served in order by the history index.
+    let plan = explain_with(
         &e,
+        "SET LOCAL enable_sort = off;",
         &statement.sql,
         statement.values.map(|v| v.0).unwrap_or_default(),
     )
     .await;
     assert!(plan.contains("idx_call_participants_history"), "{plan}");
+    assert!(
+        !plan.lines().any(|l| l.trim_start().starts_with("->  Sort")
+            || l.trim_start().starts_with("Sort  ")),
+        "the history page must not need a sort: {plan}"
+    );
 }
 
 /// §198: a burst of Calls into ONE queue — every entry gets a unique, gap-free FIFO

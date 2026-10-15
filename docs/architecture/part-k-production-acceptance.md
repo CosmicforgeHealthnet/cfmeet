@@ -23,16 +23,16 @@ stabilized tree (targeted runs during development are not counted here).
 
 | Gate | Result |
 |---|---|
-| Calling — fmt, check, clippy `-D warnings`, `cargo test --workspace --no-fail-fast`, build | {{CALLING}} |
+| Calling — fmt, check, clippy `-D warnings`, `cargo test --workspace --no-fail-fast`, build | **682 passed, 0 failed** (87 binaries; `privacy_relay_e2e` and `telephony_e2e` against the real binaries; enterprise SIP certification required and run against real Asterisk + SIPp + an S3-compatible store; disaster recovery required and run). The local RTC section prints SKIPPED (no LiveKit here) and is not counted. |
 | Privacy Relay — same | **168 passed, 0 failed** (41 binaries; disaster recovery required and run) |
 | Telephony — same, `TELEPHONY_SIP_CERT_REQUIRED=1`, `DISASTER_RECOVERY_CERT_REQUIRED=1` | **148 passed, 0 failed** (29 binaries; SIP / media edge sections A–H incl. carrier RFC 4733 DTMF; SIP signalling load; real interconnect NOT RUN) |
-| Shared packages | {{PACKAGES}} |
-| Service boundaries guard + operations registry + mutation tests | {{BOUNDARIES}} |
-| Secret scan | {{SECRETS}} |
-| Per-service database isolation (real migrations, least-privilege roles) | {{ISOLATION}} |
-| Migrations — fresh up / status / reset / re-up; upgrade from previous head with data | {{MIGRATIONS}} |
+| Shared packages | service-auth 56 (core) / 58 (client); webhooks 14; object-storage 9 (incl. a live S3-compatible server); contracts validator 17 + `contracts: OK — 40 contracts, 164 examples, 255 counter-examples, 461 JSON files` |
+| Service boundaries guard + operations registry + mutation tests | guard OK (calling 89, meeting-service 40, privacy-relay 26, telephony 21 tables); operations registry OK (21 responsibilities); 66 guard + registry mutation tests OK |
+| Secret scan | repository clean; 12 scanner mutation tests OK (incl. image trees: unmodified Debian package files are verified against dpkg MD5 manifests, anything added or altered is scanned) |
+| Per-service database isolation (real migrations, least-privilege roles) | OK — 36 checks; the real Calling (42), Privacy Relay (14) and Telephony (15) migrations apply as their migrator roles and each runtime role reads every table |
+| Migrations — fresh up / status / reset / re-up; upgrade from previous head with data | fresh up / status / reset / re-up OK for all three (applied 42 / 14 / 15); `migration_upgrade` (N-1 → head with data → down one → re-up) passes in each service |
 | RustSec advisories (all Part III lockfiles) | clean (RUSTSEC-2023-0071 ignored with written justification: `rsa` unreachable, EdDSA / HS256 only); rustls bumped to 0.23.46 |
-| GitHub Actions on the final SHA | {{CI}} |
+| GitHub Actions on the final code SHA | recorded in §14 |
 
 ## 2. §99 Testing philosophy
 
@@ -149,14 +149,39 @@ Contact Vault down (`degradation_matrix::contact_vault_unavailable_holds_the_ori
 ## 11. §108 Load and capacity
 
 Environment for every figure: developer container, 4 vCPU, PostgreSQL 16.15 on the same
-host, **debug** builds, harness pool of 20 connections, other builds running
-concurrently. These are control-plane correctness-under-load measurements, **not**
+host, **debug** builds, harness pool of 20 connections, measured inside the final full
+test runs (other tests of the same binary run in parallel). These are control-plane correctness-under-load measurements, **not**
 production capacity. Error rate was 0 in every scenario. `lock_waits` = sum of waiting-lock
 observations over 5–10 ms samples (not distinct waits).
 
 | Scenario (service) | Concurrency | Ops | Throughput /s | p50 / p95 / p99 ms | Max DB conns | Worker lag ms |
 |---|---|---|---|---|---|---|
-{{LOAD_ROWS}}
+| `call_create_authorize_sequential` (Calling) | 1 | 40 | 1.5 | 678 / 890 / 1070 | 4 | — |
+| `call_create_authorize_concurrent` (Calling) | 16 | 80 | 3.4 | 3395 / 8630 / 10390 | 20 | — |
+| `ringing_fanout_concurrent` (Calling) | 8 | 30 | 1.0 | 7734 / 11407 / 12372 | 12 | — |
+| `callback_relay_concurrent` (Calling) | 8 | 40 | 1.4 | 5348 / 6847 / 8459 | 12 | — |
+| `outbox_backlog_build` (Calling) | 8 | 60 | 1.4 | 5700 / 9175 / 13323 | 11 | — |
+| `outbox_backlog_drain` (Calling) | 1 | 1860 | 202.0 | 4 / 7 / 7 | 11 | 9206.3 |
+| `privacy_relay_session_reads` (Calling) | 16 | 200 | 19.0 | 473 / 2947 / 3542 | 19 | — |
+| `extension_call_sequential` (Calling) | 1 | 20 | 1.6 | 330 / 572 / 576 | 6 | — |
+| `extension_call_concurrent` (Calling) | 20 | 20 | 3.5 | 3880 / 5313 / 5586 | 20 | — |
+| `history_page_25` (Calling) | 1 | 20 | 23.2 | 40 / 53 / 54 | 20 | — |
+| `ivr_call_and_transition` (Calling) | 1 | 20 | 1.8 | 479 / 607 / 755 | 9 | — |
+| `business_hours_evaluation` (Calling) | 1 | 100 | 35.6 | 26 / 47 / 51 | 9 | — |
+| `queue_insert_burst` (Calling) | 60 | 60 | 3.5 | 15879 / 16337 / 16823 | 20 | — |
+| `queue_assignment` (Calling) | 1 | 12 | 2.6 | 118 / 157 / 157 | 20 | — |
+| `ring_group_fanout_call` (Calling) | 1 | 10 | 1.4 | 614 / 1127 / 1127 | 8 | — |
+| `context_session_create` (Privacy Relay) | 16 | 400 | 39.6 | 317 / 944 / 1474 | 20 | — |
+| `protected_authorization` (Privacy Relay) | 32 | 1000 | 133.7 | 200 / 485 / 630 | 20 | — |
+| `relay_number_allocation_contention` (Privacy Relay) | 64 | 64 | 127.5 | 252 / 455 / 494 | 20 | — |
+| `outbox_drain` (Privacy Relay) | 4 | 938 | 743.3 | 479 / 522 / 522 | 20 | — |
+| `leg_setup_intake` (Telephony) | 50 | 200 | 38.6 | 626 / 1942 / 2013 | 20 | 0 |
+| `command_execution` (Telephony) | 2 | 200 | 46.6 | 2307 / 4291 / 4291 | 20 | 4291 |
+| `provider_event_ingestion` (Telephony) | 60 | 600 | 316.8 | 106 / 181 / 196 | 20 | 2550 |
+| `provider_event_duplicate_dedupe` (Telephony) | 60 | 600 | 362.2 | 139 / 170 / 180 | 20 | 0 |
+| `reconciliation` (Telephony) | 2 | 200 | 141.1 | 747 / 1399 / 1399 | 20 | 1399 |
+| `sip_signalling_setup` (Telephony) | 20 | 20 | 7.2 | 2159 / 2716 / 2716 | 20 | 2159 |
+| `sip_signalling_teardown` (Telephony) | 20 | 20 | 17.5 | 1091 / 1091 / 1091 | 20 | 1091 |
 
 * **CONTROL-PLANE SCALE — MEASURED** (above; targets for a release build on a dedicated
   host are documented in each load test header and not asserted).
@@ -178,7 +203,32 @@ check. Unresolved upstream finding, documented: RUSTSEC-2023-0071 (`rsa`, no fix
 unreachable. The Meeting Service lockfile has its own advisories (owned by that service's
 workflow, outside Part III).
 
-## 13. §110 Production acceptance gates
+## 13. Defects found by this programme (all fixed, with regression tests)
+
+* **Paid originate after revocation** (Calling): a context revoked after the Contact
+  Resolution Grant was issued, but before the originate was sent, still produced a paid
+  leg that no TERMINATE would end. Fixed: the attempt is recorded only for a still-active
+  Call under a held claim, and the TERMINATE path never declares a leased originate dead
+  (`cross_service_races::context_revoked_after_the_grant_was_issued_issues_no_paid_command`).
+* **Commit-then-enqueue of TERMINATE** (Calling): fixed by the deferred trigger (Part I §81).
+* **Array JSON bodies accepted positionally** (Calling): refused by a body-shape
+  middleware (`api_authorization_matrix::request_bodies_must_be_json_objects`).
+* **Body validated before scope** on two routes (Calling): scope checked first.
+* **Lock-order deadlock** between Telephony capacity reservation and event ingestion,
+  found under SIP load: `FOR NO KEY UPDATE`
+  (`failover::capacity_reservation_is_not_blocked_by_a_legs_foreign_key_locks`).
+* **Unbounded retries**: Telephony reschedule paths, the Telephony outbox and Privacy
+  Relay enforcement now have caps and dead letters (Part I §81).
+* CI: a planner assertion on a 40-row table chose a sort with fresh statistics; the test
+  now asserts the property the history index exists for (an ordered page with no sort);
+  the new image secret scan flagged GnuTLS's public FIPS self-test keys; the scanner now
+  skips only package files verified unmodified against the dpkg manifests.
+
+## 14. GitHub Actions
+
+Recorded in a documentation-only follow-up commit once the runs of the final code commit are terminal.
+
+## 15. §110 Production acceptance gates
 
 ```
 ARCHITECTURE GATE                  ✅

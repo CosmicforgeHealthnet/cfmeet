@@ -88,6 +88,39 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(rules("bin/app", b"\0\0" + PEM), {"PRIVATE_KEY_BLOCK"})
 
 
+class ImageTreeTests(unittest.TestCase):
+    """--tree on an exported Debian root filesystem."""
+
+    def scan_tree(self, files: dict[str, bytes], md5sums: dict[str, bytes]) -> list[str]:
+        import hashlib
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for rel, data in files.items():
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_bytes(data)
+            info = root / "var/lib/dpkg/info"
+            info.mkdir(parents=True, exist_ok=True)
+            (info / "libexample.md5sums").write_text(
+                "".join(f"{hashlib.md5(data).hexdigest()}  {rel}\n" for rel, data in md5sums.items()))
+            found = scan.scan_paths(root, scan.tree_files(root), scan.package_manifest(root))
+            return sorted(f.path for f in found)
+
+    def test_unmodified_package_content_is_skipped(self) -> None:
+        lib = b"\0ELF" + PEM  # an upstream library carrying public self-test keys
+        self.assertEqual(self.scan_tree({"usr/lib/libexample.so": lib}, {"usr/lib/libexample.so": lib}), [])
+
+    def test_an_altered_package_file_is_scanned(self) -> None:
+        shipped = b"\0ELF upstream"
+        self.assertEqual(self.scan_tree({"usr/lib/libexample.so": b"\0ELF" + PEM},
+                                        {"usr/lib/libexample.so": shipped}), ["usr/lib/libexample.so"])
+
+    def test_files_added_to_the_image_are_always_scanned(self) -> None:
+        lib = b"\0ELF" + PEM
+        self.assertEqual(self.scan_tree({"usr/lib/libexample.so": lib, "app/service.pem": PEM},
+                                        {"usr/lib/libexample.so": lib}), ["app/service.pem"])
+
+
 class RepositoryTests(unittest.TestCase):
     def test_real_repository_is_clean(self) -> None:
         findings = scan.scan_paths(REPO, scan.tracked_files(REPO))

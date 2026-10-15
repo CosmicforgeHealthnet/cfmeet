@@ -19,6 +19,10 @@ Scope: by default every file tracked by git in the repository (``git ls-files``)
 ``--tree DIR`` scans a directory tree instead (an exported container root filesystem,
 a build context) with pseudo-filesystems excluded. Binary files are skipped for the
 textual rules (the PEM, keyring and credential rules still run on them, byte-wise).
+In a tree that is a Debian root filesystem, a file is skipped only when it is unmodified
+distribution content: it is listed in a package's ``var/lib/dpkg/info/*.md5sums`` and its
+MD5 matches that manifest (e.g. GnuTLS ships well-known FIPS self-test keys). Anything
+added to the image, or a package file that was altered, is scanned.
 
 Known non-secrets are allow-listed explicitly, never by excluding whole directories:
 ``*.example*`` templates, loopback-only certification placeholders under
@@ -32,6 +36,7 @@ Standard library only. Exit status: 0 clean, 1 findings, 2 usage error.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import re
 import subprocess
@@ -183,7 +188,22 @@ def tree_files(root: Path) -> list[Path]:
     return files
 
 
-def scan_paths(root: Path, paths: list[Path]) -> list[Finding]:
+def package_manifest(root: Path) -> dict[str, str]:
+    """path (relative, no leading slash) -> MD5 of every file the installed Debian
+    packages of an exported root filesystem declare; empty for a non-Debian tree."""
+    manifest: dict[str, str] = {}
+    info = root / "var/lib/dpkg/info"
+    if not info.is_dir():
+        return manifest
+    for sums in sorted(info.glob("*.md5sums")):
+        for line in sums.read_text(encoding="utf-8", errors="replace").splitlines():
+            digest, _, rel = line.partition("  ")
+            if len(digest) == 32 and rel:
+                manifest[rel.lstrip("/")] = digest.lower()
+    return manifest
+
+
+def scan_paths(root: Path, paths: list[Path], packaged: dict[str, str] | None = None) -> list[Finding]:
     findings: list[Finding] = []
     for path in paths:
         try:
@@ -195,6 +215,8 @@ def scan_paths(root: Path, paths: list[Path]) -> list[Finding]:
         rel = path.relative_to(root).as_posix()
         if rel.startswith("scripts/secret-scan/"):
             continue  # the scanner's own patterns and fixtures
+        if packaged and packaged.get(rel) == hashlib.md5(data).hexdigest():
+            continue  # unmodified Debian package content, verified against dpkg
         findings.extend(scan_bytes(rel, data))
     return findings
 
@@ -209,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
         if not root.is_dir():
             print(f"error: {root} is not a directory", file=sys.stderr)
             return 2
-        findings = scan_paths(root, tree_files(root))
+        findings = scan_paths(root, tree_files(root), package_manifest(root))
     else:
         root = (args.repo or Path(__file__).resolve().parents[2]).resolve()
         if not (root / ".git").exists():
