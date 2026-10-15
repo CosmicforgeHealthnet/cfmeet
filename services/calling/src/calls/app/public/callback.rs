@@ -105,6 +105,12 @@ impl AppCallService {
             .resolve(ctx, &PrincipalReference::Id(request.initiator))
             .await
             .map_err(|e| super::super::create::resolution(e, true))?;
+        if !initiator.kind().may_initiate_application_call() {
+            return Err(CallError::PrincipalCategoryNotAllowed);
+        }
+        // Part H §70: a block on the callee contact refuses the relay before Privacy Relay.
+        self.refuse_blocked_contact(scope, initiator.id().as_uuid(), request.target_contact)
+            .await?;
         let decision = self
             .public_privacy_authority(
                 ctx,
@@ -157,11 +163,19 @@ impl AppCallService {
             spend_headroom_minor: headroom,
             operational_incident: Evidence::Unknown,
             duplicate_risk: DuplicateRisk::None,
+            compliance: crate::routing::compliance::facts(
+                self.db(),
+                environment,
+                &self.compliance_overlay,
+            )
+            .await,
         };
         let mut plan = match crate::routing::engine::select(&policy.policy, &inputs, now) {
             RouteDecision::Selected(plan) => *plan,
             RouteDecision::Denied(denial) => {
                 tracing::info!(denial = denial.as_str(), "callback relay route denied");
+                self.note_route_denial(scope, initiator.id().as_uuid(), denial, now)
+                    .await;
                 return Err(super::outbound::denial_error(denial));
             }
         };

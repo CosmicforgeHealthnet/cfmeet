@@ -893,6 +893,15 @@ impl AppCallService {
                 .await?
                 .map(|r| r.try_get_by_index::<Uuid>(0))
                 .transpose()?;
+            // Part H §70: agents blocked from (or blocking) the caller are never offered.
+            let blocked = crate::calls::app::blocks::blocked_targets(
+                &txn,
+                call.environment_id,
+                call.initiator_principal_id,
+                &agents,
+            )
+            .await?;
+            agents.retain(|a| !blocked.contains(a));
             let mut offer = None;
             let mut i = 0;
             while i < agents.len() {

@@ -15,6 +15,8 @@
 //! has committed. Business code here depends on the provider-neutral
 //! [`CallMediaProvider`] only.
 
+pub mod abuse_reports;
+pub mod blocks;
 mod control;
 mod create;
 pub mod enterprise;
@@ -38,6 +40,7 @@ use sea_orm::{
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
+pub use blocks::AbuseControls;
 pub use control::{ActionAvailability, AvailableActions};
 pub use create::{CreateAppCall, CreatedAppCall};
 pub use ringing::{InvitationActor, RecoveredInvitation};
@@ -167,6 +170,11 @@ pub struct AppCallService {
     pub(crate) artifacts: Arc<dyn cf_object_storage::ObjectStore>,
     /// Media capture of application (RTC) callers (Part F; default: unavailable).
     pub(crate) capture: Arc<dyn enterprise::CallMediaCapture>,
+    /// Abuse-control thresholds (Part H §69, §83).
+    pub(crate) abuse_controls: AbuseControls,
+    /// Platform compliance overlay (Part H §78): countries whose paid routes always
+    /// require compliance eligibility, whatever the customer policy says.
+    pub(crate) compliance_overlay: crate::routing::compliance::ComplianceOverlay,
 }
 
 impl AppCallService {
@@ -193,7 +201,24 @@ impl AppCallService {
             enterprise_flags: crate::enterprise::EnterpriseFlags::default(),
             artifacts: Arc::new(cf_object_storage::UnconfiguredStore),
             capture: Arc::new(enterprise::UnavailableCapture),
+            abuse_controls: AbuseControls::default(),
+            compliance_overlay: Default::default(),
         }
+    }
+
+    /// Uses `controls` as the abuse-control thresholds (default: documented defaults).
+    pub fn with_abuse_controls(mut self, controls: AbuseControls) -> Self {
+        self.abuse_controls = controls;
+        self
+    }
+
+    /// Uses `overlay` as the platform compliance overlay (default: empty).
+    pub fn with_compliance_overlay(
+        mut self,
+        overlay: crate::routing::compliance::ComplianceOverlay,
+    ) -> Self {
+        self.compliance_overlay = overlay;
+        self
     }
 
     /// Uses `artifacts` as the protected artifact store (default: unconfigured).

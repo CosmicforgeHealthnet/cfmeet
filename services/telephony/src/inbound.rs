@@ -6,8 +6,12 @@
 //! 1. kill switches (Telephony, public inbound);
 //! 2. peer validation: only a configured, enabled inbound interconnect (its SIP peer
 //!    configuration) may deliver calls, and only to a platform relay number bound to it;
-//!    anything else is rejected and raises SIP_PEER_REJECTED;
-//! 3. bounded ingress rate per peer;
+//!    anything else is rejected and raises SIP_PEER_REJECTED. When the edge reports the
+//!    dialog's source address it must fall inside the peer's `allowed_source_cidrs`
+//!    (the edge's own `identify` match is the first line; this is the second), and the
+//!    peer's `max_concurrent_dialogs` is enforced;
+//! 3. bounded ingress rate per peer (over the bound: `SIP_INGRESS_RATE_LIMITED`, one
+//!    deduplicated incident per peer, a bounded metric);
 //! 4. the caller hears ringing (no answer: nothing is charged yet);
 //! 5. Privacy Relay resolves the called relay number to its CURRENT mapping (generation,
 //!    assignment, session, context) — expired, cooled-down, unknown or ambiguous mappings
@@ -45,12 +49,61 @@ struct InboundRoute {
     max_call_seconds: i32,
 }
 
+#[derive(Debug, FromQueryResult)]
+struct PeerRow {
+    cidrs: Vec<String>,
+    max_concurrent_dialogs: i32,
+}
+
+/// Whether `ip` lies inside `cidr` (`a.b.c.d/n`, `x::/n`, or a bare address).
+pub fn cidr_contains(cidr: &str, ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    let (net, bits) = match cidr.split_once('/') {
+        Some((n, b)) => (n.trim(), b.trim().parse::<u32>().ok()),
+        None => (cidr.trim(), None),
+    };
+    let Ok(net) = net.parse::<IpAddr>() else {
+        return false;
+    };
+    match (net, ip) {
+        (IpAddr::V4(n), IpAddr::V4(a)) => {
+            let bits = bits.unwrap_or(32);
+            if bits > 32 {
+                return false;
+            }
+            let mask = if bits == 0 {
+                0
+            } else {
+                u32::MAX << (32 - bits)
+            };
+            u32::from(n) & mask == u32::from(a) & mask
+        }
+        (IpAddr::V6(n), IpAddr::V6(a)) => {
+            let bits = bits.unwrap_or(128);
+            if bits > 128 {
+                return false;
+            }
+            let mask = if bits == 0 {
+                0
+            } else {
+                u128::MAX << (128 - bits)
+            };
+            u128::from(n) & mask == u128::from(a) & mask
+        }
+        _ => false,
+    }
+}
+
 /// Why an inbound dialog was rejected (bounded codes; logs only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InboundRejection {
     Disabled,
     UnknownPeer,
     UnboundNumber,
+    /// The reported source address is outside the peer's allowed networks.
+    SourceNotAllowed,
+    /// The peer's `max_concurrent_dialogs` is reached.
+    PeerCapacity,
     RateLimited,
     NoActiveMapping,
     AnonymousCaller,
@@ -64,6 +117,8 @@ impl InboundRejection {
             InboundRejection::Disabled => "DISABLED",
             InboundRejection::UnknownPeer => "UNKNOWN_PEER",
             InboundRejection::UnboundNumber => "UNBOUND_NUMBER",
+            InboundRejection::SourceNotAllowed => "SOURCE_NOT_ALLOWED",
+            InboundRejection::PeerCapacity => "PEER_CAPACITY",
             InboundRejection::RateLimited => "RATE_LIMITED",
             InboundRejection::NoActiveMapping => "NO_ACTIVE_MAPPING",
             InboundRejection::AnonymousCaller => "ANONYMOUS_CALLER",
@@ -155,8 +210,53 @@ impl TelephonyService {
                 InboundRejection::UnknownPeer
             });
         };
+        // The peer's declared networks and dialog bound (`sip_peer_config_refs`).
+        let peer_row: Option<PeerRow> = db::one(
+            &self.db,
+            "SELECT allowed_source_cidrs::text[] AS cidrs, max_concurrent_dialogs \
+             FROM sip_peer_config_refs WHERE id = $1",
+            vec![peer.clone().into()],
+        )
+        .await
+        .map_err(internal)?;
+        if let (Some(source), Some(row)) = (inbound.source_address, &peer_row) {
+            if !row.cidrs.is_empty() && !row.cidrs.iter().any(|c| cidr_contains(c, source)) {
+                crate::metrics::inc(
+                    "telephony_sip_ingress_rejections_total",
+                    &[("reason", "SOURCE_NOT_ALLOWED")],
+                );
+                let incident = Incident::new(
+                    "SIP_PEER_REJECTED",
+                    Severity::High,
+                    format!("sip-peer-source:{peer}"),
+                )
+                .evidence(json!({ "knownPeer": true, "reason": "SOURCE_NOT_ALLOWED" }));
+                incidents::raise(&self.db, &incident, self.now())
+                    .await
+                    .map_err(internal)?;
+                return Err(InboundRejection::SourceNotAllowed);
+            }
+        }
+        if let Some(row) = &peer_row {
+            let live = db::scalar_i64(
+                &self.db,
+                "SELECT count(*) FROM telephony_legs l JOIN telecom_routes r ON r.id = l.route_id \
+                 WHERE r.sip_peer_config_ref_id = $1 AND l.direction = 'INBOUND' AND l.status NOT IN ('ENDED', 'FAILED')",
+                vec![peer.clone().into()],
+            )
+            .await
+            .map_err(internal)?;
+            if live >= i64::from(row.max_concurrent_dialogs) {
+                crate::metrics::inc(
+                    "telephony_sip_ingress_rejections_total",
+                    &[("reason", "PEER_CAPACITY")],
+                );
+                return Err(InboundRejection::PeerCapacity);
+            }
+        }
         let hits = self.count_ingress(&peer).await.map_err(internal)?;
         if hits > MAX_INBOUND_PER_PEER_PER_MINUTE {
+            self.count_ingress_rejected(&peer).await.map_err(internal)?;
             return Err(InboundRejection::RateLimited);
         }
         // The caller hears ringing; nothing is answered (charged) yet.
@@ -291,6 +391,37 @@ impl TelephonyService {
         Ok(leg_id)
     }
 
+    /// A rate-limited inbound dialog: bounded metric, per-peer window of rejections and
+    /// ONE incident per peer (repeats bump its occurrences; never one per packet).
+    pub(crate) async fn count_ingress_rejected(&self, peer: &str) -> TelephonyResult<()> {
+        crate::metrics::inc(
+            "telephony_sip_ingress_rejections_total",
+            &[("reason", "RATE_LIMITED")],
+        );
+        let now = self.now();
+        let window = chrono::DateTime::<chrono::Utc>::from_timestamp(
+            now.timestamp() - now.timestamp() % 60,
+            0,
+        )
+        .unwrap_or(now);
+        let rejected = db::scalar_i64(
+            &self.db,
+            "INSERT INTO telephony_ingress_windows (subject_kind, subject_id, window_start, hits) VALUES ('SIP_INGRESS_REJECTED', $1, $2, 1) \
+             ON CONFLICT (subject_kind, subject_id, window_start) DO UPDATE SET hits = telephony_ingress_windows.hits + 1 \
+             RETURNING hits",
+            vec![peer.to_ascii_lowercase().into(), window.into()],
+        )
+        .await?;
+        let incident = Incident::new(
+            "SIP_INGRESS_RATE_LIMITED",
+            Severity::High,
+            format!("sip-ingress-rate:{}", peer.to_ascii_lowercase()),
+        )
+        .evidence(json!({ "rejectedThisMinute": rejected, "limitPerMinute": MAX_INBOUND_PER_PEER_PER_MINUTE }));
+        incidents::raise(&self.db, &incident, now).await?;
+        Ok(())
+    }
+
     pub(crate) async fn count_ingress(&self, peer: &str) -> TelephonyResult<i64> {
         let now = self.now();
         let window = chrono::DateTime::<chrono::Utc>::from_timestamp(
@@ -313,4 +444,25 @@ impl TelephonyService {
 /// Parses a caller / called identity from the edge (canonical E.164 only).
 pub fn edge_number(raw: Option<&str>) -> Option<ExecutionNumber> {
     raw.and_then(ExecutionNumber::parse)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cidr_matching_covers_v4_v6_and_bare_addresses() {
+        let ip = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
+        assert!(cidr_contains("192.0.2.0/24", ip("192.0.2.77")));
+        assert!(!cidr_contains("192.0.2.0/24", ip("192.0.3.1")));
+        assert!(cidr_contains("192.0.2.7/32", ip("192.0.2.7")));
+        assert!(cidr_contains("192.0.2.7", ip("192.0.2.7")));
+        assert!(!cidr_contains("192.0.2.7", ip("192.0.2.8")));
+        assert!(cidr_contains("0.0.0.0/0", ip("203.0.113.1")));
+        assert!(cidr_contains("2001:db8::/32", ip("2001:db8:1::5")));
+        assert!(!cidr_contains("2001:db8::/32", ip("2001:db9::1")));
+        assert!(!cidr_contains("192.0.2.0/24", ip("::ffff:192.0.2.1")));
+        assert!(!cidr_contains("garbage", ip("192.0.2.1")));
+        assert!(!cidr_contains("192.0.2.0/33", ip("192.0.2.1")));
+    }
 }

@@ -28,6 +28,7 @@ pub mod model;
 pub mod normalization;
 pub mod repository;
 pub mod resolution;
+pub mod secret_file;
 pub mod service;
 pub mod verification;
 
@@ -143,6 +144,27 @@ impl ContactVault {
     }
 }
 
+/// Audit reason of an attempt on an ERASED contact. The public error code stays
+/// `CONTACT_DISABLED` (an erased contact is a disabled one; the contract's error-code
+/// vocabulary is owned by `packages/contracts`), the audit row names the real reason.
+pub const ERASED_REASON: &str = "CONTACT_ERASED";
+const ERASED_MESSAGE: &str = "The contact has been erased.";
+
+/// The refusal for any value-bearing use of an erased contact.
+pub fn erased() -> RelayError {
+    RelayError::Coded(ErrorCode::ContactDisabled, ERASED_MESSAGE)
+}
+
+/// The stable reason code an error is audited under.
+pub(crate) fn audit_reason(error: &RelayError) -> &'static str {
+    match error {
+        RelayError::Coded(ErrorCode::ContactDisabled, message) if *message == ERASED_MESSAGE => {
+            ERASED_REASON
+        }
+        other => other.code().as_str(),
+    }
+}
+
 /// Who performs a Contact Vault operation (trusted inputs only; never deserialized).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContactActorKind {
@@ -244,6 +266,8 @@ pub enum ContactOperation {
     ResolveForExecution,
     ProtectInbound,
     ExpireVerification,
+    /// Retention minimization of a disabled contact's value (§80).
+    Erase,
 }
 
 impl ContactOperation {
@@ -260,6 +284,7 @@ impl ContactOperation {
             ContactOperation::ResolveForExecution => "RESOLVE_FOR_EXECUTION",
             ContactOperation::ProtectInbound => "PROTECT_INBOUND",
             ContactOperation::ExpireVerification => "EXPIRE_VERIFICATION",
+            ContactOperation::Erase => "ERASE",
         }
     }
 }

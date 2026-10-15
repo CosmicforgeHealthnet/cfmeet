@@ -2,11 +2,17 @@
 //! ingress: authentication before parsing, body limit, strict parser, provider-qualified
 //! dedupe, out-of-order and late events, unknown provider objects, raw-payload hygiene,
 //! and every event Telephony delivers to Calling validated against the canonical
-//! `cfmeet.telephony.events` contract.
+//! `cfmeet.telephony.events` contract. Part H: strict identifier validation before any
+//! transaction, aggregation of invalid callbacks into deduplicated incidents, secret
+//! rotation overlap, and logs that never carry a token, body or signature.
 
 mod common;
 
-use std::path::PathBuf;
+use std::{
+    io,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use axum::http::{Method, Request, StatusCode};
 use chrono::{DateTime, Utc};
@@ -14,6 +20,8 @@ use common::{Harness, Response};
 use jsonschema::{Registry, Resource, Validator};
 use serde_json::{json, Value};
 use telephony::domain::NormalizedEvent;
+use telephony::metrics;
+use tracing_subscriber::fmt::MakeWriter;
 use uuid::Uuid;
 
 const SIGNATURE: &str = "x-cfmeet-provider-signature";
@@ -530,4 +538,355 @@ async fn raw_payloads_are_never_forwarded_and_delivered_events_follow_the_contra
     );
     post(&h, &future).await;
     assert_eq!(h.scalar("SELECT count(*) FROM provider_events").await, 0);
+}
+
+/// Captures every log line emitted on this thread (the test runtime is single-threaded).
+#[derive(Clone, Default)]
+struct LogCapture(Arc<Mutex<Vec<u8>>>);
+
+impl LogCapture {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().unwrap()).to_string()
+    }
+}
+
+impl io::Write for LogCapture {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> MakeWriter<'a> for LogCapture {
+    type Writer = LogCapture;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+fn capture_logs() -> (LogCapture, tracing::subscriber::DefaultGuard) {
+    let capture = LogCapture::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(capture.clone())
+        .with_max_level(tracing::Level::TRACE)
+        .with_ansi(false)
+        .finish();
+    (capture, tracing::subscriber::set_default(subscriber))
+}
+
+async fn incident_count(h: &Harness, category: &str) -> i64 {
+    h.scalar(&format!(
+        "SELECT count(*) FROM telephony_incidents WHERE category = '{category}' AND status = 'OPEN'"
+    ))
+    .await
+}
+
+async fn occurrences(h: &Harness, category: &str) -> i64 {
+    h.scalar(&format!(
+        "SELECT coalesce(max(occurrences), 0)::bigint FROM telephony_incidents WHERE category = '{category}' AND status = 'OPEN'"
+    ))
+    .await
+}
+
+#[tokio::test]
+async fn over_long_identifiers_are_refused_with_400_before_any_transaction() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let (leg, call_ref, _) = live_leg(&h).await;
+    let before = h.scalar("SELECT count(*) FROM provider_events").await;
+    let t = h.now();
+    let long = "x".repeat(161);
+    let exact = "y".repeat(160);
+    for (name, body) in [
+        (
+            "event id",
+            json!({ "eventId": long, "event": "ringing", "occurredAt": t, "callRef": call_ref }),
+        ),
+        (
+            "call ref",
+            json!({ "eventId": "long-ref", "event": "ringing", "occurredAt": t, "callRef": long }),
+        ),
+        (
+            "correlation key",
+            json!({ "eventId": "long-key", "event": "ringing", "occurredAt": t, "correlationKey": long }),
+        ),
+        (
+            "bad event id syntax",
+            json!({ "eventId": "bad id", "event": "ringing", "occurredAt": t, "callRef": call_ref }),
+        ),
+        (
+            "negative sequence",
+            json!({ "eventId": "neg", "event": "ringing", "occurredAt": t, "callRef": call_ref, "sequence": -1 }),
+        ),
+        (
+            "huge sequence",
+            json!({ "eventId": "huge", "event": "ringing", "occurredAt": t, "callRef": call_ref, "sequence": 2147483648i64 }),
+        ),
+        (
+            "lower-case currency",
+            json!({ "eventId": "cur", "event": "completed", "occurredAt": t, "callRef": call_ref, "costMinor": 5, "currency": "ngn" }),
+        ),
+        (
+            "negative cost",
+            json!({ "eventId": "cost", "event": "completed", "occurredAt": t, "callRef": call_ref, "costMinor": -5, "currency": "NGN" }),
+        ),
+    ] {
+        let raw = serde_json::to_vec(&body).unwrap();
+        let sig = h.provider_a.sign(&raw);
+        let r = post_raw(&h, "dp-a", raw, Some(sig)).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{name}: {}", r.text);
+        assert_eq!(r.code(), "VALIDATION_ERROR", "{name}");
+    }
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM provider_events").await,
+        before,
+        "nothing stored"
+    );
+    assert_eq!(h.leg_status(leg).await, "ORIGINATING");
+    // The longest acceptable id (160) is fine, and an unknown object with a long
+    // reference gets a bounded incident key.
+    let r = post(&h, &cb(&exact, &call_ref, "ringing", 1, t)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let unknown = cb("unknown-long", &exact, "answered", 2, t);
+    assert_eq!(post(&h, &unknown).await.status, StatusCode::OK);
+    assert_eq!(disposition(&h, "unknown-long").await, "QUARANTINED");
+    assert!(
+        h.scalar("SELECT count(*) FROM telephony_incidents WHERE category = 'UNKNOWN_PROVIDER_OBJECT' AND length(dedupe_key) <= 160")
+            .await
+            >= 1
+    );
+}
+
+#[tokio::test]
+async fn malformed_callbacks_aggregate_into_one_incident_without_leaking_into_logs() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let (_, call_ref, _) = live_leg(&h).await;
+    let (logs, _guard) = capture_logs();
+    let before = metrics::counter(
+        "telephony_provider_callback_rejections_total",
+        &[("reason", "MALFORMED")],
+    );
+    let body = json!({ "eventId": "m-1", "event": "ringing", "occurredAt": h.now(), "callRef": call_ref,
+                       "carrierStatus": "secret-body-marker-180" });
+    let raw = serde_json::to_vec(&body).unwrap();
+    let sig = h.provider_a.sign(&raw);
+    // Below the threshold (5 / minute in the harness): no incident.
+    for _ in 0..4 {
+        let r = post_raw(&h, "dp-a", raw.clone(), Some(sig.clone())).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    }
+    assert_eq!(incident_count(&h, "CALLBACK_MALFORMED").await, 0);
+    // At and past it: exactly ONE open incident whose occurrences grow.
+    for _ in 0..4 {
+        post_raw(&h, "dp-a", raw.clone(), Some(sig.clone())).await;
+    }
+    assert_eq!(incident_count(&h, "CALLBACK_MALFORMED").await, 1);
+    assert!(occurrences(&h, "CALLBACK_MALFORMED").await >= 3);
+    assert_eq!(
+        h.text("SELECT dedupe_key FROM telephony_incidents WHERE category = 'CALLBACK_MALFORMED'")
+            .await
+            .as_deref(),
+        Some("callback-malformed:dp-a")
+    );
+    assert_eq!(
+        metrics::counter(
+            "telephony_provider_callback_rejections_total",
+            &[("reason", "MALFORMED")]
+        ),
+        before + 8
+    );
+    // The evidence and the logs carry neither the body nor the signature nor a token.
+    let r = post_raw(
+        &h,
+        "dp-a/secret-path-token-7f3a9c",
+        raw.clone(),
+        Some(sig.clone()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let evidence = h
+        .text("SELECT restricted_evidence::text FROM telephony_incidents WHERE category = 'CALLBACK_MALFORMED'")
+        .await
+        .unwrap();
+    let text = logs.text();
+    assert!(!text.is_empty(), "logs were captured");
+    for forbidden in [
+        "secret-body-marker-180",
+        "carrierStatus",
+        "secret-path-token-7f3a9c",
+        sig.trim_start_matches("v1="),
+        &call_ref,
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "{forbidden} leaked into logs:\n{text}"
+        );
+        assert!(
+            !evidence.contains(forbidden),
+            "{forbidden} in evidence: {evidence}"
+        );
+    }
+    assert!(
+        text.contains("/provider-callbacks/:provider_id/:token"),
+        "the route pattern, not the path, is logged:\n{text}"
+    );
+}
+
+#[tokio::test]
+async fn unknown_provider_callbacks_aggregate_under_the_unknown_subject() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let body =
+        br#"{"eventId":"u-1","event":"ringing","occurredAt":"2031-03-01T10:00:00Z"}"#.to_vec();
+    let before = metrics::counter(
+        "telephony_provider_callback_rejections_total",
+        &[("reason", "UNKNOWN_PROVIDER")],
+    );
+    // Unknown ids and non-ids alike: four distinct attacker-supplied segments, one
+    // window subject.
+    for provider in ["ghost-1", "ghost-2", "DP-A", "x"] {
+        let r = post_raw(&h, provider, body.clone(), Some("v1=00".into())).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{provider}");
+        assert_eq!(r.code(), "PROVIDER_EVENT_REJECTED");
+    }
+    assert_eq!(incident_count(&h, "CALLBACK_UNKNOWN_PROVIDER").await, 0);
+    for provider in ["ghost-3", "ghost-4", "ghost-5"] {
+        post_raw(&h, provider, body.clone(), Some("v1=00".into())).await;
+    }
+    assert_eq!(incident_count(&h, "CALLBACK_UNKNOWN_PROVIDER").await, 1);
+    assert_eq!(
+        h.text("SELECT dedupe_key FROM telephony_incidents WHERE category = 'CALLBACK_UNKNOWN_PROVIDER'")
+            .await
+            .as_deref(),
+        Some("callback-unknown-provider")
+    );
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM telephony_ingress_windows WHERE subject_kind = 'CALLBACK_UNKNOWN_PROVIDER' AND subject_id <> 'unknown'")
+            .await,
+        0,
+        "never the attacker-supplied id"
+    );
+    assert_eq!(
+        metrics::counter(
+            "telephony_provider_callback_rejections_total",
+            &[("reason", "UNKNOWN_PROVIDER")]
+        ),
+        before + 7
+    );
+    let dump = h.dump().await;
+    for ghost in ["ghost-1", "ghost-5", "DP-A"] {
+        assert!(!dump.contains(ghost), "{ghost} persisted");
+    }
+}
+
+#[tokio::test]
+async fn replay_bursts_become_one_incident_while_a_single_duplicate_is_normal() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let (leg, call_ref, _) = live_leg(&h).await;
+    let ringing = cb("rp-1", &call_ref, "ringing", 1, h.now());
+    assert_eq!(post(&h, &ringing).await.status, StatusCode::OK);
+    // A few duplicates: normal provider behaviour, no incident.
+    for _ in 0..3 {
+        assert_eq!(post(&h, &ringing).await.status, StatusCode::OK);
+    }
+    assert_eq!(incident_count(&h, "CALLBACK_REPLAY_ABUSE").await, 0);
+    // A burst (threshold 5 / minute): exactly one incident, keyed per provider.
+    for _ in 0..4 {
+        post(&h, &ringing).await;
+    }
+    assert_eq!(incident_count(&h, "CALLBACK_REPLAY_ABUSE").await, 1);
+    assert_eq!(
+        h.text(
+            "SELECT dedupe_key FROM telephony_incidents WHERE category = 'CALLBACK_REPLAY_ABUSE'"
+        )
+        .await
+        .as_deref(),
+        Some("callback-replay:dp-a")
+    );
+    assert_eq!(h.leg_status(leg).await, "RINGING");
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM provider_events WHERE provider_event_id = 'rp-1'")
+            .await,
+        1
+    );
+    // Events outside the accepted time window count as replays too.
+    let stale = cb(
+        "rp-old",
+        &call_ref,
+        "answered",
+        2,
+        h.now() - chrono::Duration::hours(3),
+    );
+    let n = occurrences(&h, "CALLBACK_REPLAY_ABUSE").await;
+    assert_eq!(post(&h, &stale).await.status, StatusCode::OK);
+    assert!(occurrences(&h, "CALLBACK_REPLAY_ABUSE").await > n);
+}
+
+#[tokio::test]
+async fn oversized_callbacks_are_counted_even_when_the_listener_refuses_them() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let before = metrics::counter(
+        "telephony_provider_callback_rejections_total",
+        &[("reason", "OVERSIZED")],
+    );
+    let huge = vec![b' '; 17 * 1024];
+    let sig = h.provider_a.sign(&huge);
+    for _ in 0..5 {
+        let r = post_raw(&h, "dp-a", huge.clone(), Some(sig.clone())).await;
+        assert_eq!(r.status, StatusCode::PAYLOAD_TOO_LARGE, "{}", r.text);
+    }
+    assert_eq!(
+        metrics::counter(
+            "telephony_provider_callback_rejections_total",
+            &[("reason", "OVERSIZED")]
+        ),
+        before + 5
+    );
+    assert_eq!(
+        h.scalar("SELECT coalesce(sum(hits), 0)::bigint FROM telephony_ingress_windows WHERE subject_kind = 'CALLBACK_MALFORMED' AND subject_id = 'dp-a'")
+            .await,
+        5
+    );
+    assert_eq!(incident_count(&h, "CALLBACK_MALFORMED").await, 1);
+    // An oversized body to a non-provider path counts under "unknown".
+    post_raw(&h, "ghost", huge.clone(), Some(sig)).await;
+    assert_eq!(
+        h.scalar("SELECT coalesce(sum(hits), 0)::bigint FROM telephony_ingress_windows WHERE subject_kind = 'CALLBACK_MALFORMED' AND subject_id = 'unknown'")
+            .await,
+        1
+    );
+}
+
+#[tokio::test]
+async fn a_callback_signed_with_the_previous_secret_is_accepted_during_the_overlap() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let (leg, call_ref, _) = live_leg(&h).await;
+    let body = cb("rot-1", &call_ref, "ringing", 1, h.now()).body();
+    let old =
+        telephony::providers::deterministic::sign_with(common::PREVIOUS_CALLBACK_SECRET, &body);
+    let r = post_raw(&h, "dp-a", body.clone(), Some(old)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(h.leg_status(leg).await, "RINGING");
+    // Any other key is still refused.
+    let other = telephony::providers::deterministic::sign_with(
+        b"some-other-secret-0123456789abcdefghijklmnop",
+        &body,
+    );
+    let r = post_raw(&h, "dp-a", body, Some(other)).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
 }

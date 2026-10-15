@@ -16,6 +16,11 @@ mod m20261008_000006_ingress_security;
 mod m20261009_000007_enterprise_sip;
 mod m20261009_000008_media_capture;
 mod m20261009_000009_recording_capture;
+mod m20261010_000010_callback_ingress_incidents;
+mod m20261010_000011_operator_audit;
+mod m20261010_000012_destination_classes;
+mod m20261010_000013_leg_relay_assignment;
+mod m20261010_000014_retention;
 
 /// Name of the table recording which Telephony migrations have been applied.
 pub const MIGRATION_TABLE: &str = "telephony_seaql_migrations";
@@ -35,6 +40,11 @@ impl MigratorTrait for Migrator {
             Box::new(m20261009_000007_enterprise_sip::Migration),
             Box::new(m20261009_000008_media_capture::Migration),
             Box::new(m20261009_000009_recording_capture::Migration),
+            Box::new(m20261010_000010_callback_ingress_incidents::Migration),
+            Box::new(m20261010_000011_operator_audit::Migration),
+            Box::new(m20261010_000012_destination_classes::Migration),
+            Box::new(m20261010_000013_leg_relay_assignment::Migration),
+            Box::new(m20261010_000014_retention::Migration),
         ]
     }
 

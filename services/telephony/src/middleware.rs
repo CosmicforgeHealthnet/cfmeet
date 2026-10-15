@@ -11,12 +11,14 @@
 //!
 //! On success the request runs in the signed hop's request / correlation context; the
 //! caller is available through [`InternalCaller`]. Diagnostics (reason, kid, issuer) are
-//! logged; the token never is.
+//! logged; the token never is. Spans carry the matched ROUTE PATTERN
+//! (`/provider-callbacks/:provider_id/:token`), never the request path, so a secret
+//! path token can never reach a log line.
 
 use std::future::Future;
 
 use axum::{
-    extract::{FromRequestParts, Request, State},
+    extract::{FromRequestParts, MatchedPath, Request, State},
     http::{request::Parts, HeaderValue},
     middleware::Next,
     response::{IntoResponse, Response},
@@ -62,8 +64,17 @@ pub async fn scoped<F: Future>(context: RequestContext, fut: F) -> F::Output {
     CURRENT.scope(context, fut).await
 }
 
-/// Public routes (health): a fresh server-generated request id, returned as
-/// `x-request-id`. Client-supplied ids are never trusted.
+/// The matched route pattern of `request` (never its concrete path).
+fn route_pattern(request: &Request) -> &str {
+    request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(MatchedPath::as_str)
+        .unwrap_or("<unmatched>")
+}
+
+/// Public routes (health, provider callbacks): a fresh server-generated request id,
+/// returned as `x-request-id`. Client-supplied ids are never trusted.
 pub async fn request_id_middleware(request: Request, next: Next) -> Response {
     let context = RequestContext::generate();
     let request_id = context.request_id.clone();
@@ -71,7 +82,7 @@ pub async fn request_id_middleware(request: Request, next: Next) -> Response {
         "request",
         request_id = %context.request_id,
         method = %request.method(),
-        path = %request.uri().path(),
+        route = route_pattern(&request),
     );
     let mut response = scoped(context, next.run(request).instrument(span)).await;
     if let Ok(value) = HeaderValue::from_str(request_id.as_str()) {
@@ -157,7 +168,7 @@ pub async fn require_internal_service(
                 caller = %ctx.authenticated_service(),
                 kid = %ctx.key_id(),
                 method = %request.method(),
-                path = %request.uri().path(),
+                route = route_pattern(&request),
             );
             request.extensions_mut().insert(InternalCaller(ctx));
             let request_id = context.request_id.clone();
@@ -174,7 +185,7 @@ pub async fn require_internal_service(
                 kid = d.kid.as_ref().map(|k| k.as_str()).unwrap_or(""),
                 issuer = d.issuer.as_ref().map(|i| i.as_str()).unwrap_or(""),
                 method = %request.method(),
-                path = %request.uri().path(),
+                route = route_pattern(&request),
                 "internal service authentication rejected"
             );
             let context = RequestContext::generate();

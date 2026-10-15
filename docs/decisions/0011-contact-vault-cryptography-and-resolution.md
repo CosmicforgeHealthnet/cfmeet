@@ -46,7 +46,7 @@ and no `Serialize`; every error is a fixed code without the value.
 
 AES-256-GCM (`aes-gcm` crate; no hand-written cryptography) with a fresh random 96-bit
 nonce per encryption (never deterministic encryption). The associated data binds the
-ciphertext to its place: `cfmeet-contact-v1 ‖ tenant ‖ application ‖ environment ‖
+ciphertext to its place: `cfmeet-contact-vault-v1 ‖ tenant ‖ application ‖ environment ‖
 ContactReference ‖ key version`, so a ciphertext copied to another row, scope or key
 version fails authentication. Fixed-vector, tamper, wrong-AAD, wrong-key, wrong-version
 and truncation tests run in CI.

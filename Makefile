@@ -20,7 +20,7 @@ CONTRACTS       := packages/contracts
         telephony telephony-migrate telephony-test telephony-lint telephony-build telephony-sip-cert \
         telephony-integration \
         service-auth-test service-auth-lint contracts-validate contracts-test contracts-lint \
-        service-boundaries
+        service-boundaries secret-scan
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -131,6 +131,10 @@ service-boundaries: ## Repository service-boundary guard + its mutation tests (P
 	python3 -m unittest discover -s scripts/service-boundaries
 	python3 scripts/service-boundaries/check_service_boundaries.py
 
+secret-scan: ## Repository secret scan (keys, keyrings, credentials) + its mutation tests; `--tree DIR` scans an exported image
+	python3 -m unittest discover -s scripts/secret-scan
+	python3 scripts/secret-scan/scan_secrets.py
+
 frontend: frontend-install ## Run the web app dev server (apps/web)
 	cd $(WEB) && npm run dev
 
@@ -139,7 +143,7 @@ web: frontend ## Alias for `make frontend`
 dev: ## Start deps, then meeting service + web app together (Ctrl+C stops both)
 	./scripts/dev.sh
 
-test: backend-test calling-test privacy-relay-test telephony-test service-auth-test contracts-test contracts-validate service-boundaries frontend-test ## Run all tests
+test: backend-test calling-test privacy-relay-test telephony-test service-auth-test contracts-test contracts-validate service-boundaries secret-scan frontend-test ## Run all tests
 
 lint: backend-lint calling-lint privacy-relay-lint telephony-lint service-auth-lint contracts-lint frontend-lint ## Run all linters
 

@@ -113,6 +113,10 @@ fn is_calling_table(name: &str) -> bool {
         || name.starts_with("voicemail_")
         // Part G §68: customer webhooks are served by Calling's platform ingress (ADR 0028).
         || name.starts_with("webhook_")
+        // Part H §77 / §78: block / opt-out rules, their refusal windows and abuse reports.
+        || name == "calling_block_rules"
+        || name == "calling_abuse_windows"
+        || name == "calling_abuse_reports"
 }
 
 /// Code with the contents of string literals removed (identifiers, types and syntax

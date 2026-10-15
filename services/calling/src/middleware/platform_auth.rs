@@ -10,10 +10,16 @@
 //! the normalized `AUTHENTICATION_FAILED` response; the specific reason is logged for
 //! operators together with the non-secret public credential id. The raw header value is
 //! never logged.
+//!
+//! Safety-only authority (Part H §72 / §74): a credential whose tenant, application or
+//! environment is SUSPENDED authenticates into [`AuthorityMode::SafetyOnly`] and may
+//! reach only [`SAFETY_ROUTES`] — operations that stop or remove an effect and create
+//! nothing. Every other request receives the same normalized `AUTHENTICATION_FAILED`
+//! response as a rejected credential (reason `scope_suspended` in the operator log).
 
 use axum::{
-    extract::{Request, State},
-    http::{header, HeaderMap},
+    extract::{MatchedPath, Request, State},
+    http::{header, HeaderMap, Method},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -24,6 +30,7 @@ use crate::{
     error::CallingError,
     platform::{
         authentication::{AuthFailureReason, AuthenticationError},
+        context::AuthorityMode,
         error::summarize_db_error,
         limits::RateDecision,
     },
@@ -32,6 +39,35 @@ use crate::{
 
 /// Header values longer than this are rejected without inspection.
 const MAX_AUTHORIZATION_LEN: usize = 256;
+
+/// The safety operations a SUSPENDED scope may still perform (method, axum route
+/// template). Each one ends, stops, disables or deletes; none creates a communication,
+/// a configuration or a paid effect. Scope checks of the handlers still apply.
+pub const SAFETY_ROUTES: &[(&Method, &str)] = &[
+    (&Method::POST, "/v1/calls/:call_id/end"),
+    (
+        &Method::POST,
+        "/v1/calls/:call_id/recordings/:recording_id/stop",
+    ),
+    (
+        &Method::DELETE,
+        "/v1/enterprise/forwarding-rules/:forwarding_rule_id",
+    ),
+    (&Method::DELETE, "/v1/enterprise/recordings/:recording_id"),
+    (
+        &Method::DELETE,
+        "/v1/enterprise/voicemail/messages/:message_id",
+    ),
+    (&Method::PATCH, "/v1/webhooks/:webhook_id"),
+    (&Method::DELETE, "/v1/webhooks/:webhook_id"),
+];
+
+/// Whether `(method, matched route)` is on the safety allow-list.
+pub fn is_safety_route(method: &Method, matched: &str) -> bool {
+    SAFETY_ROUTES
+        .iter()
+        .any(|(m, path)| *m == method && *path == matched)
+}
 
 fn bearer_credential(headers: &HeaderMap) -> Option<Zeroizing<String>> {
     let mut values = headers.get_all(header::AUTHORIZATION).iter();
@@ -93,6 +129,32 @@ pub async fn require_platform_credential(
     };
     drop(credential);
 
+    if let AuthorityMode::SafetyOnly(link) = ctx.authority_mode() {
+        // Only the matched route template decides (never the raw path), and a request
+        // that matched no route is not a safety operation.
+        let matched = request
+            .extensions()
+            .get::<MatchedPath>()
+            .map(|m| m.as_str().to_string());
+        let allowed = matched
+            .as_deref()
+            .is_some_and(|m| is_safety_route(request.method(), m));
+        if !allowed {
+            tracing::info!(
+                reason = AuthFailureReason::ScopeSuspended.as_str(),
+                suspended = link.as_str(),
+                credential_id = %ctx.credential_id(),
+                "platform authentication rejected: suspended scope, not a safety operation"
+            );
+            return CallingError::AuthenticationFailed.into_response();
+        }
+        tracing::info!(
+            suspended = link.as_str(),
+            credential_id = %ctx.credential_id(),
+            "safety operation admitted for a suspended scope"
+        );
+    }
+
     let span = tracing::Span::current();
     span.record("tenant_id", tracing::field::display(ctx.tenant_id()));
     span.record(
@@ -139,6 +201,25 @@ mod tests {
             map.append(header::AUTHORIZATION, HeaderValue::from_str(v).unwrap());
         }
         map
+    }
+
+    #[test]
+    fn safety_allow_list_is_method_and_template_exact() {
+        assert!(is_safety_route(&Method::POST, "/v1/calls/:call_id/end"));
+        assert!(!is_safety_route(&Method::GET, "/v1/calls/:call_id/end"));
+        assert!(!is_safety_route(&Method::POST, "/v1/calls"));
+        assert!(!is_safety_route(
+            &Method::POST,
+            "/v1/calls/550e8400-e29b-41d4-a716-446655440000/end"
+        ));
+        assert!(!is_safety_route(
+            &Method::POST,
+            "/v1/enterprise/forwarding-rules"
+        ));
+        assert!(is_safety_route(
+            &Method::DELETE,
+            "/v1/enterprise/forwarding-rules/:forwarding_rule_id"
+        ));
     }
 
     #[test]

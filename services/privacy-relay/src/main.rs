@@ -9,7 +9,9 @@ use privacy_relay::{
     contact_vault::ContactVault,
     enforcement::HttpCallingEnforcer,
     error::summarize_db_error,
-    internal, routes,
+    internal,
+    retention::{worker::RetentionWorker, RetentionSettings},
+    routes,
     service::RelayService,
     state::AppState,
 };
@@ -38,6 +40,13 @@ async fn main() -> anyhow::Result<()> {
         Ok(settings) => settings,
         Err(err) => {
             eprintln!("privacy-relay: contact vault configuration error: {err}");
+            std::process::exit(2);
+        }
+    };
+    let retention_settings = match RetentionSettings::from_env() {
+        Ok(settings) => settings,
+        Err(err) => {
+            eprintln!("privacy-relay: retention configuration error: {err}");
             std::process::exit(2);
         }
     };
@@ -153,11 +162,34 @@ async fn main() -> anyhow::Result<()> {
         contact_feature,
         vault_material.keys,
     );
+    // Rotation safety (§29): every key version a stored contact or fingerprint names must
+    // be readable by the configured keyrings, or the service does not serve.
+    if contacts.is_configured() {
+        if let Err(err) = contacts.verify_referenced_key_versions().await {
+            tracing::error!(error = %err, "contact vault keyring does not cover every referenced key version");
+            std::process::exit(2);
+        }
+    }
     // Key-rotation re-encryption runs on every instance (SKIP LOCKED batches).
     tokio::spawn(privacy_relay::workers::run_contact_workers(
         contacts.clone(),
         config.worker_interval,
     ));
+    // Retention (§80): bounded, SKIP LOCKED ticks on every instance.
+    for policy in retention_settings.policies() {
+        tracing::info!(
+            data_class = policy.class.as_str(),
+            action = policy.action.as_str(),
+            retention_days = policy.days(),
+            configurable_by = policy.configurable_by,
+            "retention policy"
+        );
+    }
+    let retention_interval = retention_settings.interval;
+    tokio::spawn(
+        RetentionWorker::new(relay.db().clone(), clock.clone(), retention_settings)
+            .run(retention_interval),
+    );
     let state =
         AppState::new(relay, service_auth).with_contact_vault(contacts, vault_material.delegation);
     let app = routes::app(state, internal::routes());

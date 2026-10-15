@@ -186,3 +186,53 @@ async fn audit_events_and_decisions_are_append_only() {
         2
     );
 }
+
+#[tokio::test]
+async fn evidence_tables_cannot_be_truncated() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = Consumer::new(Kind::Production);
+    let [a, b] = principals(2).try_into().unwrap();
+    let ctx = h.bidirectional(&c, &[a, b]).await;
+    let sid = h.app_session(&c, ctx["contextId"].as_str().unwrap()).await["relaySessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    h.authorize(&c, &sid, a, &[b]).await;
+    h.create_contact(&c, "+39 02 1234 5678").await;
+    for table in [
+        "contact_access_audit",
+        "relay_audit_events",
+        "contact_verification_events",
+        "relay_authorization_decisions",
+        "protected_contacts",
+        "privacy_relay_retention_audit",
+        "privacy_relay_retention_holds",
+    ] {
+        let err = exec(h.conn(), &format!("TRUNCATE {table}"))
+            .await
+            .unwrap_err();
+        // Refused by the TRUNCATE guard, or — for a table other evidence references —
+        // by its foreign keys before the guard runs; either way nothing is removed.
+        let msg = err.to_string();
+        assert!(
+            msg.contains("cannot be truncated")
+                || msg.contains("cannot truncate a table referenced in a foreign key constraint"),
+            "{table}: {err}"
+        );
+        // Nor with CASCADE through a dependent table.
+        assert!(
+            exec(h.conn(), &format!("TRUNCATE {table} CASCADE"))
+                .await
+                .is_err(),
+            "{table} CASCADE"
+        );
+    }
+    assert_eq!(
+        h.count("SELECT count(*) FROM relay_authorization_decisions")
+            .await,
+        1
+    );
+    assert_eq!(h.count("SELECT count(*) FROM protected_contacts").await, 1);
+}

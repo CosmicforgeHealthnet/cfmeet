@@ -127,7 +127,7 @@ pub enum KeyringError {
     DuplicateVersion(String),
     #[error("key {0} is not exactly 32 bytes of base64")]
     InvalidKey(String),
-    #[error("key {0} is weak (all bytes equal)")]
+    #[error("key {0} is weak (too little byte diversity or a repeating pattern)")]
     WeakKey(String),
     #[error("two versions share the same key material")]
     DuplicateMaterial,
@@ -135,6 +135,36 @@ pub enum KeyringError {
     UnknownActive,
     #[error("the encryption and fingerprint keyrings share key material")]
     SharedAcrossPurposes,
+    #[error("key version {0} is the active version and cannot be retired")]
+    ActiveVersion(String),
+    #[error("key version {0} is still referenced by stored rows and cannot be retired")]
+    ReferencedVersion(String),
+    #[error("key version {0} is referenced by stored rows but is not readable")]
+    UnreadableVersion(String),
+}
+
+/// Weak-key rule (§29): a 32-byte key is refused when it shows fewer than 16 distinct
+/// byte values or is a repetition of a pattern of at most 4 bytes (all-zero, all-equal,
+/// `abab…`, `0123 0123…`). Random keys pass this with overwhelming probability; the
+/// rule only catches placeholder, truncated or deliberately degenerate material.
+pub(crate) fn is_weak(bytes: &[u8; 32]) -> bool {
+    let mut seen = [false; 256];
+    let mut distinct = 0;
+    for b in bytes {
+        if !seen[*b as usize] {
+            seen[*b as usize] = true;
+            distinct += 1;
+        }
+    }
+    if distinct < 16 {
+        return true;
+    }
+    (1..=4).any(|period| {
+        bytes
+            .iter()
+            .enumerate()
+            .all(|(i, b)| *b == bytes[i % period])
+    })
 }
 
 #[derive(Deserialize)]
@@ -206,7 +236,7 @@ impl FileKeyring {
                 .try_into()
                 .map_err(|_| KeyringError::InvalidKey(version.to_string()))?;
             let bytes = Zeroizing::new(bytes);
-            if bytes.iter().all(|b| *b == bytes[0]) {
+            if is_weak(&bytes) {
                 return Err(KeyringError::WeakKey(version.to_string()));
             }
             if keys
@@ -364,9 +394,86 @@ pub fn activate_key_version(
     Ok(out)
 }
 
+/// Removes a NON-active, NO-LONGER-REFERENCED version from a keyring document (rotation
+/// step "retire"). `referenced` is the set of versions stored rows still name (the
+/// caller reads it from the database); a referenced version is refused so that the
+/// keyring never loses a key some ciphertext or fingerprint still needs.
+pub fn retire_key_version(
+    json: &str,
+    purpose: KeyPurpose,
+    version: &KeyVersion,
+    referenced: &[String],
+) -> Result<Zeroizing<String>, KeyringError> {
+    let existing = FileKeyring::from_json(json, purpose)?;
+    if !existing.keys.contains_key(version) {
+        return Err(KeyringError::InvalidVersion(version.to_string()));
+    }
+    if existing.active == *version {
+        return Err(KeyringError::ActiveVersion(version.to_string()));
+    }
+    if referenced.iter().any(|r| r == version.as_str()) {
+        return Err(KeyringError::ReferencedVersion(version.to_string()));
+    }
+    let mut value: serde_json::Value =
+        serde_json::from_str(json).map_err(|_| KeyringError::Malformed)?;
+    let keys = value
+        .get_mut("keys")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or(KeyringError::Malformed)?;
+    for k in keys.iter_mut() {
+        if k.get("version").and_then(serde_json::Value::as_str) == Some(version.as_str()) {
+            if let Some(serde_json::Value::String(s)) = k.get_mut("key") {
+                s.zeroize();
+            }
+        }
+    }
+    keys.retain(|k| k.get("version").and_then(serde_json::Value::as_str) != Some(version.as_str()));
+    let out =
+        Zeroizing::new(serde_json::to_string_pretty(&value).map_err(|_| KeyringError::Malformed)?);
+    value.zeroize_keys();
+    // The result must still be a valid keyring.
+    FileKeyring::from_json(&out, purpose)?;
+    Ok(out)
+}
+
+/// The versions among `referenced` that `keys` cannot read (rotation safety: a service
+/// must not start, and a version must not be retired, while stored rows name a version
+/// the keyring no longer holds).
+pub fn unreadable_versions(keys: &dyn ContactKeyProvider, referenced: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = referenced
+        .iter()
+        .filter(|r| {
+            KeyVersion::parse(r)
+                .map(|v| keys.key_by_version(&v).is_none())
+                .unwrap_or(true)
+        })
+        .cloned()
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    /// 32 pseudo-random bytes from a seeded SplitMix64 (deterministic fixtures that are
+    /// never a structured pattern).
+    pub(crate) fn fixture_key(seed: u8) -> [u8; 32] {
+        let mut state =
+            0x9e37_79b9_7f4a_7c15_u64 ^ (seed as u64).wrapping_mul(0x5851_f42d_4c95_7f2d);
+        let mut out = [0u8; 32];
+        for chunk in out.chunks_mut(8) {
+            state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            z ^= z >> 31;
+            chunk.copy_from_slice(&z.to_le_bytes()[..chunk.len()]);
+        }
+        out
+    }
 
     pub(crate) fn keyring(
         purpose: KeyPurpose,
@@ -376,11 +483,7 @@ pub(crate) mod tests {
         let keys: Vec<_> = versions
             .iter()
             .map(|(v, seed)| {
-                let mut bytes = [0u8; 32];
-                for (i, b) in bytes.iter_mut().enumerate() {
-                    *b = seed.wrapping_add(i as u8);
-                }
-                serde_json::json!({ "version": v, "key": STANDARD.encode(bytes) })
+                serde_json::json!({ "version": v, "key": STANDARD.encode(fixture_key(*seed)) })
             })
             .collect();
         FileKeyring::from_json(
@@ -395,8 +498,7 @@ pub(crate) mod tests {
     fn keyrings_are_strictly_validated() {
         let k =
             |v: &str, b: [u8; 32]| serde_json::json!({ "version": v, "key": STANDARD.encode(b) });
-        let mut a = [7u8; 32];
-        a[0] = 1;
+        let a = fixture_key(1);
         let doc = |purpose: &str, active: &str, keys: Vec<serde_json::Value>| {
             serde_json::json!({ "keyring_version": 1, "purpose": purpose, "active": active, "keys": keys }).to_string()
         };
@@ -405,24 +507,170 @@ pub(crate) mod tests {
             KeyPurpose::Encryption
         )
         .is_ok());
-        for (json, err) in [
-            (doc("CONTACT_FINGERPRINT", "v1", vec![k("v1", a)]), "purpose"),
-            (doc("CONTACT_ENCRYPTION", "v2", vec![k("v1", a)]), "active"),
-            (doc("CONTACT_ENCRYPTION", "v1", vec![k("v1", [9u8; 32])]), "weak"),
-            (doc("CONTACT_ENCRYPTION", "v1", vec![k("v1", a), k("v2", a)]), "duplicate material"),
-            (doc("CONTACT_ENCRYPTION", "V1", vec![k("V1", a)]), "version"),
-            (doc("CONTACT_ENCRYPTION", "v1", vec![]), "count"),
+        let all_zero = [0u8; 32];
+        let mut two_values = [7u8; 32];
+        two_values[0] = 1;
+        let mut pattern4 = [0u8; 32];
+        for (i, b) in pattern4.iter_mut().enumerate() {
+            *b = [0x12, 0x34, 0x56, 0x78][i % 4];
+        }
+        let mut pattern2 = [0u8; 32];
+        for (i, b) in pattern2.iter_mut().enumerate() {
+            *b = [0xab, 0xcd][i % 2];
+        }
+        let cases: Vec<(String, KeyringError)> = vec![
+            (
+                doc("CONTACT_FINGERPRINT", "v1", vec![k("v1", a)]),
+                KeyringError::WrongPurpose {
+                    expected: "CONTACT_ENCRYPTION",
+                    found: "CONTACT_FINGERPRINT".into(),
+                },
+            ),
+            (
+                doc("CONTACT_ENCRYPTION", "v2", vec![k("v1", a)]),
+                KeyringError::UnknownActive,
+            ),
+            (
+                doc("CONTACT_ENCRYPTION", "v1", vec![k("v1", [9u8; 32])]),
+                KeyringError::WeakKey("v1".into()),
+            ),
+            (
+                doc("CONTACT_ENCRYPTION", "v1", vec![k("v1", all_zero)]),
+                KeyringError::WeakKey("v1".into()),
+            ),
+            (
+                doc("CONTACT_ENCRYPTION", "v1", vec![k("v1", two_values)]),
+                KeyringError::WeakKey("v1".into()),
+            ),
+            (
+                doc("CONTACT_ENCRYPTION", "v1", vec![k("v1", pattern4)]),
+                KeyringError::WeakKey("v1".into()),
+            ),
+            (
+                doc("CONTACT_ENCRYPTION", "v1", vec![k("v1", pattern2)]),
+                KeyringError::WeakKey("v1".into()),
+            ),
+            (
+                doc("CONTACT_ENCRYPTION", "v1", vec![k("v1", a), k("v2", a)]),
+                KeyringError::DuplicateMaterial,
+            ),
+            (
+                doc(
+                    "CONTACT_ENCRYPTION",
+                    "v1",
+                    vec![k("v1", a), k("v1", fixture_key(2))],
+                ),
+                KeyringError::DuplicateVersion("v1".into()),
+            ),
+            (
+                doc("CONTACT_ENCRYPTION", "V1", vec![k("V1", a)]),
+                KeyringError::InvalidVersion("V1".into()),
+            ),
+            (
+                doc("CONTACT_ENCRYPTION", "v1", vec![]),
+                KeyringError::KeyCount,
+            ),
             (
                 serde_json::json!({ "keyring_version": 1, "purpose": "CONTACT_ENCRYPTION", "active": "v1",
                     "keys": [{ "version": "v1", "key": STANDARD.encode([1u8; 16]) }] })
                 .to_string(),
-                "short key",
+                KeyringError::InvalidKey("v1".into()),
             ),
-        ] {
+            (
+                serde_json::json!({ "keyring_version": 1, "purpose": "CONTACT_ENCRYPTION", "active": "v1",
+                    "keys": [{ "version": "v1", "key": "not base64!" }] })
+                .to_string(),
+                KeyringError::InvalidKey("v1".into()),
+            ),
+            (
+                serde_json::json!({ "keyring_version": 2, "purpose": "CONTACT_ENCRYPTION", "active": "v1",
+                    "keys": [k("v1", a)] })
+                .to_string(),
+                KeyringError::UnsupportedVersion,
+            ),
+            ("{ not json".to_string(), KeyringError::Malformed),
+            (
+                serde_json::json!({ "keyring_version": 1, "purpose": "CONTACT_ENCRYPTION", "active": "v1",
+                    "keys": [k("v1", a)], "extra": true })
+                .to_string(),
+                KeyringError::Malformed,
+            ),
+            (
+                serde_json::json!({ "keyring_version": 1, "purpose": "CONTACT_ENCRYPTION", "active": "v1",
+                    "keys": [{ "version": "v1", "key": STANDARD.encode(a), "comment": "x" }] })
+                .to_string(),
+                KeyringError::Malformed,
+            ),
+        ];
+        for (json, expected) in cases {
             let e = FileKeyring::from_json(&json, KeyPurpose::Encryption).unwrap_err();
+            assert_eq!(e, expected, "{json}");
             // Errors never echo key material.
-            assert!(!e.to_string().contains(&STANDARD.encode(a)), "{err}");
+            assert!(!e.to_string().contains(&STANDARD.encode(a)));
         }
+        // Nine keys: too many.
+        let nine: Vec<_> = (0..9u8)
+            .map(|i| k(&format!("v{i}"), fixture_key(10 + i)))
+            .collect();
+        assert_eq!(
+            FileKeyring::from_json(
+                &doc("CONTACT_ENCRYPTION", "v0", nine),
+                KeyPurpose::Encryption
+            )
+            .unwrap_err(),
+            KeyringError::KeyCount
+        );
+        // The weak-key rule itself.
+        assert!(is_weak(&all_zero));
+        assert!(is_weak(&two_values));
+        assert!(is_weak(&pattern4));
+        assert!(!is_weak(&a));
+        assert!(!is_weak(&core::array::from_fn(|i| i as u8)));
+    }
+
+    #[test]
+    fn retiring_a_version_is_refused_while_active_or_referenced() {
+        let v1 = KeyVersion::parse("ck-1").unwrap();
+        let v2 = KeyVersion::parse("ck-2").unwrap();
+        let doc = generate_keyring_json(KeyPurpose::Encryption, &v1);
+        let both = add_key_version(&doc, KeyPurpose::Encryption, &v2).unwrap();
+        assert_eq!(
+            retire_key_version(&both, KeyPurpose::Encryption, &v1, &[]).unwrap_err(),
+            KeyringError::ActiveVersion("ck-1".into())
+        );
+        let activated = activate_key_version(&both, KeyPurpose::Encryption, &v2).unwrap();
+        assert_eq!(
+            retire_key_version(&activated, KeyPurpose::Encryption, &v1, &["ck-1".into()])
+                .unwrap_err(),
+            KeyringError::ReferencedVersion("ck-1".into())
+        );
+        assert_eq!(
+            retire_key_version(
+                &activated,
+                KeyPurpose::Encryption,
+                &KeyVersion::parse("ck-9").unwrap(),
+                &[]
+            )
+            .unwrap_err(),
+            KeyringError::InvalidVersion("ck-9".into())
+        );
+        let retired =
+            retire_key_version(&activated, KeyPurpose::Encryption, &v1, &["ck-2".into()]).unwrap();
+        let ring = FileKeyring::from_json(&retired, KeyPurpose::Encryption).unwrap();
+        assert_eq!(ring.versions(), vec![v2.clone()]);
+        assert!(ring.key_by_version(&v1).is_none());
+        // The retired material is gone from the document.
+        let old_key = serde_json::from_str::<serde_json::Value>(&doc).unwrap()["keys"][0]["key"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(!retired.contains(&old_key));
+        // Referenced-but-unreadable detection (service start-up and rotation-status).
+        assert_eq!(
+            unreadable_versions(&ring, &["ck-1".into(), "ck-2".into(), "ck-1".into()]),
+            vec!["ck-1".to_string()]
+        );
+        assert!(unreadable_versions(&ring, &["ck-2".into()]).is_empty());
     }
 
     #[test]

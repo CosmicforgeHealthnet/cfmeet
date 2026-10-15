@@ -138,7 +138,8 @@ pub async fn rewrap<C: ConnectionTrait>(conn: &C, id: Uuid, sealed: &Sealed) -> 
 }
 
 /// Up to `limit` rows still encrypted under a readable non-active version, locked for
-/// this worker (`SKIP LOCKED`: concurrent workers take disjoint batches).
+/// this worker (`SKIP LOCKED`: concurrent workers take disjoint batches). Erased rows
+/// hold no ciphertext and are never selected.
 pub async fn lock_for_rewrap<C: ConnectionTrait>(
     conn: &C,
     active: &str,
@@ -149,7 +150,7 @@ pub async fn lock_for_rewrap<C: ConnectionTrait>(
         conn,
         &format!(
             "SELECT {CONTACT_COLUMNS} FROM protected_contacts \
-             WHERE encryption_key_version <> $1 AND encryption_key_version = ANY($2) \
+             WHERE erased_at IS NULL AND encryption_key_version <> $1 AND encryption_key_version = ANY($2) \
              ORDER BY encryption_key_version, id LIMIT $3 FOR UPDATE SKIP LOCKED"
         ),
         vec![active.into(), readable.into(), (limit as i64).into()],
@@ -163,15 +164,101 @@ pub struct KeyVersionCount {
     pub contacts: i64,
 }
 
-/// Contacts per encryption key version (rotation progress evidence).
+/// Contacts per encryption key version (rotation progress evidence; erased rows name
+/// no version).
 pub async fn key_version_counts<C: ConnectionTrait>(conn: &C) -> RelayResult<Vec<KeyVersionCount>> {
     db::all(
         conn,
         "SELECT encryption_key_version AS key_version, count(*)::bigint AS contacts \
-         FROM protected_contacts GROUP BY encryption_key_version ORDER BY encryption_key_version",
+         FROM protected_contacts WHERE erased_at IS NULL \
+         GROUP BY encryption_key_version ORDER BY encryption_key_version",
         vec![],
     )
     .await
+}
+
+#[derive(Debug, Clone, sea_orm::FromQueryResult)]
+struct ReferencedVersion {
+    key_version: String,
+}
+
+/// Every encryption key version a stored (non-erased) contact names (§29 rotation
+/// guard: each must be readable by the keyring).
+pub async fn referenced_encryption_versions<C: ConnectionTrait>(
+    conn: &C,
+) -> RelayResult<Vec<String>> {
+    let rows: Vec<ReferencedVersion> = db::all(
+        conn,
+        "SELECT DISTINCT encryption_key_version AS key_version FROM protected_contacts \
+         WHERE erased_at IS NULL ORDER BY encryption_key_version",
+        vec![],
+    )
+    .await?;
+    Ok(rows.into_iter().map(|r| r.key_version).collect())
+}
+
+/// Every fingerprint key version a stored fingerprint names.
+pub async fn referenced_fingerprint_versions<C: ConnectionTrait>(
+    conn: &C,
+) -> RelayResult<Vec<String>> {
+    let rows: Vec<ReferencedVersion> = db::all(
+        conn,
+        "SELECT DISTINCT fingerprint_key_version AS key_version FROM contact_fingerprints \
+         ORDER BY fingerprint_key_version",
+        vec![],
+    )
+    .await?;
+    Ok(rows.into_iter().map(|r| r.key_version).collect())
+}
+
+// ---------------------------------------------------------------------------
+// Retention minimization (§80): erasure of a disabled contact's value.
+// ---------------------------------------------------------------------------
+
+/// Up to `limit` contacts DISABLED at or before `cutoff` and not yet erased, locked for
+/// this worker (`SKIP LOCKED`), skipping every contact an active retention hold covers.
+pub async fn lock_for_erasure<C: ConnectionTrait>(
+    conn: &C,
+    cutoff: DateTime<Utc>,
+    limit: u64,
+) -> RelayResult<Vec<ContactRow>> {
+    db::all(
+        conn,
+        &format!(
+            "SELECT {CONTACT_COLUMNS} FROM protected_contacts c \
+             WHERE c.disabled_at IS NOT NULL AND c.disabled_at <= $1 AND c.erased_at IS NULL \
+               AND NOT privacy_relay_retention_held($2, c.id, c.tenant_id, c.application_id, c.environment_id) \
+             ORDER BY c.disabled_at, c.id LIMIT $3 FOR UPDATE SKIP LOCKED"
+        ),
+        vec![
+            cutoff.into(),
+            crate::retention::DataClass::ProtectedContactValue
+                .as_str()
+                .into(),
+            (limit as i64).into(),
+        ],
+    )
+    .await
+}
+
+/// Erases one contact's value: ciphertext, nonce and key version become NULL, the masked
+/// display keeps only the country calling code, the version advances. Idempotent
+/// (`erased_at IS NULL`); returns whether this call erased it.
+pub async fn erase<C: ConnectionTrait>(
+    conn: &C,
+    id: Uuid,
+    now: DateTime<Utc>,
+) -> RelayResult<bool> {
+    let n = db::exec(
+        conn,
+        "UPDATE protected_contacts SET ciphertext = NULL, nonce = NULL, encryption_key_version = NULL, \
+           masked_display = COALESCE(substring(masked_display from '^\\+[0-9]{1,3}') || '••••••', '•••'), \
+           erased_at = $2, version = version + 1, updated_at = $2 \
+         WHERE id = $1 AND erased_at IS NULL AND disabled_at IS NOT NULL",
+        vec![id.into(), now.into()],
+    )
+    .await?;
+    Ok(n == 1)
 }
 
 // ---------------------------------------------------------------------------

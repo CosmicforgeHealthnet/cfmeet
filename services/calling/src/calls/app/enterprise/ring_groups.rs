@@ -93,6 +93,16 @@ impl AppCallService {
                 out.push((member.position, principal));
             }
         }
+        // Part H §70: members blocked from (or blocking) the caller are skipped silently.
+        let candidates: Vec<Uuid> = out.iter().map(|(_, p)| p.id().as_uuid()).collect();
+        let blocked = crate::calls::app::blocks::blocked_targets(
+            txn,
+            scope.environment_id().as_uuid(),
+            call.initiator_principal_id,
+            &candidates,
+        )
+        .await?;
+        out.retain(|(_, p)| !blocked.contains(&p.id().as_uuid()));
         Ok(out)
     }
 

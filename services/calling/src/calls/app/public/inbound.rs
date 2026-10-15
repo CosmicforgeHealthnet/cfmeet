@@ -91,6 +91,8 @@ struct Owner {
     service_account_id: Uuid,
     credential_id: Uuid,
     kind: String,
+    /// Part H §71: the whole owner authority chain is ACTIVE (statuses, credential expiry).
+    chain_active: bool,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -131,18 +133,31 @@ impl AppCallService {
         );
         // The environment's explicit inbound owner (opt-in; fail closed).
         let owner = Owner::find_by_statement(stmt(
-            "SELECT o.service_account_id, o.credential_id, e.kind FROM call_inbound_owners o \
-             JOIN platform_environments e ON e.id = o.environment_id \
-             WHERE o.environment_id = $1 AND o.tenant_id = $2 AND o.application_id = $3 AND o.enabled",
+            &format!(
+                "SELECT o.service_account_id, o.credential_id, e.kind, {} AS chain_active \
+                 FROM call_inbound_owners o \
+                 JOIN platform_environments e ON e.id = o.environment_id \
+                 JOIN platform_applications a ON a.id = o.application_id \
+                 JOIN platform_tenants t ON t.id = o.tenant_id \
+                 JOIN platform_service_accounts sa ON sa.id = o.service_account_id \
+                 JOIN platform_api_credentials c ON c.id = o.credential_id \
+                 WHERE o.environment_id = $1 AND o.tenant_id = $2 AND o.application_id = $3 AND o.enabled",
+                super::OWNER_CHAIN_ACTIVE_SQL
+            ),
             vec![
                 s.environment_id.into(),
                 s.tenant_id.into(),
                 s.application_id.into(),
+                self.calls.now().into(),
             ],
         ))
         .one(self.db())
         .await?
         .ok_or(CallError::PublicRouteDenied("INBOUND_NOT_CONFIGURED"))?;
+        if !owner.chain_active {
+            // A suspended scope or a revoked / expired owner credential: no Call.
+            return Err(CallError::PublicRouteDenied("SCOPE_SUSPENDED"));
+        }
         let provider = self.provider()?.clone();
         // Targets: application principals Privacy Relay listed for this caller.
         let mut target_ids: Vec<Uuid> = offer
@@ -169,6 +184,30 @@ impl AppCallService {
                 targets.push(p);
             }
         }
+        // Part H §70: an application-level block on the caller refuses the offer; a target
+        // that blocked the caller contact is dropped (silently, like an absent endpoint).
+        let environment = s.environment_id;
+        if super::super::blocks::contact_blocked_by_application(
+            self.db(),
+            environment,
+            offer.caller_contact_reference,
+        )
+        .await?
+        {
+            crate::metrics::inc(
+                "calling_public_route_denials_total",
+                &[("reason", "CALLER_BLOCKED")],
+            );
+            return Err(CallError::PublicRouteDenied("CALLER_BLOCKED"));
+        }
+        let blocking = super::super::blocks::principals_blocking_contact(
+            self.db(),
+            environment,
+            offer.caller_contact_reference,
+            &target_ids,
+        )
+        .await?;
+        targets.retain(|t| !blocking.contains(&t.id().as_uuid()));
         if targets.is_empty() {
             // Phone-to-phone (§46): the caller reaches exactly one protected contact.
             let contacts: Vec<Uuid> = offer
@@ -179,6 +218,20 @@ impl AppCallService {
                 .filter(|c| *c != offer.caller_contact_reference)
                 .collect();
             if let [callee] = contacts[..] {
+                // Part H §70: an application rule on the callee contact refuses the relay.
+                if super::super::blocks::contact_blocked_by_application(
+                    self.db(),
+                    environment,
+                    callee,
+                )
+                .await?
+                {
+                    crate::metrics::inc(
+                        "calling_public_route_denials_total",
+                        &[("reason", "DESTINATION_BLOCKED")],
+                    );
+                    return Err(CallError::PublicRouteDenied("DESTINATION_BLOCKED"));
+                }
                 return self.accept_relay_offer(offer, scope, &owner, callee).await;
             }
             return Err(CallError::PublicRouteDenied("NO_APPLICATION_TARGET"));
@@ -293,6 +346,12 @@ impl AppCallService {
             spend_headroom_minor: headroom,
             operational_incident: Evidence::Unknown,
             duplicate_risk: DuplicateRisk::None,
+            compliance: crate::routing::compliance::facts(
+                self.db(),
+                s.environment_id,
+                &self.compliance_overlay,
+            )
+            .await,
         };
         let mut plan = match crate::routing::engine::select(&policy.policy, &inputs, now) {
             RouteDecision::Selected(plan) => *plan,
@@ -709,6 +768,12 @@ impl AppCallService {
             spend_headroom_minor: headroom,
             operational_incident: Evidence::Unknown,
             duplicate_risk: DuplicateRisk::None,
+            compliance: crate::routing::compliance::facts(
+                self.db(),
+                s.environment_id,
+                &self.compliance_overlay,
+            )
+            .await,
         };
         let mut plan = match crate::routing::engine::select(&policy.policy, &inputs, now) {
             RouteDecision::Selected(plan) => *plan,

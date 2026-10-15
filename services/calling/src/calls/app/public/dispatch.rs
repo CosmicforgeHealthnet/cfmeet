@@ -325,6 +325,24 @@ impl AppCallService {
                 return Ok(Dispatched::Retry);
             }
         };
+        // Part H §71: the scope must still be ACTIVE at the moment of the paid effect. A
+        // suspension after the Call was authorized refuses the origination definitively.
+        if !super::scope_is_active(self.db(), scope_of(call)).await? {
+            if self
+                .complete(row.id, "REFUSED", Some("SCOPE_SUSPENDED"), None)
+                .await?
+            {
+                self.leg_never_executed(
+                    call,
+                    leg_id,
+                    row.attempt_id,
+                    active.then_some(FailureCategory::Execution),
+                )
+                .await?;
+            }
+            tracing::info!(call_id = %call.id, call_leg_id = %leg_id, "telephony originate refused: scope suspended");
+            return Ok(Dispatched::Refused);
+        }
         let mut command = row.payload.clone();
         command["destination"]["grantId"] = json!(grant.grant_id);
         command["destination"]["grantSecret"] = json!(grant.secret.as_str());

@@ -52,6 +52,17 @@ impl fmt::Debug for ExecutionNumber {
     }
 }
 
+/// A provider-supplied identifier (event id, call reference, correlation key) as the
+/// database accepts it: `^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,159}$`.
+pub fn valid_provider_token(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    (1..=160).contains(&bytes.len())
+        && bytes[0].is_ascii_alphanumeric()
+        && bytes.iter().all(|b| {
+            b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'@' | b'/' | b'-')
+        })
+}
+
 /// One origination request: only what the interconnect needs — never the Call domain.
 #[derive(Debug, Clone)]
 pub struct OriginateRequest {
@@ -331,6 +342,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn provider_tokens_follow_the_database_rule() {
+        assert!(valid_provider_token("CA0123abc.def:ghi@x/y-z"));
+        assert!(valid_provider_token(&"a".repeat(160)));
+        assert!(!valid_provider_token(&"a".repeat(161)));
+        assert!(!valid_provider_token(""));
+        assert!(!valid_provider_token(".leading"));
+        assert!(!valid_provider_token("with space"));
+        assert!(!valid_provider_token("tab\there"));
+    }
+
+    #[test]
     fn execution_numbers_are_canonical_and_redacted() {
         let n = ExecutionNumber::parse("+2348031234567").unwrap();
         assert_eq!(format!("{n:?}"), "ExecutionNumber(<redacted>)");
@@ -360,51 +382,96 @@ pub enum RegistryError {
     Invalid(String, String),
 }
 
-#[derive(Debug, sea_orm::FromQueryResult)]
-struct ProviderConfigRow {
-    id: String,
-    adapter: String,
-    capabilities: Vec<String>,
-    credential_ref: Option<String>,
+#[derive(Debug, Clone, sea_orm::FromQueryResult)]
+pub struct ProviderConfigRow {
+    pub id: String,
+    pub adapter: String,
+    pub capabilities: Vec<String>,
+    pub credential_ref: Option<String>,
 }
 
-/// Builds the registry from `telecom_providers` rows. Credentials come from secret FILES
-/// in `TELECOM_PROVIDER_SECRETS_DIR` named by `credential_ref` (never from the database,
-/// never inline). The deterministic test adapter is refused outside `local` / `test`.
-pub async fn registry_from_database(
-    db: &sea_orm::DatabaseConnection,
+/// Minimum length of a provider callback secret (bytes, after trimming).
+pub const MIN_PROVIDER_SECRET_BYTES: usize = 32;
+
+/// Reads a provider credential FILE (`<dir>/<credential_ref>`): never from the database,
+/// never inline, at least [`MIN_PROVIDER_SECRET_BYTES`].
+pub fn read_provider_secret(
+    secrets_dir: Option<&str>,
+    provider_id: &str,
+    credential_ref: Option<&str>,
+) -> Result<Vec<u8>, RegistryError> {
+    let (Some(dir), Some(name)) = (secrets_dir, credential_ref) else {
+        return Err(RegistryError::Invalid(
+            provider_id.to_string(),
+            "credential_ref and TELECOM_PROVIDER_SECRETS_DIR are required".into(),
+        ));
+    };
+    let path = std::path::Path::new(dir).join(name);
+    let bytes = std::fs::read(&path).map_err(|_| {
+        RegistryError::Invalid(
+            provider_id.to_string(),
+            "the credential file cannot be read".into(),
+        )
+    })?;
+    let trimmed: Vec<u8> = String::from_utf8_lossy(&bytes).trim().as_bytes().to_vec();
+    if trimmed.len() < MIN_PROVIDER_SECRET_BYTES {
+        return Err(RegistryError::Invalid(
+            provider_id.to_string(),
+            "the credential is too short".into(),
+        ));
+    }
+    Ok(trimmed)
+}
+
+/// The PREVIOUS callback secret during a rotation overlap (`<credential_ref>.previous`,
+/// present only while the provider may still sign with the old key): None when the
+/// file does not exist; an error when it exists but is unusable.
+pub fn read_previous_provider_secret(
+    secrets_dir: Option<&str>,
+    provider_id: &str,
+    credential_ref: Option<&str>,
+) -> Result<Option<Vec<u8>>, RegistryError> {
+    let (Some(dir), Some(name)) = (secrets_dir, credential_ref) else {
+        return Ok(None);
+    };
+    let previous = format!("{name}.previous");
+    if !std::path::Path::new(dir).join(&previous).exists() {
+        return Ok(None);
+    }
+    read_provider_secret(Some(dir), provider_id, Some(&previous))
+        .map(Some)
+        .map_err(|_| {
+            RegistryError::Invalid(
+                provider_id.to_string(),
+                "the previous credential file exists but is unusable (remove it or fix it)".into(),
+            )
+        })
+}
+
+/// Builds the registry from configured provider rows (pure: no database; the policy
+/// every registry build applies).
+///
+/// * the deterministic test adapter is refused outside `local` / `test`;
+/// * every registered provider requires `TELECOM_PROVIDER_SECRETS_DIR` to exist (a
+///   deployment with interconnects but no secret mount is misconfigured);
+/// * a provider secret shorter than [`MIN_PROVIDER_SECRET_BYTES`] is refused.
+pub fn registry_from_rows(
+    rows: Vec<ProviderConfigRow>,
     environment: cf_service_auth::RuntimeEnvironment,
+    secrets_dir: Option<&str>,
     edge: Arc<dyn crate::sip::SipMediaEdge>,
 ) -> Result<ProviderRegistry, RegistryError> {
-    use sea_orm::FromQueryResult;
-    let rows = ProviderConfigRow::find_by_statement(crate::db::stmt(
-        "SELECT id, adapter, capabilities, credential_ref FROM telecom_providers ORDER BY id",
-        vec![],
-    ))
-    .all(db)
-    .await
-    .map_err(|e| RegistryError::Database(crate::error::summarize_db_error(&e).0))?;
-    let secrets_dir = std::env::var("TELECOM_PROVIDER_SECRETS_DIR").ok();
-    let read_secret = |id: &str, r: &Option<String>| -> Result<Vec<u8>, RegistryError> {
-        let (Some(dir), Some(name)) = (&secrets_dir, r) else {
-            return Err(RegistryError::Invalid(
-                id.to_string(),
-                "credential_ref and TELECOM_PROVIDER_SECRETS_DIR are required".into(),
-            ));
-        };
-        let path = std::path::Path::new(dir).join(name);
-        let bytes = std::fs::read(&path).map_err(|_| {
-            RegistryError::Invalid(id.to_string(), "the credential file cannot be read".into())
-        })?;
-        let trimmed: Vec<u8> = String::from_utf8_lossy(&bytes).trim().as_bytes().to_vec();
-        if trimmed.len() < 32 {
-            return Err(RegistryError::Invalid(
-                id.to_string(),
-                "the credential is too short".into(),
-            ));
+    if let Some(first) = rows.first() {
+        match secrets_dir {
+            Some(dir) if std::path::Path::new(dir).is_dir() => {}
+            _ => {
+                return Err(RegistryError::Invalid(
+                    first.id.clone(),
+                    "TELECOM_PROVIDER_SECRETS_DIR must name an existing directory when a provider is registered".into(),
+                ));
+            }
         }
-        Ok(trimmed)
-    };
+    }
     let mut registry = ProviderRegistry::new();
     for row in rows {
         let caps: Vec<ProviderCapability> = row
@@ -421,10 +488,17 @@ pub async fn registry_from_database(
                         environment.to_string(),
                     ));
                 }
-                let secret = read_secret(&row.id, &row.credential_ref)?;
-                registry = registry.with(Arc::new(deterministic::DeterministicProvider::new(
-                    &row.id, &secret,
-                )));
+                let secret =
+                    read_provider_secret(secrets_dir, &row.id, row.credential_ref.as_deref())?;
+                let previous = read_previous_provider_secret(
+                    secrets_dir,
+                    &row.id,
+                    row.credential_ref.as_deref(),
+                )?;
+                registry = registry.with(Arc::new(
+                    deterministic::DeterministicProvider::new(&row.id, &secret)
+                        .with_previous_secret(previous.as_deref()),
+                ));
             }
             "SIP_TRUNK" => {
                 registry = registry.with(Arc::new(sip_trunk::SipTrunkProvider::new(
@@ -442,4 +516,140 @@ pub async fn registry_from_database(
         }
     }
     Ok(registry)
+}
+
+/// Builds the registry from `telecom_providers` rows. Credentials come from secret FILES
+/// in `TELECOM_PROVIDER_SECRETS_DIR` named by `credential_ref` (never from the database,
+/// never inline); `<credential_ref>.previous` is accepted as the previous callback
+/// secret during a rotation overlap. The deterministic test adapter is refused outside
+/// `local` / `test`.
+pub async fn registry_from_database(
+    db: &sea_orm::DatabaseConnection,
+    environment: cf_service_auth::RuntimeEnvironment,
+    edge: Arc<dyn crate::sip::SipMediaEdge>,
+) -> Result<ProviderRegistry, RegistryError> {
+    use sea_orm::FromQueryResult;
+    let rows = ProviderConfigRow::find_by_statement(crate::db::stmt(
+        "SELECT id, adapter, capabilities, credential_ref FROM telecom_providers ORDER BY id",
+        vec![],
+    ))
+    .all(db)
+    .await
+    .map_err(|e| RegistryError::Database(crate::error::summarize_db_error(&e).0))?;
+    let secrets_dir = std::env::var("TELECOM_PROVIDER_SECRETS_DIR").ok();
+    registry_from_rows(rows, environment, secrets_dir.as_deref(), edge)
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+    use cf_service_auth::RuntimeEnvironment as E;
+
+    fn row(id: &str, adapter: &str, credential_ref: Option<&str>) -> ProviderConfigRow {
+        ProviderConfigRow {
+            id: id.into(),
+            adapter: adapter.into(),
+            capabilities: vec!["OUTBOUND_VOICE".into()],
+            credential_ref: credential_ref.map(str::to_string),
+        }
+    }
+
+    fn secrets_dir(files: &[(&str, &str)]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("tel-secrets-{}", Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, content) in files {
+            std::fs::write(dir.join(name), content).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn startup_refuses_unsafe_provider_configurations() {
+        let edge = crate::sip::NoEdge::shared();
+        let good = secrets_dir(&[("dp-secret", &"s".repeat(40))]);
+        let dir = good.to_str().unwrap();
+        // The test adapter is refused outside local / test.
+        for env in [E::Staging, E::Production] {
+            let err = registry_from_rows(
+                vec![row("dp-a", "DETERMINISTIC_TEST", Some("dp-secret"))],
+                env,
+                Some(dir),
+                edge.clone(),
+            )
+            .unwrap_err();
+            assert!(
+                matches!(err, RegistryError::TestAdapterRefused(..)),
+                "{env}"
+            );
+        }
+        assert!(registry_from_rows(
+            vec![row("dp-a", "DETERMINISTIC_TEST", Some("dp-secret"))],
+            E::Test,
+            Some(dir),
+            edge.clone(),
+        )
+        .is_ok());
+        // A registered provider without a secrets directory is refused (any adapter).
+        for adapter in ["DETERMINISTIC_TEST", "SIP_TRUNK"] {
+            assert!(registry_from_rows(
+                vec![row("p-a", adapter, Some("dp-secret"))],
+                E::Test,
+                None,
+                edge.clone(),
+            )
+            .is_err());
+            assert!(registry_from_rows(
+                vec![row("p-a", adapter, Some("dp-secret"))],
+                E::Test,
+                Some("/nonexistent/secrets"),
+                edge.clone(),
+            )
+            .is_err());
+        }
+        // No providers: no directory needed.
+        assert!(registry_from_rows(vec![], E::Production, None, edge.clone()).is_ok());
+        // A short secret is refused; a missing credential_ref is refused.
+        let short = secrets_dir(&[("dp-secret", "tooshort")]);
+        assert!(registry_from_rows(
+            vec![row("dp-a", "DETERMINISTIC_TEST", Some("dp-secret"))],
+            E::Test,
+            short.to_str(),
+            edge.clone(),
+        )
+        .is_err());
+        assert!(registry_from_rows(
+            vec![row("dp-a", "DETERMINISTIC_TEST", None)],
+            E::Test,
+            Some(dir),
+            edge.clone(),
+        )
+        .is_err());
+        // A previous secret is loaded when present and must be usable too.
+        let overlap = secrets_dir(&[
+            ("dp-secret", &"n".repeat(40)),
+            ("dp-secret.previous", &"o".repeat(40)),
+        ]);
+        let registry = registry_from_rows(
+            vec![row("dp-a", "DETERMINISTIC_TEST", Some("dp-secret"))],
+            E::Test,
+            overlap.to_str(),
+            edge.clone(),
+        )
+        .unwrap();
+        assert!(registry.get("dp-a").is_some());
+        let bad_previous = secrets_dir(&[
+            ("dp-secret", &"n".repeat(40)),
+            ("dp-secret.previous", "short"),
+        ]);
+        assert!(registry_from_rows(
+            vec![row("dp-a", "DETERMINISTIC_TEST", Some("dp-secret"))],
+            E::Test,
+            bad_previous.to_str(),
+            edge,
+        )
+        .is_err());
+        for d in [good, short, overlap, bad_previous] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
 }

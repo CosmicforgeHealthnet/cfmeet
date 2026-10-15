@@ -924,3 +924,75 @@ async fn concurrent_workers_release_and_cool_down_each_assignment_exactly_once()
         4
     );
 }
+
+#[tokio::test]
+async fn reads_and_releases_from_another_application_or_environment_are_not_found() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = consumer();
+    h.add_relay_number(RELAY_A, BINDING_A).await;
+    let (ctx, _) = context(&h, &c, 0, 60).await;
+    let s = session(&h, &c, &ctx).await;
+    assert_eq!(
+        h.assign_relay_number(&c, &s).await.status,
+        StatusCode::CREATED
+    );
+    let other_application = Consumer {
+        application_id: Uuid::new_v4(),
+        environment_id: Uuid::new_v4(),
+        ..c.clone()
+    };
+    let other_environment = c.sibling_environment();
+    let norm = |r: &common::Response| {
+        let mut v = r.normalized_error();
+        v["error"]["message"] = Value::Null;
+        (r.status, v)
+    };
+    for foreign in [&other_application, &other_environment] {
+        let unknown = Uuid::new_v4();
+        let theirs = h
+            .get(
+                &format!("/internal/v1/sessions/{s}/relay-number-assignment"),
+                foreign,
+            )
+            .await;
+        let none = h
+            .get(
+                &format!("/internal/v1/sessions/{unknown}/relay-number-assignment"),
+                foreign,
+            )
+            .await;
+        assert_eq!(theirs.code(), "SESSION_NOT_FOUND", "{}", theirs.text);
+        assert_eq!(norm(&theirs), norm(&none));
+        let theirs = h
+            .post(
+                &format!("/internal/v1/sessions/{s}/relay-number-assignment/release"),
+                foreign,
+                json!({}),
+            )
+            .await;
+        let none = h
+            .post(
+                &format!("/internal/v1/sessions/{unknown}/relay-number-assignment/release"),
+                foreign,
+                json!({}),
+            )
+            .await;
+        assert_eq!(theirs.code(), "SESSION_NOT_FOUND", "{}", theirs.text);
+        assert_eq!(norm(&theirs), norm(&none));
+    }
+    // The owner still holds an ACTIVE assignment; nothing leaked or changed.
+    let mine = h
+        .get(
+            &format!("/internal/v1/sessions/{s}/relay-number-assignment"),
+            &c,
+        )
+        .await;
+    assert_eq!(assignment(&mine)["status"], "ACTIVE");
+    assert_eq!(
+        h.count("SELECT count(*) FROM relay_number_assignments WHERE status = 'ACTIVE'")
+            .await,
+        1
+    );
+}

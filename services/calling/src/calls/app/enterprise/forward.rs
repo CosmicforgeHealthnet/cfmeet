@@ -193,6 +193,20 @@ impl AppCallService {
                 Ok(c) if c.status == "ACTIVE" => c,
                 _ => return Ok(Err(Refused("DESTINATION_DISABLED"))),
             };
+        // Part H §70: an application-level block on the public contact refuses the step.
+        if crate::calls::app::blocks::contact_blocked_by_application(
+            self.db(),
+            call.environment_id,
+            contact.contact_reference,
+        )
+        .await?
+        {
+            crate::metrics::inc(
+                "calling_public_route_denials_total",
+                &[("reason", "DESTINATION_BLOCKED")],
+            );
+            return Ok(Err(Refused("DESTINATION_BLOCKED")));
+        }
         // Gate 2: Privacy Relay's CURRENT authority, acting for the application that placed
         // the Call, for the Call's caller towards the protected contact.
         let Some(kind) = environment_kind(self.db(), call.environment_id).await? else {
@@ -291,6 +305,12 @@ impl AppCallService {
             spend_headroom_minor: headroom,
             operational_incident: Evidence::Unknown,
             duplicate_risk: DuplicateRisk::None,
+            compliance: crate::routing::compliance::facts(
+                self.db(),
+                environment,
+                &self.compliance_overlay,
+            )
+            .await,
         };
         let mut plan = match crate::routing::engine::select(&routing_policy.policy, &inputs, now) {
             RouteDecision::Selected(plan) => *plan,

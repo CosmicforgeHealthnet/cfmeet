@@ -140,6 +140,16 @@ pub async fn record<C: ConnectionTrait>(
     Ok(id)
 }
 
+/// The audit entry of a refused / failed attempt: an internal failure (database,
+/// cryptographic) is FAILED, every domain refusal is DENIED with its reason code.
+fn refusal_entry(entry: AccessEntry, error: &crate::error::RelayError) -> AccessEntry {
+    match error {
+        crate::error::RelayError::Database { .. } => entry.failed("INTERNAL_ERROR"),
+        e if e.code() == crate::error::ErrorCode::InternalError => entry.failed("INTERNAL_ERROR"),
+        e => entry.denied(super::audit_reason(e)),
+    }
+}
+
 /// Records a refused / failed attempt best-effort (never masks the original error).
 pub async fn record_refusal<C: ConnectionTrait>(
     conn: &C,
@@ -148,12 +158,28 @@ pub async fn record_refusal<C: ConnectionTrait>(
     error: &crate::error::RelayError,
     at: DateTime<Utc>,
 ) {
-    let code = error.code();
-    let entry = match error {
-        crate::error::RelayError::Database { .. } => entry.failed("INTERNAL_ERROR"),
-        _ => entry.denied(code.as_str()),
-    };
+    let entry = refusal_entry(entry, error);
     if let Err(e) = record(conn, actor, &entry, at).await {
         tracing::error!(error = %e, operation = entry.operation.as_str(), "contact access audit could not be written");
     }
+}
+
+/// Records a refused / failed attempt and FAILS CLOSED when the audit cannot be
+/// written: the caller answers `SERVICE_UNAVAILABLE` instead of its own refusal (the
+/// plaintext resolution paths never answer anything that is not in the audit).
+pub async fn record_refusal_required<C: ConnectionTrait>(
+    conn: &C,
+    actor: &ContactActor,
+    entry: AccessEntry,
+    error: &crate::error::RelayError,
+    at: DateTime<Utc>,
+) -> RelayResult<()> {
+    let entry = refusal_entry(entry, error);
+    if let Err(e) = record(conn, actor, &entry, at).await {
+        tracing::error!(error = %e, operation = entry.operation.as_str(), "contact access audit could not be written; refusing");
+        return Err(crate::error::RelayError::Refused(
+            crate::error::ErrorCode::ServiceUnavailable,
+        ));
+    }
+    Ok(())
 }

@@ -402,6 +402,24 @@ async fn tenant_b_cannot_touch_anything_of_tenant_a_and_learns_nothing() {
         "{}",
         g.text
     );
+    // ... and the refusal is byte-identical (status + body) to the one for a random
+    // unknown ContactReference: no existence oracle.
+    let g_unknown = h
+        .post(&format!("/internal/v1/contacts/{}/resolution-grants", Uuid::new_v4()), &b, json!({
+            "relaySessionId": sid, "decisionId": Uuid::new_v4(), "callId": Uuid::new_v4(), "callLegId": Uuid::new_v4(), "purpose": "PUBLIC_NETWORK_CALL_LEG" }))
+        .await;
+    assert_eq!(g.status, g_unknown.status);
+    assert_eq!(g.normalized_error(), g_unknown.normalized_error());
+    assert_eq!(g.code(), "CONTACT_NOT_FOUND");
+    assert_eq!(
+        g.text
+            .replace(g.json["error"]["requestId"].as_str().unwrap_or(""), "req"),
+        g_unknown.text.replace(
+            g_unknown.json["error"]["requestId"].as_str().unwrap_or(""),
+            "req"
+        ),
+        "byte-identical apart from the request id"
+    );
     // Relay resources: A's session from B is SESSION_NOT_FOUND like an unknown one.
     h.add_relay_number("+44 20 7946 0500", "pb-cert").await;
     let theirs = h.assign_relay_number(&b, &sid).await;

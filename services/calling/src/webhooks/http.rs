@@ -151,6 +151,16 @@ async fn update(
     ctx.require_scope(names::WEBHOOKS_MANAGE)?;
     let id = uuid_path(&id)?;
     let b = parse_body(body)?;
+    // Part H §72: a suspended scope may only DISABLE a subscription here — never move
+    // it to another endpoint, change its event types or re-enable it.
+    if ctx.is_safety_only()
+        && (b.url.is_some()
+            || b.event_types.is_some()
+            || b.description.is_some()
+            || b.status.as_deref() != Some("DISABLED"))
+    {
+        return Err(CallingError::AuthenticationFailed);
+    }
     let view = state
         .webhooks
         .update(

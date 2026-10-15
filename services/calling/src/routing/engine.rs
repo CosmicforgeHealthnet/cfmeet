@@ -97,6 +97,9 @@ text_enum!(
         CostLimitExceeded = "COST_LIMIT_EXCEEDED",
         SpendLimitExceeded = "SPEND_LIMIT_EXCEEDED",
         DuplicateRiskUnresolved = "DUPLICATE_RISK_UNRESOLVED",
+        // Part H §78: the destination country requires an ELIGIBLE, unexpired compliance
+        // eligibility of the environment and none covers it (or it could not be read).
+        ComplianceEligibilityRequired = "COMPLIANCE_ELIGIBILITY_REQUIRED",
         NotExecutable = "NOT_EXECUTABLE",
         UnsupportedShape = "UNSUPPORTED_SHAPE",
     }
@@ -196,6 +199,8 @@ pub struct RouteInputs {
     /// An active operational incident affecting public routes.
     pub operational_incident: Evidence<bool>,
     pub duplicate_risk: DuplicateRisk,
+    /// Part H §78: the platform overlay and the environment's compliance eligibility.
+    pub compliance: super::compliance::ComplianceFacts,
 }
 
 /// Failover rules carried by a plan.
@@ -428,6 +433,19 @@ fn select_inner(
                     country.get_or_insert_with(|| cc.clone());
                 }
                 Evidence::Unknown => return Err(RouteDenial::DestinationCountryUnknown),
+            }
+        }
+        // Part H §78: a compliance-required destination country needs an ELIGIBLE,
+        // unexpired eligibility covering it; unreadable evidence denies (fail closed).
+        if let Some(cc) = &country {
+            if policy.requires_compliance(cc) || inputs.compliance.overlay.requires(cc) {
+                let covered = match &inputs.compliance.eligibility {
+                    Evidence::Known(Some(record)) => record.covers(cc, now),
+                    Evidence::Known(None) | Evidence::Unknown => false,
+                };
+                if !covered {
+                    return Err(RouteDenial::ComplianceEligibilityRequired);
+                }
             }
         }
         if inputs.duplicate_risk == DuplicateRisk::Unresolved {
@@ -681,6 +699,7 @@ mod tests {
             },
             max_failover_attempts: 1,
             max_estimated_leg_cost_minor: Some(500),
+            compliance_required_countries: vec![],
             duplicate_risk: DuplicateRiskPolicy::BlockUntilReconciled,
         }
     }
@@ -732,6 +751,7 @@ mod tests {
             spend_headroom_minor: Evidence::Known(10_000),
             operational_incident: Evidence::Known(false),
             duplicate_risk: DuplicateRisk::None,
+            compliance: crate::routing::compliance::ComplianceFacts::not_required(),
         }
     }
 

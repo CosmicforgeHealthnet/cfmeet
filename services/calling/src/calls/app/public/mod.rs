@@ -39,7 +39,10 @@ pub(crate) use outbound::{enqueue_originate_in, live_telecom_allowed, OriginateS
 
 use super::AppCallService;
 use crate::{
-    calls::errors::{CallError, CallResult},
+    calls::{
+        command::CallScope,
+        errors::{CallError, CallResult},
+    },
     config::ConfigError,
     models::calls,
     routing::engine::TelecomFlags,
@@ -173,6 +176,43 @@ pub(crate) async fn exec<C: ConnectionTrait>(
 ) -> CallResult<u64> {
     Ok(db.execute(stmt(sql, values)).await?.rows_affected())
 }
+
+/// Whether the tenant, application and environment of `scope` are all ACTIVE (Part H
+/// §71 / §77). Every server-initiated public-network effect (an inbound offer, an
+/// enterprise SIP offer, a queued ORIGINATE) re-checks this at the moment of the effect:
+/// a suspension takes effect on the next effect, never only on the next API request.
+/// Fails closed: an unreadable chain is an error, never "active".
+pub(crate) async fn scope_is_active<C: ConnectionTrait>(
+    db: &C,
+    scope: CallScope,
+) -> CallResult<bool> {
+    let row = db
+        .query_one(stmt(
+            "SELECT (t.status = 'ACTIVE' AND a.status = 'ACTIVE' AND e.status = 'ACTIVE') AS active \
+             FROM platform_environments e \
+             JOIN platform_applications a ON a.id = e.application_id AND a.tenant_id = e.tenant_id \
+             JOIN platform_tenants t ON t.id = e.tenant_id \
+             WHERE e.id = $1 AND e.tenant_id = $2 AND e.application_id = $3",
+            vec![
+                scope.environment_id().as_uuid().into(),
+                scope.tenant_id().as_uuid().into(),
+                scope.application_id().as_uuid().into(),
+            ],
+        ))
+        .await?;
+    Ok(row
+        .map(|r| r.try_get_by_index::<bool>(0))
+        .transpose()?
+        .unwrap_or(false))
+}
+
+/// SQL predicate (over the inbound-owner join aliases `t`, `a`, `e`, `sa`, `c`) that is
+/// true only when the whole authority chain of the environment's inbound owner is
+/// usable: tenant, application, environment and service account ACTIVE, the owner
+/// credential ACTIVE and not expired at `$4`.
+pub(crate) const OWNER_CHAIN_ACTIVE_SQL: &str = "(t.status = 'ACTIVE' AND a.status = 'ACTIVE' \
+    AND e.status = 'ACTIVE' AND sa.status = 'ACTIVE' AND c.status = 'ACTIVE' \
+    AND (c.expires_at IS NULL OR c.expires_at > $4))";
 
 pub(crate) async fn parties<C: ConnectionTrait>(
     db: &C,

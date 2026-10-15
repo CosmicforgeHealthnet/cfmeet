@@ -144,6 +144,39 @@ impl AppCallService {
                     .map_err(|e| resolution(e, false))?,
             );
         }
+        // Part H §10: principal categories are an allow-list (a service account or a
+        // telephone endpoint never initiates; a service account is never a target).
+        if !initiator.kind().may_initiate_application_call() {
+            return Err(CallError::PrincipalCategoryNotAllowed);
+        }
+        if targets
+            .iter()
+            .any(|t| !t.kind().may_be_application_call_target())
+        {
+            return Err(CallError::TargetUnavailable);
+        }
+        // Part H §70: an ACTIVE block rule between the initiator and any target (either
+        // direction) refuses the call before Privacy Relay, routing or ringing — and never
+        // discloses which side blocked.
+        let target_ids: Vec<Uuid> = targets.iter().map(|t| t.id().as_uuid()).collect();
+        if !super::blocks::blocked_targets(
+            self.db(),
+            scope.environment_id().as_uuid(),
+            initiator.id().as_uuid(),
+            &target_ids,
+        )
+        .await?
+        .is_empty()
+        {
+            self.note_refusal(
+                scope,
+                initiator.id().as_uuid(),
+                super::blocks::RefusalKind::BlockedAttempt,
+                self.calls.now(),
+            )
+            .await;
+            return Err(CallError::TargetUnavailable);
+        }
         let initiator_endpoint = self
             .endpoints
             .active_endpoint(scope, request.initiator, request.initiator_endpoint)
@@ -341,6 +374,7 @@ impl AppCallService {
                 spend_headroom_minor: Evidence::Unknown,
                 operational_incident: Evidence::Unknown,
                 duplicate_risk: DuplicateRisk::None,
+                compliance: crate::routing::compliance::ComplianceFacts::not_required(),
             },
             self.calls.now(),
         );

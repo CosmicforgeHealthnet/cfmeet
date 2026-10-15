@@ -46,3 +46,13 @@ The image contains the API server and SeaORM migration binary. Runtime configura
 The earlier `services/core-api/` name was replaced before Phase 2 so the service's domain responsibility is explicit.
 
 Before retiring the legacy `rtc_backend` / `rtc_frontend` repositories, deploy both the web app and meeting service successfully from `cfmeet` and verify `/health` plus a full meeting join.
+
+## Security, secrets and retention
+
+Before any environment goes live read, in this order:
+
+* [`docs/architecture/security-deployment-checklist.md`](../../docs/architecture/security-deployment-checklist.md) — network segmentation per plane, secret delivery (`*_FILE`), backup / keyring separation, administrative interfaces, go-live gates.
+* [`docs/architecture/secret-rotation-runbook.md`](../../docs/architecture/secret-rotation-runbook.md) — rotation steps for every secret class, including which rotations are not seamless.
+* `infra/telephony/README.md` — SIP / media edge planes, carrier peer configuration, certification.
+* `make secret-scan` — repository scan; `python3 scripts/secret-scan/scan_secrets.py --tree <exported rootfs>` scans a built image.
+

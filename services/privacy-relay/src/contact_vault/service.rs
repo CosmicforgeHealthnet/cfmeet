@@ -20,6 +20,33 @@ use crate::{
 };
 use sea_orm::TransactionTrait;
 
+use super::keyring::{unreadable_versions, KeyPurpose};
+
+/// Key versions stored rows name, and which of them the keyrings cannot read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RotationStatus {
+    pub referenced_encryption: Vec<String>,
+    pub referenced_fingerprint: Vec<String>,
+    pub unreadable_encryption: Vec<String>,
+    pub unreadable_fingerprint: Vec<String>,
+}
+
+/// Why the rotation guard refuses (names a version only, never material).
+#[derive(Debug, thiserror::Error)]
+pub enum RotationGuardError {
+    #[error("the contact vault keyrings are not configured")]
+    Unconfigured,
+    #[error(
+        "{purpose} key version {version} is referenced by stored rows but is not in the keyring"
+    )]
+    Unreadable {
+        purpose: &'static str,
+        version: String,
+    },
+    #[error("the referenced key versions cannot be read: {0}")]
+    Database(RelayError),
+}
+
 /// `POST /v1/privacy-relay/contacts`. Status, verification, fingerprints, key versions and
 /// scope are not inputs (unknown members are refused).
 #[derive(Debug, Deserialize)]
@@ -246,6 +273,9 @@ impl ContactVault {
         let row = repository::find(&txn, actor.scope, id, true)
             .await?
             .ok_or(RelayError::Refused(ErrorCode::ContactNotFound))?;
+        if row.is_erased() {
+            return Err(super::erased());
+        }
         if row.is_disabled() {
             return Err(RelayError::Refused(ErrorCode::ContactDisabled));
         }
@@ -397,7 +427,7 @@ impl ContactVault {
         txn.commit().await?;
         report.remaining = crate::db::scalar_i64(
             &self.db,
-            "SELECT count(*)::bigint FROM protected_contacts WHERE encryption_key_version <> $1",
+            "SELECT count(*)::bigint FROM protected_contacts WHERE erased_at IS NULL AND encryption_key_version <> $1",
             vec![active.into()],
         )
         .await?;
@@ -420,6 +450,50 @@ impl ContactVault {
             .into_iter()
             .map(|c| (c.key_version, c.contacts))
             .collect())
+    }
+
+    /// Rotation safety guard (§29): every key version a stored contact or fingerprint
+    /// names must be readable by the configured keyrings. Called before the service
+    /// serves (a keyring that lost a referenced version is a deployment error, not a
+    /// runtime surprise) and before a version is retired.
+    pub async fn verify_referenced_key_versions(&self) -> Result<(), RotationGuardError> {
+        let keys = self
+            .keys_any()
+            .map_err(|_| RotationGuardError::Unconfigured)?;
+        let status = self.rotation_status().await?;
+        if let Some(v) = status.unreadable_encryption.first() {
+            return Err(RotationGuardError::Unreadable {
+                purpose: KeyPurpose::Encryption.as_str(),
+                version: v.clone(),
+            });
+        }
+        if let Some(v) = status.unreadable_fingerprint.first() {
+            return Err(RotationGuardError::Unreadable {
+                purpose: KeyPurpose::Fingerprint.as_str(),
+                version: v.clone(),
+            });
+        }
+        let _ = keys;
+        Ok(())
+    }
+
+    /// Referenced versions against the configured keyrings (rotation-status evidence).
+    pub async fn rotation_status(&self) -> Result<RotationStatus, RotationGuardError> {
+        let keys = self
+            .keys_any()
+            .map_err(|_| RotationGuardError::Unconfigured)?;
+        let encryption = repository::referenced_encryption_versions(&self.db)
+            .await
+            .map_err(RotationGuardError::Database)?;
+        let fingerprint = repository::referenced_fingerprint_versions(&self.db)
+            .await
+            .map_err(RotationGuardError::Database)?;
+        Ok(RotationStatus {
+            unreadable_encryption: unreadable_versions(keys.encryption(), &encryption),
+            unreadable_fingerprint: unreadable_versions(keys.fingerprint(), &fingerprint),
+            referenced_encryption: encryption,
+            referenced_fingerprint: fingerprint,
+        })
     }
 
     /// Whether `id` is an existing, enabled contact of `scope` (Communication Context
@@ -559,4 +633,40 @@ impl ContactVault {
             .map(|c| (c.key_version, c.contacts))
             .collect())
     }
+}
+
+/// Progress of one contact-erasure batch (retention, §80).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ErasureReport {
+    pub erased: Vec<Uuid>,
+}
+
+/// Erases (minimizes) up to `limit` contacts DISABLED at or before `cutoff`, inside the
+/// caller's transaction: ciphertext, nonce and key version gone, the opaque reference and
+/// its digit-free masked display kept, one `ERASE` access-audit row per contact, no key
+/// material needed. Idempotent and `SKIP LOCKED` (concurrent workers erase each contact
+/// once); contacts under an active retention hold are skipped.
+pub async fn erase_disabled_contacts<C: sea_orm::ConnectionTrait>(
+    conn: &C,
+    cutoff: chrono::DateTime<chrono::Utc>,
+    now: chrono::DateTime<chrono::Utc>,
+    limit: u64,
+) -> RelayResult<ErasureReport> {
+    let rows = repository::lock_for_erasure(conn, cutoff, limit.clamp(1, 500)).await?;
+    let mut report = ErasureReport::default();
+    for row in &rows {
+        if !repository::erase(conn, row.id, now).await? {
+            continue;
+        }
+        let actor = ContactActor::system(row.scope());
+        record(
+            conn,
+            &actor,
+            &AccessEntry::new(ContactOperation::Erase, Some(row.id)).purpose("DATA_RETENTION"),
+            now,
+        )
+        .await?;
+        report.erased.push(row.id);
+    }
+    Ok(report)
 }

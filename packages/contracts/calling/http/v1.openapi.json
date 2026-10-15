@@ -9348,6 +9348,373 @@
           }
         ]
       }
+    },
+    "/v1/blocks": {
+      "post": {
+        "operationId": "createBlock",
+        "summary": "Create a block / opt-out rule",
+        "description": "Part H §70: a principal blocks a principal or a protected ContactReference (calls.write), or the application blocks a ContactReference (enterprise.config.write). Never a raw number. Idempotent for an active pair (200 returns the existing rule).",
+        "security": [
+          {
+            "platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "responses": {
+          "200": {
+            "description": "The block rule.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The block rule.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listBlocks",
+        "summary": "List block rules",
+        "description": "Active block rules of the caller's scope, optionally of one principal.",
+        "security": [
+          {
+            "platformCredential": [
+              "calls.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.read",
+        "responses": {
+          "200": {
+            "description": "Block rules.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "principalId",
+            "in": "query",
+            "required": false,
+            "description": "A principal of the caller's own scope.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/blocks/{block_id}": {
+      "delete": {
+        "operationId": "releaseBlock",
+        "summary": "Release a block rule",
+        "description": "Releases (never deletes) a rule; a rule of another scope is not found.",
+        "security": [
+          {
+            "platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "responses": {
+          "200": {
+            "description": "The released rule.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "block_id",
+            "in": "path",
+            "required": true,
+            "description": "Block rule id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/calls/{call_id}/abuse-reports": {
+      "post": {
+        "operationId": "createAbuseReport",
+        "summary": "Report an unwanted or abusive call",
+        "description": "Part H §69: a participant principal of the call reports it with a bounded category and optional code (no free text, no number). Idempotent per reporter and call.",
+        "security": [
+          {
+            "platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "responses": {
+          "200": {
+            "description": "The report.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The report.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "required": true,
+            "description": "Call id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/abuse-reports": {
+      "get": {
+        "operationId": "listAbuseReports",
+        "summary": "List abuse reports",
+        "description": "Reports filed in the caller's scope, optionally by one principal.",
+        "security": [
+          {
+            "platformCredential": [
+              "calls.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.read",
+        "responses": {
+          "200": {
+            "description": "Abuse reports.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "principalId",
+            "in": "query",
+            "required": false,
+            "description": "A principal of the caller's own scope.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -9812,7 +10179,8 @@
           "VERSION_CONFLICT",
           "ENTERPRISE_POLICY_DENIED",
           "ARTIFACT_STORAGE_UNAVAILABLE",
-          "RECORDING_NOT_AUTHORIZED"
+          "RECORDING_NOT_AUTHORIZED",
+          "PRINCIPAL_NOT_ELIGIBLE"
         ]
       },
       "ErrorEnvelope": {

@@ -350,6 +350,10 @@ class RealRepository(unittest.TestCase):
         self.assertTrue(all(t.startswith(("platform_", "enterprise_", "voicemail_", "webhook_"))
                             or t in call_domain or t.startswith("call_recording")
                             or t == "calling_incidents"
+                            # Part H sections 69-70: block / opt-out rules, their refusal
+                            # windows and abuse reports are Calling-owned (ADR 0029).
+                            or t in {"calling_block_rules", "calling_abuse_windows",
+                                     "calling_abuse_reports"}
                             for t in calling), calling)
         # No second Call authority.
         self.assertFalse(calling & {"enterprise_calls", "pbx_calls", "voicemail_calls", "ivr_calls"})

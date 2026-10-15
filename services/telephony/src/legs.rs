@@ -24,7 +24,7 @@ pub(crate) const LEG_COLUMNS: &str = "id, calling_call_id, calling_call_leg_id, 
     spend_reserved_minor, spend_currency, provider_cost_minor, provider_cost_currency, max_duration_seconds, media_attachment, end_reason, \
     failure_category, usage_status, reconcile_after, reconcile_lease_until, reconcile_attempts, \
     last_provider_sequence, event_sequence, created_at, originating_at, ringing_at, answered_at, \
-    connected_at, ended_at, updated_at, version, enterprise_device_id, edge_channel_ref";
+    connected_at, ended_at, updated_at, version, enterprise_device_id, edge_channel_ref, relay_assignment_ref";
 
 #[derive(Debug, Clone, FromQueryResult)]
 pub struct LegRow {
@@ -75,6 +75,8 @@ pub struct LegRow {
     pub enterprise_device_id: Option<Uuid>,
     /// Part F: the edge channel of an ENTERPRISE_INTERNAL leg (internal to Telephony).
     pub edge_channel_ref: Option<String>,
+    /// Part H: Privacy Relay's assignment reference of the presented caller identity.
+    pub relay_assignment_ref: Option<Uuid>,
 }
 
 impl LegRow {

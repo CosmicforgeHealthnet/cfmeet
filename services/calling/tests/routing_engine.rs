@@ -41,6 +41,7 @@ fn pstn_policy() -> RoutingPolicy {
         max_failover_attempts: 1,
         max_estimated_leg_cost_minor: None,
         duplicate_risk: calling::routing::policy::DuplicateRiskPolicy::BlockUntilReconciled,
+        compliance_required_countries: vec![],
     }
 }
 
@@ -73,6 +74,7 @@ fn pstn_inputs(contact: Uuid) -> RouteInputs {
         spend_headroom_minor: Evidence::Known(1_000),
         operational_incident: Evidence::Known(false),
         duplicate_risk: DuplicateRisk::None,
+        compliance: calling::routing::compliance::ComplianceFacts::not_required(),
     }
 }
 

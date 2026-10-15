@@ -24,7 +24,9 @@ use super::{
 };
 use crate::scope::RelayScope;
 
-const DOMAIN: &[u8] = b"cfmeet-contact-v1";
+/// Domain-separation label of the fingerprint MAC (distinct from the ciphertext AAD
+/// label `cfmeet-contact-vault-v1`; both are pinned by a unit test in `crypto.rs`).
+pub(crate) const DOMAIN: &[u8] = b"cfmeet-contact-v1";
 const SEPARATOR: u8 = 0x1f;
 
 /// One (key version, fingerprint) of a number in a scope.

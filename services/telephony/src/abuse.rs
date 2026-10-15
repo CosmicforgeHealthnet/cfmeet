@@ -6,7 +6,9 @@
 //! * one protected contact keeps not answering (`REPEATED_NO_ANSWER`);
 //! * one protected contact is dialed again and again (`SAME_DESTINATION_VELOCITY`);
 //! * one application's originations keep failing (`FAILED_ORIGINATIONS`);
-//! * one Privacy Relay session keeps requesting callbacks (`RAPID_CALLBACKS`).
+//! * one Privacy Relay session keeps requesting callbacks (`RAPID_CALLBACKS`);
+//! * an application's origination hit a blocked / unclassified destination range
+//!   (`DESTINATION_CLASS_REFUSED`, raised by the executor's pre-toll check).
 //!
 //! Evidence holds opaque identifiers and counts only (never a number). Nothing is
 //! blocked here: enforcement stays with the spend / velocity policy in Calling and the
@@ -98,7 +100,7 @@ impl TelephonyService {
         Ok(raised)
     }
 
-    async fn raise_abuse_signal(
+    pub(crate) async fn raise_abuse_signal(
         &self,
         kind: &'static str,
         subject: Uuid,

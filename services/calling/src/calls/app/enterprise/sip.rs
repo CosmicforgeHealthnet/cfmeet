@@ -83,6 +83,8 @@ impl std::fmt::Debug for EnterpriseKeypad {
 struct Owner {
     service_account_id: Uuid,
     credential_id: Uuid,
+    /// Part H §71: the whole owner authority chain is ACTIVE (statuses, credential expiry).
+    chain_active: bool,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -143,12 +145,22 @@ impl AppCallService {
             .map_err(super::enterprise_error)?
             .ok_or(CallError::NotFound)?;
         let owner = Owner::find_by_statement(stmt(
-            "SELECT service_account_id, credential_id FROM call_inbound_owners \
-             WHERE environment_id = $1 AND tenant_id = $2 AND application_id = $3 AND enabled",
+            &format!(
+                "SELECT o.service_account_id, o.credential_id, {} AS chain_active \
+                 FROM call_inbound_owners o \
+                 JOIN platform_environments e ON e.id = o.environment_id \
+                 JOIN platform_applications a ON a.id = o.application_id \
+                 JOIN platform_tenants t ON t.id = o.tenant_id \
+                 JOIN platform_service_accounts sa ON sa.id = o.service_account_id \
+                 JOIN platform_api_credentials c ON c.id = o.credential_id \
+                 WHERE o.environment_id = $1 AND o.tenant_id = $2 AND o.application_id = $3 AND o.enabled",
+                crate::calls::app::public::OWNER_CHAIN_ACTIVE_SQL
+            ),
             vec![
                 s.environment_id.into(),
                 s.tenant_id.into(),
                 s.application_id.into(),
+                self.calls.now().into(),
             ],
         ))
         .one(self.db())
@@ -156,6 +168,10 @@ impl AppCallService {
         .ok_or(CallError::CapabilityUnavailable(
             "no owner is configured for calls of this environment",
         ))?;
+        if !owner.chain_active {
+            // A suspended scope or a revoked / expired owner credential: no Call.
+            return Err(CallError::PublicRouteDenied("SCOPE_SUSPENDED"));
+        }
         let caller = self
             .principals
             .resolve_in(

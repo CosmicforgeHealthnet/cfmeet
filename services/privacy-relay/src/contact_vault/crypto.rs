@@ -27,8 +27,10 @@ use crate::scope::RelayScope;
 
 /// Stored algorithm identifier.
 pub const ALGORITHM: &str = "AES-256-GCM";
-/// Domain separation label of the AAD.
-const AAD_LABEL: &str = "cfmeet-contact-vault-v1";
+/// Domain separation label of the AAD. (ADR 0011 names it `cfmeet-contact-v1`, which is
+/// the FINGERPRINT domain; the stored ciphertexts are bound to this exact string, so the
+/// code label is authoritative and never changes.)
+pub(crate) const AAD_LABEL: &str = "cfmeet-contact-vault-v1";
 pub const NONCE_LEN: usize = 12;
 const TAG_LEN: usize = 16;
 
@@ -306,5 +308,62 @@ mod tests {
             open(&keys, scope(), id, &unknown).unwrap_err(),
             CryptoError::UnknownKeyVersion
         );
+    }
+
+    #[test]
+    fn the_aad_and_fingerprint_labels_are_pinned() {
+        // Changing either label would orphan every stored ciphertext / fingerprint.
+        assert_eq!(AAD_LABEL, "cfmeet-contact-vault-v1");
+        assert_eq!(
+            crate::contact_vault::fingerprint::DOMAIN,
+            b"cfmeet-contact-v1"
+        );
+        assert_ne!(
+            AAD_LABEL.as_bytes(),
+            crate::contact_vault::fingerprint::DOMAIN
+        );
+        let version = KeyVersion::parse("v").unwrap();
+        let aad = ContactAad {
+            scope: scope(),
+            contact_reference: Uuid::parse_str(CONTACT).unwrap(),
+            key_version: &version,
+        };
+        assert!(aad.bytes().starts_with(b"cfmeet-contact-vault-v1|"));
+    }
+
+    #[test]
+    fn a_ciphertext_moved_to_a_row_differing_in_one_aad_part_fails_authentication() {
+        let keys = keyring(KeyPurpose::Encryption, "k1", &[("k1", 3)]);
+        let id = Uuid::new_v4();
+        let sealed = seal(&keys, scope(), id, &number("+390212345678")).unwrap();
+        let s = scope();
+        // ONLY the application differs.
+        let other_application =
+            RelayScope::from_row(s.tenant_id(), Uuid::new_v4(), s.environment_id());
+        assert_eq!(
+            open(&keys, other_application, id, &sealed).unwrap_err(),
+            CryptoError::Authentication
+        );
+        // ONLY the environment differs.
+        let other_environment =
+            RelayScope::from_row(s.tenant_id(), s.application_id(), Uuid::new_v4());
+        assert_eq!(
+            open(&keys, other_environment, id, &sealed).unwrap_err(),
+            CryptoError::Authentication
+        );
+        // ONLY the key version label differs, with the SAME key bytes under the new label.
+        let relabelled_keyring = keyring(KeyPurpose::Encryption, "k2", &[("k2", 3)]);
+        assert_eq!(
+            relabelled_keyring.current_key().1.expose(),
+            keys.current_key().1.expose()
+        );
+        let mut relabelled = sealed.clone();
+        relabelled.key_version = KeyVersion::parse("k2").unwrap();
+        assert_eq!(
+            open(&relabelled_keyring, scope(), id, &relabelled).unwrap_err(),
+            CryptoError::Authentication
+        );
+        // Unchanged, it still opens.
+        assert!(open(&keys, scope(), id, &sealed).is_ok());
     }
 }

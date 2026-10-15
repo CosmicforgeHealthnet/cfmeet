@@ -9,6 +9,11 @@
 //!
 //! Its HTTP callbacks are authenticated with HMAC-SHA-256 over the raw body
 //! (`x-cfmeet-provider-signature: v1=<hex>`), verified in constant time before parsing.
+//! During a secret rotation a PREVIOUS secret (`<credential_ref>.previous`) is accepted
+//! as well: both MACs are always computed, so timing does not reveal which key matched.
+//! The body parser is strict: unknown fields, over-long or malformed identifiers,
+//! out-of-range sequences / costs and non-ISO currencies are refused before anything is
+//! touched.
 
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
@@ -23,9 +28,9 @@ use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
 use super::{
-    CapacityReport, ControlOutcome, EventRejection, OriginateOutcome, OriginateRequest,
-    ProviderEvent, ProviderIngress, QueryKey, QueryOutcome, TelecomInterconnectProvider,
-    UnknownReason,
+    valid_provider_token, CapacityReport, ControlOutcome, EventRejection, OriginateOutcome,
+    OriginateRequest, ProviderEvent, ProviderIngress, QueryKey, QueryOutcome,
+    TelecomInterconnectProvider, UnknownReason,
 };
 use crate::domain::{
     EndReason, FailureCategory, Health, LegStatus, NormalizedEvent, ProviderCapability,
@@ -90,6 +95,8 @@ pub struct DeterministicProvider {
     id: String,
     capabilities: Vec<ProviderCapability>,
     callback_secret: Arc<Vec<u8>>,
+    /// The previous callback secret during a rotation overlap (same length rule).
+    previous_secret: Option<Arc<Vec<u8>>>,
     state: Arc<Mutex<State>>,
 }
 
@@ -108,8 +115,15 @@ impl DeterministicProvider {
                 ProviderCapability::Dtmf,
             ],
             callback_secret: Arc::new(callback_secret.to_vec()),
+            previous_secret: None,
             state: Arc::default(),
         }
+    }
+
+    /// Accepts callbacks signed with `previous` as well (rotation overlap).
+    pub fn with_previous_secret(mut self, previous: Option<&[u8]>) -> Self {
+        self.previous_secret = previous.map(|p| Arc::new(p.to_vec()));
+        self
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
@@ -269,11 +283,13 @@ impl DeterministicProvider {
 
     /// Signs a callback body the way the provider would.
     pub fn sign(&self, body: &[u8]) -> String {
-        format!(
-            "v1={}",
-            hex::encode(hmac_sha256(&self.callback_secret, body))
-        )
+        sign_with(&self.callback_secret, body)
     }
+}
+
+/// Signs `body` with `secret` the way the provider would (tests: the previous key).
+pub fn sign_with(secret: &[u8], body: &[u8]) -> String {
+    format!("v1={}", hex::encode(hmac_sha256(secret, body)))
 }
 
 fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
@@ -503,8 +519,21 @@ impl TelecomInterconnectProvider for DeterministicProvider {
         let Ok(given) = hex::decode(hex_sig) else {
             return Err(EventRejection::Unauthenticated);
         };
-        let expected = hmac_sha256(&self.callback_secret, &ingress.body);
-        if given.len() == expected.len() && bool::from(given.ct_eq(&expected)) {
+        let current = hmac_sha256(&self.callback_secret, &ingress.body);
+        // Always compute both MACs (a fixed-cost fallback when no previous key is set),
+        // so the timing is the same whichever key matches.
+        let previous = hmac_sha256(
+            self.previous_secret
+                .as_deref()
+                .map(Vec::as_slice)
+                .unwrap_or(&self.callback_secret),
+            &ingress.body,
+        );
+        let ok_current = given.len() == current.len() && bool::from(given.ct_eq(&current));
+        let ok_previous = self.previous_secret.is_some()
+            && given.len() == previous.len()
+            && bool::from(given.ct_eq(&previous));
+        if ok_current | ok_previous {
             Ok(())
         } else {
             Err(EventRejection::Unauthenticated)
@@ -531,10 +560,32 @@ impl TelecomInterconnectProvider for DeterministicProvider {
             "failed" => NormalizedEvent::LegFailed,
             _ => return Err(EventRejection::Malformed),
         };
+        // Strict identifiers and bounds (the database rule), before any transaction.
+        if !valid_provider_token(&body.event_id)
+            || body
+                .call_ref
+                .as_deref()
+                .is_some_and(|r| !valid_provider_token(r))
+            || body
+                .correlation_key
+                .as_deref()
+                .is_some_and(|k| !valid_provider_token(k))
+            || body
+                .sequence
+                .is_some_and(|s| !(0..=i64::from(i32::MAX)).contains(&s))
+        {
+            return Err(EventRejection::Malformed);
+        }
         let mut detail = BTreeMap::new();
         detail.insert("provider_status".to_string(), body.event.clone());
         let cost = match (body.cost_minor, body.currency) {
-            (Some(c), Some(cur)) if c >= 0 && cur.len() == 3 => Some((c, cur)),
+            (Some(c), Some(cur))
+                if (0..=crate::events::ingest::MAX_PROVIDER_COST_MINOR).contains(&c)
+                    && cur.len() == 3
+                    && cur.bytes().all(|b| b.is_ascii_uppercase()) =>
+            {
+                Some((c, cur))
+            }
             (None, None) => None,
             _ => return Err(EventRejection::Malformed),
         };
@@ -556,6 +607,71 @@ impl TelecomInterconnectProvider for DeterministicProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ingress(provider: &DeterministicProvider, body: &[u8], signature: &str) -> ProviderIngress {
+        let mut headers = BTreeMap::new();
+        headers.insert(SIGNATURE_HEADER.to_string(), signature.to_string());
+        ProviderIngress {
+            provider_id: provider.id.clone(),
+            path_token: None,
+            headers,
+            body: body.to_vec(),
+            received_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn callbacks_verify_under_the_current_or_the_previous_secret_only() {
+        let current = b"current-secret-0123456789abcdefghijklmnop";
+        let previous = b"previous-secret-0123456789abcdefghijklmno";
+        let other = b"other-secret-0123456789abcdefghijklmnopqrs";
+        let body = br#"{"eventId":"ev-1","event":"ringing","occurredAt":"2031-03-01T10:00:00Z"}"#;
+        let overlap =
+            DeterministicProvider::new("dp-a", current).with_previous_secret(Some(previous));
+        assert!(overlap
+            .verify_event(&ingress(&overlap, body, &sign_with(current, body)))
+            .is_ok());
+        assert!(overlap
+            .verify_event(&ingress(&overlap, body, &sign_with(previous, body)))
+            .is_ok());
+        assert!(overlap
+            .verify_event(&ingress(&overlap, body, &sign_with(other, body)))
+            .is_err());
+        // After the overlap (no previous file) the old key is refused again.
+        let rotated = DeterministicProvider::new("dp-a", current);
+        assert!(rotated
+            .verify_event(&ingress(&rotated, body, &sign_with(previous, body)))
+            .is_err());
+        assert!(rotated
+            .verify_event(&ingress(&rotated, body, &sign_with(current, body)))
+            .is_ok());
+    }
+
+    #[test]
+    fn the_callback_parser_is_strict_about_identifiers_and_bounds() {
+        let p = DeterministicProvider::new("dp-a", b"current-secret-0123456789abcdefghijklmnop");
+        let parse = |json: String| {
+            let i = ingress(&p, json.as_bytes(), "v1=00");
+            p.normalize_event(&i).map(|_| ())
+        };
+        let ok = format!(
+            r#"{{"eventId":"{}","event":"ringing","occurredAt":"2031-03-01T10:00:00Z","sequence":7}}"#,
+            "e".repeat(160)
+        );
+        assert!(parse(ok).is_ok());
+        for bad in [
+            format!(r#"{{"eventId":"{}","event":"ringing","occurredAt":"2031-03-01T10:00:00Z"}}"#, "e".repeat(161)),
+            format!(r#"{{"eventId":"ev","callRef":"{}","event":"ringing","occurredAt":"2031-03-01T10:00:00Z"}}"#, "r".repeat(161)),
+            r#"{"eventId":"ev","correlationKey":"bad key","event":"ringing","occurredAt":"2031-03-01T10:00:00Z"}"#.to_string(),
+            r#"{"eventId":"ev","event":"ringing","occurredAt":"2031-03-01T10:00:00Z","sequence":-1}"#.to_string(),
+            r#"{"eventId":"ev","event":"ringing","occurredAt":"2031-03-01T10:00:00Z","sequence":2147483648}"#.to_string(),
+            r#"{"eventId":"ev","event":"completed","occurredAt":"2031-03-01T10:00:00Z","costMinor":5,"currency":"ngn"}"#.to_string(),
+            r#"{"eventId":"ev","event":"completed","occurredAt":"2031-03-01T10:00:00Z","costMinor":-5,"currency":"NGN"}"#.to_string(),
+            r#"{"eventId":"ev","event":"completed","occurredAt":"2031-03-01T10:00:00Z","costMinor":1000000000001,"currency":"NGN"}"#.to_string(),
+        ] {
+            assert_eq!(parse(bad.clone()), Err(EventRejection::Malformed), "{bad}");
+        }
+    }
 
     #[test]
     fn hmac_matches_rfc_4231_case_2() {

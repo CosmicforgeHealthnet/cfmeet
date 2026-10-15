@@ -174,6 +174,18 @@ impl AppCallService {
                 "the transferring participant has left the call",
             ));
         }
+        // Part H §70: a block between the transferring participant and the target (either
+        // direction) makes the target unavailable.
+        if super::blocks::principal_pair_blocked(
+            &txn,
+            call.environment_id,
+            transferring.principal_id,
+            target.id().as_uuid(),
+        )
+        .await?
+        {
+            return Err(CallError::TargetUnavailable);
+        }
         let participants = call_participants::Entity::find()
             .filter(call_participants::Column::CallId.eq(call.id))
             .all(&txn)

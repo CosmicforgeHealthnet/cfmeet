@@ -21,7 +21,7 @@ use crate::{
 pub const CONTACT_COLUMNS: &str =
     "id, tenant_id, application_id, environment_id, version, ciphertext, nonce, \
     encryption_key_version, masked_display, country_iso2, voice_capability, verification_state, \
-    verification_expires_at, verification_updated_at, disabled_at, created_at, updated_at";
+    verification_expires_at, verification_updated_at, disabled_at, erased_at, created_at, updated_at";
 
 #[derive(FromQueryResult, Clone)]
 pub struct ContactRow {
@@ -30,9 +30,10 @@ pub struct ContactRow {
     pub application_id: Uuid,
     pub environment_id: Uuid,
     pub version: i64,
-    pub ciphertext: Vec<u8>,
-    pub nonce: Vec<u8>,
-    pub encryption_key_version: String,
+    /// NULL once the contact has been ERASED (retention minimization, §80).
+    pub ciphertext: Option<Vec<u8>>,
+    pub nonce: Option<Vec<u8>>,
+    pub encryption_key_version: Option<String>,
     pub masked_display: String,
     pub country_iso2: Option<String>,
     pub voice_capability: String,
@@ -40,6 +41,8 @@ pub struct ContactRow {
     pub verification_expires_at: Option<DateTime<Utc>>,
     pub verification_updated_at: DateTime<Utc>,
     pub disabled_at: Option<DateTime<Utc>>,
+    /// Set once the value was erased; such a row is an opaque, disabled reference.
+    pub erased_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -96,13 +99,25 @@ impl ContactRow {
         RelayScope::from_row(self.tenant_id, self.application_id, self.environment_id)
     }
 
+    /// The stored ciphertext; an erased contact has none (refused with the erased code).
     pub fn sealed(&self) -> RelayResult<Sealed> {
+        let (Some(ciphertext), Some(nonce), Some(version)) = (
+            self.ciphertext.as_ref(),
+            self.nonce.as_ref(),
+            self.encryption_key_version.as_deref(),
+        ) else {
+            return Err(super::erased());
+        };
         Ok(Sealed {
-            ciphertext: self.ciphertext.clone(),
-            nonce: self.nonce.clone(),
-            key_version: KeyVersion::parse(&self.encryption_key_version)
+            ciphertext: ciphertext.clone(),
+            nonce: nonce.clone(),
+            key_version: KeyVersion::parse(version)
                 .ok_or(RelayError::Refused(ErrorCode::InternalError))?,
         })
+    }
+
+    pub fn is_erased(&self) -> bool {
+        self.erased_at.is_some()
     }
 
     pub fn stored_state(&self) -> RelayResult<VerificationState> {
@@ -126,6 +141,10 @@ impl ContactRow {
         self.disabled_at.is_some()
     }
 
+    /// The safe view (contract `ProtectedContact`). An ERASED contact renders as a
+    /// DISABLED reference whose masked display carries no digits (the contract has no
+    /// separate ERASED status yet; `disabledAt` and the digit-free display tell the two
+    /// apart).
     pub fn view(&self, now: DateTime<Utc>) -> RelayResult<Value> {
         let state = self.effective_state(now)?;
         Ok(json!({

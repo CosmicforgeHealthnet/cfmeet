@@ -11,12 +11,16 @@ on:
       - "services/**"
       - "packages/**"
       - "scripts/service-boundaries/**"
+      - "scripts/secret-scan/**"
+      - "infra/**"
       - ".github/workflows/service-boundaries.yml"
   pull_request:
     paths:
       - "services/**"
       - "packages/**"
       - "scripts/service-boundaries/**"
+      - "scripts/secret-scan/**"
+      - "infra/**"
       - ".github/workflows/service-boundaries.yml"
   workflow_dispatch:
 
@@ -49,3 +53,22 @@ jobs:
           if git ls-files | grep -i 'phase-03'; then
             echo "::error::a phase-03 path exists in the repository"; exit 1
           fi
+
+  secret-scan:
+    name: repository secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Every rule fires on its own synthetic material; published / placeholder fixtures
+      # stay clean; the real tree is clean.
+      - name: scanner mutation tests
+        run: python3 -m unittest discover -s scripts/secret-scan -v
+
+      - name: scan tracked files
+        run: python3 scripts/secret-scan/scan_secrets.py
+

@@ -12,7 +12,7 @@ use telephony::{
     ports::{HttpCalling, HttpPrivacyRelay},
     providers::registry_from_database,
     routes,
-    service::TelephonyService,
+    service::{ExecutionSettings, TelephonyService},
     sip::edge_from_env,
     state::AppState,
 };
@@ -26,6 +26,13 @@ async fn main() -> anyhow::Result<()> {
         Ok(config) => config,
         Err(err) => {
             eprintln!("telephony: configuration error: {err}");
+            std::process::exit(2);
+        }
+    };
+    let execution = match ExecutionSettings::from_env() {
+        Ok(settings) => settings,
+        Err(err) => {
+            eprintln!("telephony: execution configuration error: {err}");
             std::process::exit(2);
         }
     };
@@ -121,7 +128,8 @@ async fn main() -> anyhow::Result<()> {
         .with_providers(providers)
         .with_edge(edge.clone())
         .with_privacy_relay(Arc::new(HttpPrivacyRelay::new(service_auth.clone())))
-        .with_calling(Arc::new(HttpCalling::new(service_auth.clone())));
+        .with_calling(Arc::new(HttpCalling::new(service_auth.clone())))
+        .with_settings(execution);
     // Edge events (inbound dialogs, call progress, application media joins).
     tokio::spawn(telephony.clone().run_edge_events());
     // Commands, outbox, reconciliation, usage, health: every instance (SKIP LOCKED).

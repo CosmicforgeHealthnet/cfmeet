@@ -25,6 +25,7 @@
 pub mod assignment;
 pub mod inbound;
 pub mod inventory;
+pub mod retention;
 
 use chrono::{DateTime, Utc};
 use sea_orm::FromQueryResult;

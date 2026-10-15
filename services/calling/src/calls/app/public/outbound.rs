@@ -57,6 +57,63 @@ pub struct CreatePublicCall {
     pub key: CommandKey,
 }
 
+impl AppCallService {
+    /// Part H §70: refuses (`DESTINATION_BLOCKED`) when `initiator` or the application
+    /// blocks the public `contact`, counting the attempt towards an incident.
+    pub(crate) async fn refuse_blocked_contact(
+        &self,
+        scope: CallScope,
+        initiator: Uuid,
+        contact: Uuid,
+    ) -> CallResult<()> {
+        if super::super::blocks::contact_blocked_for_initiator(
+            self.db(),
+            scope.environment_id().as_uuid(),
+            initiator,
+            contact,
+        )
+        .await?
+        {
+            crate::metrics::inc(
+                "calling_public_route_denials_total",
+                &[("reason", "DESTINATION_BLOCKED")],
+            );
+            self.note_refusal(
+                scope,
+                initiator,
+                super::super::blocks::RefusalKind::BlockedAttempt,
+                self.calls.now(),
+            )
+            .await;
+            return Err(CallError::PublicRouteDenied("DESTINATION_BLOCKED"));
+        }
+        Ok(())
+    }
+
+    /// Part H §83: a destination-policy denial counts towards a REPEATED_ROUTE_DENIALS
+    /// incident of the initiator.
+    pub(crate) async fn note_route_denial(
+        &self,
+        scope: CallScope,
+        initiator: Uuid,
+        denial: RouteDenial,
+        now: chrono::DateTime<chrono::Utc>,
+    ) {
+        if matches!(
+            denial,
+            RouteDenial::DestinationCountryDenied | RouteDenial::ComplianceEligibilityRequired
+        ) {
+            self.note_refusal(
+                scope,
+                initiator,
+                super::super::blocks::RefusalKind::RouteDenial,
+                now,
+            )
+            .await;
+        }
+    }
+}
+
 /// A route denial as the stable public error.
 pub(crate) fn denial_error(denial: RouteDenial) -> CallError {
     crate::metrics::inc(
@@ -204,6 +261,13 @@ impl AppCallService {
             .resolve(ctx, &PrincipalReference::Id(request.initiator))
             .await
             .map_err(|e| super::super::create::resolution(e, true))?;
+        if !initiator.kind().may_initiate_application_call() {
+            return Err(CallError::PrincipalCategoryNotAllowed);
+        }
+        // Part H §70: the initiator's (or the application's) block on the destination
+        // contact refuses the call before Privacy Relay is even asked.
+        self.refuse_blocked_contact(scope, initiator.id().as_uuid(), request.target_contact)
+            .await?;
         let initiator_endpoint = self
             .endpoints
             .active_endpoint(scope, request.initiator, request.initiator_endpoint)
@@ -273,11 +337,19 @@ impl AppCallService {
             spend_headroom_minor: headroom,
             operational_incident: Evidence::Unknown,
             duplicate_risk: DuplicateRisk::None,
+            compliance: crate::routing::compliance::facts(
+                self.db(),
+                environment,
+                &self.compliance_overlay,
+            )
+            .await,
         };
         let mut plan = match crate::routing::engine::select(&policy.policy, &inputs, now) {
             RouteDecision::Selected(plan) => *plan,
             RouteDecision::Denied(denial) => {
                 tracing::info!(denial = denial.as_str(), "public route denied");
+                self.note_route_denial(scope, initiator.id().as_uuid(), denial, now)
+                    .await;
                 return Err(denial_error(denial));
             }
         };

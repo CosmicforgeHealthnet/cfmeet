@@ -15,7 +15,8 @@ use sea_orm::DatabaseConnection;
 
 use crate::{
     clock::SharedClock,
-    config::TelecomFlags,
+    config::{invalid, ConfigError, TelecomFlags},
+    destinations::{DestinationClass, UnclassifiedPolicy},
     ports::{CallingPort, PrivacyRelayPort, Unconfigured},
     providers::ProviderRegistry,
     sip::{NoEdge, SipMediaEdge},
@@ -41,6 +42,98 @@ pub struct ExecutionSettings {
     pub provider_event_retention: Duration,
     /// Callback authentication failures per minute per provider before an incident.
     pub callback_auth_failure_incident_threshold: i64,
+    /// Invalid callbacks (malformed / oversized / unknown provider / replay burst) per
+    /// minute per subject before an aggregated incident (Part H §59–§60).
+    pub callback_invalid_incident_threshold: i64,
+    /// Destination classes refused before any provider action (Part H §66).
+    pub blocked_destination_classes: Vec<DestinationClass>,
+    /// What happens to a destination no class rule matches.
+    pub unclassified_destination_policy: UnclassifiedPolicy,
+    /// Retention of RESOLVED incidents (Part H §80).
+    pub incident_retention: Duration,
+}
+
+/// Settings read from the environment (every value has a documented default):
+///
+/// | Variable | Default | Meaning |
+/// |---|---|---|
+/// | `TELEPHONY_CALLBACK_AUTH_FAILURE_INCIDENT_THRESHOLD` | 20 | auth failures / minute / provider → `CALLBACK_AUTH_FAILURES` |
+/// | `TELEPHONY_CALLBACK_INVALID_INCIDENT_THRESHOLD` | 20 | invalid callbacks / minute / subject → `CALLBACK_*` incidents |
+/// | `TELEPHONY_BLOCKED_DESTINATION_CLASSES` | `PREMIUM,SHARED_COST,SATELLITE,HIGH_RISK` | classes refused pre-toll |
+/// | `TELEPHONY_UNCLASSIFIED_DESTINATION_POLICY` | `ALLOW` | `ALLOW` or `DENY` destinations no rule classifies |
+/// | `TELEPHONY_PROVIDER_EVENT_RETENTION_DAYS` | 30 (min 1) | provider event evidence retention |
+/// | `TELEPHONY_INCIDENT_RETENTION_DAYS` | 365 (min 1) | RESOLVED incident retention |
+impl ExecutionSettings {
+    pub fn from_env() -> Result<Self, ConfigError> {
+        Self::from_lookup(&|k: &str| std::env::var(k).ok())
+    }
+
+    pub fn from_lookup(get: &impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
+        let value = |k: &str| {
+            get(k)
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        };
+        let mut settings = Self::default();
+        let threshold = |var: &'static str, current: i64| -> Result<i64, ConfigError> {
+            match value(var) {
+                None => Ok(current),
+                Some(v) => v
+                    .parse::<i64>()
+                    .ok()
+                    .filter(|n| (1..=100_000).contains(n))
+                    .ok_or_else(|| invalid(var, "must be an integer between 1 and 100000")),
+            }
+        };
+        let days = |var: &'static str, current: Duration| -> Result<Duration, ConfigError> {
+            match value(var) {
+                None => Ok(current),
+                Some(v) => v
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|d| (1..=3_650).contains(d))
+                    .map(|d| Duration::from_secs(d * 24 * 3600))
+                    .ok_or_else(|| {
+                        invalid(var, "must be an integer number of days between 1 and 3650")
+                    }),
+            }
+        };
+        settings.callback_auth_failure_incident_threshold = threshold(
+            "TELEPHONY_CALLBACK_AUTH_FAILURE_INCIDENT_THRESHOLD",
+            settings.callback_auth_failure_incident_threshold,
+        )?;
+        settings.callback_invalid_incident_threshold = threshold(
+            "TELEPHONY_CALLBACK_INVALID_INCIDENT_THRESHOLD",
+            settings.callback_invalid_incident_threshold,
+        )?;
+        if let Some(v) = value("TELEPHONY_BLOCKED_DESTINATION_CLASSES") {
+            settings.blocked_destination_classes =
+                crate::destinations::parse_blocked(&v).ok_or_else(|| {
+                    invalid(
+                        "TELEPHONY_BLOCKED_DESTINATION_CLASSES",
+                        "must be a comma-separated list of STANDARD, PREMIUM, SHARED_COST, SATELLITE, HIGH_RISK",
+                    )
+                })?;
+        }
+        if let Some(v) = value("TELEPHONY_UNCLASSIFIED_DESTINATION_POLICY") {
+            settings.unclassified_destination_policy =
+                UnclassifiedPolicy::parse(&v).ok_or_else(|| {
+                    invalid(
+                        "TELEPHONY_UNCLASSIFIED_DESTINATION_POLICY",
+                        "must be ALLOW or DENY",
+                    )
+                })?;
+        }
+        settings.provider_event_retention = days(
+            "TELEPHONY_PROVIDER_EVENT_RETENTION_DAYS",
+            settings.provider_event_retention,
+        )?;
+        settings.incident_retention = days(
+            "TELEPHONY_INCIDENT_RETENTION_DAYS",
+            settings.incident_retention,
+        )?;
+        Ok(settings)
+    }
 }
 
 impl Default for ExecutionSettings {
@@ -55,6 +148,10 @@ impl Default for ExecutionSettings {
             ringing_drift_after: Duration::from_secs(120),
             provider_event_retention: Duration::from_secs(30 * 24 * 3600),
             callback_auth_failure_incident_threshold: 20,
+            callback_invalid_incident_threshold: 20,
+            blocked_destination_classes: DestinationClass::DEFAULT_BLOCKED.to_vec(),
+            unclassified_destination_policy: UnclassifiedPolicy::Allow,
+            incident_retention: Duration::from_secs(365 * 24 * 3600),
         }
     }
 }
@@ -138,5 +235,67 @@ impl TelephonyService {
 
     pub fn providers(&self) -> &ProviderRegistry {
         &self.providers
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    fn lookup(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let map: HashMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        move |k| map.get(k).cloned()
+    }
+
+    #[test]
+    fn execution_settings_have_documented_defaults_and_bounds() {
+        let s = ExecutionSettings::from_lookup(&lookup(&[])).unwrap();
+        assert_eq!(s.callback_invalid_incident_threshold, 20);
+        assert_eq!(
+            s.provider_event_retention,
+            Duration::from_secs(30 * 24 * 3600)
+        );
+        assert_eq!(s.incident_retention, Duration::from_secs(365 * 24 * 3600));
+        assert_eq!(s.unclassified_destination_policy, UnclassifiedPolicy::Allow);
+        assert_eq!(
+            s.blocked_destination_classes,
+            DestinationClass::DEFAULT_BLOCKED.to_vec()
+        );
+        let s = ExecutionSettings::from_lookup(&lookup(&[
+            ("TELEPHONY_PROVIDER_EVENT_RETENTION_DAYS", "7"),
+            ("TELEPHONY_INCIDENT_RETENTION_DAYS", "90"),
+            ("TELEPHONY_CALLBACK_INVALID_INCIDENT_THRESHOLD", "5"),
+            ("TELEPHONY_BLOCKED_DESTINATION_CLASSES", "PREMIUM"),
+            ("TELEPHONY_UNCLASSIFIED_DESTINATION_POLICY", "DENY"),
+        ]))
+        .unwrap();
+        assert_eq!(
+            s.provider_event_retention,
+            Duration::from_secs(7 * 24 * 3600)
+        );
+        assert_eq!(s.incident_retention, Duration::from_secs(90 * 24 * 3600));
+        assert_eq!(s.callback_invalid_incident_threshold, 5);
+        assert_eq!(
+            s.blocked_destination_classes,
+            vec![DestinationClass::Premium]
+        );
+        assert_eq!(s.unclassified_destination_policy, UnclassifiedPolicy::Deny);
+        for (var, bad) in [
+            ("TELEPHONY_PROVIDER_EVENT_RETENTION_DAYS", "0"),
+            ("TELEPHONY_INCIDENT_RETENTION_DAYS", "forever"),
+            ("TELEPHONY_CALLBACK_INVALID_INCIDENT_THRESHOLD", "0"),
+            ("TELEPHONY_BLOCKED_DESTINATION_CLASSES", "EXPENSIVE"),
+            ("TELEPHONY_UNCLASSIFIED_DESTINATION_POLICY", "maybe"),
+        ] {
+            assert!(
+                ExecutionSettings::from_lookup(&lookup(&[(var, bad)])).is_err(),
+                "{var}={bad}"
+            );
+        }
     }
 }

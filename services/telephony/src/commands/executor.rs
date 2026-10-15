@@ -6,9 +6,15 @@
 //! 1. checks (leg not cancelled, kill switches, authority still valid, grant valid);
 //! 2. route choice + capacity reservation + correlation key persisted (one transaction);
 //! 3. protected destination resolved from Privacy Relay with the grant — in memory only;
-//!    the caller identity is the session's relay identity Privacy Relay selected, and it
-//!    must be bound to the chosen interconnect;
-//! 4. the TRANSMIT FENCE is committed (`transmitted_at`, binding SENT, leg ORIGINATING);
+//!    the destination is classified (Part H §66: premium / shared-cost / satellite /
+//!    high-risk ranges are refused before any provider action); the caller identity is
+//!    the session's relay identity Privacy Relay selected, it must be bound to the
+//!    chosen interconnect, and its assignment reference is kept on the leg as identity
+//!    evidence (Part H §78);
+//! 4. the TRANSMIT FENCE is committed (`transmitted_at`, binding SENT, leg ORIGINATING)
+//!    after re-checking the kill switches and that the chosen route and provider are
+//!    still ENABLED (an operator `disable` between route choice and the fence stops
+//!    the request: `ROUTE_DISABLED` / `PROVIDER_DISABLED`, definite, nothing sent);
 //!    if the database is unavailable here no provider request is ever sent;
 //! 5. the provider request (bounded by a deadline);
 //! 6. the outcome is persisted: ACCEPTED, DEFINITE_FAILURE or UNKNOWN_OUTCOME.
@@ -25,6 +31,7 @@ use uuid::Uuid;
 use super::{CommandRow, COMMAND_COLUMNS};
 use crate::{
     db,
+    destinations::{self, Classification},
     domain::{
         CommandKind, EndReason, FailureCategory, LegStatus, NormalizedEvent, PublicRouteClass,
         RouteCapability,
@@ -373,6 +380,31 @@ impl TelephonyService {
                 )
                 .await;
         }
+        // Pre-toll destination classification (Part H §66): the plaintext exists only
+        // here; only the bounded class leaves as a code / metric label.
+        let classification = destinations::classify(
+            &self.db,
+            &country,
+            &resolved.destination,
+            &self.settings.blocked_destination_classes,
+            self.settings.unclassified_destination_policy,
+        )
+        .await?;
+        if !classification.allowed() {
+            crate::metrics::inc(
+                "telephony_destination_class_refusals_total",
+                &[("class", classification.label())],
+            );
+            self.raise_abuse_signal("DESTINATION_CLASS_REFUSED", leg.application_id, 1, 0, now)
+                .await?;
+            let code = match classification {
+                Classification::Blocked(_) => "DESTINATION_CLASS_BLOCKED",
+                _ => "DESTINATION_UNCLASSIFIED",
+            };
+            return self
+                .fail_before_send(&command, FailureCategory::Policy, code)
+                .await;
+        }
         let candidates: Vec<String> = command.payload["candidateRoutes"]
             .as_array()
             .map(|a| {
@@ -418,6 +450,7 @@ impl TelephonyService {
             .collect();
         let mut chosen = None;
         let mut capacity_exhausted = false;
+        let mut identity_unbound = 0;
         for route in routes {
             if route
                 .estimated_leg_cost_minor
@@ -441,6 +474,7 @@ impl TelephonyService {
             )
             .await?;
             if bound == 0 {
+                identity_unbound += 1;
                 continue;
             }
             match self.reserve_capacity(&txn, &route).await {
@@ -456,8 +490,13 @@ impl TelephonyService {
         }
         let Some(route) = chosen else {
             drop(txn);
+            // The caller identity Privacy Relay selected is not bound to any eligible
+            // interconnect (not in `telecom_number_bindings`, or bound to another
+            // provider): no identity, no call (Part H §78).
             let code = if capacity_exhausted {
                 "CAPACITY_EXHAUSTED"
+            } else if identity_unbound > 0 {
+                "CALLER_IDENTITY_UNAVAILABLE"
             } else {
                 "ROUTE_UNAVAILABLE"
             };
@@ -484,13 +523,15 @@ impl TelephonyService {
         db::exec(
             &txn,
             "UPDATE telephony_legs SET route_id = $2, provider_id = $3, destination_country = $4, \
-               updated_at = GREATEST(updated_at, $5), version = version + 1 WHERE id = $1",
+               relay_assignment_ref = $6, updated_at = GREATEST(updated_at, $5), version = version + 1 \
+             WHERE id = $1",
             vec![
                 leg_id.into(),
                 route.id.clone().into(),
                 route.provider_id.clone().into(),
                 country.clone().into(),
                 now.into(),
+                resolved.relay_assignment_ref.into(),
             ],
         )
         .await?;
@@ -525,6 +566,16 @@ impl TelephonyService {
             self.fail_before_send(&command, FailureCategory::Policy, "CANCELLED")
                 .await?;
             return Ok(Executed::Skipped);
+        }
+        // Re-check immediately before the request leaves (Part H §45): the kill
+        // switches, and that the chosen route and its provider are still ENABLED. An
+        // operator `disable` is the lasting stop; a disabled route / provider between
+        // route choice and here means NO request (definite, safe to fail over).
+        if let Some(code) = self.transmit_gate(&txn, &route.id, class).await? {
+            drop(txn);
+            return self
+                .fail_before_send(&command, FailureCategory::Policy, code)
+                .await;
         }
         legs::transition_in(
             &txn,
@@ -601,6 +652,34 @@ impl TelephonyService {
             tokio::time::sleep(std::time::Duration::from_millis(100 << attempt)).await;
         }
         last
+    }
+
+    /// The transmit gate: `Some(code)` when the request must NOT be sent.
+    async fn transmit_gate<C: ConnectionTrait>(
+        &self,
+        txn: &C,
+        route_id: &str,
+        class: PublicRouteClass,
+    ) -> TelephonyResult<Option<&'static str>> {
+        if !self.flags.telephony.enabled() || !self.flags.public_outbound.enabled() {
+            return Ok(Some("FEATURE_DISABLED"));
+        }
+        if class == PublicRouteClass::CallbackRelay && !self.flags.callback_relay.enabled() {
+            return Ok(Some("FEATURE_DISABLED"));
+        }
+        let gate: Option<GateRow> = db::one(
+            txn,
+            "SELECT r.status AS route_status, p.status AS provider_status \
+             FROM telecom_routes r JOIN telecom_providers p ON p.id = r.provider_id WHERE r.id = $1",
+            vec![route_id.into()],
+        )
+        .await?;
+        Ok(match gate {
+            None => Some("ROUTE_DISABLED"),
+            Some(g) if g.route_status != "ENABLED" => Some("ROUTE_DISABLED"),
+            Some(g) if g.provider_status != "ENABLED" => Some("PROVIDER_DISABLED"),
+            Some(_) => None,
+        })
     }
 
     async fn record_originate_outcome(
@@ -1145,6 +1224,12 @@ impl TelephonyService {
 #[derive(Debug, sea_orm::FromQueryResult)]
 struct RouteRef {
     route_id: String,
+}
+
+#[derive(Debug, sea_orm::FromQueryResult)]
+struct GateRow {
+    route_status: String,
+    provider_status: String,
 }
 
 #[derive(Debug, sea_orm::FromQueryResult)]

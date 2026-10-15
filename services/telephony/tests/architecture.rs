@@ -133,6 +133,8 @@ fn raw_numbers_exist_only_inside_the_execution_boundary_and_are_never_logged() {
         "src/sip/ari.rs",
         "src/ports.rs",
         "src/commands/executor.rs",
+        // Pre-toll destination classification (longest-prefix match; never logged).
+        "src/destinations.rs",
         "src/inbound.rs",
         "src/bin/telephony-admin.rs",
     ];

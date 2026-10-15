@@ -72,6 +72,11 @@ pub struct RoutingPolicy {
     #[serde(default)]
     pub max_estimated_leg_cost_minor: Option<i64>,
     pub duplicate_risk: DuplicateRiskPolicy,
+    /// Part H §78: destination countries (ISO 3166-1 alpha-2, or `*` for all) whose paid
+    /// routes require an operator-recorded compliance eligibility. Unioned with the
+    /// platform overlay (`CALLING_COMPLIANCE_REQUIRED_COUNTRIES`), which it cannot remove.
+    #[serde(default)]
+    pub compliance_required_countries: Vec<String>,
 }
 
 /// Version label of the policy model (recorded on every route).
@@ -98,6 +103,7 @@ impl Default for RoutingPolicy {
             max_failover_attempts: 0,
             max_estimated_leg_cost_minor: None,
             duplicate_risk: DuplicateRiskPolicy::BlockUntilReconciled,
+            compliance_required_countries: vec![],
         }
     }
 }
@@ -140,6 +146,16 @@ impl RoutingPolicy {
         if count > 300 {
             return Err("too many destination countries");
         }
+        if self.compliance_required_countries.len() > 300 {
+            return Err("too many compliance-required countries");
+        }
+        if self
+            .compliance_required_countries
+            .iter()
+            .any(|c| c != "*" && !iso_country(c))
+        {
+            return Err("complianceRequiredCountries must be ISO 3166-1 alpha-2 codes or *");
+        }
         if self.max_failover_attempts > MAX_FAILOVER_ATTEMPTS {
             return Err("maxFailoverAttempts must be between 0 and 3");
         }
@@ -154,6 +170,13 @@ impl RoutingPolicy {
             return Err("callbackRelayEnabled requires CALLBACK_RELAY in allowedRouteClasses");
         }
         Ok(())
+    }
+
+    /// Whether the customer policy marks `country` as compliance-required.
+    pub fn requires_compliance(&self, country: &str) -> bool {
+        self.compliance_required_countries
+            .iter()
+            .any(|c| c == "*" || c == country)
     }
 
     pub fn allows(&self, class: RoutingClass) -> bool {

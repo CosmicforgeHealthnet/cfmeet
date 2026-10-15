@@ -21,8 +21,41 @@ use crate::{
     error::CallingError,
 };
 
+/// Which link of the authority chain is SUSPENDED (Part H §72 / §74).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuspendedLink {
+    Tenant,
+    Application,
+    Environment,
+}
+
+impl SuspendedLink {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Tenant => "tenant",
+            Self::Application => "application",
+            Self::Environment => "environment",
+        }
+    }
+}
+
+/// What the authenticated credential may do (Part H §9, §72, §74).
+///
+/// * `Full`: every link of the chain is ACTIVE; the scopes decide.
+/// * `SafetyOnly`: the credential and service account are valid and active but the
+///   tenant, application or environment is SUSPENDED. The client may perform only the
+///   explicit safety allow-list of the authentication middleware (ending a live call,
+///   stopping a recording, disabling a forwarding rule, deleting a recording or
+///   voicemail, disabling / deleting a webhook) and nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthorityMode {
+    Full,
+    SafetyOnly(SuspendedLink),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlatformAuthContext {
+    authority_mode: AuthorityMode,
     tenant_id: TenantId,
     tenant_classification: TenantClassification,
     application_id: ApplicationId,
@@ -38,6 +71,7 @@ pub struct PlatformAuthContext {
 
 /// Values loaded from the credential's persisted authority chain.
 pub(crate) struct TrustedAuthority {
+    pub authority_mode: AuthorityMode,
     pub tenant_id: TenantId,
     pub tenant_classification: TenantClassification,
     pub application_id: ApplicationId,
@@ -52,6 +86,7 @@ pub(crate) struct TrustedAuthority {
 impl PlatformAuthContext {
     pub(crate) fn from_trusted(authority: TrustedAuthority, request: RequestContext) -> Self {
         Self {
+            authority_mode: authority.authority_mode,
             tenant_id: authority.tenant_id,
             tenant_classification: authority.tenant_classification,
             application_id: authority.application_id,
@@ -71,6 +106,16 @@ impl PlatformAuthContext {
 
     pub fn tenant_id(&self) -> TenantId {
         self.tenant_id
+    }
+
+    pub fn authority_mode(&self) -> AuthorityMode {
+        self.authority_mode
+    }
+
+    /// The scope (tenant, application or environment) is SUSPENDED: only the safety
+    /// allow-list of the authentication middleware is reachable with this context.
+    pub fn is_safety_only(&self) -> bool {
+        matches!(self.authority_mode, AuthorityMode::SafetyOnly(_))
     }
 
     pub fn tenant_classification(&self) -> TenantClassification {

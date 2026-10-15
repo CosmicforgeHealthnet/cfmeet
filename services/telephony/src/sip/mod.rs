@@ -12,6 +12,7 @@
 //! Telephony.
 
 pub mod ari;
+pub mod peer_config;
 
 use std::{fmt, sync::Arc};
 
@@ -59,6 +60,9 @@ pub struct EdgeOriginate {
 pub struct EdgeInbound {
     /// Which configured peer / trunk the INVITE arrived on (validated peer only).
     pub peer: Option<String>,
+    /// The signalling source address the edge reports for the dialog, when its event
+    /// carries one (checked against the peer's `allowed_source_cidrs`).
+    pub source_address: Option<std::net::IpAddr>,
     pub called: Option<ExecutionNumber>,
     pub caller: Option<ExecutionNumber>,
     /// A media join code presented by the application media side (internal peer).
@@ -369,14 +373,18 @@ pub enum EdgeConfigError {
 pub fn edge_from_env(
     environment: cf_service_auth::RuntimeEnvironment,
 ) -> Result<Arc<dyn SipMediaEdge>, EdgeConfigError> {
-    match std::env::var("TELEPHONY_SIP_EDGE")
-        .ok()
-        .as_deref()
-        .map(str::trim)
-    {
+    edge_from_lookup(&|k: &str| std::env::var(k).ok(), environment)
+}
+
+/// [`edge_from_env`] over an explicit lookup (startup-refusal tests).
+pub fn edge_from_lookup(
+    get: &impl Fn(&str) -> Option<String>,
+    environment: cf_service_auth::RuntimeEnvironment,
+) -> Result<Arc<dyn SipMediaEdge>, EdgeConfigError> {
+    match get("TELEPHONY_SIP_EDGE").as_deref().map(str::trim) {
         None | Some("") | Some("none") => Ok(NoEdge::shared()),
         Some("asterisk-ari") => {
-            let settings = ari::AriSettings::from_env(environment)?;
+            let settings = ari::AriSettings::from_lookup(get, environment)?;
             Ok(Arc::new(ari::AriEdge::start(settings)))
         }
         Some(_) => Err(EdgeConfigError::Invalid(

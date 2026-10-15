@@ -370,7 +370,9 @@ async fn telephone_endpoints_store_only_opaque_references() {
                ('enterprise_call_contexts', 'entry_extension_number'))) \
          AND NOT (data_type = 'uuid' AND column_name = 'contact_reference' \
               AND table_name IN ('call_public_parties', 'call_spend_reservations', \
-                                 'enterprise_public_contacts'))",
+                                 'enterprise_public_contacts')) \
+         AND NOT (data_type = 'uuid' AND table_name = 'calling_block_rules' \
+              AND column_name = 'blocked_contact_reference')",
     )
     .await;
     assert_eq!(phone_columns, 0);

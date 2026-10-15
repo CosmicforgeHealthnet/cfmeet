@@ -69,6 +69,25 @@ text_enum!(PrincipalStatus {
     Deactivated = "DEACTIVATED",
 });
 
+impl PrincipalKind {
+    /// Whether a principal of this category may initiate an application call
+    /// (`POST /v1/calls`, Part H §10). A SERVICE_ACCOUNT is an API client identity, never
+    /// a communication subject; a TELEPHONE_ENDPOINT only ever arrives from the public
+    /// network (Telephony offers it) and is never an application-side initiator.
+    pub fn may_initiate_application_call(&self) -> bool {
+        !matches!(
+            self,
+            PrincipalKind::ServiceAccount | PrincipalKind::TelephoneEndpoint
+        )
+    }
+
+    /// Whether a principal of this category may be the target of an application call.
+    /// A SERVICE_ACCOUNT has no endpoint to ring and is never a participant.
+    pub fn may_be_application_call_target(&self) -> bool {
+        !matches!(self, PrincipalKind::ServiceAccount)
+    }
+}
+
 impl EnvironmentKind {
     /// Human-recognisable credential prefix tag. Convenience only: the persisted
     /// environment binding of the credential is authoritative.
@@ -122,6 +141,24 @@ mod tests {
         assert!(EnvironmentKind::Production.may_allow_live_telecom());
         assert!(!EnvironmentKind::Sandbox.may_allow_live_telecom());
         assert!(!EnvironmentKind::Test.may_allow_live_telecom());
+    }
+
+    #[test]
+    fn principal_category_capabilities_are_an_allow_list() {
+        assert!(!PrincipalKind::ServiceAccount.may_initiate_application_call());
+        assert!(!PrincipalKind::TelephoneEndpoint.may_initiate_application_call());
+        assert!(!PrincipalKind::ServiceAccount.may_be_application_call_target());
+        assert!(PrincipalKind::TelephoneEndpoint.may_be_application_call_target());
+        for kind in [
+            PrincipalKind::NativeCfUser,
+            PrincipalKind::ExternalApplicationPrincipal,
+            PrincipalKind::EnterpriseMember,
+            PrincipalKind::TemporaryExternalParticipant,
+            PrincipalKind::BotOrService,
+        ] {
+            assert!(kind.may_initiate_application_call(), "{kind:?}");
+            assert!(kind.may_be_application_call_target(), "{kind:?}");
+        }
     }
 
     #[test]

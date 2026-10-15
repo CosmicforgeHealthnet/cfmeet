@@ -18,6 +18,8 @@ const TABLES: &[&str] = &[
     "privacy_relay_commands",
     "privacy_relay_enforcement_jobs",
     "privacy_relay_outbox",
+    "privacy_relay_retention_audit",
+    "privacy_relay_retention_holds",
     "privacy_relay_seaql_migrations",
     "privacy_relay_session_channels",
     "privacy_relay_session_directions",
@@ -57,8 +59,9 @@ async fn up_down_up_creates_exactly_the_privacy_relay_tables() {
             "SELECT count(*) FROM privacy_relay_seaql_migrations"
         )
         .await,
-        // Part G §67 adds the outbox publication state (000012).
-        12
+        // Part G §67 adds the outbox publication state (000012); Part H §80 adds
+        // retention holds / audit and contact erasure (000013).
+        13
     );
     Migrator::down(&db.conn, None).await.unwrap();
     assert_eq!(tables(&db.conn).await, ["privacy_relay_seaql_migrations"]);
@@ -90,6 +93,10 @@ async fn up_down_up_creates_exactly_the_privacy_relay_tables() {
         "relay_number_events",
         // Unresolved inbound attempts have no scope (a scoped row names all of it).
         "relay_inbound_resolutions",
+        // Retention evidence is platform-level (a hold MAY name a scope; its columns are
+        // optional).
+        "privacy_relay_retention_audit",
+        "privacy_relay_retention_holds",
     ];
     for table in TABLES.iter().filter(|t| !PLATFORM_OWNED.contains(t)) {
         for column in ["tenant_id", "application_id", "environment_id"] {

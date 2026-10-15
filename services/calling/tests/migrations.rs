@@ -127,6 +127,16 @@ const PART_G_TABLES: &[&str] = &[
     "webhook_subscriptions",
 ];
 
+/// Part H (security closure): operator audit, block rules, compliance eligibility and
+/// abuse reports — added after Part G, so a call-domain rollback removes them.
+const PART_H_TABLES: &[&str] = &[
+    "calling_abuse_reports",
+    "calling_abuse_windows",
+    "calling_block_rules",
+    "platform_compliance_eligibility",
+    "platform_operator_audit",
+];
+
 /// Derived from the migrator itself (never a brittle hand-maintained count).
 fn migrations() -> usize {
     <calling_migration::Migrator as MigratorTrait>::migrations().len()
@@ -147,6 +157,7 @@ async fn migrations_apply_roll_back_and_reapply_on_a_clean_database() {
         .chain(CALL_TABLES)
         .chain(ENTERPRISE_TABLES)
         .chain(PART_G_TABLES)
+        .chain(PART_H_TABLES)
         .map(|s| s.to_string())
         .collect();
     expected.push(MIGRATION_TABLE.to_string());
@@ -725,7 +736,7 @@ async fn no_privacy_relay_telephony_or_meeting_service_tables_exist() {
         || t.starts_with("call_")
         || t == "calls"
         || t == "calling_outbox_events"
-        || t == "calling_incidents"
+        || t.starts_with("calling_")
         || t.starts_with("enterprise_")
         || t.starts_with("voicemail_")
         || t.starts_with("webhook_")

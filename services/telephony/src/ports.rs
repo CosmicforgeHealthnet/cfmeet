@@ -39,6 +39,9 @@ pub struct ResolvedExecution {
     /// The session's authorized relay identity (selected by Privacy Relay, never by a
     /// client): the caller id this leg presents.
     pub caller_identity: Option<ExecutionNumber>,
+    /// Privacy Relay's assignment reference of that identity (`callerIdentity.assignmentId`):
+    /// identity evidence kept on the leg (Part H §78) — never the number itself.
+    pub relay_assignment_ref: Option<Uuid>,
 }
 
 impl fmt::Debug for ResolvedExecution {
@@ -268,10 +271,14 @@ impl PrivacyRelayPort for HttpPrivacyRelay {
         let caller_identity = resolution["callerIdentity"]["e164"]
             .as_str()
             .and_then(ExecutionNumber::parse);
+        let relay_assignment_ref = resolution["callerIdentity"]["assignmentId"]
+            .as_str()
+            .and_then(|s| Uuid::parse_str(s).ok());
         Ok(ResolvedExecution {
             destination,
             country: resolution["country"].as_str().map(str::to_string),
             caller_identity,
+            relay_assignment_ref,
         })
     }
 

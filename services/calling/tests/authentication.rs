@@ -11,6 +11,7 @@ use calling::{
     },
     platform::{
         authentication::{AuthFailureReason, AuthenticationError},
+        context::{AuthorityMode, SuspendedLink},
         credentials::IssueCredential,
         scopes::names,
     },
@@ -52,6 +53,15 @@ async fn reason(h: &Harness, token: &str) -> AuthFailureReason {
         Err(AuthenticationError::Rejected { reason, .. }) => reason,
         other => panic!("expected rejection, got {other:?}"),
     }
+}
+
+/// Part H §72: a SUSPENDED tenant / application / environment authenticates into a
+/// safety-only authority (so a live call can still be ended) — every ordinary route is
+/// refused with the normalized authentication failure.
+async fn assert_safety_only(h: &Harness, token: &str, link: SuspendedLink) {
+    let ctx = h.authenticate(token).await.expect("safety-only context");
+    assert!(ctx.is_safety_only());
+    assert_eq!(ctx.authority_mode(), AuthorityMode::SafetyOnly(link));
 }
 
 #[tokio::test]
@@ -302,10 +312,7 @@ async fn every_inactive_link_of_the_authority_chain_fails_authentication() {
         .await
         .unwrap();
     bodies.push(assert_rejected(&h, token).await.normalized_error());
-    assert_eq!(
-        reason(&h, token).await,
-        AuthFailureReason::EnvironmentInactive
-    );
+    assert_safety_only(&h, token, SuspendedLink::Environment).await;
     p.set_environment_status(env, EnvironmentStatus::Active)
         .await
         .unwrap();
@@ -315,10 +322,7 @@ async fn every_inactive_link_of_the_authority_chain_fails_authentication() {
         .await
         .unwrap();
     bodies.push(assert_rejected(&h, token).await.normalized_error());
-    assert_eq!(
-        reason(&h, token).await,
-        AuthFailureReason::ApplicationInactive
-    );
+    assert_safety_only(&h, token, SuspendedLink::Application).await;
     p.set_application_status(c.application.id, ApplicationStatus::Active)
         .await
         .unwrap();
@@ -328,7 +332,7 @@ async fn every_inactive_link_of_the_authority_chain_fails_authentication() {
         .await
         .unwrap();
     bodies.push(assert_rejected(&h, token).await.normalized_error());
-    assert_eq!(reason(&h, token).await, AuthFailureReason::TenantInactive);
+    assert_safety_only(&h, token, SuspendedLink::Tenant).await;
     p.set_tenant_status(c.tenant.id, TenantStatus::Active)
         .await
         .unwrap();

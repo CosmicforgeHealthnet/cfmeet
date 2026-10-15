@@ -17,6 +17,7 @@
 //! [`availability::RouteAvailabilitySource`] port; Calling never reads Telephony data.
 
 pub mod availability;
+pub mod compliance;
 pub mod engine;
 pub mod policy;
 pub mod store;

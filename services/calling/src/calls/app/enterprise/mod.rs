@@ -42,7 +42,7 @@ use sea_orm::{
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
-use super::{create::CreatedAppCall, AppCallService, PendingSignals};
+use super::{blocks, create::CreatedAppCall, AppCallService, PendingSignals};
 use crate::{
     calls::{
         attempts::NewAttempt,
@@ -708,6 +708,7 @@ impl AppCallService {
                 spend_headroom_minor: Evidence::Unknown,
                 operational_incident: Evidence::Unknown,
                 duplicate_risk: DuplicateRisk::None,
+                compliance: crate::routing::compliance::ComplianceFacts::not_required(),
             },
             self.calls.now(),
         );
@@ -823,6 +824,37 @@ impl AppCallService {
                 principal,
                 destination,
             } => {
+                // Part H §70: a target blocked from (or blocking) the caller is unreachable
+                // — it is neither rung nor forwarded, and never becomes a participant.
+                let blocked = blocks::principal_pair_blocked(
+                    txn,
+                    call.environment_id,
+                    call.initiator_principal_id,
+                    principal.id().as_uuid(),
+                )
+                .await?;
+                if blocked {
+                    record_step(
+                        &self.calls,
+                        txn,
+                        call,
+                        "NO_ROUTE",
+                        Some(destination),
+                        "TARGET_UNREACHABLE",
+                        None,
+                        now,
+                    )
+                    .await?;
+                    return self
+                        .enterprise_no_route(
+                            txn,
+                            cmd,
+                            call,
+                            context,
+                            FailureCategory::TargetUnavailable,
+                        )
+                        .await;
+                }
                 let (participant, _) = self
                     .calls
                     .add_participant_in(txn, cmd, call, &principal, None)

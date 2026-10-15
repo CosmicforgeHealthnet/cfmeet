@@ -64,14 +64,22 @@ impl std::fmt::Debug for AriSettings {
 impl AriSettings {
     /// `TELEPHONY_ARI_URL`, `TELEPHONY_ARI_USERNAME`, `TELEPHONY_ARI_PASSWORD_FILE`
     /// (secret file; inline passwords are refused), `TELEPHONY_ARI_APP`
-    /// (default `cfmeet-telephony`). Outside `local` / `test` the URL must not be a
-    /// public address over plain HTTP… it must be loopback or a private network.
+    /// (default `cfmeet-telephony`). Outside `local` / `test` the control plane must be
+    /// `https` (or `wss`) unless the host is a loopback or RFC 1918 ADDRESS — a
+    /// `.internal`-style host name is not evidence of a private network.
     pub fn from_env(
         environment: cf_service_auth::RuntimeEnvironment,
     ) -> Result<Self, EdgeConfigError> {
+        Self::from_lookup(&|k: &str| std::env::var(k).ok(), environment)
+    }
+
+    /// [`Self::from_env`] over an explicit lookup (startup-refusal tests).
+    pub fn from_lookup(
+        lookup: &impl Fn(&str) -> Option<String>,
+        environment: cf_service_auth::RuntimeEnvironment,
+    ) -> Result<Self, EdgeConfigError> {
         let get = |k: &str| {
-            std::env::var(k)
-                .ok()
+            lookup(k)
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty())
         };
@@ -112,30 +120,52 @@ impl AriSettings {
         })
     }
 
-    fn validate_url(
+    /// Outside `local` / `test`: `https://` / `wss://` always pass; plain `http://` /
+    /// `ws://` only when the host is a loopback or RFC 1918 (10/8, 172.16/12,
+    /// 192.168/16) address or `localhost`. Host-name suffixes (`.internal`, `.svc`,
+    /// `.cluster.local`) are NOT accepted as proof of a private network: a name can
+    /// resolve anywhere, an address cannot.
+    pub fn validate_url(
         url: &str,
         environment: cf_service_auth::RuntimeEnvironment,
     ) -> Result<(), EdgeConfigError> {
-        let rest = url
-            .strip_prefix("http://")
-            .or_else(|| url.strip_prefix("https://"))
-            .ok_or_else(|| {
-                EdgeConfigError::Invalid("TELEPHONY_ARI_URL", "must be http(s)://host:port".into())
-            })?;
-        let host = rest.split(['/', ':']).next().unwrap_or("");
+        let (secure, rest) = if let Some(r) = url.strip_prefix("https://") {
+            (true, r)
+        } else if let Some(r) = url.strip_prefix("wss://") {
+            (true, r)
+        } else if let Some(r) = url.strip_prefix("http://") {
+            (false, r)
+        } else if let Some(r) = url.strip_prefix("ws://") {
+            (false, r)
+        } else {
+            return Err(EdgeConfigError::Invalid(
+                "TELEPHONY_ARI_URL",
+                "must be http(s)://host:port or ws(s)://host:port".into(),
+            ));
+        };
+        let host = rest
+            .split(['/', '?', '#'])
+            .next()
+            .unwrap_or("")
+            .trim_start_matches('[');
+        let host = host.rsplit_once(':').map(|(h, _)| h).unwrap_or(host);
+        let host = host.trim_end_matches(']');
+        if host.is_empty() {
+            return Err(EdgeConfigError::Invalid(
+                "TELEPHONY_ARI_URL",
+                "must name a host".into(),
+            ));
+        }
         use cf_service_auth::RuntimeEnvironment as E;
-        let private = host == "localhost"
+        let private_address = host == "localhost"
             || host.parse::<std::net::IpAddr>().is_ok_and(|ip| match ip {
                 std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private(),
                 std::net::IpAddr::V6(v6) => v6.is_loopback(),
-            })
-            || host.ends_with(".internal")
-            || host.ends_with(".svc")
-            || host.ends_with(".cluster.local");
-        if !private && matches!(environment, E::Staging | E::Production) {
+            });
+        if !secure && !private_address && matches!(environment, E::Staging | E::Production) {
             return Err(EdgeConfigError::Invalid(
                 "TELEPHONY_ARI_URL",
-                "the SIP control plane must be on a private network, never internet-exposed".into(),
+                "the SIP control plane must use https / wss unless it is a loopback or RFC 1918 address".into(),
             ));
         }
         Ok(())
@@ -438,6 +468,15 @@ fn translate_recording(kind: &str, value: &Value) -> Option<EdgeEvent> {
     })
 }
 
+/// The signalling source address of a channel, when `ari.conf` exports it
+/// (`channelvars = CHANNEL(pjsip,remote_addr)`, value `ip:port`); None otherwise.
+fn source_address(channel: &Value) -> Option<std::net::IpAddr> {
+    let raw = channel["channelvars"]["CHANNEL(pjsip,remote_addr)"].as_str()?;
+    let host = raw.trim().trim_start_matches('[');
+    let host = host.rsplit_once(':').map(|(h, _)| h).unwrap_or(host);
+    host.trim_end_matches(']').parse().ok()
+}
+
 /// Translates one ARI event into a neutral edge event (None: not relevant).
 fn translate(value: &Value, history: &Mutex<History>) -> Option<EdgeEvent> {
     let kind = value["type"].as_str()?;
@@ -467,6 +506,7 @@ fn translate(value: &Value, history: &Mutex<History>) -> Option<EdgeEvent> {
                         .and_then(|n| n.rsplit_once('-').map(|(p, _)| p.to_string()));
                     EdgeEventKind::Inbound(EdgeInbound {
                         peer,
+                        source_address: source_address(channel),
                         called: ExecutionNumber::parse(
                             channel["dialplan"]["exten"].as_str().unwrap_or(""),
                         ),
@@ -486,6 +526,7 @@ fn translate(value: &Value, history: &Mutex<History>) -> Option<EdgeEvent> {
                         && code.bytes().all(|b| b.is_ascii_alphanumeric());
                     EdgeEventKind::Inbound(EdgeInbound {
                         peer: None,
+                        source_address: None,
                         called: None,
                         caller: None,
                         media_join_code: Some(if valid { code } else { String::new() }),
@@ -980,6 +1021,120 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn lookup(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let map: std::collections::HashMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        move |k| map.get(k).cloned()
+    }
+
+    #[test]
+    fn the_control_plane_url_must_be_private_or_encrypted_outside_local_and_test() {
+        use cf_service_auth::RuntimeEnvironment as E;
+        for url in [
+            "http://127.0.0.1:8088",
+            "http://localhost:8088",
+            "http://10.4.0.9:8088",
+            "http://172.20.1.1:8088",
+            "http://192.168.7.7:8088",
+            "https://ari.internal:8089",
+            "https://203.0.113.9:8089",
+            "wss://ari.example.net/ws",
+        ] {
+            assert!(
+                AriSettings::validate_url(url, E::Production).is_ok(),
+                "{url}"
+            );
+        }
+        for url in [
+            "http://ari.internal:8088",
+            "http://ari.svc:8088",
+            "http://edge.cluster.local:8088",
+            "http://203.0.113.9:8088",
+            "ws://ari.example.net/ws",
+            "ftp://127.0.0.1",
+            "http://",
+        ] {
+            assert!(
+                AriSettings::validate_url(url, E::Production).is_err(),
+                "{url}"
+            );
+            assert!(AriSettings::validate_url(url, E::Staging).is_err(), "{url}");
+        }
+        // Local / test may use a plain name (no public control plane exists there).
+        assert!(AriSettings::validate_url("http://ari.internal:8088", E::Local).is_ok());
+        assert!(AriSettings::validate_url("http://ari.internal:8088", E::Test).is_ok());
+        assert!(AriSettings::validate_url("ftp://x", E::Local).is_err());
+    }
+
+    #[test]
+    fn startup_refuses_inline_missing_or_short_control_plane_passwords() {
+        use cf_service_auth::RuntimeEnvironment as E;
+        let dir = std::env::temp_dir().join(format!("tel-ari-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let good = dir.join("ari.pass");
+        std::fs::write(&good, "a-password-with-at-least-sixteen-chars\n").unwrap();
+        let short = dir.join("short.pass");
+        std::fs::write(&short, "short\n").unwrap();
+        let base = [
+            ("TELEPHONY_SIP_EDGE", "asterisk-ari"),
+            ("TELEPHONY_ARI_URL", "http://127.0.0.1:8088"),
+            ("TELEPHONY_ARI_USERNAME", "telephony"),
+        ];
+        fn with<'a>(
+            base: &[(&'a str, &'a str)],
+            extra: &[(&'a str, &'a str)],
+        ) -> Vec<(&'a str, &'a str)> {
+            let mut pairs = base.to_vec();
+            pairs.extend_from_slice(extra);
+            pairs
+        }
+        let good_file = good.to_str().unwrap().to_string();
+        assert!(AriSettings::from_lookup(
+            &lookup(&with(&base, &[("TELEPHONY_ARI_PASSWORD_FILE", &good_file)])),
+            E::Production
+        )
+        .is_ok());
+        // Inline password refused, even with a file present.
+        assert!(AriSettings::from_lookup(
+            &lookup(&with(
+                &base,
+                &[
+                    ("TELEPHONY_ARI_PASSWORD_FILE", &good_file),
+                    ("TELEPHONY_ARI_PASSWORD", "inline-password-is-refused"),
+                ]
+            )),
+            E::Production
+        )
+        .is_err());
+        // Missing password file refused when the edge is selected.
+        assert!(AriSettings::from_lookup(&lookup(&with(&base, &[])), E::Production).is_err());
+        assert!(super::super::edge_from_lookup(&lookup(&with(&base, &[])), E::Production).is_err());
+        // Shorter than 16 characters refused.
+        assert!(AriSettings::from_lookup(
+            &lookup(&with(
+                &base,
+                &[("TELEPHONY_ARI_PASSWORD_FILE", short.to_str().unwrap())]
+            )),
+            E::Production
+        )
+        .is_err());
+        // A public plain-http control plane refused outside local / test.
+        assert!(AriSettings::from_lookup(
+            &lookup(&[
+                ("TELEPHONY_ARI_URL", "http://ari.internal:8088"),
+                ("TELEPHONY_ARI_USERNAME", "telephony"),
+                ("TELEPHONY_ARI_PASSWORD_FILE", &good_file),
+            ]),
+            E::Production
+        )
+        .is_err());
+        // No edge selected: nothing is required.
+        assert!(super::super::edge_from_lookup(&lookup(&[]), E::Production).is_ok());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn causes_and_states_map_to_the_neutral_vocabulary() {
         assert_eq!(end_reason(16), EndReason::Completed);
@@ -1007,7 +1162,24 @@ mod tests {
                 assert_eq!(i.peer.as_deref(), Some("peer-ng-a"));
                 assert_eq!(i.called.unwrap().expose(), "+2342010000001");
                 assert!(i.caller.is_some());
+                assert!(i.source_address.is_none(), "no channelvars exported");
             }
+            other => panic!("{other:?}"),
+        }
+        let with_source = translate(
+            &json!({ "type": "StasisStart", "timestamp": "2026-10-08T10:00:00.000+0000", "args": ["inbound"],
+                     "channel": { "id": "1696.9", "name": "PJSIP/peer-ng-a-00000009", "state": "Ring",
+                                  "caller": { "number": "+2348031234567" },
+                                  "channelvars": { "CHANNEL(pjsip,remote_addr)": "192.0.2.7:5060" },
+                                  "dialplan": { "exten": "+2342010000001", "context": "from-trunk" } } }),
+            &h,
+        )
+        .unwrap();
+        match with_source.kind {
+            EdgeEventKind::Inbound(i) => assert_eq!(
+                i.source_address,
+                Some("192.0.2.7".parse::<std::net::IpAddr>().unwrap())
+            ),
             other => panic!("{other:?}"),
         }
         let join = translate(
@@ -1086,8 +1258,12 @@ mod tests {
         use cf_service_auth::RuntimeEnvironment as E;
         assert!(AriSettings::validate_url("http://127.0.0.1:8088", E::Production).is_ok());
         assert!(AriSettings::validate_url("http://10.0.4.2:8088", E::Production).is_ok());
+        // Part H §43: a cluster host NAME is no proof of a private network; it needs TLS.
         assert!(
-            AriSettings::validate_url("http://asterisk.telephony.svc:8088", E::Staging).is_ok()
+            AriSettings::validate_url("http://asterisk.telephony.svc:8088", E::Staging).is_err()
+        );
+        assert!(
+            AriSettings::validate_url("https://asterisk.telephony.svc:8089", E::Staging).is_ok()
         );
         assert!(AriSettings::validate_url("http://203.0.113.9:8088", E::Production).is_err());
         assert!(AriSettings::validate_url("http://edge.example.com:8088", E::Production).is_err());

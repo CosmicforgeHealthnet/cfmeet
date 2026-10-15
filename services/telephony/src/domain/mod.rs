@@ -32,6 +32,7 @@ macro_rules! vocab {
         }
     };
 }
+pub(crate) use vocab;
 
 vocab!(
     /// Normalized execution lifecycle of a Telephony leg (distinct from the Call state).

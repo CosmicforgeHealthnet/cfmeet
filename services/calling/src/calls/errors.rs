@@ -40,6 +40,9 @@ pub enum CallError {
     /// The effective authorization decision is DENIED.
     #[error("the call is not authorized")]
     AuthorizationDenied,
+    /// The initiator's principal category may not perform this operation (Part H §10).
+    #[error("the principal category is not eligible")]
+    PrincipalCategoryNotAllowed,
     /// The environment may not produce real public-network telecom effects.
     #[error("live telecom is not allowed in this environment")]
     LiveTelecomNotAllowed,
@@ -123,6 +126,7 @@ impl CallError {
                 "CALL_NOT_AUTHORIZED"
             }
             CallError::LiveTelecomNotAllowed => "LIVE_TELECOM_NOT_ALLOWED",
+            CallError::PrincipalCategoryNotAllowed => "PRINCIPAL_NOT_ELIGIBLE",
             CallError::ConcurrentCallLimitExceeded { .. } => "CONCURRENT_CALL_LIMIT_EXCEEDED",
             CallError::RateLimited { .. } => "RATE_LIMITED",
             CallError::InvalidState(_) => "CALL_RESOURCE_STATE_CONFLICT",
@@ -165,7 +169,8 @@ impl CallError {
             CallError::InsufficientEvidence(_) => StatusCode::UNPROCESSABLE_ENTITY,
             CallError::AuthorizationRequired
             | CallError::AuthorizationDenied
-            | CallError::LiveTelecomNotAllowed => StatusCode::FORBIDDEN,
+            | CallError::LiveTelecomNotAllowed
+            | CallError::PrincipalCategoryNotAllowed => StatusCode::FORBIDDEN,
             CallError::ConcurrentCallLimitExceeded { .. } | CallError::RateLimited { .. } => {
                 StatusCode::TOO_MANY_REQUESTS
             }
@@ -246,6 +251,7 @@ impl From<CallError> for CallingError {
             CallError::AuthorizationRequired
             | CallError::AuthorizationDenied
             | CallError::LiveTelecomNotAllowed => ErrorCode::CallNotAuthorized,
+            CallError::PrincipalCategoryNotAllowed => ErrorCode::PrincipalNotEligible,
             CallError::ConcurrentCallLimitExceeded { .. } => ErrorCode::ConcurrentCallLimitExceeded,
             CallError::InvalidState(_) => ErrorCode::CallResourceStateConflict,
             CallError::Conflict(_) => ErrorCode::Conflict,

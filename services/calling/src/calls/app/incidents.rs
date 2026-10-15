@@ -23,6 +23,12 @@ text_enum!(
         VoicemailFinalizationFailure = "VOICEMAIL_FINALIZATION_FAILURE",
         RecordingArtifactFailure = "RECORDING_ARTIFACT_FAILURE",
         ForwardingLoopRepeated = "FORWARDING_LOOP_REPEATED",
+        // Part H §83: one initiator ran into ACTIVE block rules repeatedly.
+        RepeatedBlockedAttempts = "REPEATED_BLOCKED_ATTEMPTS",
+        // Part H §83: one initiator ran into destination-policy denials repeatedly.
+        RepeatedRouteDenials = "REPEATED_ROUTE_DENIALS",
+        // Part H §69: several participants reported the same principal.
+        AbuseReportsBurst = "ABUSE_REPORTS_BURST",
     }
 );
 
@@ -41,6 +47,7 @@ text_enum!(
         VoicemailMessage = "VOICEMAIL_MESSAGE",
         CallRecording = "CALL_RECORDING",
         Destination = "DESTINATION",
+        Principal = "PRINCIPAL",
     }
 );
 
@@ -53,6 +60,8 @@ pub struct Incident {
     pub call_id: Option<Uuid>,
     pub resource: Option<(IncidentResource, Uuid)>,
     pub evidence: Value,
+    /// An optional time bucket (e.g. a window start) making the dedupe key per window.
+    pub bucket: Option<String>,
 }
 
 impl Incident {
@@ -70,7 +79,15 @@ impl Incident {
             call_id: None,
             resource: Some((resource, id)),
             evidence: Value::Object(Default::default()),
+            bucket: None,
         }
+    }
+
+    /// Dedupes per `bucket` (a bounded label such as a window start) instead of once
+    /// per open resource.
+    pub fn bucket(mut self, bucket: impl Into<String>) -> Self {
+        self.bucket = Some(bucket.into());
+        self
     }
 
     pub fn call(mut self, call_id: Uuid) -> Self {
@@ -86,13 +103,25 @@ impl Incident {
     /// Stable while open: one incident per category and resource.
     fn dedupe_key(&self) -> String {
         let category = self.category.as_str().to_ascii_lowercase();
-        match self.resource {
+        let key = match self.resource {
             Some((kind, id)) => format!(
                 "{category}:{}:{}",
                 kind.as_str().to_ascii_lowercase(),
                 id.simple()
             ),
             None => format!("{category}:{}", self.call_id.unwrap_or_default().simple()),
+        };
+        match &self.bucket {
+            Some(bucket) => {
+                let bucket: String = bucket
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                    .take(32)
+                    .collect::<String>()
+                    .to_ascii_lowercase();
+                format!("{key}:{bucket}")
+            }
+            None => key,
         }
     }
 }

@@ -33,6 +33,7 @@ pub mod middleware;
 pub mod models;
 pub mod relay;
 pub mod relay_numbers;
+pub mod retention;
 pub mod routes;
 pub mod scope;
 pub mod service;

@@ -12,10 +12,13 @@
 //! 409 IDEMPOTENCY_CONFLICT.
 
 use axum::{
-    extract::{rejection::JsonRejection, DefaultBodyLimit, Path, State},
+    extract::{
+        rejection::{JsonRejection, QueryRejection},
+        DefaultBodyLimit, Path, Query, State,
+    },
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -65,6 +68,13 @@ pub fn routes() -> Router<AppState> {
             "/v1/calls/:call_id/sessions/:session_id/remove",
             post(remove_session),
         )
+        .route("/v1/blocks", post(create_block).get(list_blocks))
+        .route("/v1/blocks/:block_id", delete(release_block))
+        .route(
+            "/v1/calls/:call_id/abuse-reports",
+            post(create_abuse_report),
+        )
+        .route("/v1/abuse-reports", get(list_abuse_reports))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
 }
 
@@ -662,6 +672,136 @@ async fn ivr_input(
     Ok(respond(
         StatusCode::OK,
         serde_json::json!({ "callId": call_id, "accepted": accepted }),
+        false,
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// Part H §70 block rules and §69 abuse reports.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateBlockBody {
+    #[serde(default)]
+    principal_id: Option<Uuid>,
+    #[serde(default)]
+    blocked_principal_id: Option<Uuid>,
+    #[serde(default)]
+    blocked_contact_reference_id: Option<Uuid>,
+    reason_code: String,
+}
+
+/// `POST /v1/blocks`: a principal (calls.write) or the application
+/// (enterprise.config.write) blocks a principal or an opaque contact. Idempotent per
+/// active pair (200 with the existing rule).
+async fn create_block(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    body: Result<Json<CreateBlockBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    let b = parse_body(body)?;
+    let (view, created) = state
+        .app
+        .create_block_rule(
+            &ctx,
+            super::blocks::CreateBlockRule {
+                principal_id: b.principal_id,
+                blocked_principal_id: b.blocked_principal_id,
+                blocked_contact_reference_id: b.blocked_contact_reference_id,
+                reason_code: b.reason_code,
+            },
+        )
+        .await?;
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok(respond(status, view, false))
+}
+
+/// `GET /v1/blocks?principalId=`: the principal's rules, or the application's own
+/// rules without `principalId` (calls.read).
+async fn list_blocks(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    let q = crate::enterprise::http::QueryParams::parse(query, &["principalId"])?;
+    let principal = q.uuid("principalId")?;
+    let items = state.app.list_block_rules(&ctx, principal).await?;
+    Ok(respond(
+        StatusCode::OK,
+        serde_json::json!({ "items": items }),
+        false,
+    ))
+}
+
+/// `DELETE /v1/blocks/:block_id`: releases the rule (same scope rule as creation).
+async fn release_block(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(block_id): Path<String>,
+) -> Result<Response, CallingError> {
+    let id = uuid_path(&block_id)?;
+    let view = state.app.release_block_rule(&ctx, id).await?;
+    Ok(respond(StatusCode::OK, view, false))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AbuseReportBody {
+    principal_id: Uuid,
+    category: String,
+    #[serde(default)]
+    comment_code: Option<String>,
+}
+
+/// `POST /v1/calls/:call_id/abuse-reports` (calls.write): a participant reports the
+/// Call. Idempotent per (call, reporter): 200 with the existing report.
+async fn create_abuse_report(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(call_id): Path<String>,
+    body: Result<Json<AbuseReportBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    let call_id = uuid_path(&call_id)?;
+    let b = parse_body(body)?;
+    let (view, created) = state
+        .app
+        .create_abuse_report(
+            &ctx,
+            call_id,
+            super::abuse_reports::CreateAbuseReport {
+                principal_id: b.principal_id,
+                category: b.category,
+                comment_code: b.comment_code,
+            },
+        )
+        .await?;
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok(respond(status, view, false))
+}
+
+/// `GET /v1/abuse-reports?principalId=` (calls.read): the reports a principal filed.
+async fn list_abuse_reports(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    let q = crate::enterprise::http::QueryParams::parse(query, &["principalId"])?;
+    let principal = q
+        .uuid("principalId")?
+        .ok_or(CallingError::Validation("principalId is required."))?;
+    let items = state.app.list_abuse_reports(&ctx, principal).await?;
+    Ok(respond(
+        StatusCode::OK,
+        serde_json::json!({ "items": items }),
         false,
     ))
 }

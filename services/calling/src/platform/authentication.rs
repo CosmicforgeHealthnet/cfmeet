@@ -9,9 +9,13 @@
 //! AND the presented environment tag matches the persisted environment
 //! AND credential ACTIVE, not revoked, not expired, not before not_before,
 //!     not past its rotation overlap
-//! AND service account ACTIVE AND environment ACTIVE
-//! AND application ACTIVE AND tenant ACTIVE
+//! AND service account ACTIVE
 //! ```
+//!
+//! A SUSPENDED environment, application or tenant does not reject the credential: the
+//! context is returned in [`AuthorityMode::SafetyOnly`] and the authentication
+//! middleware admits only the safety allow-list (Part H §72 / §74) — every other request
+//! is refused exactly like an authentication failure.
 //!
 //! There is no cache: suspension, revocation and rotation take effect on the next
 //! request. Clients only ever learn "authentication failed"; the specific
@@ -23,7 +27,7 @@ use chrono::{DateTime, Utc};
 use sea_orm::{DatabaseConnection, DbBackend, DbErr, FromQueryResult, Statement};
 
 use super::{
-    context::{PlatformAuthContext, TrustedAuthority},
+    context::{AuthorityMode, PlatformAuthContext, SuspendedLink, TrustedAuthority},
     credential_format::{self, PresentedCredential},
     credentials::CredentialEffectiveState,
     error::summarize_db_error,
@@ -58,6 +62,8 @@ pub enum AuthFailureReason {
     EnvironmentInactive,
     ApplicationInactive,
     TenantInactive,
+    /// The scope is SUSPENDED and the request is not a safety operation (Part H §72).
+    ScopeSuspended,
     CorruptAuthorityChain,
 }
 
@@ -79,6 +85,7 @@ impl AuthFailureReason {
             Self::EnvironmentInactive => "environment_inactive",
             Self::ApplicationInactive => "application_inactive",
             Self::TenantInactive => "tenant_inactive",
+            Self::ScopeSuspended => "scope_suspended",
             Self::CorruptAuthorityChain => "corrupt_authority_chain",
         }
     }
@@ -305,23 +312,27 @@ fn evaluate(
     {
         return Err(R::ServiceAccountInactive);
     }
-    if EnvironmentStatus::parse(&row.environment_status).ok_or_else(corrupt)?
-        != EnvironmentStatus::Active
-    {
-        return Err(R::EnvironmentInactive);
-    }
-    if ApplicationStatus::parse(&row.application_status).ok_or_else(corrupt)?
-        != ApplicationStatus::Active
-    {
-        return Err(R::ApplicationInactive);
-    }
-    if TenantStatus::parse(&row.tenant_status).ok_or_else(corrupt)? != TenantStatus::Active {
-        return Err(R::TenantInactive);
-    }
+    // A SUSPENDED scope keeps a safety-only authority (Part H §72): the outermost
+    // suspended link is reported. Unknown status values are a corrupt chain.
+    let environment_status =
+        EnvironmentStatus::parse(&row.environment_status).ok_or_else(corrupt)?;
+    let application_status =
+        ApplicationStatus::parse(&row.application_status).ok_or_else(corrupt)?;
+    let tenant_status = TenantStatus::parse(&row.tenant_status).ok_or_else(corrupt)?;
+    let authority_mode = if tenant_status != TenantStatus::Active {
+        AuthorityMode::SafetyOnly(SuspendedLink::Tenant)
+    } else if application_status != ApplicationStatus::Active {
+        AuthorityMode::SafetyOnly(SuspendedLink::Application)
+    } else if environment_status != EnvironmentStatus::Active {
+        AuthorityMode::SafetyOnly(SuspendedLink::Environment)
+    } else {
+        AuthorityMode::Full
+    };
     let classification =
         TenantClassification::parse(&row.tenant_classification).ok_or_else(corrupt)?;
 
     Ok(TrustedAuthority {
+        authority_mode,
         tenant_id: TenantId::from_uuid(row.tenant_id),
         tenant_classification: classification,
         application_id: ApplicationId::from_uuid(row.application_id),

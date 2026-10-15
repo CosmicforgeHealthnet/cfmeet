@@ -144,8 +144,13 @@ async fn a_number_is_canonicalized_encrypted_and_only_ever_returned_masked() {
     let created = h.create_contact(&c, NUMBER).await;
     let stored = row(&h, &c, &created["contactReference"]).await;
     assert_eq!(stored.sealed().unwrap().nonce.len(), 12);
-    assert_eq!(stored.encryption_key_version, "ck-test-1");
-    assert!(!stored.ciphertext.windows(10).any(|w| w == b"0212345678"));
+    assert_eq!(stored.encryption_key_version.as_deref(), Some("ck-test-1"));
+    assert!(!stored
+        .ciphertext
+        .as_deref()
+        .unwrap()
+        .windows(10)
+        .any(|w| w == b"0212345678"));
     assert_eq!(
         decrypt(&h.vault_keys, &stored),
         "+39••••••5678|Some(\"IT\")"
@@ -843,8 +848,9 @@ async fn encryption_key_rotation_reencrypts_in_batches_without_changing_any_cont
     assert_eq!(
         row(&h, &c, &newer["contactReference"])
             .await
-            .encryption_key_version,
-        "ck-v2"
+            .encryption_key_version
+            .as_deref(),
+        Some("ck-v2")
     );
     assert_eq!(
         h.contacts.key_version_counts().await.unwrap(),

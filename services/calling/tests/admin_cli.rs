@@ -321,9 +321,11 @@ async fn cli_manages_the_full_credential_lifecycle() {
     assert_eq!(trusted.code, 1);
     assert!(trusted.stderr.contains("FIRST_PARTY"));
 
-    // Suspension through the CLI blocks authentication.
+    // Suspension through the CLI leaves only the safety-only authority (Part H §72):
+    // every ordinary route is refused, safety operations (end a call, stop a
+    // recording, ...) remain possible.
     cli.ok(&["tenant", "suspend", "--tenant", "cosmicforge"]);
-    assert!(h.authenticate(&new_secret).await.is_err());
+    assert!(h.authenticate(&new_secret).await.unwrap().is_safety_only());
     cli.ok(&["tenant", "reactivate", "--tenant", "cosmicforge"]);
     h.ctx(&new_secret).await;
 }

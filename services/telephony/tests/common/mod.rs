@@ -223,6 +223,8 @@ pub struct FakePrivacyRelay {
     pub contacts: StdMutex<HashMap<Uuid, (String, String)>>,
     /// The relay identity the session presents.
     pub relay_number: StdMutex<Option<String>>,
+    /// Privacy Relay's assignment reference of that identity.
+    pub assignment_ref: StdMutex<Option<Uuid>>,
     pub resolutions: StdMutex<Vec<(Uuid, Uuid, Uuid)>>,
     /// called relay number -> mapping
     pub mappings: StdMutex<HashMap<String, InboundMapping>>,
@@ -236,6 +238,7 @@ impl FakePrivacyRelay {
             mode: StdMutex::new(PrMode::Normal),
             contacts: StdMutex::default(),
             relay_number: StdMutex::new(Some(RELAY_NUMBER.to_string())),
+            assignment_ref: StdMutex::new(Some(Uuid::new_v4())),
             resolutions: StdMutex::default(),
             mappings: StdMutex::default(),
             protected: StdMutex::default(),
@@ -293,6 +296,7 @@ impl PrivacyRelayPort for FakePrivacyRelay {
                 .unwrap()
                 .as_deref()
                 .and_then(ExecutionNumber::parse),
+            relay_assignment_ref: *self.assignment_ref.lock().unwrap(),
         })
     }
 
@@ -575,6 +579,8 @@ impl Consumer {
 // ---------------------------------------------------------------------------
 
 pub const CALLBACK_SECRET: &[u8] = b"deterministic-test-callback-secret-0123456789";
+/// The previous callback secret of provider a (rotation overlap, Part H §44).
+pub const PREVIOUS_CALLBACK_SECRET: &[u8] = b"deterministic-test-previous-secret-9876543210";
 /// The platform relay number the fake Privacy Relay presents (public, platform-owned).
 pub const RELAY_NUMBER: &str = "+2342010000001";
 
@@ -619,6 +625,11 @@ pub fn fast_settings() -> ExecutionSettings {
         ringing_drift_after: std::time::Duration::from_secs(120),
         provider_event_retention: std::time::Duration::from_secs(3600),
         callback_auth_failure_incident_threshold: 5,
+        callback_invalid_incident_threshold: 5,
+        blocked_destination_classes: telephony::destinations::DestinationClass::DEFAULT_BLOCKED
+            .to_vec(),
+        unclassified_destination_policy: telephony::destinations::UnclassifiedPolicy::Allow,
+        incident_retention: std::time::Duration::from_secs(365 * 24 * 3600),
     }
 }
 
@@ -644,7 +655,8 @@ impl Harness {
     ) -> Option<Self> {
         let db = Arc::new(TestDb::new().await?);
         let clock = ManualClock::new(Utc::now());
-        let provider_a = DeterministicProvider::new("dp-a", CALLBACK_SECRET);
+        let provider_a = DeterministicProvider::new("dp-a", CALLBACK_SECRET)
+            .with_previous_secret(Some(PREVIOUS_CALLBACK_SECRET));
         let provider_b = DeterministicProvider::new("dp-b", CALLBACK_SECRET);
         let privacy = Arc::new(FakePrivacyRelay::new());
         let calling = Arc::new(FakeCalling::new());

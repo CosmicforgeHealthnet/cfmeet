@@ -13,6 +13,15 @@
 //!    resurrects anything (a still-live provider call is terminated by reconciliation);
 //! 4. stored with a bounded, restricted, redacted detail and a retention bound. Raw
 //!    provider payloads are never forwarded to Calling, webhooks or Privacy Relay.
+//!
+//! Part H §55, §59–§60: every provider-supplied identifier is validated against the
+//! database rule BEFORE any transaction (an over-long id is a 400, never a rolled-back
+//! 500 that makes the provider retry forever), and invalid callbacks are counted in
+//! bounded per-minute windows whose subject is a known provider id or the literal
+//! `unknown` — never the attacker-supplied path segment. Past
+//! `callback_invalid_incident_threshold` hits per minute they raise ONE deduplicated
+//! incident (`CALLBACK_MALFORMED`, `CALLBACK_UNKNOWN_PROVIDER`, `CALLBACK_REPLAY_ABUSE`);
+//! a single duplicate is normal provider behaviour and is never an incident.
 
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{ConnectionTrait, FromQueryResult, TransactionTrait};
@@ -26,7 +35,7 @@ use crate::{
     error::{is_unique_violation, ErrorCode, TelephonyError, TelephonyResult},
     incidents::{self, Incident, Severity},
     legs::{self, Change, LegRow},
-    providers::{EventRejection, ProviderEvent, ProviderIngress},
+    providers::{valid_provider_token, EventRejection, ProviderEvent, ProviderIngress},
     service::TelephonyService,
 };
 
@@ -54,6 +63,54 @@ impl Disposition {
             Disposition::Quarantined => "QUARANTINED",
             Disposition::Ignored => "IGNORED",
         }
+    }
+}
+
+/// Why a callback was refused before application (bounded; metric label).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InvalidCallback {
+    /// Unknown provider id, or a path segment that is not a provider id at all.
+    UnknownProvider,
+    /// Authenticated but not strictly well-formed (T1 validation included).
+    Malformed,
+    /// Larger than `MAX_CALLBACK_BYTES` (refused by the listener or here).
+    Oversized,
+    /// A duplicate event id or an event outside the accepted time window.
+    Replay,
+}
+
+impl InvalidCallback {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            InvalidCallback::UnknownProvider => "UNKNOWN_PROVIDER",
+            InvalidCallback::Malformed => "MALFORMED",
+            InvalidCallback::Oversized => "OVERSIZED",
+            InvalidCallback::Replay => "REPLAY",
+        }
+    }
+}
+
+/// `telecom_providers.id` syntax (the only path segment ever used as a window subject).
+pub fn valid_provider_id(id: &str) -> bool {
+    (2..=32).contains(&id.len())
+        && id.as_bytes()[0].is_ascii_lowercase()
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// A bounded, constraint-safe incident key for an unknown provider object: the raw
+/// reference is used while it fits `dedupe_key`, else its digest.
+fn unknown_object_key(provider_id: &str, call_ref: Option<&str>) -> String {
+    let r = call_ref.unwrap_or("none");
+    let key = format!("unknown-object:{provider_id}:{r}");
+    if key.len() <= 160 {
+        key
+    } else {
+        format!(
+            "unknown-object:{provider_id}:sha256-{}",
+            &hex::encode(Sha256::digest(r.as_bytes()))[..32]
+        )
     }
 }
 
@@ -105,20 +162,45 @@ impl TelephonyService {
         &self,
         ingress: ProviderIngress,
     ) -> TelephonyResult<Vec<Disposition>> {
-        if ingress.body.len() > MAX_CALLBACK_BYTES {
-            return Err(TelephonyError::Refused(ErrorCode::PayloadTooLarge));
+        if !valid_provider_id(&ingress.provider_id) {
+            self.count_invalid_callback(InvalidCallback::UnknownProvider, None)
+                .await?;
+            return Err(TelephonyError::Refused(ErrorCode::ProviderEventRejected));
         }
         let Some(provider) = self.providers.get(&ingress.provider_id).cloned() else {
+            self.count_invalid_callback(InvalidCallback::UnknownProvider, None)
+                .await?;
             return Err(TelephonyError::Refused(ErrorCode::ProviderEventRejected));
         };
+        if ingress.body.len() > MAX_CALLBACK_BYTES {
+            self.count_invalid_callback(InvalidCallback::Oversized, Some(&ingress.provider_id))
+                .await?;
+            return Err(TelephonyError::Refused(ErrorCode::PayloadTooLarge));
+        }
         if let Err(rejection) = provider.verify_event(&ingress) {
             self.count_auth_failure(&ingress.provider_id, rejection)
                 .await?;
             return Err(TelephonyError::Refused(ErrorCode::ProviderEventRejected));
         }
-        let events = provider
-            .normalize_event(&ingress)
-            .map_err(|_| TelephonyError::Validation("The provider event is malformed."))?;
+        let events = match provider.normalize_event(&ingress) {
+            Ok(events) => events,
+            Err(_) => {
+                self.count_invalid_callback(InvalidCallback::Malformed, Some(&ingress.provider_id))
+                    .await?;
+                return Err(TelephonyError::Validation(
+                    "The provider event is malformed.",
+                ));
+            }
+        };
+        // Defence in depth: an adapter that let an invalid id through is still refused
+        // before any transaction.
+        if events.iter().any(|e| !valid_event_ids(e)) {
+            self.count_invalid_callback(InvalidCallback::Malformed, Some(&ingress.provider_id))
+                .await?;
+            return Err(TelephonyError::Validation(
+                "The provider event is malformed.",
+            ));
+        }
         self.count_window("CALLBACK_ACCEPTED", &ingress.provider_id)
             .await?;
         let mut out = Vec::new();
@@ -131,16 +213,59 @@ impl TelephonyService {
         Ok(out)
     }
 
-    /// Deletes provider event evidence past its retention bound (bounded batches).
-    pub async fn purge_expired_provider_events(&self, limit: u64) -> TelephonyResult<u64> {
-        let deleted = db::exec(
-            &self.db,
-            "DELETE FROM provider_events WHERE id IN (SELECT id FROM provider_events WHERE retain_until < $1 \
-             ORDER BY retain_until LIMIT $2 FOR UPDATE SKIP LOCKED)",
-            vec![self.now().into(), (limit.clamp(1, 1000) as i64).into()],
-        )
-        .await?;
-        Ok(deleted)
+    /// Counts a callback the listener refused as too large before the handler ran
+    /// (the body limit layer); the subject is the provider id when it is one.
+    pub async fn count_oversized_callback(&self, provider_id: Option<&str>) -> TelephonyResult<()> {
+        let known = provider_id.filter(|p| valid_provider_id(p) && self.providers.get(p).is_some());
+        self.count_invalid_callback(InvalidCallback::Oversized, known)
+            .await
+    }
+
+    /// Counts one invalid callback (bounded metric + per-minute window) and raises the
+    /// aggregated incident once the window crosses the threshold.
+    async fn count_invalid_callback(
+        &self,
+        kind: InvalidCallback,
+        provider_id: Option<&str>,
+    ) -> TelephonyResult<()> {
+        crate::metrics::inc(
+            "telephony_provider_callback_rejections_total",
+            &[("reason", kind.as_str())],
+        );
+        let subject = provider_id.unwrap_or("unknown");
+        let (window, category, key, severity) = match kind {
+            InvalidCallback::UnknownProvider => (
+                "CALLBACK_UNKNOWN_PROVIDER",
+                "CALLBACK_UNKNOWN_PROVIDER",
+                "callback-unknown-provider".to_string(),
+                Severity::Medium,
+            ),
+            InvalidCallback::Malformed | InvalidCallback::Oversized => (
+                "CALLBACK_MALFORMED",
+                "CALLBACK_MALFORMED",
+                format!("callback-malformed:{subject}"),
+                Severity::Medium,
+            ),
+            InvalidCallback::Replay => (
+                "CALLBACK_REPLAY",
+                "CALLBACK_REPLAY_ABUSE",
+                format!("callback-replay:{subject}"),
+                Severity::High,
+            ),
+        };
+        let hits = self.count_window(window, subject).await?;
+        tracing::warn!(
+            provider = subject,
+            reason = kind.as_str(),
+            "provider callback refused"
+        );
+        if hits >= self.settings.callback_invalid_incident_threshold {
+            let mut incident = Incident::new(category, severity, key)
+                .evidence(json!({ "hitsThisMinute": hits, "reason": kind.as_str() }));
+            incident.provider_id = provider_id.map(str::to_string);
+            incidents::raise(&self.db, &incident, self.now()).await?;
+        }
+        Ok(())
     }
 
     async fn count_window(&self, kind: &str, subject: &str) -> TelephonyResult<i64> {
@@ -201,6 +326,11 @@ impl TelephonyService {
         provider_id: &str,
         event: ProviderEvent,
     ) -> TelephonyResult<Disposition> {
+        if !valid_event_ids(&event) {
+            return Err(TelephonyError::Validation(
+                "The provider event is malformed.",
+            ));
+        }
         let now = self.now();
         let retention = Duration::from_std(self.settings.provider_event_retention)
             .unwrap_or(Duration::days(30));
@@ -214,6 +344,8 @@ impl TelephonyService {
                 provider = provider_id,
                 "provider event outside the accepted time window ignored"
             );
+            self.count_invalid_callback(InvalidCallback::Replay, Some(provider_id))
+                .await?;
             return Ok(Disposition::Ignored);
         }
         let txn = self.db.begin().await?;
@@ -291,6 +423,8 @@ impl TelephonyService {
                     "telephony_provider_events_total",
                     &[("disposition", Disposition::Duplicate.as_str())],
                 );
+                self.count_invalid_callback(InvalidCallback::Replay, Some(provider_id))
+                    .await?;
                 return Ok(Disposition::Duplicate);
             }
             return Err(e);
@@ -299,10 +433,7 @@ impl TelephonyService {
             let mut incident = Incident::new(
                 "UNKNOWN_PROVIDER_OBJECT",
                 Severity::Medium,
-                format!(
-                    "unknown-object:{provider_id}:{}",
-                    event.provider_call_ref.as_deref().unwrap_or("none")
-                ),
+                unknown_object_key(provider_id, event.provider_call_ref.as_deref()),
             )
             .evidence(json!({ "event": event.event.as_str() }));
             incident.provider_id = Some(provider_id.to_string());
@@ -476,4 +607,81 @@ impl TelephonyService {
 #[derive(Debug, FromQueryResult)]
 struct HitsRow {
     hits: i64,
+}
+
+/// Every provider-supplied identifier of `event` satisfies the database rule
+/// (`^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,159}$`), the sequence is bounded and a cost is a
+/// non-negative amount with an ISO-4217-shaped currency.
+pub fn valid_event_ids(event: &ProviderEvent) -> bool {
+    valid_provider_token(&event.provider_event_id)
+        && event
+            .provider_call_ref
+            .as_deref()
+            .is_none_or(valid_provider_token)
+        && event
+            .correlation_key
+            .as_deref()
+            .is_none_or(valid_provider_token)
+        && event
+            .sequence
+            .is_none_or(|s| (0..=i64::from(i32::MAX)).contains(&s))
+        && event
+            .provider_cost_minor
+            .as_ref()
+            .is_none_or(|(cost, currency)| {
+                (0..=MAX_PROVIDER_COST_MINOR).contains(cost)
+                    && currency.len() == 3
+                    && currency.bytes().all(|b| b.is_ascii_uppercase())
+            })
+}
+
+/// Upper bound of a provider-reported cost of one leg (minor units).
+pub const MAX_PROVIDER_COST_MINOR: i64 = 1_000_000_000_000;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn event(id: &str) -> ProviderEvent {
+        ProviderEvent {
+            provider_event_id: id.into(),
+            provider_call_ref: None,
+            correlation_key: None,
+            event: crate::domain::NormalizedEvent::LegRinging,
+            occurred_at: Utc::now(),
+            sequence: Some(1),
+            restricted_detail: Default::default(),
+            inbound: None,
+            dtmf: None,
+            provider_cost_minor: None,
+        }
+    }
+
+    #[test]
+    fn provider_identifiers_follow_the_database_rule_before_any_transaction() {
+        assert!(valid_event_ids(&event("ev-1")));
+        assert!(valid_event_ids(&event(&"a".repeat(160))));
+        assert!(!valid_event_ids(&event(&"a".repeat(161))));
+        assert!(!valid_event_ids(&event("")));
+        assert!(!valid_event_ids(&event("-leading")));
+        assert!(!valid_event_ids(&event("has space")));
+        let mut e = event("ev-2");
+        e.provider_call_ref = Some("x".repeat(161));
+        assert!(!valid_event_ids(&e));
+        let mut e = event("ev-3");
+        e.sequence = Some(i64::from(i32::MAX) + 1);
+        assert!(!valid_event_ids(&e));
+        e.sequence = Some(-1);
+        assert!(!valid_event_ids(&e));
+        let mut e = event("ev-4");
+        e.provider_cost_minor = Some((5, "ngn".into()));
+        assert!(!valid_event_ids(&e));
+        e.provider_cost_minor = Some((MAX_PROVIDER_COST_MINOR + 1, "NGN".into()));
+        assert!(!valid_event_ids(&e));
+        e.provider_cost_minor = Some((250, "NGN".into()));
+        assert!(valid_event_ids(&e));
+        assert!(valid_provider_id("dp-a") && !valid_provider_id("DP-A") && !valid_provider_id("a"));
+        assert!(unknown_object_key("dp-a", Some(&"r".repeat(200))).len() <= 160);
+        assert_eq!(unknown_object_key("dp-a", None), "unknown-object:dp-a:none");
+    }
 }

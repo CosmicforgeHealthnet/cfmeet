@@ -58,6 +58,8 @@ pub enum ErrorCode {
     EnterprisePolicyDenied,
     ArtifactStorageUnavailable,
     RecordingNotAuthorized,
+    /// The principal's category may not perform the operation (Part H §10).
+    PrincipalNotEligible,
 }
 
 impl ErrorCode {
@@ -95,6 +97,7 @@ impl ErrorCode {
         ErrorCode::EnterprisePolicyDenied,
         ErrorCode::ArtifactStorageUnavailable,
         ErrorCode::RecordingNotAuthorized,
+        ErrorCode::PrincipalNotEligible,
     ];
 
     /// Codes that only internal routes return.
@@ -163,6 +166,9 @@ impl ErrorCode {
             ErrorCode::RecordingNotAuthorized => {
                 "Recording this call is not authorized; the decision and its reason are in the call's recording authorizations."
             }
+            ErrorCode::PrincipalNotEligible => {
+                "The principal's category is not eligible for this operation."
+            }
             _ => "The request could not be completed.",
         }
     }
@@ -202,6 +208,7 @@ impl ErrorCode {
             ErrorCode::EnterprisePolicyDenied => "ENTERPRISE_POLICY_DENIED",
             ErrorCode::ArtifactStorageUnavailable => "ARTIFACT_STORAGE_UNAVAILABLE",
             ErrorCode::RecordingNotAuthorized => "RECORDING_NOT_AUTHORIZED",
+            ErrorCode::PrincipalNotEligible => "PRINCIPAL_NOT_ELIGIBLE",
         }
     }
 }

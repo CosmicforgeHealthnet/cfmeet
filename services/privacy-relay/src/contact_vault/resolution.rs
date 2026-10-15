@@ -27,7 +27,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::{
-    audit::{record, record_refusal, AccessEntry, ExecutionRefs},
+    audit::{record, record_refusal_required, AccessEntry, ExecutionRefs},
     model::iso,
     repository,
     verification::require_verified,
@@ -186,7 +186,8 @@ impl ContactVault {
         match self.grant_inner(actor, contact, &request).await {
             Ok(v) => Ok(v),
             Err(e) => {
-                record_refusal(&self.db, actor, entry, &e, self.now()).await;
+                // No refusal without its audit row (fail closed on an audit failure).
+                record_refusal_required(&self.db, actor, entry, &e, self.now()).await?;
                 Err(e)
             }
         }
@@ -346,7 +347,9 @@ impl ContactVault {
         match self.resolve_inner(actor, contact, &request).await {
             Ok(v) => Ok(v),
             Err(e) => {
-                record_refusal(&self.db, actor, entry, &e, self.now()).await;
+                // No refusal without its audit row (fail closed on an audit failure); a
+                // success is audited inside its own transaction.
+                record_refusal_required(&self.db, actor, entry, &e, self.now()).await?;
                 Err(e)
             }
         }

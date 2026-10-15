@@ -123,6 +123,9 @@ pub async fn contact_use<C: ConnectionTrait>(
 /// VERIFIED. BLOCKED / INVALID are refused whatever their history; expiry is evaluated
 /// at `now`, not by a worker.
 pub fn require_verified(row: &ContactRow, now: DateTime<Utc>) -> RelayResult<()> {
+    if row.is_erased() {
+        return Err(super::erased());
+    }
     if row.is_disabled() {
         return Err(RelayError::Refused(ErrorCode::ContactDisabled));
     }
@@ -276,7 +279,7 @@ impl ContactVault {
             &txn,
             &format!(
                 "SELECT {CONTACT_COLUMNS} FROM protected_contacts \
-                 WHERE verification_state = 'VERIFIED' AND verification_expires_at <= $1 \
+                 WHERE verification_state = 'VERIFIED' AND verification_expires_at <= $1 AND erased_at IS NULL \
                  ORDER BY verification_expires_at, id LIMIT $2 FOR UPDATE SKIP LOCKED"
             ),
             vec![now.into(), (limit.clamp(1, 1000) as i64).into()],
