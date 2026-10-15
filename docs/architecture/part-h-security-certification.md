@@ -29,7 +29,7 @@ change (no targeted re-run substitutes for it).
 | Gate | Result |
 |---|---|
 | Calling — `fmt --check`, `check`, `clippy -D warnings`, `build` (`--workspace --locked`) | clean |
-| Calling — `cargo test --workspace --locked --no-fail-fast` | **632 passed, 0 failed, 0 ignored (77 test binaries; run with the real-binary e2e enabled: `privacy_relay_e2e` 3, `telephony_e2e` 2, `enterprise_sip_certification` IVR section). The RTC (LiveKit) certification and the S3 voicemail / recording certification sections print SKIPPED locally (no LiveKit server / S3 store in this environment) and are **not** counted; CI runs them (RTC certification and MinIO jobs)** |
+| Calling — `cargo test --workspace --locked --no-fail-fast` | **632 passed, 0 failed, 0 ignored (77 test binaries; run with the real-binary e2e enabled: `privacy_relay_e2e` 3, `telephony_e2e` 2, `enterprise_sip_certification` with `ENTERPRISE_SIP_CERT_REQUIRED=1` against a local S3-compatible store: IVR, voicemail, recording and org-isolation sections certified). Only the RTC (LiveKit) certification section prints SKIPPED locally (no LiveKit server here) and is **not** counted; CI runs it (RTC certification workflow)** |
 | Privacy Relay — fmt, check, clippy, full suite | **149 passed, 0 failed, 0 ignored (35 test binaries)** |
 | Telephony — fmt, check, clippy, full suite with `TELEPHONY_SIP_CERT_REQUIRED=1` (real Asterisk + SIPp; carrier RFC 4733 DTMF exercised) | **130 passed, 0 failed, 0 ignored (24 test binaries); `sip_certification::real_sip_media_edge_certification` ran and passed** |
 | `packages/service-auth` (core + client features) | 114 passed, 0 failed |
@@ -39,7 +39,7 @@ change (no targeted re-run substitutes for it).
 | Secret scan — `make secret-scan` (repository + scanner mutation tests); built binaries scanned with `--tree` | clean; 9 scanner tests passed; the nine built service binaries (`--tree`) clean, no canary number or key block |
 | Migrations — each service: fresh up / status / reset / re-up (CI smoke replayed locally) + migration suites | Calling 41, Privacy Relay 13, Telephony 14 migrations: the CI migration-smoke steps (fresh up / status / reset / re-up / table checks) replayed locally and green; each service's migration suite green in its full run |
 | Cross-service e2e with real binaries — Calling ↔ Privacy Relay; Calling ↔ Telephony ↔ Privacy Relay | Calling ↔ Privacy Relay 3/3, Calling ↔ Telephony ↔ Privacy Relay 2/2 (inside the final Calling run) |
-| Enterprise SIP certification (Calling + Telephony + Asterisk + SIPp) | IVR section ran locally and passed; voicemail / recording sections need an S3 store and run in CI (MinIO) |
+| Enterprise SIP certification (Calling + Telephony + Asterisk + SIPp) | All sections ran locally and passed (IVR four branches; voicemail capture → protected upload → READY → authorized retrieval → read → delete, with denied access audited; recording consent denial, notice, bridge capture, stop, audited retrieval; 36 cross-tenant attempts → 404); CI runs the same suite against MinIO |
 
 Baseline before Part H: Calling 546, Privacy Relay 126, Telephony 87.
 
@@ -205,6 +205,10 @@ Baseline before Part H: Calling 546, Privacy Relay 126, Telephony 87.
   pooled keep-alive connections served (graceful shutdown now); MinIO moved to the pinned
   `pgsty/minio` digest (Docker Hub no longer serves `minio/minio`); two secret-scan false
   positives in test / source text.
+* Tests: the enterprise history-plan assertion depended on autovacuum timing (ANALYZE
+  before EXPLAIN now; assertion unchanged); a capture-egress test tag could produce an
+  invalid name (digit-safe now); the enterprise certification voicemail audit expectation
+  now includes the audited denied access and metadata read (§79).
 
 ## 14. External items (kept separate from implementation correctness)
 
