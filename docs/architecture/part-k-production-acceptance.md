@@ -226,7 +226,24 @@ workflow, outside Part III).
 
 ## 14. GitHub Actions
 
-Recorded in a documentation-only follow-up commit once the runs of the final code commit are terminal.
+Final code commit `8b830e3` (every workflow its paths trigger, all terminal):
+
+| Workflow | Run | Conclusion |
+|---|---|---|
+| Calling service | 38767666451 | success |
+| Calling RTC certification (real LiveKit) | 38767666636 | success |
+| Enterprise calling certification (Asterisk + SIPp + MinIO, races ×5) | 38767666624 | success |
+| Privacy Relay service | 38767666611 | success |
+| Telephony service | 38767666557 | success |
+| Dependency and image security | 38767666500 | success |
+| Service boundaries (guard, registry, secret scan, database isolation) | 38767666288 | success |
+
+Workflows whose paths `8b830e3` does not touch last ran on the preceding code commit
+`a019d21`, whose differences to `8b830e3` are limited to the secret scanner, one Calling
+test file and this report: Telephony SIP certification 38764752641, Contracts and service
+auth 38764752903, Webhooks package 38764752642, Object storage 38764752773 — all success.
+On `a019d21` the enterprise race job (planner assertion) and the image secret scan
+(GnuTLS self-test keys) failed; both were fixed in `8b830e3` (§13).
 
 ## 15. §110 Production acceptance gates
 
