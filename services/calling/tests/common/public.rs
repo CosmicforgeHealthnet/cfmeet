@@ -420,10 +420,19 @@ impl PublicWorld {
     }
 }
 
-/// Every digit run of `text` long enough to be a telephone number.
+/// Every standalone all-digit token of `text` long enough to be a national-format
+/// telephone number (234… or 44…, at least ten digits). Tokens are split on everything but
+/// ASCII letters, digits and '-', so a digit run inside a random identifier — a hex hash,
+/// a UUID group, base64 — belongs to a larger token and is not mistaken for a number,
+/// while a number stored or returned as a value is its own token whatever surrounds it
+/// (quotes, commas, spaces, '+', JSON).
 pub fn number_like_runs(text: &str) -> Vec<String> {
-    text.split(|c: char| !c.is_ascii_digit())
-        .filter(|run| run.len() >= 10 && (run.starts_with("234") || run.starts_with("44")))
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+        .filter(|t| {
+            t.len() >= 10
+                && (t.starts_with("234") || t.starts_with("44"))
+                && t.bytes().all(|b| b.is_ascii_digit())
+        })
         .map(str::to_string)
         .collect()
 }

@@ -23,6 +23,7 @@ use cf_service_auth::{OutboundServiceRequest, ServiceId, ServiceTokenSigner};
 use common::{
     app::{AppWorld, Device},
     privacy::FakePrivacyRelay,
+    public::number_like_runs,
     scalar_i64,
     telephony::{leg_event, Answer, FakePublicMedia, FakeTelephony},
     TestResponse,
@@ -359,16 +360,39 @@ async fn an_app_user_calls_a_protected_phone_and_hangs_up() {
             "{needle} leaked into Calling's database"
         );
     }
-    // Nor a national-format number (234 + at least 7 more digits in one run). A short
-    // substring like "2348" is not evidence: random UUIDs and timestamps contain it.
-    let digits: Vec<&str> = dump
-        .split(|c: char| !c.is_ascii_digit())
-        .filter(|run| run.len() >= 10 && run.starts_with("234"))
+    // Nor a national-format number stored as a value of its own.
+    let numbers = number_like_runs(&dump);
+    let context: Vec<&str> = numbers
+        .iter()
+        .filter_map(|n| dump.lines().find(|line| line.contains(n.as_str())))
         .collect();
     assert!(
-        digits.is_empty(),
-        "a telephone number leaked into Calling's database"
+        numbers.is_empty(),
+        "a telephone number leaked into Calling's database: {numbers:?} in {context:#?}"
     );
+}
+
+#[test]
+fn number_detection_finds_stored_numbers_and_ignores_random_identifiers() {
+    for leaked in [
+        "(1,2348031234567)",
+        r#"{"to": "2348031234567"}"#,
+        "tel 2348031234567,",
+        "+2348031234567",
+    ] {
+        assert_eq!(number_like_runs(leaked), ["2348031234567"], "{leaked}");
+    }
+    assert_eq!(number_like_runs(r#"["447700900123"]"#), ["447700900123"]);
+    for random in [
+        "8e1f0c2a-4b7d-4c1e-9a3b-234803123456",
+        "a1b2c3d42348031234567ff09e",
+        "2026-10-15 12:17:14.769+00",
+        "AbC2348031234567xYz=",
+        "234567",
+        "4f2c9d1e-0b3a-4c5d-8e7f-447700900123",
+    ] {
+        assert!(number_like_runs(random).is_empty(), "{random}");
+    }
 }
 
 #[tokio::test]

@@ -209,6 +209,10 @@ Baseline before Part H: Calling 546, Privacy Relay 126, Telephony 87.
   before EXPLAIN now; assertion unchanged); a capture-egress test tag could produce an
   invalid name (digit-safe now); the enterprise certification voicemail audit expectation
   now includes the audited denied access and metadata read (§79).
+* Tests: the "no telephone number in Calling" heuristic scanned bare digit runs, so a
+  digit run inside a random hex hash / UUID group could match (seen once in CI on
+  `c15f48f`); it now scans standalone all-digit tokens, with a self-test proving a stored
+  number is still found and random identifiers are not.
 
 ## 14. External items (kept separate from implementation correctness)
 
