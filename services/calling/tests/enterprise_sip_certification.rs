@@ -1394,10 +1394,13 @@ async fn voicemail_scenario(
     assert_eq!(
         stack
             .text(&format!(
-                "SELECT string_agg(operation, ',' ORDER BY seq) FROM enterprise_admin_audit WHERE resource_id = '{message}'"
+                "SELECT string_agg(operation || ':' || coalesce(details->>'outcome', '-'), ',' ORDER BY seq) \
+                 FROM enterprise_admin_audit WHERE resource_id = '{message}'"
             ))
             .await,
-        "MEDIA_ACCESS,MARK_READ,DELETE"
+        // Part H §79: denied access (the non-owner's media request) and metadata reads are
+        // audited too, not only the granted operations.
+        "MEDIA_ACCESS:GRANTED,MEDIA_ACCESS:DENIED,READ_METADATA:GRANTED,MARK_READ:GRANTED,DELETE:GRANTED"
     );
     // History (§62): the desk caller's canonical history holds the Call, answered by the
     // mailbox (enterprise outcome VOICEMAIL), never a raw number or object key.

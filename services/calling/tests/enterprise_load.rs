@@ -64,6 +64,13 @@ async fn dial(e: &EnterpriseWorld, from: &Desk, number: &str) -> Uuid {
 }
 
 async fn explain(e: &EnterpriseWorld, sql: &str, values: Vec<sea_orm::Value>) -> String {
+    // Fresh statistics first: otherwise the plan depends on whether autovacuum has
+    // analyzed the freshly loaded tables yet, and the assertion becomes timing-dependent.
+    e.h()
+        .conn()
+        .execute_unprepared("ANALYZE call_participants, calls")
+        .await
+        .unwrap();
     let txn = e.h().conn().begin().await.unwrap();
     txn.execute_unprepared("SET LOCAL enable_seqscan = off")
         .await
