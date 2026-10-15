@@ -1844,18 +1844,47 @@ async fn list_messages(
     Ok(ok(page))
 }
 
+/// The voicemail scope check of one message route. A refusal is audited DENIED on the
+/// message when it exists in the caller's own scope (never otherwise: a foreign or
+/// unknown id leaves no trace), then answered exactly as before (403).
+async fn require_voicemail_scope(
+    state: &AppState,
+    ctx: &PlatformAuthContext,
+    scope: &'static str,
+    id: &str,
+    operation: crate::enterprise::audit::AuditOperation,
+) -> Result<(), CallingError> {
+    if let Err(refusal) = ctx.require_scope(scope) {
+        if let Ok(id) = uuid_path(id) {
+            state
+                .enterprise
+                .audit_voicemail_scope_denial(&AdminActor::of(ctx), id, operation)
+                .await;
+        }
+        return Err(refusal);
+    }
+    Ok(())
+}
+
 async fn get_message(
     State(state): State<AppState>,
     ctx: PlatformAuthContext,
     Path(id): Path<String>,
     query: Result<Query<Vec<(String, String)>>, QueryRejection>,
 ) -> Result<Response, CallingError> {
-    ctx.require_scope(names::ENTERPRISE_VOICEMAIL_READ)?;
+    require_voicemail_scope(
+        &state,
+        &ctx,
+        names::ENTERPRISE_VOICEMAIL_READ,
+        &id,
+        crate::enterprise::audit::AuditOperation::ReadMetadata,
+    )
+    .await?;
     let q = QueryParams::parse(query, &["principalId"])?;
     let view = state
         .enterprise
         .get_voicemail_message(
-            CallScope::of_platform(&ctx),
+            &AdminActor::of(&ctx),
             uuid_path(&id)?,
             requester(&ctx, q.uuid("principalId")?)?,
         )
@@ -1878,7 +1907,14 @@ async fn set_read_state(
     Path(id): Path<String>,
     body: Result<Json<ReadStateBody>, JsonRejection>,
 ) -> Result<Response, CallingError> {
-    ctx.require_scope(names::ENTERPRISE_VOICEMAIL_MANAGE)?;
+    require_voicemail_scope(
+        &state,
+        &ctx,
+        names::ENTERPRISE_VOICEMAIL_MANAGE,
+        &id,
+        crate::enterprise::audit::AuditOperation::MarkRead,
+    )
+    .await?;
     let id = uuid_path(&id)?;
     let body = parse_body(body)?;
     let view = state
@@ -1900,7 +1936,14 @@ async fn delete_message(
     Path(id): Path<String>,
     query: Result<Query<Vec<(String, String)>>, QueryRejection>,
 ) -> Result<Response, CallingError> {
-    ctx.require_scope(names::ENTERPRISE_VOICEMAIL_MANAGE)?;
+    require_voicemail_scope(
+        &state,
+        &ctx,
+        names::ENTERPRISE_VOICEMAIL_MANAGE,
+        &id,
+        crate::enterprise::audit::AuditOperation::Delete,
+    )
+    .await?;
     let id = uuid_path(&id)?;
     let q = QueryParams::parse(query, &["expectedVersion", "principalId"])?;
     let view = state
@@ -1928,7 +1971,14 @@ async fn media_access(
     Path(id): Path<String>,
     body: Result<Json<MediaAccessBody>, JsonRejection>,
 ) -> Result<Response, CallingError> {
-    ctx.require_scope(names::ENTERPRISE_VOICEMAIL_READ)?;
+    require_voicemail_scope(
+        &state,
+        &ctx,
+        names::ENTERPRISE_VOICEMAIL_READ,
+        &id,
+        crate::enterprise::audit::AuditOperation::MediaAccess,
+    )
+    .await?;
     let id = uuid_path(&id)?;
     let body = parse_body(body)?;
     let access = state

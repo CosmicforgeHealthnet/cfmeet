@@ -169,7 +169,14 @@ impl LiveKitSettings {
                 "must be 1-64 characters of [A-Za-z0-9_-]".to_string(),
             ));
         }
-        let api_secret = required("CALLING_LIVEKIT_API_SECRET")?;
+        let secret = |var: &'static str, file_var: &'static str| {
+            crate::config::secret::required_secret(get, var, file_var)
+                .map(|s| s.expose_secret().trim().to_string())
+        };
+        let api_secret = secret(
+            "CALLING_LIVEKIT_API_SECRET",
+            "CALLING_LIVEKIT_API_SECRET_FILE",
+        )?;
         let lowered = api_secret.to_ascii_lowercase();
         if api_secret.len() < MIN_SECRET_LEN
             || ["changeme", "change-me", "placeholder", "example", "your-"]
@@ -181,8 +188,17 @@ impl LiveKitSettings {
                 format!("must be a generated secret of at least {MIN_SECRET_LEN} characters"),
             ));
         }
-        let edge_key = required("CALLING_MEDIA_EDGE_SIGNING_KEY")?;
-        if edge_key.len() < MIN_SECRET_LEN || edge_key == api_secret {
+        let edge_key = secret(
+            "CALLING_MEDIA_EDGE_SIGNING_KEY",
+            "CALLING_MEDIA_EDGE_SIGNING_KEY_FILE",
+        )?;
+        let lowered = edge_key.to_ascii_lowercase();
+        if edge_key.len() < MIN_SECRET_LEN
+            || edge_key == api_secret
+            || ["changeme", "change-me", "placeholder", "example", "your-"]
+                .iter()
+                .any(|p| lowered.contains(p))
+        {
             return Err(ConfigError::invalid(
                 "CALLING_MEDIA_EDGE_SIGNING_KEY",
                 format!(
@@ -1490,5 +1506,56 @@ mod tests {
         );
         assert_eq!(held["can_publish"], false);
         assert_eq!(held["can_subscribe"], true);
+    }
+
+    #[test]
+    fn provider_secrets_accept_files_and_refuse_placeholders() {
+        use crate::config::secret::tests::TempSecret;
+        let secret_file = TempSecret::new(&format!("{SECRET}\n"), 0o600);
+        let edge_file = TempSecret::new(EDGE, 0o600);
+        let (secret_path, edge_path) = (secret_file.path(), edge_file.path());
+        let base = [
+            ("CF_RUNTIME_ENVIRONMENT", "production"),
+            ("CALLING_LIVEKIT_URL", "wss://media.example.org"),
+            ("CALLING_LIVEKIT_API_URL", "https://media.example.org"),
+            ("CALLING_LIVEKIT_API_KEY", "callingkey"),
+            ("CALLING_LIVEKIT_API_SECRET_FILE", secret_path.as_str()),
+            (
+                "CALLING_MEDIA_GATEWAY_URL",
+                "wss://calling.example.org/v1/calling/media",
+            ),
+            ("CALLING_MEDIA_EDGE_SIGNING_KEY_FILE", edge_path.as_str()),
+        ];
+        assert!(LiveKitSettings::from_lookup(&lookup(&base)).is_ok());
+        // Inline and file at once: ambiguous.
+        let mut both = base.to_vec();
+        both.push(("CALLING_LIVEKIT_API_SECRET", SECRET));
+        assert!(LiveKitSettings::from_lookup(&lookup(&both)).is_err());
+        // A placeholder media-edge key is refused (it was only length-checked before).
+        let mut weak = base.to_vec();
+        weak.retain(|(k, _)| *k != "CALLING_MEDIA_EDGE_SIGNING_KEY_FILE");
+        weak.push((
+            "CALLING_MEDIA_EDGE_SIGNING_KEY",
+            "changeme-changeme-changeme-changeme-edge",
+        ));
+        let err = LiveKitSettings::from_lookup(&lookup(&weak)).unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::Invalid {
+                var: "CALLING_MEDIA_EDGE_SIGNING_KEY",
+                ..
+            }
+        ));
+        assert!(!err.to_string().contains("changeme"));
+        // A world-readable secret file is refused in production.
+        #[cfg(unix)]
+        {
+            let readable = TempSecret::new(SECRET, 0o644);
+            let readable_path = readable.path();
+            let mut permissive = base.to_vec();
+            permissive.retain(|(k, _)| *k != "CALLING_LIVEKIT_API_SECRET_FILE");
+            permissive.push(("CALLING_LIVEKIT_API_SECRET_FILE", readable_path.as_str()));
+            assert!(LiveKitSettings::from_lookup(&lookup(&permissive)).is_err());
+        }
     }
 }

@@ -122,7 +122,7 @@ impl DeterministicProvider {
 
     /// Accepts callbacks signed with `previous` as well (rotation overlap).
     pub fn with_previous_secret(mut self, previous: Option<&[u8]>) -> Self {
-        self.previous_secret = previous.map(|p| Arc::new(p.to_vec()));
+        self.previous_secret = Option::map(previous, |bytes| Arc::new(bytes.to_vec()));
         self
     }
 

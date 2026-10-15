@@ -353,7 +353,12 @@ class RealRepository(unittest.TestCase):
                             # Part H sections 69-70: block / opt-out rules, their refusal
                             # windows and abuse reports are Calling-owned (ADR 0029).
                             or t in {"calling_block_rules", "calling_abuse_windows",
-                                     "calling_abuse_reports"}
+                                     "calling_abuse_reports",
+                                     # Part H section 79: orphaned protected objects
+                                     # awaiting deletion; section 80: retention holds
+                                     # and the retention audit (ADR 0030).
+                                     "calling_orphan_objects", "calling_retention_holds",
+                                     "calling_retention_audit"}
                             for t in calling), calling)
         # No second Call authority.
         self.assertFalse(calling & {"enterprise_calls", "pbx_calls", "voicemail_calls", "ivr_calls"})

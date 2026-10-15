@@ -213,6 +213,174 @@ pub async fn store_eligibility<C: ConnectionTrait>(
     .await?)
 }
 
+/// Whether `value` is an opaque evidence reference: `^[A-Za-z0-9._:-]{1,200}$`, starting
+/// with a letter or digit. Never a document, an address or a number with a `+`.
+pub fn valid_evidence_ref(value: &str) -> bool {
+    let b = value.as_bytes();
+    !b.is_empty()
+        && b.len() <= 200
+        && b[0].is_ascii_alphanumeric()
+        && b.iter()
+            .all(|c| c.is_ascii_alphanumeric() || b"._:-".contains(c))
+}
+
+/// Validated input of `platform_admin compliance set`.
+fn validated(set: &SetEligibility, now: DateTime<Utc>) -> Result<(), &'static str> {
+    if set.countries.len() > 250 || !set.countries.iter().all(|c| iso_country(c)) {
+        return Err("countries must be at most 250 ISO 3166-1 alpha-2 codes");
+    }
+    if set
+        .evidence_ref
+        .as_deref()
+        .is_some_and(|e| !valid_evidence_ref(e))
+    {
+        return Err("the evidence reference must match ^[A-Za-z0-9._:-]{1,200}$");
+    }
+    if set.expires_at.is_some_and(|e| e <= now) {
+        return Err("the expiry must be in the future");
+    }
+    Ok(())
+}
+
+/// The safe operator view (`compliance show`): status, countries, expiry and whether an
+/// evidence reference is recorded — never the reference itself.
+pub fn safe_view(record: &EligibilityRecord, now: DateTime<Utc>) -> serde_json::Value {
+    serde_json::json!({
+        "environmentId": record.environment_id,
+        "status": record.status,
+        "countries": record.countries,
+        "expiresAt": record.expires_at,
+        "expired": record.expires_at.is_some_and(|e| e <= now),
+        "evidenceRefPresent": record.evidence_ref.is_some(),
+        "decidedBy": record.decided_by,
+        "decidedAt": record.decided_at,
+        "version": record.version,
+    })
+}
+
+fn audit_entry(
+    action: crate::platform::operator::OperatorAction,
+    environment: &crate::platform::environments::EnvironmentView,
+    record: &EligibilityRecord,
+) -> crate::platform::operator::AuditEntry {
+    crate::platform::operator::AuditEntry::new(
+        action,
+        crate::platform::operator::AuditTargetKind::ComplianceEligibility,
+        record.id,
+    )
+    .scope(
+        Some(environment.tenant_id.as_uuid()),
+        Some(environment.application_id.as_uuid()),
+        Some(environment.id.as_uuid()),
+    )
+    .detail(serde_json::json!({
+        "status": record.status,
+        "countries": record.countries,
+        "expiresAt": record.expires_at,
+        "evidenceRefPresent": record.evidence_ref.is_some(),
+        "version": record.version,
+    }))
+}
+
+/// `platform_admin compliance set` (audited, one transaction): replaces the
+/// environment's assessment. `decided_by` is the operator.
+#[allow(clippy::too_many_arguments)]
+pub async fn operator_set(
+    db: &sea_orm::DatabaseConnection,
+    operator: &crate::platform::operator::OperatorContext,
+    environment: &crate::platform::environments::EnvironmentView,
+    status: EligibilityStatus,
+    countries: Vec<String>,
+    evidence_ref: Option<String>,
+    expires_at: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> crate::platform::PlatformResult<EligibilityRecord> {
+    use crate::platform::{operator, PlatformError};
+    let set = SetEligibility {
+        status,
+        countries,
+        evidence_ref,
+        decided_by: operator.operator().to_string(),
+        expires_at,
+    };
+    validated(&set, now).map_err(|m| PlatformError::Validation(m.to_string()))?;
+    let environment = environment.clone();
+    operator::audited(db, operator, now, move |txn| {
+        Box::pin(async move {
+            let record = store_eligibility(
+                txn,
+                environment.tenant_id.as_uuid(),
+                environment.application_id.as_uuid(),
+                environment.id.as_uuid(),
+                &set,
+                now,
+            )
+            .await
+            .map_err(eligibility_error)?
+            .ok_or(PlatformError::NotFound("environment"))?;
+            let entry = audit_entry(
+                operator::OperatorAction::ComplianceEligibilitySet,
+                &environment,
+                &record,
+            );
+            Ok((record, entry))
+        })
+    })
+    .await
+}
+
+/// `platform_admin compliance revoke` (audited): the environment's assessment becomes
+/// INELIGIBLE (countries and evidence cleared). Nothing recorded = not found.
+pub async fn operator_revoke(
+    db: &sea_orm::DatabaseConnection,
+    operator: &crate::platform::operator::OperatorContext,
+    environment: &crate::platform::environments::EnvironmentView,
+    now: DateTime<Utc>,
+) -> crate::platform::PlatformResult<EligibilityRecord> {
+    use crate::platform::{operator, PlatformError};
+    let environment = environment.clone();
+    let decided_by = operator.operator().to_string();
+    operator::audited(db, operator, now, move |txn| {
+        Box::pin(async move {
+            let current = load_eligibility(txn, environment.id.as_uuid())
+                .await
+                .map_err(eligibility_error)?
+                .ok_or(PlatformError::NotFound("compliance eligibility"))?;
+            let record = store_eligibility(
+                txn,
+                environment.tenant_id.as_uuid(),
+                environment.application_id.as_uuid(),
+                environment.id.as_uuid(),
+                &SetEligibility {
+                    status: EligibilityStatus::Ineligible,
+                    countries: Vec::new(),
+                    evidence_ref: None,
+                    decided_by,
+                    expires_at: None,
+                },
+                now.max(current.decided_at),
+            )
+            .await
+            .map_err(eligibility_error)?
+            .ok_or(PlatformError::NotFound("compliance eligibility"))?;
+            let entry = audit_entry(
+                operator::OperatorAction::ComplianceEligibilityRevoked,
+                &environment,
+                &record,
+            );
+            Ok((record, entry))
+        })
+    })
+    .await
+}
+
+fn eligibility_error(e: crate::calls::errors::CallError) -> crate::platform::PlatformError {
+    crate::platform::PlatformError::Database {
+        summary: format!("compliance eligibility ({})", e.code()),
+        connectivity: false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,6 +394,23 @@ mod tests {
         assert!(ComplianceOverlay::parse("").unwrap() == ComplianceOverlay::default());
         assert!(ComplianceOverlay::parse("ng").is_err());
         assert!(ComplianceOverlay::parse("+234").is_err());
+    }
+
+    #[test]
+    fn evidence_references_are_bounded_opaque_codes() {
+        for ok in ["KYC-2026:0042", "a", "ops.case_17", &"x".repeat(200)] {
+            assert!(valid_evidence_ref(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "-lead",
+            "has space",
+            "+2348012345678",
+            "https://docs/x.pdf",
+            &"x".repeat(201),
+        ] {
+            assert!(!valid_evidence_ref(bad), "{bad}");
+        }
     }
 
     #[test]

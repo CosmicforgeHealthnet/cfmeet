@@ -44,7 +44,18 @@ use uuid::Uuid;
 type Principal = calling::platform::principals::ResolvedPrincipal;
 
 fn tag() -> String {
-    Uuid::new_v4().simple().to_string()[..8].to_string()
+    // Unique names without digit runs: enterprise names refuse anything that looks like a
+    // telephone number (7+ consecutive digits), which 8 random hex characters sometimes are.
+    Uuid::new_v4().simple().to_string()[..8]
+        .chars()
+        .map(|c| {
+            if c.is_ascii_digit() {
+                (b'g' + (c as u8 - b'0')) as char
+            } else {
+                c
+            }
+        })
+        .collect()
 }
 
 /// A scripted LiveKit server API: Egress + RoomService.ListParticipants.

@@ -27,7 +27,8 @@ use serde_json::{json, Map};
 use uuid::Uuid;
 
 use super::{
-    context_of, exec, ivr::sip_leg, record_step, stmt, update_context, ContextRow, EnterprisePhase,
+    context_of, exec, ivr::sip_leg, orphans::ArtifactKind, record_step, stmt, update_context,
+    ContextRow, EnterprisePhase,
 };
 use crate::{
     calls::{
@@ -529,6 +530,18 @@ impl AppCallService {
                     Err(cf_object_storage::StorageError::NotConfigured) => "STORAGE_NOT_CONFIGURED",
                     Err(_) => "STORAGE_UNAVAILABLE",
                 };
+                if code == "STORAGE_INTEGRITY" {
+                    // Written, but not what was captured: never leave it behind (§79.26).
+                    self.discard_written_object(
+                        scope,
+                        ArtifactKind::Voicemail,
+                        capture_id,
+                        Some(call_id),
+                        &key,
+                        "INTEGRITY_MISMATCH",
+                    )
+                    .await;
+                }
                 exec(
                     self.db(),
                     "UPDATE voicemail_messages SET failure_code = $2, version = version + 1, \
@@ -545,7 +558,67 @@ impl AppCallService {
                 return Err(CallError::ArtifactStorageUnavailable);
             }
         };
-        // READY, and the Call (if still ringing in voicemail) ends NO_ANSWER / VOICEMAIL.
+        match self
+            .finalize_voicemail(
+                capture_id,
+                call_id,
+                media.duration_ms,
+                content_type,
+                &key,
+                &stored,
+            )
+            .await
+        {
+            Ok(Some((call, pending))) => {
+                self.publish(pending).await;
+                self.ivr_after_commit(&call).await;
+                crate::metrics::inc(
+                    "calling_enterprise_capture_deliveries_total",
+                    &[("result", "STORED")],
+                );
+                crate::metrics::inc("calling_enterprise_voicemail_total", &[("result", "READY")]);
+                tracing::info!(message_id = %capture_id, call_id = %call_id, "voicemail message ready");
+                Ok(CaptureDelivery::Stored)
+            }
+            Ok(None) => {
+                self.discard_written_object(
+                    scope,
+                    ArtifactKind::Voicemail,
+                    capture_id,
+                    Some(call_id),
+                    &key,
+                    "NOT_AWAITING",
+                )
+                .await;
+                Ok(CaptureDelivery::AlreadyStored)
+            }
+            Err(error) => {
+                self.discard_written_object(
+                    scope,
+                    ArtifactKind::Voicemail,
+                    capture_id,
+                    Some(call_id),
+                    &key,
+                    "FINALIZATION_FAILED",
+                )
+                .await;
+                Err(error)
+            }
+        }
+    }
+
+    /// The READY transaction of a delivered voicemail message; the Call (if still
+    /// ringing in voicemail) ends NO_ANSWER / VOICEMAIL. `Ok(None)`: the message no
+    /// longer awaits a capture (nothing changed).
+    async fn finalize_voicemail(
+        &self,
+        capture_id: Uuid,
+        call_id: Uuid,
+        duration_ms: i32,
+        content_type: &str,
+        key: &str,
+        stored: &cf_object_storage::StoredObject,
+    ) -> CallResult<Option<(calls::Model, PendingSignals)>> {
         let txn = self.db().begin().await?;
         let Some(call) = calls::Entity::find_by_id(call_id)
             .lock_exclusive()
@@ -562,7 +635,7 @@ impl AppCallService {
             "PROCESSING" | "RECORDING" | "FAILED"
         ) {
             txn.rollback().await?;
-            return Ok(CaptureDelivery::AlreadyStored);
+            return Ok(None);
         }
         let mailbox = mailbox_by_id(&txn, &call, message.mailbox_id).await?;
         let now = self.calls.now();
@@ -577,7 +650,7 @@ impl AppCallService {
                 key.into(),
                 content_type.into(),
                 (stored.size as i64).into(),
-                media.duration_ms.into(),
+                duration_ms.into(),
                 stored.sha256.clone().into(),
                 stored.encrypted.into(),
                 now.into(),
@@ -598,9 +671,7 @@ impl AppCallService {
                         ("mailbox_id", text(mailbox.id)),
                         (
                             "duration_ms",
-                            crate::calls::attributes::SafeValue::from(
-                                media.duration_ms.max(0) as usize
-                            ),
+                            crate::calls::attributes::SafeValue::from(duration_ms.max(0) as usize),
                         ),
                     ])?,
                 ),
@@ -615,7 +686,7 @@ impl AppCallService {
                 crate::calls::service::ArtifactUsageFact {
                     usage_type: crate::calls::kinds::UsageType::VoicemailArtifact,
                     artifact_id: capture_id,
-                    duration_ms: i64::from(media.duration_ms),
+                    duration_ms: i64::from(duration_ms),
                     size_bytes: stored.size as i64,
                 },
             )
@@ -623,16 +694,15 @@ impl AppCallService {
         let (call, pending) = self
             .end_voicemail_call_in(&txn, &cmd, &call, "VOICEMAIL")
             .await?;
+        // A queued orphan of this very key is the artifact now (never deleted later).
+        exec(
+            &txn,
+            "DELETE FROM calling_orphan_objects WHERE object_key = $1",
+            vec![key.into()],
+        )
+        .await?;
         txn.commit().await?;
-        self.publish(pending).await;
-        self.ivr_after_commit(&call).await;
-        crate::metrics::inc(
-            "calling_enterprise_capture_deliveries_total",
-            &[("result", "STORED")],
-        );
-        crate::metrics::inc("calling_enterprise_voicemail_total", &[("result", "READY")]);
-        tracing::info!(message_id = %capture_id, call_id = %call_id, "voicemail message ready");
-        Ok(CaptureDelivery::Stored)
+        Ok(Some((call, pending)))
     }
 
     /// A capture source reports that the capture failed (bounded code): the message is
@@ -798,11 +868,16 @@ impl AppCallService {
             self.ivr_after_commit(&call).await;
             out.1 += 1;
         }
-        // Retention: READY -> DELETING (audited as the system).
+        // Retention: READY -> DELETING (audited as the system). A retention hold (Part H
+        // §80) on the message, its mailbox or its Call keeps it.
         let expired = MessageRow::find_by_statement(stmt(
             &format!(
                 "SELECT {MESSAGE_COLUMNS} FROM voicemail_messages WHERE state = 'READY' \
-                   AND retention_until <= $1 ORDER BY retention_until LIMIT $2"
+                   AND retention_until <= $1 \
+                   AND NOT calling_retention_held('VOICEMAIL_ARTIFACT', id, tenant_id, application_id, environment_id) \
+                   AND NOT calling_retention_held('VOICEMAIL_ARTIFACT', mailbox_id, tenant_id, application_id, environment_id) \
+                   AND NOT calling_retention_held('VOICEMAIL_ARTIFACT', call_id, tenant_id, application_id, environment_id) \
+                 ORDER BY retention_until LIMIT $2"
             ),
             vec![now.into(), (limit as i64).into()],
         ))
@@ -864,7 +939,31 @@ impl AppCallService {
                         ],
                     )
                     .await?;
-                    tracing::warn!(message_id = %message.id, %error, "voicemail artifact deletion pending; retried");
+                    let attempts = message.delete_attempts + 1;
+                    crate::metrics::inc(
+                        "calling_enterprise_artifact_deletions_total",
+                        &[("artifact", "VOICEMAIL"), ("result", "RETRY")],
+                    );
+                    tracing::warn!(message_id = %message.id, attempts, %error, "voicemail artifact deletion pending; retried");
+                    if attempts == self.config.artifact_delete_incident_attempts {
+                        // Once, when the threshold is crossed (still DELETING, retried).
+                        let scope = message_scope(self.db(), message.id).await?;
+                        crate::calls::app::incidents::raise(
+                            self.db(),
+                            &crate::calls::app::incidents::Incident::new(
+                                crate::calls::app::incidents::IncidentCategory::VoicemailFinalizationFailure,
+                                crate::calls::app::incidents::IncidentSeverity::Medium,
+                                scope,
+                                crate::calls::app::incidents::IncidentResource::VoicemailMessage,
+                                message.id,
+                            )
+                            .bucket("delete")
+                            .call(message.call_id)
+                            .evidence(json!({ "deletePending": true, "deleteAttempts": attempts })),
+                            now,
+                        )
+                        .await;
+                    }
                     continue;
                 }
             }

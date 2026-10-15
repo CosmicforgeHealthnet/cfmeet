@@ -652,9 +652,11 @@ impl Stack {
         let scope = e.a.w.scope();
         // Telephony: the desk phone's edge endpoint, bound to this scope.
         let tadmin = telephony_bin.with_file_name("telephony-admin");
+        // Telephony's operator CLI attributes every mutation to an operator (Part H §75).
         let tenv = [
             ("DATABASE_URL", telephony_db.url.clone()),
             ("CF_RUNTIME_ENVIRONMENT", "test".to_string()),
+            ("CF_OPERATOR_ID", "ops.certification".to_string()),
         ];
         run(
             &tadmin,

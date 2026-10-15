@@ -481,6 +481,70 @@ impl AppCallService {
     }
 }
 
+/// `platform_admin block release` (audited, one transaction): an operator releases a
+/// rule of any scope (idempotent; the row stays as evidence).
+pub async fn operator_release(
+    db: &sea_orm::DatabaseConnection,
+    operator: &crate::platform::operator::OperatorContext,
+    id: Uuid,
+    now: DateTime<Utc>,
+) -> crate::platform::PlatformResult<BlockRuleView> {
+    use crate::platform::{
+        operator::{self, AuditEntry, AuditTargetKind, OperatorAction},
+        PlatformError,
+    };
+    operator::audited(db, operator, now, move |txn| {
+        Box::pin(async move {
+            let scope = txn
+                .query_one(stmt(
+                    "SELECT tenant_id, application_id, environment_id, status \
+                     FROM calling_block_rules WHERE id = $1 FOR UPDATE",
+                    vec![id.into()],
+                ))
+                .await?
+                .ok_or(PlatformError::NotFound("block rule"))?;
+            let ids: (Uuid, Uuid, Uuid) = (
+                scope.try_get_by_index(0)?,
+                scope.try_get_by_index(1)?,
+                scope.try_get_by_index(2)?,
+            );
+            let was: String = scope.try_get_by_index(3)?;
+            let sql = if was == BlockStatus::Active.as_str() {
+                format!(
+                    "UPDATE calling_block_rules SET status = 'RELEASED', released_at = $2, \
+                     version = version + 1 WHERE id = $1 RETURNING {VIEW_COLUMNS}"
+                )
+            } else {
+                // Already released: idempotent, the row is not touched.
+                format!("SELECT {VIEW_COLUMNS} FROM calling_block_rules WHERE id = $1 AND $2::timestamptz IS NOT NULL")
+            };
+            let view = BlockRuleView::find_by_statement(stmt(&sql, vec![id.into(), now.into()]))
+                .one(txn)
+                .await?
+                .ok_or(PlatformError::NotFound("block rule"))?;
+            let entry = AuditEntry::new(
+                OperatorAction::BlockRuleReleased,
+                AuditTargetKind::BlockRule,
+                id,
+            )
+            .scope(Some(ids.0), Some(ids.1), Some(ids.2))
+            .detail(serde_json::json!({ "previousStatus": was, "blockedKind": view.blocked_kind }));
+            Ok((view, entry))
+        })
+    })
+    .await
+}
+
+/// `platform_admin block show`.
+pub async fn rule<C: ConnectionTrait>(db: &C, id: Uuid) -> CallResult<Option<BlockRuleView>> {
+    Ok(BlockRuleView::find_by_statement(stmt(
+        &format!("SELECT {VIEW_COLUMNS} FROM calling_block_rules WHERE id = $1"),
+        vec![id.into()],
+    ))
+    .one(db)
+    .await?)
+}
+
 fn window_start(now: DateTime<Utc>) -> DateTime<Utc> {
     let secs = REFUSAL_WINDOW.num_seconds();
     DateTime::from_timestamp(now.timestamp() / secs * secs, 0).unwrap_or(now)

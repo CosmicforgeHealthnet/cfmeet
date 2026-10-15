@@ -258,9 +258,78 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(2);
         }
     };
+    // Key rotation (Part H §74.12): every stored seal must name a configured key
+    // (current or previous) — otherwise those subscriptions could never be signed.
+    if let Some(secret_box) = webhook_settings.secret_box.as_deref() {
+        let unknown = calling::webhooks::keys::unknown_key_ids(&db, secret_box)
+            .await
+            .map_err(|e| {
+                anyhow!(
+                    "cannot verify webhook key coverage ({})",
+                    summarize_db_error(&e)
+                )
+            })?;
+        if !unknown.is_empty() {
+            tracing::error!(
+                unknown_key_ids = ?unknown,
+                current_key_id = secret_box.current_kid(),
+                "webhook signing secrets are sealed under keys that are not configured; \
+                 configure them as current or previous (CALLING_WEBHOOK_SECRET_KEY_PREVIOUS)"
+            );
+            std::process::exit(2);
+        }
+    }
     tracing::info!(
         webhooks_available = webhook_settings.secret_box.is_some(),
+        webhook_key_id = webhook_settings
+            .secret_box
+            .as_deref()
+            .map(|b| b.current_kid()),
         "customer webhooks configured"
+    );
+
+    // Part H: the platform compliance overlay and the abuse incident thresholds. Invalid
+    // values refuse startup (never a silent default).
+    let compliance_overlay =
+        match calling::routing::compliance::ComplianceOverlay::from_lookup(&lookup) {
+            Ok(overlay) => overlay,
+            Err(err) => {
+                tracing::error!(error = %err, "compliance overlay configuration error");
+                std::process::exit(2);
+            }
+        };
+    let abuse_controls = match calling::calls::app::AbuseControls::from_lookup(&lookup) {
+        Ok(controls) => controls,
+        Err(err) => {
+            tracing::error!(error = %err, "abuse control configuration error");
+            std::process::exit(2);
+        }
+    };
+    tracing::info!(
+        compliance_required_countries = compliance_overlay.countries.len(),
+        compliance_required_everywhere = compliance_overlay.all,
+        blocked_attempts_incident_threshold = abuse_controls.blocked_attempts_incident_threshold,
+        abuse_reports_incident_threshold = abuse_controls.abuse_reports_incident_threshold,
+        "abuse and compliance controls configured"
+    );
+
+    // Part H §80: retention / minimization bounds (ADR 0030). Invalid values — or a bound
+    // for the retained call events — refuse startup.
+    let retention = match calling::retention::RetentionSettings::from_lookup(&lookup) {
+        Ok(settings) => settings,
+        Err(err) => {
+            tracing::error!(error = %err, "retention configuration error");
+            std::process::exit(2);
+        }
+    };
+    tracing::info!(
+        call_display_days = retention.call_display.as_secs() / 86_400,
+        webhook_history_days = retention.webhook_history.as_secs() / 86_400,
+        incidents_days = retention.incidents.as_secs() / 86_400,
+        media_provider_events_days = retention.media_provider_events.as_secs() / 86_400,
+        operator_audit_days = retention.operator_audit.as_secs() / 86_400,
+        interval_secs = retention.interval.as_secs(),
+        "retention configured"
     );
 
     let clock: SharedClock = Arc::new(SystemClock);
@@ -287,6 +356,8 @@ async fn main() -> anyhow::Result<()> {
             artifacts,
             capture,
             webhooks: webhook_settings,
+            compliance_overlay,
+            abuse_controls,
         },
     );
 
@@ -294,6 +365,8 @@ async fn main() -> anyhow::Result<()> {
     // SKIP LOCKED leases make the sweeps multi-instance safe).
     let workers = (*state.app).clone();
     tokio::spawn(workers.run_workers(Duration::from_secs(1), Duration::from_secs(2)));
+    // Retention / minimization (bounded batches, SKIP LOCKED; every instance).
+    tokio::spawn((*state.app).clone().run_retention(retention));
 
     // Durable event publication and customer webhook delivery (SKIP LOCKED + leases:
     // multi-instance safe; never blocked by a kill switch).

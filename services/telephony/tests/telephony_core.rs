@@ -1,6 +1,8 @@
 //! Telephony core (Part E §39–§40): service identity, paid-action authorization proof,
 //! durable commands before provider action, idempotency, feature flags, provider ids
-//! never becoming CF Meet ids.
+//! never becoming CF Meet ids, and (Part H §78) the caller identity: only the session's
+//! relay identity Privacy Relay selected, bound to the chosen interconnect, with its
+//! assignment reference kept on the leg as identity evidence.
 
 mod common;
 
@@ -412,6 +414,114 @@ async fn privacy_relay_down_fails_closed_before_any_destination_exists() {
         .find(|e| e["telephonyLegId"] == json!(leg))
         .unwrap();
     assert_eq!(failed["definite"], true);
+}
+
+/// The command's result code and the leg's status of one origination.
+async fn originated(h: &Harness) -> (Uuid, String, Option<String>) {
+    let (leg, _) = h.originate().await;
+    h.run().await;
+    let code = h
+        .text(&format!(
+            "SELECT result_code FROM telephony_commands WHERE telephony_leg_id = '{leg}' AND kind = 'ORIGINATE'"
+        ))
+        .await;
+    (leg, h.leg_status(leg).await, code)
+}
+
+#[tokio::test]
+async fn the_caller_identity_must_be_the_relay_identity_bound_to_the_chosen_interconnect() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let now = h.clock_now();
+    // A third interconnect (another provider) with its own relay number.
+    h.sql(&format!(
+        "INSERT INTO telecom_providers (id, adapter, capabilities, status, credential_ref, max_concurrent_legs, created_at, updated_at, health) \
+         VALUES ('dp-c', 'DETERMINISTIC_TEST', ARRAY['OUTBOUND_VOICE'], 'ENABLED', 'dp-secret', 100, '{now}', '{now}', 'HEALTHY'); \
+         INSERT INTO telecom_routes (id, provider_id, countries, capabilities, priority, status, max_concurrent_legs, \
+           max_call_seconds, created_at, updated_at, health) \
+         VALUES ('ng-c', 'dp-c', ARRAY['NG'], ARRAY['VOICE_OUTBOUND'], 30, 'ENABLED', 50, 3600, '{now}', '{now}', 'HEALTHY'); \
+         INSERT INTO telecom_number_bindings (public_e164, route_id, capabilities, status, created_at, updated_at) \
+         VALUES ('+2342010000003', 'ng-c', ARRAY['VOICE_OUTBOUND'], 'ENABLED', '{now}', '{now}'), \
+                ('+2342010000004', 'ng-a', ARRAY['VOICE_OUTBOUND'], 'DISABLED', '{now}', '{now}'), \
+                ('+2342010000005', 'ng-a', ARRAY['VOICE_INBOUND'], 'ENABLED', '{now}', '{now}')"
+    ))
+    .await;
+    for (identity, why) in [
+        // Not in telecom_number_bindings at all.
+        (Some("+2342010000002"), "unbound"),
+        // Bound only to another provider's interconnect.
+        (Some("+2342010000003"), "bound to another provider"),
+        // Bound, but the binding is disabled.
+        (Some("+2342010000004"), "binding disabled"),
+        // Bound for inbound only.
+        (Some("+2342010000005"), "inbound-only binding"),
+        // Privacy Relay selected no identity.
+        (None, "missing"),
+    ] {
+        *h.privacy.relay_number.lock().unwrap() = identity.map(str::to_string);
+        let (leg, status, code) = originated(&h).await;
+        assert_eq!(status, "FAILED", "{why}");
+        assert_eq!(
+            code.as_deref(),
+            Some("CALLER_IDENTITY_UNAVAILABLE"),
+            "{why}"
+        );
+        assert_eq!(
+            h.text(&format!(
+                "SELECT end_reason FROM telephony_legs WHERE id = '{leg}'"
+            ))
+            .await
+            .as_deref(),
+            Some("NOT_SENT"),
+            "{why}"
+        );
+        assert!(
+            h.provider_a.requests().is_empty() && h.provider_b.requests().is_empty(),
+            "{why}: zero provider originates"
+        );
+        assert_eq!(
+            h.scalar(&format!(
+                "SELECT count(*) FROM telephony_legs WHERE id = '{leg}' AND relay_assignment_ref IS NOT NULL"
+            ))
+            .await,
+            0,
+            "{why}: no identity evidence for a call that never left"
+        );
+    }
+    // The session's bound relay identity: the request carries it and the leg keeps
+    // Privacy Relay's assignment reference as identity evidence.
+    *h.privacy.relay_number.lock().unwrap() = Some(RELAY_NUMBER.to_string());
+    let assignment = Uuid::new_v4();
+    *h.privacy.assignment_ref.lock().unwrap() = Some(assignment);
+    let (leg, status, _) = originated(&h).await;
+    assert_eq!(status, "ORIGINATING");
+    assert_eq!(h.provider_a.requests().len(), 1);
+    assert_eq!(
+        h.text(&format!(
+            "SELECT relay_assignment_ref::text FROM telephony_legs WHERE id = '{leg}'"
+        ))
+        .await,
+        Some(assignment.to_string())
+    );
+    // Bound to provider b only: the executor skips a (identity not bound there) and
+    // takes b — never a with an unbound identity.
+    h.sql("UPDATE telecom_number_bindings SET status = 'DISABLED' WHERE route_id = 'ng-a'")
+        .await;
+    let (leg, status, _) = originated(&h).await;
+    assert_eq!(status, "ORIGINATING");
+    assert_eq!(
+        h.text(&format!(
+            "SELECT route_id FROM telephony_legs WHERE id = '{leg}'"
+        ))
+        .await
+        .as_deref(),
+        Some("ng-b")
+    );
+    assert_eq!(
+        (h.provider_a.requests().len(), h.provider_b.requests().len()),
+        (1, 1)
+    );
 }
 
 #[tokio::test]

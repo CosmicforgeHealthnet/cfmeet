@@ -281,3 +281,140 @@ async fn setup_in(h: &Harness, c: Consumer) -> Setup {
         session,
     }
 }
+
+/// §78.25 cases the read-time query decides on its own (no sweep, no operator command
+/// in between): an assignment past its validity while still ACTIVE, an ACTIVE assignment
+/// whose number left ASSIGNED, and a session binding that would name another session's
+/// or another tenant's assignment (refused by the schema; never a caller identity).
+#[tokio::test]
+async fn the_caller_identity_is_withheld_at_read_time_for_expired_or_unavailable_numbers_and_foreign_bindings(
+) {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let s = setup(&h).await;
+    let s_unavailable = setup(&h).await;
+    h.add_relay_number(RELAY, "pb-read-1").await;
+    h.add_relay_number("+44 20 7946 0501", "pb-read-2").await;
+    let a1 = h.assign_relay_number(&s.c, &s.session).await;
+    assert_eq!(a1.status, StatusCode::CREATED, "{}", a1.text);
+    let a2 = h
+        .assign_relay_number(&s_unavailable.c, &s_unavailable.session)
+        .await;
+    assert_eq!(a2.status, StatusCode::CREATED, "{}", a2.text);
+    let assignment = |r: &common::Response| {
+        r.json["assignment"]["assignmentId"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let (a1, a2) = (assignment(&a1), assignment(&a2));
+    let number_of = |a: &str| {
+        let a = a.to_string();
+        let h = &h;
+        async move {
+            common::rows(
+                h.conn(),
+                &format!(
+                    "SELECT relay_number_id::text FROM relay_number_assignments WHERE id = '{a}'"
+                ),
+            )
+            .await[0][0]
+                .clone()
+        }
+    };
+    // Control: both sessions present their identity.
+    for x in [&s, &s_unavailable] {
+        let r = resolve(&h, x, &authorize(&h, x, "PUBLIC_RELAY").await).await;
+        assert!(
+            r.json["resolution"]["callerIdentity"].is_object(),
+            "{}",
+            r.text
+        );
+    }
+
+    // EXPIRED but not yet swept: the assignment row is still ACTIVE, its validity is past.
+    h.clock.advance(chrono::Duration::minutes(1));
+    common::exec(
+        h.conn(),
+        &format!(
+            "UPDATE relay_number_assignments SET expires_at = assigned_at + interval '1 second' WHERE id = '{a1}'"
+        ),
+    )
+    .await
+    .unwrap();
+    let r = resolve(&h, &s, &authorize(&h, &s, "PUBLIC_RELAY").await).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert!(
+        r.json["resolution"].get("callerIdentity").is_none(),
+        "an expired assignment is no caller identity: {}",
+        r.text
+    );
+    assert_eq!(
+        h.count(&format!(
+            "SELECT count(*) FROM relay_number_assignments WHERE id = '{a1}' AND status = 'ACTIVE'"
+        ))
+        .await,
+        1,
+        "decided at read time, not by the sweep"
+    );
+
+    // The number left ASSIGNED (UNAVAILABLE) while its assignment is still ACTIVE.
+    let n_of_a2 = number_of(&a2).await;
+    common::exec(
+        h.conn(),
+        &format!(
+            "UPDATE relay_number_inventory SET operational_status = 'UNAVAILABLE', unavailable_at = updated_at WHERE id = '{n_of_a2}'"
+        ),
+    )
+    .await
+    .unwrap();
+    let r = resolve(
+        &h,
+        &s_unavailable,
+        &authorize(&h, &s_unavailable, "PUBLIC_RELAY").await,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert!(
+        r.json["resolution"].get("callerIdentity").is_none(),
+        "a number that is not ASSIGNED is no caller identity: {}",
+        r.text
+    );
+    assert_eq!(
+        h.count(&format!(
+            "SELECT count(*) FROM relay_number_assignments WHERE id = '{a2}' AND status = 'ACTIVE'"
+        ))
+        .await,
+        1
+    );
+
+    // A session can never be bound to another session's assignment, of the same tenant
+    // or of another one: the schema refuses the binding, so no read can follow it.
+    let unbound_same_tenant = setup_in(&h, s.c.clone()).await;
+    for (foreign, what) in [(&a1, "same tenant"), (&a2, "another tenant")] {
+        let err = common::exec(
+            h.conn(),
+            &format!(
+                "UPDATE privacy_relay_sessions SET relay_identity_binding_ref = '{foreign}' WHERE id = '{}'",
+                unbound_same_tenant.session
+            ),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("must reference this session's relay assignment"),
+            "{what}: {err}"
+        );
+    }
+    let r = resolve(
+        &h,
+        &unbound_same_tenant,
+        &authorize(&h, &unbound_same_tenant, "PUBLIC_RELAY").await,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert!(r.json["resolution"].get("callerIdentity").is_none());
+    assert!(!r.text.contains("79460500") && !r.text.contains("79460501"));
+}

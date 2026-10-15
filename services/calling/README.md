@@ -328,6 +328,35 @@ S3-compatible store; it certifies internal enterprise SIP only. Results:
   manager; without it webhook creation is refused) and
   `CALLING_WEBHOOK_ALLOW_PRIVATE_ENDPOINTS` (honoured only when `CF_RUNTIME_ENVIRONMENT=local`).
 
+## Retention, deletion and minimization (Part H §80)
+
+[ADR 0030](../../docs/decisions/0030-calling-retention-deletion-and-minimization.md);
+code in [`src/retention`](src/retention/mod.rs) (`retention::policies(&settings)`). Every
+data class has one policy; bounds are configuration (`CALLING_RETENTION_*`, see
+`.env.example`), never legal claims.
+
+| Class | Action | Bound (default) |
+|---|---|---|
+| `CALL_RECORD` | MINIMIZE display metadata of terminal Calls (participant display names, enterprise entry label → extension code) | `CALLING_RETENTION_CALL_DISPLAY_DAYS` (365) |
+| `CALL_EVENT`, `CALL_USAGE`, `SPEND_EVIDENCE`, `ADMIN_AUDIT`, `RECORDING_ACCESS_AUDIT` | RETAIN (evidence other records need; `CALLING_RETENTION_CALL_EVENTS_DAYS` refuses startup) | — |
+| `WEBHOOK_DELIVERY_HISTORY` / `WEBHOOK_EVENT_HISTORY` | DELETE terminal deliveries + attempts, then events without deliveries | `CALLING_RETENTION_WEBHOOK_HISTORY_DAYS` (90) |
+| `CALLING_INCIDENT` | DELETE RESOLVED incidents | `CALLING_RETENTION_INCIDENTS_DAYS` (365) |
+| `MEDIA_PROVIDER_EVIDENCE` | DELETE media / telephony provider events of terminal or unknown Calls | `CALLING_RETENTION_MEDIA_PROVIDER_EVENTS_DAYS` (30) |
+| `OPERATOR_AUDIT` | DELETE after its own bound | `CALLING_RETENTION_OPERATOR_AUDIT_DAYS` (2555) |
+| `RECORDING_ARTIFACT` / `VOICEMAIL_ARTIFACT` | DELETE per recording policy / mailbox (Part F workers), honouring holds | per policy |
+| `PRINCIPAL` | MINIMIZE on `platform_admin principal tombstone` | — |
+
+The worker (`retention::worker`, scheduled by `AppCallService::run_retention` every
+`CALLING_RETENTION_INTERVAL_SECS`) runs one transaction per class batch (≤ 500 rows,
+`FOR UPDATE SKIP LOCKED`, `SET LOCAL calling.retention_worker = 'on'` — the only way the
+guard triggers of the purgeable tables accept a DELETE), writes one append-only
+`calling_retention_audit` row per batch (class, action, count, policy, actor, outcome:
+`DELETED` / `MINIMIZED` / `SKIPPED_HOLD` / `FAILED`; never content) and counts
+`calling_retention_actions_total{data_class,action,outcome}`. A failed batch commits
+nothing and is retried next tick. Operator holds (`calling_retention_holds`; a scope hold
+names tenant, application and environment; only a platform-wide hold covers every scope)
+keep resources out of every retention action, including the recording / voicemail passes.
+
 ## Privacy Relay integration (Part D §26–§30)
 
 Privacy Relay (`services/privacy-relay`, [ADR 0010](../../docs/decisions/0010-communication-context-and-privacy-relay-session-architecture.md))
@@ -499,7 +528,14 @@ From the repository root: `make calling-migrate`, `make calling`.
 `platform_admin` uses the same domain services as future administration APIs. There are
 no public credential-management endpoints.
 
+Every mutating command names the acting operator (`--operator <id>` or
+`CF_OPERATOR_ID`) and is refused (exit 2, nothing changed) without one; each mutation
+writes exactly one row to the append-only `platform_operator_audit` table (operator,
+generated correlation id, bounded action, target, opaque detail) in the same transaction
+as the change. Read-only commands need no operator.
+
 ```bash
+export CF_OPERATOR_ID=ops.alice
 A="cargo run -q --bin platform_admin --"
 $A tenant create --slug acme --name "Acme" --classification external
 $A application create --tenant acme --slug dispatch --name "Dispatch"
@@ -514,6 +550,21 @@ $A principal register --tenant acme --application dispatch --environment product
    --kind external-application-principal --reference user-123
 $A limits set-credential --credential <public id> --requests-per-minute 120
 $A limits effective --credential <public id>
+$A compliance set --tenant acme --application dispatch --environment production \
+   --status eligible --countries NG,GB --expires-at 2027-01-01T00:00:00Z --evidence-ref KYC-2026:0042
+$A compliance show --tenant acme --application dispatch --environment production
+$A compliance revoke --tenant acme --application dispatch --environment production
+$A abuse-report set-status --report <id> --status reviewed
+$A block release --block <id>
+# Retention (Part H §80): holds are audited; list / policies are read-only.
+$A retention policies
+$A retention hold --tenant acme --application dispatch --environment production \
+   --data-class CALL_RECORD --resource <call id> --reason dispute
+$A retention hold --platform-wide --reason security-investigation
+$A retention list [--all]
+$A retention release --hold <id>
+$A principal tombstone --principal <id>       # DEACTIVATED for ever, reference replaced
+$A webhooks reseal --batch 100                # one WEBHOOK_KEYS_RESEALED audit row
 ```
 
 `$A --help` lists every command (suspend / reactivate for tenants, applications,
@@ -560,7 +611,8 @@ are set — `make privacy-relay-integration`, CI job `calling-e2e` in
 Part E: `routing_engine`, `public_*`, `telephony_e2e`. Part F: `enterprise_foundation`,
 `enterprise_extensions`, `enterprise_ring_groups`, `enterprise_queues`, `enterprise_ivr`,
 `enterprise_hours_forwarding`, `enterprise_transfer`, `enterprise_voicemail`,
-`enterprise_recording`, `call_history`, `enterprise_operations` (outbox events,
+`enterprise_recording`, `call_history`, `retention` (Part H §80: minimization,
+purges, holds, concurrent workers, failure injection, tombstone), `enterprise_operations` (outbox events,
 incidents, metrics, failure injection), `enterprise_security` (scope matrix, contract
 scans), `enterprise_load` (measured throughput with burst invariants; scale with
 `ENTERPRISE_LOAD_SCALE`), `enterprise_certification` (§212 organization isolation) and the real-stack `enterprise_sip_certification` (skipped
@@ -599,4 +651,5 @@ The image runs as a non-root user and contains `calling`, `calling-migration` an
 * [ADR 0013 — Routing Engine and route plans](../../docs/decisions/0013-routing-engine-and-route-plans.md) … [ADR 0017 — Provider failover](../../docs/decisions/0017-provider-failover.md) (Part E)
 * [ADR 0018 — Enterprise calling architecture](../../docs/decisions/0018-enterprise-calling-architecture.md) … [ADR 0026 — Enterprise operations](../../docs/decisions/0026-enterprise-operations-events-incidents-metrics.md), [ADR 0027 — RTC call-audio capture](../../docs/decisions/0027-rtc-call-audio-capture-livekit-egress.md) (Part F)
 * [ADR 0028 — Platform API, events, webhooks, usage and limits](../../docs/decisions/0028-platform-api-events-webhooks-usage-and-limits.md) (Part G)
+* [ADR 0029 — Part H security closure](../../docs/decisions/0029-security-closure-layered-authorization-abuse-and-retention.md), [ADR 0030 — Calling retention, deletion and minimization](../../docs/decisions/0030-calling-retention-deletion-and-minimization.md) (Part H)
 * [Service data ownership](../../docs/architecture/service-data-ownership.md)

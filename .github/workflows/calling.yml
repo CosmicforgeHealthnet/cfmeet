@@ -180,7 +180,7 @@ jobs:
           cargo run -q --locked -p calling-migration -- reset
           cargo run -q --locked -p calling-migration -- up
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
-            "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'platform\_%'")" = "11"
+            "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'platform\_%'")" = "16"
           # Call domain (Part C §15–§25, Part D §26–§30 evidence, Part E §37–§51 routing,
           # public-network parties / bridges / telephony commands and events, spend): calls
           # + 28 call_* tables + the outbox; Part F §55 adds call_answer_group_claims (the
@@ -220,7 +220,9 @@ jobs:
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND NOT ( \
                tablename LIKE 'platform\_%' OR tablename LIKE 'call\_%' OR tablename IN ('calls', \
-               'calling_outbox_events', 'calling_seaql_migrations', 'calling_incidents') OR tablename LIKE 'enterprise\_%' \
+               'calling_outbox_events', 'calling_seaql_migrations', 'calling_incidents', \
+               'calling_block_rules', 'calling_abuse_windows', 'calling_abuse_reports', 'calling_orphan_objects', \
+               'calling_retention_holds', 'calling_retention_audit') OR tablename LIKE 'enterprise\_%' \
                OR tablename LIKE 'voicemail\_%' OR tablename LIKE 'webhook\_%')")" = "0"
 
       - name: Service starts against the migrated database and refuses unsafe configuration

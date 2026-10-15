@@ -19,6 +19,7 @@
 pub mod catalog;
 pub mod http;
 pub mod ingest;
+pub mod keys;
 pub mod notices;
 pub mod worker;
 
@@ -97,19 +98,12 @@ impl Default for WebhookSettings {
 impl WebhookSettings {
     /// `CALLING_WEBHOOK_SECRET_KEY` (base64, 32 bytes; from the secret manager) and
     /// `CALLING_WEBHOOK_ALLOW_PRIVATE_ENDPOINTS` (honoured ONLY in the `local` runtime).
+    /// The key ring is read by [`WebhookSettings::secret_box_from_lookup`].
     pub fn from_lookup(
         get: &impl Fn(&str) -> Option<String>,
         local_runtime: bool,
     ) -> Result<Self, ConfigError> {
-        let secret_box = match get("CALLING_WEBHOOK_SECRET_KEY").filter(|v| !v.trim().is_empty()) {
-            None => None,
-            Some(v) => Some(Arc::new(SecretBox::from_base64(&v).map_err(|_| {
-                ConfigError::invalid(
-                    "CALLING_WEBHOOK_SECRET_KEY",
-                    "must be 32 bytes, base64".to_string(),
-                )
-            })?)),
-        };
+        let secret_box = Self::secret_box_from_lookup(get)?.map(Arc::new);
         let allow_private = matches!(
             get("CALLING_WEBHOOK_ALLOW_PRIVATE_ENDPOINTS").as_deref(),
             Some("true") | Some("1")
@@ -128,6 +122,88 @@ impl WebhookSettings {
             },
             ..Self::default()
         })
+    }
+
+    /// The signing-secret key ring (Part H §74.12). Every key may be a secret file
+    /// (`<NAME>_FILE`, see [`crate::config::secret`]):
+    ///
+    /// | Variable | Meaning |
+    /// |---|---|
+    /// | `CALLING_WEBHOOK_SECRET_KEY` | current key (base64, 32 bytes, not weak); unset = webhooks unavailable |
+    /// | `CALLING_WEBHOOK_SECRET_KEY_ID` | its id (default `k0`) |
+    /// | `CALLING_WEBHOOK_SECRET_KEY_PREVIOUS` | previous key, opens only (rotation overlap) |
+    /// | `CALLING_WEBHOOK_SECRET_KEY_PREVIOUS_ID` | its id (required with the previous key) |
+    /// | `CALLING_WEBHOOK_SECRET_LEGACY_KEY_ID` | the id legacy `v1.` seals were made with (default `k0`) |
+    pub fn secret_box_from_lookup(
+        get: &impl Fn(&str) -> Option<String>,
+    ) -> Result<Option<SecretBox>, ConfigError> {
+        use cf_webhooks::secret_box::{SealingKey, SecretBoxError, DEFAULT_KEY_ID};
+        use secrecy::ExposeSecret;
+        let id = |var: &'static str| {
+            get(var)
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        };
+        let key_error = |var: &'static str, e: SecretBoxError| {
+            ConfigError::invalid(
+                var,
+                match e {
+                    SecretBoxError::WeakKey => {
+                        "is a weak key (repeated or low-entropy bytes); generate 32 random bytes"
+                    }
+                    SecretBoxError::KeyId => "has an invalid key id ([A-Za-z0-9_-], 1-32)",
+                    _ => "must be 32 bytes, base64",
+                }
+                .to_string(),
+            )
+        };
+        let current = crate::config::secret::read_secret(
+            get,
+            "CALLING_WEBHOOK_SECRET_KEY",
+            "CALLING_WEBHOOK_SECRET_KEY_FILE",
+        )?;
+        let previous = crate::config::secret::read_secret(
+            get,
+            "CALLING_WEBHOOK_SECRET_KEY_PREVIOUS",
+            "CALLING_WEBHOOK_SECRET_KEY_PREVIOUS_FILE",
+        )?;
+        let Some(current) = current else {
+            if previous.is_some() {
+                return Err(ConfigError::Missing {
+                    var: "CALLING_WEBHOOK_SECRET_KEY",
+                });
+            }
+            return Ok(None);
+        };
+        let current_id =
+            id("CALLING_WEBHOOK_SECRET_KEY_ID").unwrap_or_else(|| DEFAULT_KEY_ID.to_string());
+        let current = SealingKey::from_base64(&current_id, current.expose_secret())
+            .map_err(|e| key_error("CALLING_WEBHOOK_SECRET_KEY", e))?;
+        let previous = match previous {
+            None => None,
+            Some(raw) => {
+                let previous_id =
+                    id("CALLING_WEBHOOK_SECRET_KEY_PREVIOUS_ID").ok_or(ConfigError::Missing {
+                        var: "CALLING_WEBHOOK_SECRET_KEY_PREVIOUS_ID",
+                    })?;
+                Some(
+                    SealingKey::from_base64(&previous_id, raw.expose_secret())
+                        .map_err(|e| key_error("CALLING_WEBHOOK_SECRET_KEY_PREVIOUS", e))?,
+                )
+            }
+        };
+        let secret_box = SecretBox::new(current, previous).map_err(|_| {
+            ConfigError::invalid(
+                "CALLING_WEBHOOK_SECRET_KEY_PREVIOUS",
+                "must differ from the current key in both id and value".to_string(),
+            )
+        })?;
+        let legacy = id("CALLING_WEBHOOK_SECRET_LEGACY_KEY_ID")
+            .unwrap_or_else(|| DEFAULT_KEY_ID.to_string());
+        let secret_box = secret_box
+            .with_legacy_key_id(&legacy)
+            .map_err(|e| key_error("CALLING_WEBHOOK_SECRET_LEGACY_KEY_ID", e))?;
+        Ok(Some(secret_box))
     }
 }
 
@@ -317,6 +393,11 @@ impl WebhookService {
         &self.db
     }
 
+    /// The configured signing-secret key ring (`None`: webhooks unavailable).
+    pub fn key_ring(&self) -> Option<&SecretBox> {
+        self.settings.secret_box.as_deref()
+    }
+
     pub(crate) fn now(&self) -> DateTime<Utc> {
         self.clock.now()
     }
@@ -409,8 +490,8 @@ impl WebhookService {
             &format!(
                 "INSERT INTO webhook_subscriptions (id, tenant_id, application_id, environment_id, \
                    endpoint_url, description, status, event_types, secret_sealed, secret_version, \
-                   created_by_credential_id, version, created_at, updated_at) \
-                 VALUES ($1, $2, $3, $4, $5, $6, 'ACTIVE', $7, $8, 1, $9, 1, $10, $10) \
+                   created_by_credential_id, version, created_at, updated_at, secret_key_id) \
+                 VALUES ($1, $2, $3, $4, $5, $6, 'ACTIVE', $7, $8, 1, $9, 1, $10, $10, $11) \
                  RETURNING {SUBSCRIPTION_COLUMNS}"
             ),
             vec![
@@ -424,6 +505,7 @@ impl WebhookService {
                 sealed.into(),
                 ctx.credential_id().as_uuid().into(),
                 now.into(),
+                secret_box.current_kid().into(),
             ],
         ))
         .one(&txn)
@@ -640,7 +722,7 @@ impl WebhookService {
         let secret = cf_webhooks::signing::generate_secret();
         let row = SubscriptionRow::find_by_statement(stmt(
             &format!(
-                "UPDATE webhook_subscriptions SET secret_sealed = $2, \
+                "UPDATE webhook_subscriptions SET secret_sealed = $2, secret_key_id = $4, \
                    secret_version = secret_version + 1, version = version + 1, updated_at = $3 \
                  WHERE id = $1 RETURNING {SUBSCRIPTION_COLUMNS}"
             ),
@@ -648,6 +730,7 @@ impl WebhookService {
                 id.into(),
                 secret_box.seal(&secret, &id.to_string()).into(),
                 self.now().into(),
+                secret_box.current_kid().into(),
             ],
         ))
         .one(&txn)
@@ -913,5 +996,165 @@ fn page<R, V: From<R>>(
     Page {
         data: rows.into_iter().map(V::from).collect(),
         next_cursor,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use base64::Engine;
+
+    use super::*;
+
+    fn b64(seed: u8) -> String {
+        let mut k = [0u8; 32];
+        for (i, b) in k.iter_mut().enumerate() {
+            *b = seed.wrapping_add((i as u8).wrapping_mul(7));
+        }
+        base64::engine::general_purpose::STANDARD.encode(k)
+    }
+
+    fn lookup(pairs: &[(&str, String)]) -> impl Fn(&str) -> Option<String> {
+        let map: HashMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect();
+        move |k| map.get(k).cloned()
+    }
+
+    fn ring(pairs: &[(&str, String)]) -> Result<Option<SecretBox>, ConfigError> {
+        WebhookSettings::secret_box_from_lookup(&lookup(pairs))
+    }
+
+    #[test]
+    fn the_key_ring_has_ids_a_previous_key_and_a_legacy_id() {
+        assert!(ring(&[]).unwrap().is_none(), "no key: webhooks unavailable");
+        let one = ring(&[("CALLING_WEBHOOK_SECRET_KEY", b64(1))])
+            .unwrap()
+            .unwrap();
+        assert_eq!((one.current_kid(), one.previous_kid()), ("k0", None));
+        assert_eq!(one.legacy_kid(), "k0");
+        let rotated = ring(&[
+            ("CALLING_WEBHOOK_SECRET_KEY", b64(2)),
+            ("CALLING_WEBHOOK_SECRET_KEY_ID", "k1".into()),
+            ("CALLING_WEBHOOK_SECRET_KEY_PREVIOUS", b64(1)),
+            ("CALLING_WEBHOOK_SECRET_KEY_PREVIOUS_ID", "k0".into()),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            (rotated.current_kid(), rotated.previous_kid()),
+            ("k1", Some("k0"))
+        );
+        // Sealed under the old single-key deployment, opened by the rotated one.
+        let sealed = one.seal("whsec_x", "sub");
+        assert_eq!(rotated.open(&sealed, "sub").unwrap(), "whsec_x");
+        let declared = ring(&[
+            ("CALLING_WEBHOOK_SECRET_KEY", b64(1)),
+            ("CALLING_WEBHOOK_SECRET_KEY_ID", "main".into()),
+            ("CALLING_WEBHOOK_SECRET_LEGACY_KEY_ID", "main".into()),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(declared.legacy_kid(), "main");
+    }
+
+    #[test]
+    fn weak_ambiguous_or_incomplete_key_rings_are_refused() {
+        let weak = base64::engine::general_purpose::STANDARD.encode([42u8; 32]);
+        let mut low = [0u8; 32];
+        for (i, b) in low.iter_mut().enumerate() {
+            *b = (i % 8) as u8;
+        }
+        let low = base64::engine::general_purpose::STANDARD.encode(low);
+        for (case, pairs) in [
+            (
+                "weak current",
+                vec![("CALLING_WEBHOOK_SECRET_KEY", weak.clone())],
+            ),
+            ("low entropy", vec![("CALLING_WEBHOOK_SECRET_KEY", low)]),
+            (
+                "short",
+                vec![("CALLING_WEBHOOK_SECRET_KEY", "c2hvcnQ=".to_string())],
+            ),
+            (
+                "bad id",
+                vec![
+                    ("CALLING_WEBHOOK_SECRET_KEY", b64(1)),
+                    ("CALLING_WEBHOOK_SECRET_KEY_ID", "a.b".to_string()),
+                ],
+            ),
+            (
+                "previous without id",
+                vec![
+                    ("CALLING_WEBHOOK_SECRET_KEY", b64(1)),
+                    ("CALLING_WEBHOOK_SECRET_KEY_PREVIOUS", b64(2)),
+                ],
+            ),
+            (
+                "previous without current",
+                vec![
+                    ("CALLING_WEBHOOK_SECRET_KEY_PREVIOUS", b64(2)),
+                    ("CALLING_WEBHOOK_SECRET_KEY_PREVIOUS_ID", "old".to_string()),
+                ],
+            ),
+            (
+                "previous equals current id",
+                vec![
+                    ("CALLING_WEBHOOK_SECRET_KEY", b64(1)),
+                    ("CALLING_WEBHOOK_SECRET_KEY_PREVIOUS", b64(2)),
+                    ("CALLING_WEBHOOK_SECRET_KEY_PREVIOUS_ID", "k0".to_string()),
+                ],
+            ),
+            (
+                "previous equals current key",
+                vec![
+                    ("CALLING_WEBHOOK_SECRET_KEY", b64(1)),
+                    ("CALLING_WEBHOOK_SECRET_KEY_PREVIOUS", b64(1)),
+                    ("CALLING_WEBHOOK_SECRET_KEY_PREVIOUS_ID", "old".to_string()),
+                ],
+            ),
+            (
+                "weak previous",
+                vec![
+                    ("CALLING_WEBHOOK_SECRET_KEY", b64(1)),
+                    ("CALLING_WEBHOOK_SECRET_KEY_PREVIOUS", weak.clone()),
+                    ("CALLING_WEBHOOK_SECRET_KEY_PREVIOUS_ID", "old".to_string()),
+                ],
+            ),
+        ] {
+            let err = ring(&pairs).expect_err(case);
+            for (_, value) in &pairs {
+                assert!(!err.to_string().contains(value.as_str()), "{case}: {err}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_key_may_be_a_secret_file() {
+        use crate::config::secret::tests::TempSecret;
+        let file = TempSecret::new(&format!("{}\n", b64(5)), 0o600);
+        let previous = TempSecret::new(&b64(6), 0o600);
+        let pairs = [
+            ("CF_RUNTIME_ENVIRONMENT", "production".to_string()),
+            ("CALLING_WEBHOOK_SECRET_KEY_FILE", file.path()),
+            ("CALLING_WEBHOOK_SECRET_KEY_ID", "k2".to_string()),
+            ("CALLING_WEBHOOK_SECRET_KEY_PREVIOUS_FILE", previous.path()),
+            ("CALLING_WEBHOOK_SECRET_KEY_PREVIOUS_ID", "k1".to_string()),
+        ];
+        let ring_from_files = ring(&pairs).unwrap().unwrap();
+        assert_eq!(ring_from_files.current_kid(), "k2");
+        let mut both = pairs.to_vec();
+        both.push(("CALLING_WEBHOOK_SECRET_KEY", b64(5)));
+        assert!(ring(&both).is_err());
+        let missing = [(
+            "CALLING_WEBHOOK_SECRET_KEY_FILE",
+            "/nonexistent/webhook-key".to_string(),
+        )];
+        assert!(ring(&missing).is_err(), "never falls back to 'no webhooks'");
+        // The full settings parser applies the same ring.
+        let settings = WebhookSettings::from_lookup(&lookup(&pairs), false).unwrap();
+        assert_eq!(settings.secret_box.unwrap().previous_kid(), Some("k1"));
     }
 }

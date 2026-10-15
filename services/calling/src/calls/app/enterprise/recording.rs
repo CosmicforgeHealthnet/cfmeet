@@ -49,7 +49,10 @@ use crate::{
     signaling::signals::SignalType,
 };
 
-use super::voicemail::{CaptureDelivery, CapturePurpose, CaptureRequest, CapturedMedia};
+use super::{
+    orphans::ArtifactKind,
+    voicemail::{CaptureDelivery, CapturePurpose, CaptureRequest, CapturedMedia},
+};
 
 /// How long a finished recording may take to be delivered before it is FAILED.
 const DELIVERY_WINDOW_MINUTES: i64 = 30;
@@ -1035,6 +1038,18 @@ impl AppCallService {
                     Err(cf_object_storage::StorageError::NotConfigured) => "STORAGE_NOT_CONFIGURED",
                     Err(_) => "STORAGE_UNAVAILABLE",
                 };
+                if code == "STORAGE_INTEGRITY" {
+                    // Written, but not what was captured: never leave it behind (§79.26).
+                    self.discard_written_object(
+                        scope,
+                        ArtifactKind::Recording,
+                        recording_id,
+                        Some(call_id),
+                        &key,
+                        "INTEGRITY_MISMATCH",
+                    )
+                    .await;
+                }
                 exec(
                     self.db(),
                     "UPDATE call_recordings SET failure_code = $2, version = version + 1, \
@@ -1050,6 +1065,74 @@ impl AppCallService {
                 return Err(CallError::ArtifactStorageUnavailable);
             }
         };
+        let finalized = self
+            .finalize_recording(
+                recording_id,
+                call_id,
+                &recording,
+                media.duration_ms,
+                &content_type,
+                &key,
+                &stored,
+            )
+            .await;
+        match finalized {
+            Ok(true) => {
+                crate::metrics::inc(
+                    "calling_enterprise_capture_deliveries_total",
+                    &[("result", "STORED")],
+                );
+                crate::metrics::inc(
+                    "calling_enterprise_recordings_total",
+                    &[("result", "READY")],
+                );
+                tracing::info!(%recording_id, %call_id, "call recording ready");
+                Ok(CaptureDelivery::Stored)
+            }
+            Ok(false) => {
+                // No longer awaiting this capture (finalized / deleted meanwhile): the
+                // object just written is not the artifact unless the row references it.
+                self.discard_written_object(
+                    scope,
+                    ArtifactKind::Recording,
+                    recording_id,
+                    Some(call_id),
+                    &key,
+                    "NOT_AWAITING",
+                )
+                .await;
+                Ok(CaptureDelivery::AlreadyStored)
+            }
+            Err(error) => {
+                // The state transaction failed after the write: remove the object (or
+                // queue it), then let the deliverer retry.
+                self.discard_written_object(
+                    scope,
+                    ArtifactKind::Recording,
+                    recording_id,
+                    Some(call_id),
+                    &key,
+                    "FINALIZATION_FAILED",
+                )
+                .await;
+                Err(error)
+            }
+        }
+    }
+
+    /// The READY transaction of a delivered recording. `Ok(false)`: the recording no
+    /// longer awaits a capture (nothing changed).
+    #[allow(clippy::too_many_arguments)]
+    async fn finalize_recording(
+        &self,
+        recording_id: Uuid,
+        call_id: Uuid,
+        recording: &RecordingRow,
+        duration_ms: i32,
+        content_type: &str,
+        key: &str,
+        stored: &cf_object_storage::StoredObject,
+    ) -> CallResult<bool> {
         let retention_days: i32 = self
             .db()
             .query_one(stmt(
@@ -1071,7 +1154,7 @@ impl AppCallService {
         };
         if !matches!(current.state.as_str(), "PROCESSING" | "FAILED") {
             txn.rollback().await?;
-            return Ok(CaptureDelivery::AlreadyStored);
+            return Ok(false);
         }
         let now = self.calls.now();
         exec(
@@ -1086,7 +1169,7 @@ impl AppCallService {
                 key.into(),
                 content_type.into(),
                 (stored.size as i64).into(),
-                media.duration_ms.into(),
+                duration_ms.into(),
                 stored.sha256.clone().into(),
                 stored.encrypted.into(),
                 now.into(),
@@ -1105,9 +1188,7 @@ impl AppCallService {
                         ("recording_id", text(recording_id)),
                         (
                             "duration_ms",
-                            crate::calls::attributes::SafeValue::from(
-                                media.duration_ms.max(0) as usize
-                            ),
+                            crate::calls::attributes::SafeValue::from(duration_ms.max(0) as usize),
                         ),
                     ])?,
                 ),
@@ -1122,22 +1203,20 @@ impl AppCallService {
                 crate::calls::service::ArtifactUsageFact {
                     usage_type: crate::calls::kinds::UsageType::RecordingArtifact,
                     artifact_id: recording_id,
-                    duration_ms: i64::from(media.duration_ms),
+                    duration_ms: i64::from(duration_ms),
                     size_bytes: stored.size as i64,
                 },
             )
             .await?;
+        // A queued orphan of this very key is the artifact now (never deleted later).
+        exec(
+            &txn,
+            "DELETE FROM calling_orphan_objects WHERE object_key = $1",
+            vec![key.into()],
+        )
+        .await?;
         txn.commit().await?;
-        crate::metrics::inc(
-            "calling_enterprise_capture_deliveries_total",
-            &[("result", "STORED")],
-        );
-        crate::metrics::inc(
-            "calling_enterprise_recordings_total",
-            &[("result", "READY")],
-        );
-        tracing::info!(%recording_id, %call_id, "call recording ready");
-        Ok(CaptureDelivery::Stored)
+        Ok(true)
     }
 
     /// The capture of a recording failed (bounded code): FAILED (the Call is unaffected).
@@ -1168,13 +1247,29 @@ impl AppCallService {
             return Err(CallError::NotFound);
         };
         let now = self.calls.now();
+        // A FAILED recording is retained like a READY one (policy retention) and then
+        // moves to DELETED through the retention pass (§79.27): never kept forever.
+        let retention_days: i32 = txn
+            .query_one(stmt(
+                "SELECT retention_days FROM call_recording_policies WHERE id = $1",
+                vec![recording.policy_id.into()],
+            ))
+            .await?
+            .map(|r| r.try_get_by_index(0))
+            .transpose()?
+            .unwrap_or(30);
         let changed = exec(
             &txn,
             "UPDATE call_recordings SET state = 'FAILED', failed_at = $2, failure_code = $3, \
                stopped_at = COALESCE(stopped_at, $2), stop_reason = COALESCE(stop_reason, 'CAPTURE_FAILED'), \
-               version = version + 1, updated_at = GREATEST(updated_at, $2) \
+               retention_until = $4, version = version + 1, updated_at = GREATEST(updated_at, $2) \
              WHERE id = $1 AND state IN ('STARTING', 'RECORDING', 'STOPPING', 'PROCESSING')",
-            vec![recording_id.into(), now.into(), code.clone().into()],
+            vec![
+                recording_id.into(),
+                now.into(),
+                code.clone().into(),
+                (now + Duration::days(retention_days as i64)).into(),
+            ],
         )
         .await?;
         if changed > 0 {
@@ -1306,11 +1401,19 @@ impl AppCallService {
                 }
             }
         }
-        // Retention: READY -> DELETING (audited as the system).
+        // Retention: READY / FAILED -> DELETING (audited as the system). A FAILED row
+        // from before FAILED rows carried retention_until falls back to its policy's
+        // retention counted from the failure. A retention hold (Part H §80) on the
+        // recording or its Call keeps it (an explicit delete is not a retention action).
         let expired: Vec<RecordingRow> = RecordingRow::find_by_statement(stmt(
             &format!(
-                "SELECT {RECORDING_COLUMNS} FROM call_recordings WHERE state = 'READY' \
-                   AND retention_until <= $1 ORDER BY retention_until LIMIT $2"
+                "SELECT {RECORDING_COLUMNS} FROM call_recordings WHERE ((state = 'READY' \
+                   AND retention_until <= $1) OR (state = 'FAILED' AND COALESCE(retention_until, \
+                   failed_at + make_interval(days => (SELECT p.retention_days FROM call_recording_policies p \
+                   WHERE p.id = call_recordings.policy_id))) <= $1)) \
+                   AND NOT calling_retention_held('RECORDING_ARTIFACT', id, tenant_id, application_id, environment_id) \
+                   AND NOT calling_retention_held('RECORDING_ARTIFACT', call_id, tenant_id, application_id, environment_id) \
+                 ORDER BY retention_until NULLS FIRST LIMIT $2"
             ),
             vec![now.into(), (limit as i64).into()],
         ))
@@ -1328,7 +1431,7 @@ impl AppCallService {
                 &txn,
                 "UPDATE call_recordings SET state = 'DELETING', deleting_at = $2, \
                  delete_reason = 'RETENTION', next_attempt_at = $2, version = version + 1, \
-                 updated_at = GREATEST(updated_at, $2) WHERE id = $1 AND state = 'READY'",
+                 updated_at = GREATEST(updated_at, $2) WHERE id = $1 AND state IN ('READY', 'FAILED')",
                 vec![recording.id.into(), now.into()],
             )
             .await?;
@@ -1363,9 +1466,31 @@ impl AppCallService {
         .all(self.db())
         .await?;
         for recording in deleting {
-            if let Some(key) = recording.object_key.as_deref() {
+            // A READY artifact names its object; a FAILED one has none recorded, but a
+            // capture may have been written before it failed: both possible keys go.
+            let keys: Vec<String> = match recording.object_key.clone() {
+                Some(key) => vec![key],
+                None => match calls::Entity::find_by_id(recording.call_id)
+                    .one(self.db())
+                    .await?
+                {
+                    Some(call) => ["audio/wav", "audio/ogg"]
+                        .iter()
+                        .map(|ct| config::object_key(scope_of(&call), recording.id, ct))
+                        .collect(),
+                    None => Vec::new(),
+                },
+            };
+            let mut failure = None;
+            for key in &keys {
                 if let Err(error) = self.artifacts.delete(key).await {
-                    exec(
+                    failure = Some(error);
+                    break;
+                }
+            }
+            if let Some(error) = failure {
+                let attempts = recording.delete_attempts + 1;
+                exec(
                         self.db(),
                         "UPDATE call_recordings SET delete_attempts = delete_attempts + 1, \
                          next_attempt_at = $2, version = version + 1, \
@@ -1382,9 +1507,36 @@ impl AppCallService {
                         ],
                     )
                     .await?;
-                    tracing::warn!(recording_id = %recording.id, %error, "recording artifact deletion pending; retried");
-                    continue;
+                crate::metrics::inc(
+                    "calling_enterprise_artifact_deletions_total",
+                    &[("artifact", "RECORDING"), ("result", "RETRY")],
+                );
+                tracing::warn!(recording_id = %recording.id, attempts, %error, "recording artifact deletion pending; retried");
+                if attempts == self.config.artifact_delete_incident_attempts {
+                    // Once, when the threshold is crossed (the row stays DELETING and
+                    // keeps being retried).
+                    if let Some(call) = calls::Entity::find_by_id(recording.call_id)
+                        .one(self.db())
+                        .await?
+                    {
+                        crate::calls::app::incidents::raise(
+                                self.db(),
+                                &crate::calls::app::incidents::Incident::new(
+                                    crate::calls::app::incidents::IncidentCategory::RecordingArtifactFailure,
+                                    crate::calls::app::incidents::IncidentSeverity::Medium,
+                                    scope_of(&call),
+                                    crate::calls::app::incidents::IncidentResource::CallRecording,
+                                    recording.id,
+                                )
+                                .bucket("delete")
+                                .call(call.id)
+                                .evidence(json!({ "deletePending": true, "deleteAttempts": attempts })),
+                                now,
+                            )
+                            .await;
+                    }
                 }
+                continue;
             }
             let txn = self.db().begin().await?;
             let Some(call) = calls::Entity::find_by_id(recording.call_id)
@@ -1424,6 +1576,8 @@ impl AppCallService {
             }
             txn.commit().await?;
         }
+        // Unreferenced objects whose immediate deletion failed (§79.26).
+        self.orphan_tick(limit).await?;
         Ok(out)
     }
 }

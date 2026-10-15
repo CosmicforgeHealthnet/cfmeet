@@ -2,7 +2,10 @@
 //!
 //! Secrets (database URL credentials, the credential pepper) are held in redacted
 //! containers. There is no fallback secret in any environment: a missing or weak
-//! `API_CREDENTIAL_PEPPER` stops the service and the admin CLI from starting.
+//! `API_CREDENTIAL_PEPPER` stops the service and the admin CLI from starting. Every
+//! secret may be mounted as a file instead (`<NAME>_FILE`, see [`secret`]).
+
+pub mod secret;
 
 use std::{fmt, net::SocketAddr};
 
@@ -196,15 +199,19 @@ impl CallingConfig {
 
 /// Builds only the verifier keyring (admin CLI and server share this).
 pub fn keyring_from(get: &impl Fn(&str) -> Option<String>) -> Result<VerifierKeyring, ConfigError> {
-    let pepper = get("API_CREDENTIAL_PEPPER").ok_or(ConfigError::Missing {
-        var: "API_CREDENTIAL_PEPPER",
-    })?;
-    let current = CredentialPepper::parse("API_CREDENTIAL_PEPPER", &pepper)?;
+    let pepper =
+        secret::required_secret(get, "API_CREDENTIAL_PEPPER", "API_CREDENTIAL_PEPPER_FILE")?;
+    let current = CredentialPepper::parse("API_CREDENTIAL_PEPPER", pepper.expose_secret())?;
     let current_version = version(get, "API_CREDENTIAL_PEPPER_VERSION")?.unwrap_or(1);
-    let previous = match get("API_CREDENTIAL_PREVIOUS_PEPPER") {
+    let previous = match secret::read_secret(
+        get,
+        "API_CREDENTIAL_PREVIOUS_PEPPER",
+        "API_CREDENTIAL_PREVIOUS_PEPPER_FILE",
+    )? {
         None => None,
         Some(raw) => {
-            let pepper = CredentialPepper::parse("API_CREDENTIAL_PREVIOUS_PEPPER", &raw)?;
+            let pepper =
+                CredentialPepper::parse("API_CREDENTIAL_PREVIOUS_PEPPER", raw.expose_secret())?;
             let version = version(get, "API_CREDENTIAL_PREVIOUS_PEPPER_VERSION")?.ok_or(
                 ConfigError::Missing {
                     var: "API_CREDENTIAL_PREVIOUS_PEPPER_VERSION",
@@ -303,6 +310,107 @@ mod tests {
                 var: "API_CREDENTIAL_PEPPER"
             }
         ));
+    }
+
+    /// No fallback pepper exists in any runtime environment (§74.11): a production
+    /// deployment without `API_CREDENTIAL_PEPPER` / `_FILE` refuses to start.
+    #[test]
+    fn production_without_a_pepper_refuses_to_start() {
+        for runtime in ["production", "staging", "local", "test"] {
+            let err = CallingConfig::from_lookup(lookup(&[
+                ("DATABASE_URL", "postgres://x/y"),
+                ("CF_RUNTIME_ENVIRONMENT", runtime),
+            ]))
+            .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    ConfigError::Missing {
+                        var: "API_CREDENTIAL_PEPPER"
+                    }
+                ),
+                "{runtime}: {err}"
+            );
+        }
+        // The CLI / server share keyring_from: same refusal.
+        assert!(keyring_from(&lookup(&[("CF_RUNTIME_ENVIRONMENT", "production")])).is_err());
+    }
+
+    #[test]
+    fn the_pepper_can_be_a_secret_file_and_is_never_ambiguous() {
+        use super::secret::tests::TempSecret;
+        let file = TempSecret::new(&format!("{PEPPER}\n"), 0o600);
+        let path = file.path();
+        let cfg = CallingConfig::from_lookup(lookup(&[
+            ("DATABASE_URL", "postgres://x/y"),
+            ("CF_RUNTIME_ENVIRONMENT", "production"),
+            ("API_CREDENTIAL_PEPPER_FILE", path.as_str()),
+        ]))
+        .unwrap();
+        assert_eq!(cfg.keyring.current_version(), 1);
+        // Both forms set: refused (no silent preference).
+        let err = CallingConfig::from_lookup(lookup(&[
+            ("DATABASE_URL", "postgres://x/y"),
+            ("API_CREDENTIAL_PEPPER", PEPPER),
+            ("API_CREDENTIAL_PEPPER_FILE", path.as_str()),
+        ]))
+        .unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid { .. }));
+        // A missing file is an error, never the inline value or a default.
+        let err = CallingConfig::from_lookup(lookup(&[
+            ("DATABASE_URL", "postgres://x/y"),
+            ("API_CREDENTIAL_PEPPER_FILE", "/nonexistent/calling/pepper"),
+        ]))
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::Invalid {
+                var: "API_CREDENTIAL_PEPPER_FILE",
+                ..
+            }
+        ));
+        // A placeholder in a file is as weak as inline.
+        let weak = TempSecret::new("changeme", 0o600);
+        let weak_path = weak.path();
+        assert!(CallingConfig::from_lookup(lookup(&[
+            ("DATABASE_URL", "postgres://x/y"),
+            ("API_CREDENTIAL_PEPPER_FILE", weak_path.as_str()),
+        ]))
+        .is_err());
+        // The previous pepper accepts the file form too.
+        let previous = TempSecret::new(
+            "previous-pepper-zyxwvutsrqponmlkjihgfedcba9876543210",
+            0o600,
+        );
+        let previous_path = previous.path();
+        let cfg = CallingConfig::from_lookup(lookup(&[
+            ("DATABASE_URL", "postgres://x/y"),
+            ("API_CREDENTIAL_PEPPER", PEPPER),
+            ("API_CREDENTIAL_PEPPER_VERSION", "2"),
+            (
+                "API_CREDENTIAL_PREVIOUS_PEPPER_FILE",
+                previous_path.as_str(),
+            ),
+            ("API_CREDENTIAL_PREVIOUS_PEPPER_VERSION", "1"),
+        ]))
+        .unwrap();
+        assert_eq!(cfg.keyring.current_version(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_world_readable_pepper_file_is_refused_in_production() {
+        use super::secret::tests::TempSecret;
+        let file = TempSecret::new(PEPPER, 0o644);
+        let path = file.path();
+        let err = CallingConfig::from_lookup(lookup(&[
+            ("DATABASE_URL", "postgres://x/y"),
+            ("CF_RUNTIME_ENVIRONMENT", "production"),
+            ("API_CREDENTIAL_PEPPER_FILE", path.as_str()),
+        ]))
+        .unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid { .. }));
+        assert!(!err.to_string().contains(PEPPER));
     }
 
     #[test]

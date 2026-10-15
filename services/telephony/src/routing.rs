@@ -51,7 +51,12 @@ const ROUTE_SELECT: &str = "SELECT r.id, r.provider_id, r.priority, r.sip_peer_c
     FROM telecom_routes r JOIN telecom_providers p ON p.id = r.provider_id \
     WHERE r.status = 'ENABLED' AND p.status = 'ENABLED'";
 
-fn circuit_allows(state: &str, opened_at: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
+/// Whether one circuit allows an attempt now (an expired OPEN allows one probe).
+pub(crate) fn circuit_allows(
+    state: &str,
+    opened_at: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> bool {
     match CircuitState::parse(state) {
         Some(CircuitState::Closed) | Some(CircuitState::HalfOpen) => true,
         Some(CircuitState::Open) => {

@@ -193,10 +193,13 @@ impl AppCallService {
                 Ok(c) if c.status == "ACTIVE" => c,
                 _ => return Ok(Err(Refused("DESTINATION_DISABLED"))),
             };
-        // Part H §70: an application-level block on the public contact refuses the step.
-        if crate::calls::app::blocks::contact_blocked_by_application(
+        // Part H §70: an application-level block on the public contact, or the caller's
+        // own block on it, refuses the step (forwarding never reaches a contact the
+        // caller could not call directly).
+        if crate::calls::app::blocks::contact_blocked_for_initiator(
             self.db(),
             call.environment_id,
+            call.initiator_principal_id,
             contact.contact_reference,
         )
         .await?

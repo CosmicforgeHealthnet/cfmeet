@@ -133,6 +133,9 @@ const PART_H_TABLES: &[&str] = &[
     "calling_abuse_reports",
     "calling_abuse_windows",
     "calling_block_rules",
+    "calling_orphan_objects",
+    "calling_retention_audit",
+    "calling_retention_holds",
     "platform_compliance_eligibility",
     "platform_operator_audit",
 ];
@@ -817,4 +820,80 @@ async fn enterprise_columns_hold_no_contact_secret_dtmf_or_provider_data() {
         .await;
         assert!(types.is_empty() || types == ["uuid"], "{column}: {types:?}");
     }
+}
+
+/// Part H §72.8: the operator audit vocabulary of every `platform_admin` mutation
+/// (migrations 000038 and 000042) rolls back cleanly even though audited rows can never be deleted,
+/// and an unknown action is always refused.
+#[tokio::test]
+async fn operator_audit_vocabulary_rolls_back_with_audited_rows_present() {
+    let Some(db) = TestDb::empty().await else {
+        return;
+    };
+    let conn = &db.conn;
+    calling_migration::Migrator::up(conn, None).await.unwrap();
+    let insert = |action: &str| {
+        format!(
+            "INSERT INTO platform_operator_audit (id, actor, correlation_id, action, target_kind) \
+             VALUES ('{}', 'ops.alice', 'op_{}', '{action}', 'ENVIRONMENT')",
+            uuid::Uuid::new_v4(),
+            uuid::Uuid::new_v4().simple()
+        )
+    };
+    conn.execute_unprepared(&insert("ROUTING_POLICY_SET"))
+        .await
+        .unwrap();
+    assert!(conn
+        .execute_unprepared(&insert("SOMETHING_ELSE"))
+        .await
+        .is_err());
+    conn.execute_unprepared(&insert("RETENTION_HOLD_PLACED"))
+        .await
+        .unwrap();
+    // Down to before 000042 (retention): its audited row stays, its codes are refused
+    // again, the 000038 codes are still accepted.
+    let names: Vec<String> = <calling_migration::Migrator as MigratorTrait>::migrations()
+        .iter()
+        .map(|m| m.name().to_string())
+        .collect();
+    let position = |name: &str| names.iter().position(|n| n == name).unwrap() as u32;
+    // Rolls back every applied migration from `name` on.
+    let down_to_before = |name: &'static str| async move {
+        let applied = calling_migration::Migrator::get_applied_migrations(conn)
+            .await
+            .unwrap()
+            .len() as u32;
+        calling_migration::Migrator::down(conn, Some(applied - position(name)))
+            .await
+            .unwrap();
+    };
+    down_to_before("m20261015_000042_calling_retention").await;
+    assert!(conn
+        .execute_unprepared(&insert("PRINCIPAL_TOMBSTONED"))
+        .await
+        .is_err());
+    conn.execute_unprepared(&insert("SPEND_POLICY_SET"))
+        .await
+        .unwrap();
+    // Down to before 000038: the audited rows stay (append-only), new codes are refused
+    // again.
+    down_to_before("m20261015_000038_platform_operator_audit_actions").await;
+    assert!(conn
+        .execute_unprepared(&insert("SPEND_POLICY_SET"))
+        .await
+        .is_err());
+    conn.execute_unprepared(&insert("TENANT_STATUS_SET"))
+        .await
+        .unwrap();
+    assert_eq!(
+        common::scalar_i64(conn, "SELECT count(*) FROM platform_operator_audit").await,
+        4
+    );
+    calling_migration::Migrator::up(conn, None).await.unwrap();
+    conn.execute_unprepared(&insert("COMPLIANCE_ELIGIBILITY_REVOKED"))
+        .await
+        .unwrap();
+    conn.execute_unprepared(&insert("WEBHOOK_KEYS_RESEALED"))
+        .await
+        .unwrap();
 }

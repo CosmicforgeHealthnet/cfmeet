@@ -44,6 +44,10 @@ mod m20261010_000034_platform_operator_audit;
 mod m20261010_000035_calling_block_rules;
 mod m20261010_000036_platform_compliance_eligibility;
 mod m20261010_000037_calling_abuse_reports;
+mod m20261015_000038_platform_operator_audit_actions;
+mod m20261015_000040_webhook_secret_key_ids;
+mod m20261015_000041_calling_orphan_objects;
+mod m20261015_000042_calling_retention;
 
 /// Name of the table recording which Calling migrations have been applied.
 pub const MIGRATION_TABLE: &str = "calling_seaql_migrations";
@@ -91,6 +95,10 @@ impl MigratorTrait for Migrator {
             Box::new(m20261010_000035_calling_block_rules::Migration),
             Box::new(m20261010_000036_platform_compliance_eligibility::Migration),
             Box::new(m20261010_000037_calling_abuse_reports::Migration),
+            Box::new(m20261015_000038_platform_operator_audit_actions::Migration),
+            Box::new(m20261015_000040_webhook_secret_key_ids::Migration),
+            Box::new(m20261015_000041_calling_orphan_objects::Migration),
+            Box::new(m20261015_000042_calling_retention::Migration),
         ]
     }
 

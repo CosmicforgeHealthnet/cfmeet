@@ -113,11 +113,13 @@ impl SignalingKeys {
     /// `CALLING_SIGNALING_SIGNING_KEY` (required, ≥ 32 characters, no placeholder) and
     /// `CALLING_SIGNALING_CREDENTIAL_TTL_SECONDS` (default 600, max 3600).
     pub fn from_lookup(get: &impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
-        let key = get("CALLING_SIGNALING_SIGNING_KEY")
-            .filter(|v| !v.trim().is_empty())
-            .ok_or(ConfigError::Missing {
-                var: "CALLING_SIGNALING_SIGNING_KEY",
-            })?;
+        let key = crate::config::secret::required_secret(
+            get,
+            "CALLING_SIGNALING_SIGNING_KEY",
+            "CALLING_SIGNALING_SIGNING_KEY_FILE",
+        )?
+        .expose_secret()
+        .to_string();
         let lowered = key.to_ascii_lowercase();
         if key.len() < MIN_KEY_LEN
             || [
@@ -354,5 +356,54 @@ mod tests {
             .unwrap_err();
             assert!(!err.to_string().contains(weak));
         }
+    }
+
+    #[test]
+    fn the_key_may_be_a_secret_file_never_both_never_a_fallback() {
+        use crate::config::secret::tests::TempSecret;
+        let file = TempSecret::new(&format!("{KEY}\n"), 0o600);
+        let path = file.path();
+        let get = |k: &str| match k {
+            "CALLING_SIGNALING_SIGNING_KEY_FILE" => Some(path.clone()),
+            "CF_RUNTIME_ENVIRONMENT" => Some("production".to_string()),
+            _ => None,
+        };
+        let from_file = SignalingKeys::from_lookup(&get).unwrap();
+        let now = Utc::now();
+        let minted = keys()
+            .mint(
+                scope(),
+                PrincipalId::from_uuid(Uuid::from_u128(4)),
+                CallEndpointId::from_uuid(Uuid::from_u128(5)),
+                ServiceAccountId::from_uuid(Uuid::from_u128(6)),
+                CredentialId::from_uuid(Uuid::from_u128(7)),
+                now,
+            )
+            .unwrap();
+        assert!(from_file.verify(minted.token.expose_secret(), now).is_ok());
+        let both = |k: &str| match k {
+            "CALLING_SIGNALING_SIGNING_KEY_FILE" => Some(path.clone()),
+            "CALLING_SIGNALING_SIGNING_KEY" => Some(KEY.to_string()),
+            _ => None,
+        };
+        assert!(SignalingKeys::from_lookup(&both).is_err());
+        let missing = |k: &str| {
+            (k == "CALLING_SIGNALING_SIGNING_KEY_FILE").then(|| "/nonexistent/key".to_string())
+        };
+        assert!(SignalingKeys::from_lookup(&missing).is_err());
+        // Placeholders are refused from a file exactly as inline.
+        let weak = TempSecret::new("placeholder-placeholder-placeholder-x", 0o600);
+        let weak_path = weak.path();
+        let get = |k: &str| (k == "CALLING_SIGNALING_SIGNING_KEY_FILE").then(|| weak_path.clone());
+        assert!(SignalingKeys::from_lookup(&get).is_err());
+        // Production never accepts a missing key (no fallback).
+        let production =
+            |k: &str| (k == "CF_RUNTIME_ENVIRONMENT").then(|| "production".to_string());
+        assert!(matches!(
+            SignalingKeys::from_lookup(&production),
+            Err(ConfigError::Missing {
+                var: "CALLING_SIGNALING_SIGNING_KEY"
+            })
+        ));
     }
 }

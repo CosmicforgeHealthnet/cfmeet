@@ -359,6 +359,16 @@ impl PlatformService {
         application_id: ApplicationId,
         scope: &str,
     ) -> PlatformResult<ApplicationScopeView> {
+        self.grant_application_scope_in(&self.db, application_id, scope)
+            .await
+    }
+
+    pub(crate) async fn grant_application_scope_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        application_id: ApplicationId,
+        scope: &str,
+    ) -> PlatformResult<ApplicationScopeView> {
         let application = self.application(application_id).await?;
         let tenant = self.tenant(application.tenant_id).await?;
         let scope = self.registry.grantable(scope, tenant.classification)?;
@@ -377,13 +387,13 @@ impl PlatformService {
             .do_nothing()
             .to_owned(),
         )
-        .exec_without_returning(&self.db)
+        .exec_without_returning(db)
         .await?;
         let row = application_scopes::Entity::find_by_id((
             application_id.as_uuid(),
             scope.as_str().to_string(),
         ))
-        .one(&self.db)
+        .one(db)
         .await?
         .ok_or(PlatformError::NotFound("application scope"))?;
         tracing::info!(
@@ -406,11 +416,21 @@ impl PlatformService {
         application_id: ApplicationId,
         scope: &str,
     ) -> PlatformResult<bool> {
+        self.revoke_application_scope_in(&self.db, application_id, scope)
+            .await
+    }
+
+    pub(crate) async fn revoke_application_scope_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        application_id: ApplicationId,
+        scope: &str,
+    ) -> PlatformResult<bool> {
         self.application(application_id).await?;
         let result = application_scopes::Entity::delete_many()
             .filter(application_scopes::Column::ApplicationId.eq(application_id.as_uuid()))
             .filter(application_scopes::Column::Scope.eq(scope))
-            .exec(&self.db)
+            .exec(db)
             .await?;
         tracing::info!(
             application_id = %application_id,

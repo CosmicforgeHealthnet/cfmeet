@@ -1,6 +1,6 @@
 # ADR 0029 — Part H security closure: layered authorization, abuse containment, callback security, regulatory boundary and retention ownership
 
-Status: Accepted (partial closure — see `docs/architecture/part-h-security-certification.md`)
+Status: Accepted (certification: `docs/architecture/part-h-security-certification.md`)
 
 ## Context
 
@@ -72,11 +72,17 @@ Telephony core ADR 0014, edge ADR 0015, recording ADR 0024, API / webhooks / lim
     no-delete triggers honour; application code never sets it. Durations are
     configuration, not legal claims; holds use neutral reason codes. Implemented in
     Privacy Relay (contact erasure after disable, verification events, grants, access
-    audit, relay evidence) and Telephony (provider events, resolved incidents, holds,
-    audit). Calling's own classes are recorded as pending in the certification report.
-11. **Operator actions are audited** where implemented (Telephony `telephony_operator_audit`,
-    `--operator` required). Calling's `platform_operator_audit` table exists; the CLI
-    write path is pending.
+    audit, relay evidence), Telephony (provider events, resolved incidents, holds,
+    audit) and Calling (ADR 0030: call display minimization, webhook history, incidents,
+    provider evidence, operator audit, holds, principal tombstones).
+11. **Operator actions are audited.** Every mutating command of `platform_admin` and
+    `telephony-admin` requires an explicit operator identity (`--operator` /
+    `CF_OPERATOR_ID`) and writes an append-only operator-audit row with a correlation id in
+    the same transaction (Calling `platform_operator_audit`, Telephony
+    `telephony_operator_audit`). `privacy-relay-admin` operates on keyring files and on
+    Contact Vault rows whose effects are recorded in the append-only contact access audit
+    (`REENCRYPT`, erasure) and the retention audit; it takes no operator identity. There is
+    no network admin API and no bypass.
 12. **Secrets**: no production fallback (unchanged); repository / image secret scan
     (`make secret-scan`, CI job) added; rotation runbook and deployment checklist document
     every secret class honestly, including the rotations that need a restart.
@@ -86,4 +92,13 @@ Telephony core ADR 0014, edge ADR 0015, recording ADR 0024, API / webhooks / lim
 * New failure codes: `PRINCIPAL_NOT_ELIGIBLE`, `DESTINATION_BLOCKED`, `CALLER_BLOCKED`,
   `SCOPE_SUSPENDED`, `COMPLIANCE_ELIGIBILITY_REQUIRED`, `DESTINATION_CLASS_BLOCKED`,
   `DESTINATION_UNCLASSIFIED`.
+* Webhook signing secrets are sealed under a versioned key ring (`v2.<kid>`), rotated with
+  a current + previous overlap and an audited bounded reseal; an unknown key id fails
+  closed. Sensitive Calling secrets accept `*_FILE` delivery.
+* SIP peers are identified by network address only (`endpoint_identifier_order = ip`);
+  the transmit fence re-checks route, provider, circuit and destination class immediately
+  before any toll-generating command.
+* Edge-event attribution of unknown channels was deliberately left at its Part E
+  behaviour: a stricter attribution quarantined legitimate carrier RFC 4733 DTMF and was
+  reverted; SIP certification guards it.
 * Real-carrier certification remains pending (ADR 0016); nothing here claims it.

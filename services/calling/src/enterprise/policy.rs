@@ -731,6 +731,57 @@ impl EnterpriseService {
         scope: CallScope,
         capabilities: Vec<AdminCapability>,
     ) -> EnterpriseResult<CallPolicyView> {
+        let txn = self.begin().await?;
+        let view = self.set_capabilities_in(&txn, scope, capabilities).await?;
+        txn.commit().await?;
+        Ok(view)
+    }
+
+    /// [`operator_set_capabilities`](Self::operator_set_capabilities) by `operator`: the
+    /// change and its `platform_operator_audit` row (ENTERPRISE_CAPABILITIES_SET) commit
+    /// in one transaction, or neither does.
+    pub async fn operator_set_capabilities_by(
+        &self,
+        operator: &crate::platform::operator::OperatorContext,
+        scope: CallScope,
+        capabilities: Vec<AdminCapability>,
+    ) -> EnterpriseResult<CallPolicyView> {
+        use crate::platform::operator::{self, AuditEntry, AuditTargetKind, OperatorAction};
+        let txn = self.begin().await?;
+        let view = self.set_capabilities_in(&txn, scope, capabilities).await?;
+        let names: Vec<&'static str> = view
+            .rules
+            .admin_capabilities
+            .iter()
+            .map(|c| c.as_str())
+            .collect();
+        let entry = AuditEntry::new(
+            OperatorAction::EnterpriseCapabilitiesSet,
+            AuditTargetKind::Environment,
+            scope.environment_id().as_uuid(),
+        )
+        .scope(
+            Some(scope.tenant_id().as_uuid()),
+            Some(scope.application_id().as_uuid()),
+            Some(scope.environment_id().as_uuid()),
+        )
+        .detail(serde_json::json!({ "capabilities": names }));
+        operator::record(&txn, operator, &entry, self.now())
+            .await
+            .map_err(|e| EnterpriseError::Database {
+                summary: e.to_string(),
+                connectivity: false,
+            })?;
+        txn.commit().await?;
+        Ok(view)
+    }
+
+    async fn set_capabilities_in(
+        &self,
+        txn: &sea_orm::DatabaseTransaction,
+        scope: CallScope,
+        capabilities: Vec<AdminCapability>,
+    ) -> EnterpriseResult<CallPolicyView> {
         let actor = AdminActor::operator(scope);
         let mut caps = capabilities.clone();
         caps.sort();
@@ -740,27 +791,26 @@ impl EnterpriseService {
                 "capabilities must be distinct.",
             ));
         }
-        let txn = self.begin().await?;
         exec(
-            &txn,
+            txn,
             "SELECT pg_advisory_xact_lock(hashtextextended('enterprise-policy-default:' || $1::text, 0))",
             vec![scope.environment_id().as_uuid().into()],
         )
         .await?;
-        let current = effective_policy(&txn, scope, None).await?;
+        let current = effective_policy(txn, scope, None).await?;
         let now = self.now();
         let caps_value: Vec<String> = caps.iter().map(|c| c.as_str().to_string()).collect();
         let id = match current.policy_id {
             Some(id) => {
                 exec(
-                    &txn,
+                    txn,
                     "UPDATE enterprise_call_policies SET admin_capabilities = $2, \
                      version = version + 1, updated_at = GREATEST(updated_at, $3) WHERE id = $1",
                     vec![id.into(), caps_value.into(), now.into()],
                 )
                 .await?;
                 audit::record(
-                    &txn,
+                    txn,
                     &actor,
                     AuditFact {
                         resource: AuditResource::CallPolicy,
@@ -787,7 +837,7 @@ impl EnterpriseService {
                 values.extend(rule_values(&rules));
                 values.push(now.into());
                 exec(
-                    &txn,
+                    txn,
                     "INSERT INTO enterprise_call_policies (id, tenant_id, application_id, environment_id, \
                      name, is_default, status, internal_calling_enabled, external_public_calling_allowed, \
                      public_destination_countries, forwarding_allowed, public_forwarding_allowed, \
@@ -800,7 +850,7 @@ impl EnterpriseService {
                 )
                 .await?;
                 audit::record(
-                    &txn,
+                    txn,
                     &actor,
                     AuditFact {
                         resource: AuditResource::CallPolicy,
@@ -816,8 +866,7 @@ impl EnterpriseService {
                 id
             }
         };
-        let row = policy_row(&txn, scope, id, false).await?;
-        txn.commit().await?;
+        let row = policy_row(txn, scope, id, false).await?;
         row.try_into()
     }
 }

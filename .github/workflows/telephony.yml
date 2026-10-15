@@ -212,8 +212,11 @@ jobs:
           ./target/debug/telephony-migration reset
           ./target/debug/telephony-migration up
           q() { psql -h 127.0.0.1 -U postgres -d telephony_migration_smoke -tAc "$1"; }
-          test "$(q "SELECT count(*) FROM telephony_seaql_migrations")" = "9"
-          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'telephony_seaql_migrations'")" = "17"
+          # Applied = registered migrations (derived from the migrator, never hand-counted).
+          test "$(q "SELECT count(*) FROM telephony_seaql_migrations")" = "$(grep -c 'Box::new(m20' migration/src/lib.rs)"
+          # 17 Part E / F tables + Part H operator audit, destination classes, retention
+          # holds and retention audit.
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'telephony_seaql_migrations'")" = "21"
           # No Calling / Privacy Relay authority tables.
           test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename IN \
             ('calls', 'call_participants', 'call_sessions', 'call_legs', 'communication_contexts', \

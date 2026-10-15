@@ -603,3 +603,122 @@ async fn principal_spend_ceiling_holds_across_call_paths() {
     let results = race(&x, &[other_principal], 2).await;
     assert!(results.iter().all(|r| r.is_ok()), "{results:?}");
 }
+
+/// Part H §77.22 — unknown cost. The strategy is the reservation itself: before any
+/// ORIGINATE exists, a positive allowance (`leg_allowance_minor`, > 0 by CHECK) bounded by
+/// the daily / monthly caps is reserved for at most `max_leg_seconds`, whatever the
+/// route's estimated cost. An UNKNOWN estimated cost therefore never opens an unreserved
+/// paid leg, and an UNKNOWN actual cost settles conservatively at the reserved amount,
+/// creates no new paid action and never rewrites the immutable usage fact.
+#[tokio::test]
+async fn an_unknown_cost_never_opens_an_unreserved_or_unbounded_paid_leg() {
+    use calling::routing::engine::{CandidateRoute, Evidence, RouteHealth};
+    use calling::telephony::events::TelephonyEvent;
+    use common::{public::PublicWorld, telephony::leg_event};
+
+    let Some(x) = PublicWorld::new().await else {
+        return;
+    };
+    // Telephony knows the route is healthy but not what a leg costs.
+    x.telephony.set_routes(Evidence::Known(vec![CandidateRoute {
+        route_ref: "ng-a".into(),
+        health: RouteHealth::Healthy,
+        capacity_available: Evidence::Known(true),
+        estimated_leg_cost_minor: Evidence::Unknown,
+        quality_permille: Evidence::Unknown,
+    }]));
+    // Room for exactly one allowance today.
+    x.set_spend(SpendPolicy {
+        daily_limit_minor: 5_000,
+        ..common::public::spend_policy()
+    })
+    .await;
+    let r = x.call_to(x.contact, "unknown-cost-1").await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let call: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+    // The ORIGINATE carries a positive reservation equal to the allowance, within the
+    // cap, for at most max_leg_seconds.
+    let originates = x.telephony.originates();
+    assert_eq!(originates.len(), 1);
+    let spend = &originates[0].1["spend"];
+    assert_eq!(spend["reservedAmountMinor"], 5_000);
+    assert_eq!(spend["maxDurationSeconds"], 3600);
+    let leg: Uuid =
+        x.w.h()
+            .conn()
+            .query_one(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Postgres,
+                format!(
+                "SELECT id FROM call_legs WHERE call_id = '{call}' AND leg_kind = 'PUBLIC_NETWORK'"
+            ),
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get_by_index(0)
+            .unwrap();
+    assert_eq!(
+        x.count(&format!(
+            "SELECT count(*) FROM call_spend_reservations WHERE call_leg_id = '{leg}' \
+             AND status = 'RESERVED' AND amount_minor = 5000 AND max_duration_seconds = 3600"
+        ))
+        .await,
+        1
+    );
+    // An unknown estimate does not bypass the cap: the next leg is refused, nothing new
+    // is reserved or commanded.
+    let r = x.call_to(x.contact, "unknown-cost-2").await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS, "{}", r.text);
+    assert_eq!(r.json["error"]["code"], "TELECOM_SPEND_LIMIT_EXCEEDED");
+    assert_eq!(x.effects().await, (1, 1, 1));
+
+    // The actual cost turns out UNKNOWN: settled at the reservation, marked unknown.
+    let t = x.telephony.telephony_leg_of(leg).unwrap();
+    let apply = |value: serde_json::Value| {
+        let x = &x;
+        async move {
+            let event: TelephonyEvent = serde_json::from_value(value).unwrap();
+            x.w.h()
+                .state
+                .app
+                .apply_telephony_event(&event)
+                .await
+                .unwrap()
+                .as_str()
+        }
+    };
+    let mut unknown = leg_event("USAGE_FINALIZED", call, leg, t, None, 5);
+    unknown["usage"] = json!({ "connectedDurationMs": 90_000, "billableSeconds": 90,
+                               "costKnown": false, "destinationCountry": "NG" });
+    assert_eq!(apply(unknown).await, "APPLIED");
+    let settled_sql = format!(
+        "SELECT settled_minor FROM call_spend_reservations WHERE call_leg_id = '{leg}' \
+         AND status = 'SETTLED' AND NOT cost_known"
+    );
+    let settled = || x.count(&settled_sql);
+    assert_eq!(settled().await, 5_000);
+    let fact = || async {
+        common::enterprise::strings(
+            x.w.h().conn(),
+            &format!(
+                "SELECT cost_status || ':' || COALESCE(cost_minor::text, '-') \
+                 FROM call_usage_records WHERE leg_id = '{leg}'"
+            ),
+        )
+        .await
+    };
+    let recorded = fact().await;
+    assert_eq!(recorded.len(), 1);
+    assert!(recorded[0].starts_with("UNKNOWN"), "{recorded:?}");
+    // A later (known) usage report rewrites neither the settlement nor the fact, and no
+    // new paid action follows.
+    let mut late = leg_event("USAGE_FINALIZED", call, leg, t, None, 6);
+    late["usage"] = json!({ "connectedDurationMs": 90_000, "billableSeconds": 90,
+                            "costMinor": 1, "costKnown": true, "currency": "NGN",
+                            "destinationCountry": "NG" });
+    apply(late).await;
+    assert_eq!(settled().await, 5_000);
+    assert_eq!(fact().await, recorded);
+    assert_eq!(x.telephony.originates().len(), 1);
+    assert_eq!(x.effects().await, (1, 1, 1));
+}

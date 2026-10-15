@@ -313,11 +313,26 @@ impl WebhookService {
             .map(|b| b.open(&target.secret_sealed, &c.subscription_id.to_string()))
         {
             Some(Ok(s)) => s,
-            _ => {
-                // Configuration problem: retried (never sent unsigned).
-                return self
-                    .finish(c, "RETRY", None, Some("SIGNING_UNAVAILABLE"), started)
-                    .await;
+            outcome => {
+                // Configuration problem: refused, counted and retried — never sent
+                // unsigned. A seal under a key id this deployment does not hold (rotated
+                // away too early, or tampered) is told apart from a missing key ring.
+                let category = match outcome {
+                    Some(Err(cf_webhooks::secret_box::SecretBoxError::UnknownKey)) => {
+                        "SIGNING_KEY_UNKNOWN"
+                    }
+                    _ => "SIGNING_UNAVAILABLE",
+                };
+                crate::metrics::inc(
+                    "calling_webhook_signing_refusals_total",
+                    &[("reason", category)],
+                );
+                tracing::warn!(
+                    delivery_id = %c.id,
+                    category,
+                    "webhook delivery refused: the signing secret cannot be opened"
+                );
+                return self.finish(c, "RETRY", None, Some(category), started).await;
             }
         };
         // The SSRF policy is enforced again at delivery time (and at connection time by

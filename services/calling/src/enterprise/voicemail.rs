@@ -677,30 +677,145 @@ impl EnterpriseService {
         })
     }
 
-    async fn authorized_message<C: ConnectionTrait>(
+    /// The message if `requester` may act on it. `Ok(Err(row))`: the message exists in
+    /// the scope but the requester does not own its mailbox (the caller answers 404 —
+    /// exactly like an unknown id — and records the denial).
+    async fn message_access<C: ConnectionTrait>(
         &self,
         db: &C,
         scope: CallScope,
         id: Uuid,
         requester: VoicemailRequester,
         lock: bool,
-    ) -> EnterpriseResult<MessageRow> {
+    ) -> EnterpriseResult<Result<MessageRow, MessageRow>> {
         let message = message_row(db, scope, id, lock).await?;
-        self.authorize_mailbox(db, scope, message.mailbox_id, requester)
-            .await?;
-        Ok(message)
+        match self
+            .authorize_mailbox(db, scope, message.mailbox_id, requester)
+            .await
+        {
+            Ok(_) => Ok(Ok(message)),
+            Err(EnterpriseError::NotFound) => Ok(Err(message)),
+            Err(other) => Err(other),
+        }
     }
 
+    /// Appends a DENIED access fact for a message of the requester's OWN scope (Part H
+    /// §79.29). Only called once the message is known to exist in `actor.scope`, so a
+    /// foreign or unknown id leaves no trace anywhere and reveals nothing. Best effort:
+    /// a failure is logged, never turned into a different answer.
+    async fn record_voicemail_denial(
+        &self,
+        actor: &AdminActor,
+        row: &MessageRow,
+        operation: AuditOperation,
+        reason: &'static str,
+    ) {
+        let now = self.now();
+        let recorded = audit::record(
+            self.db(),
+            actor,
+            AuditFact {
+                resource: AuditResource::VoicemailMessage,
+                resource_id: row.id,
+                operation,
+                old_version: Some(row.version),
+                new_version: Some(row.version),
+                details: AuditDetails::new()
+                    .with("outcome", "DENIED")
+                    .with("reason", reason),
+            },
+            now,
+        )
+        .await;
+        crate::metrics::inc(
+            "calling_enterprise_artifact_access_denied_total",
+            &[("artifact", "VOICEMAIL"), ("reason", reason)],
+        );
+        if let Err(error) = recorded {
+            tracing::error!(message_id = %row.id, reason, %error, "voicemail access denial not audited");
+        }
+    }
+
+    /// A refusal decided before the service runs (a missing voicemail scope): audited
+    /// DENIED when — and only when — the message exists in the caller's own scope.
+    pub async fn audit_voicemail_scope_denial(
+        &self,
+        actor: &AdminActor,
+        id: Uuid,
+        operation: AuditOperation,
+    ) {
+        if let Ok(row) = message_row(self.db(), actor.scope, id, false).await {
+            self.record_voicemail_denial(actor, &row, operation, "MISSING_SCOPE")
+                .await;
+        }
+    }
+
+    /// [`Self::message_access`] for the transactional operations: a non-owner is audited
+    /// DENIED outside the (rolled back) transaction and answered 404.
+    async fn authorized_message(
+        &self,
+        txn: sea_orm::DatabaseTransaction,
+        actor: &AdminActor,
+        id: Uuid,
+        requester: VoicemailRequester,
+        operation: AuditOperation,
+    ) -> EnterpriseResult<(sea_orm::DatabaseTransaction, MessageRow)> {
+        match self
+            .message_access(&txn, actor.scope, id, requester, true)
+            .await?
+        {
+            Ok(row) => Ok((txn, row)),
+            Err(row) => {
+                txn.rollback().await?;
+                self.record_voicemail_denial(actor, &row, operation, "NOT_OWNER")
+                    .await;
+                Err(EnterpriseError::NotFound)
+            }
+        }
+    }
+
+    /// One message's metadata; every read is audited (GRANTED, or DENIED for a
+    /// non-owner of the scope — still answered 404).
     pub async fn get_voicemail_message(
         &self,
-        scope: CallScope,
+        actor: &AdminActor,
         id: Uuid,
         requester: VoicemailRequester,
     ) -> EnterpriseResult<VoicemailMessageView> {
-        Ok(message_view(
-            self.authorized_message(self.db(), scope, id, requester, false)
-                .await?,
-        ))
+        let row = match self
+            .message_access(self.db(), actor.scope, id, requester, false)
+            .await?
+        {
+            Ok(row) => row,
+            Err(row) => {
+                self.record_voicemail_denial(
+                    actor,
+                    &row,
+                    AuditOperation::ReadMetadata,
+                    "NOT_OWNER",
+                )
+                .await;
+                return Err(EnterpriseError::NotFound);
+            }
+        };
+        audit::record(
+            self.db(),
+            actor,
+            AuditFact {
+                resource: AuditResource::VoicemailMessage,
+                resource_id: id,
+                operation: AuditOperation::ReadMetadata,
+                old_version: Some(row.version),
+                new_version: Some(row.version),
+                details: AuditDetails::new().with("outcome", "GRANTED").with(
+                    "onBehalfOfOwner",
+                    matches!(requester, VoicemailRequester::Principal(_)),
+                ),
+            },
+            self.now(),
+        )
+        .await?;
+        Ok(message_view(row))
     }
 
     /// Marks a message READ / UNREAD (versioned, audited).
@@ -713,8 +828,13 @@ impl EnterpriseService {
         requester: VoicemailRequester,
     ) -> EnterpriseResult<VoicemailMessageView> {
         let txn = self.begin().await?;
-        let row = self
-            .authorized_message(&txn, actor.scope, id, requester, true)
+        let operation = if read {
+            AuditOperation::MarkRead
+        } else {
+            AuditOperation::MarkUnread
+        };
+        let (txn, row) = self
+            .authorized_message(txn, actor, id, requester, operation)
             .await?;
         check_version(expected_version, row.version)?;
         if matches!(row.state.as_str(), "DELETING" | "DELETED") {
@@ -744,7 +864,7 @@ impl EnterpriseService {
                     },
                     old_version: Some(row.version),
                     new_version: Some(row.version + 1),
-                    details: AuditDetails::new().with(
+                    details: AuditDetails::new().with("outcome", "GRANTED").with(
                         "onBehalfOfOwner",
                         matches!(requester, VoicemailRequester::Principal(_)),
                     ),
@@ -767,8 +887,8 @@ impl EnterpriseService {
         requester: VoicemailRequester,
     ) -> EnterpriseResult<VoicemailMessageView> {
         let txn = self.begin().await?;
-        let row = self
-            .authorized_message(&txn, actor.scope, id, requester, true)
+        let (txn, row) = self
+            .authorized_message(txn, actor, id, requester, AuditOperation::Delete)
             .await?;
         check_version(expected_version, row.version)?;
         match row.state.as_str() {
@@ -804,7 +924,9 @@ impl EnterpriseService {
                 operation: AuditOperation::Delete,
                 old_version: Some(row.version),
                 new_version: Some(row.version + 1),
-                details: AuditDetails::new().with("reason", reason),
+                details: AuditDetails::new()
+                    .with("reason", reason)
+                    .with("outcome", "GRANTED"),
             },
             now,
         )
@@ -823,8 +945,8 @@ impl EnterpriseService {
         requester: VoicemailRequester,
     ) -> EnterpriseResult<VoicemailMediaAccess> {
         let txn = self.begin().await?;
-        let row = self
-            .authorized_message(&txn, actor.scope, id, requester, false)
+        let (txn, row) = self
+            .authorized_message(txn, actor, id, requester, AuditOperation::MediaAccess)
             .await?;
         if row.state != "READY" {
             return Err(EnterpriseError::Conflict(
@@ -861,6 +983,7 @@ impl EnterpriseService {
                 old_version: Some(row.version),
                 new_version: Some(row.version),
                 details: AuditDetails::new()
+                    .with("outcome", "GRANTED")
                     .with("ttlSeconds", MEDIA_ACCESS_TTL.as_secs() as i64)
                     .with(
                         "onBehalfOfOwner",

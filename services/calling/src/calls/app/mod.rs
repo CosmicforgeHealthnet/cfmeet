@@ -86,6 +86,9 @@ pub struct AppCallingConfig {
     pub media_ensure_deadline: Duration,
     /// How long an accepted transfer target may take to join before the transfer fails.
     pub transfer_join_deadline: Duration,
+    /// Failed storage deletes of one voicemail / recording artifact after which an
+    /// incident is raised (once; the deletion keeps being retried).
+    pub artifact_delete_incident_attempts: i32,
 }
 
 impl Default for AppCallingConfig {
@@ -98,6 +101,7 @@ impl Default for AppCallingConfig {
             reconcile_interval: Duration::seconds(15),
             media_ensure_deadline: Duration::seconds(60),
             transfer_join_deadline: Duration::seconds(60),
+            artifact_delete_incident_attempts: 5,
         }
     }
 }
@@ -106,7 +110,8 @@ impl AppCallingConfig {
     /// `CALLING_INVITATION_TTL_SECONDS` (10–300, default 45),
     /// `CALLING_MAX_GROUP_PARTICIPANTS` (2–64, default 16),
     /// `CALLING_MAX_ENDPOINTS_PER_PARTICIPANT` (1–50, default 10),
-    /// `CALLING_MEDIA_RECONCILE_INTERVAL_SECONDS` (2–300, default 15).
+    /// `CALLING_MEDIA_RECONCILE_INTERVAL_SECONDS` (2–300, default 15),
+    /// `CALLING_ARTIFACT_DELETE_INCIDENT_ATTEMPTS` (1–100, default 5).
     pub fn from_lookup(get: &impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
         let number =
             |var: &'static str, default: i64, min: i64, max: i64| -> Result<i64, ConfigError> {
@@ -146,6 +151,12 @@ impl AppCallingConfig {
                 2,
                 300,
             )?),
+            artifact_delete_incident_attempts: number(
+                "CALLING_ARTIFACT_DELETE_INCIDENT_ATTEMPTS",
+                5,
+                1,
+                100,
+            )? as i32,
             ..defaults
         })
     }

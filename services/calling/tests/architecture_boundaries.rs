@@ -117,6 +117,11 @@ fn is_calling_table(name: &str) -> bool {
         || name == "calling_block_rules"
         || name == "calling_abuse_windows"
         || name == "calling_abuse_reports"
+        // Part H §79: orphaned protected objects awaiting deletion (recording / voicemail).
+        || name == "calling_orphan_objects"
+        // Part H §80: retention holds and the retention audit (ADR 0030).
+        || name == "calling_retention_holds"
+        || name == "calling_retention_audit"
 }
 
 /// Code with the contents of string literals removed (identifiers, types and syntax

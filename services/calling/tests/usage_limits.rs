@@ -415,7 +415,12 @@ async fn tenant_concurrency_ceiling_holds_across_applications() {
 
 fn dev_settings() -> WebhookSettings {
     WebhookSettings {
-        secret_box: Some(Arc::new(SecretBox::from_bytes(&[42u8; 32]).unwrap())),
+        secret_box: Some(Arc::new(
+            SecretBox::from_bytes(&std::array::from_fn::<u8, 32, _>(|i| {
+                (i as u8).wrapping_mul(7).wrapping_add(42)
+            }))
+            .unwrap(),
+        )),
         policy: EndpointPolicy {
             allow_insecure_http: true,
             allow_private_networks: true,

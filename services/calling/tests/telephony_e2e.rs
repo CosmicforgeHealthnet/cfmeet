@@ -262,9 +262,11 @@ impl Stack {
             &[("DATABASE_URL", telephony_db.url.clone())],
         );
         let tadmin = bins.telephony.with_file_name("telephony-admin");
+        // Telephony's operator CLI attributes every mutation to an operator (Part H §75).
         let tenv = [
             ("DATABASE_URL", telephony_db.url.clone()),
             ("CF_RUNTIME_ENVIRONMENT", "test".to_string()),
+            ("CF_OPERATOR_ID", "ops.certification".to_string()),
         ];
         std::fs::write(
             dir.join("provider-secrets").join("dp-a.secret"),

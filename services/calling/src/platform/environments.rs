@@ -8,7 +8,8 @@
 
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
+    QueryOrder,
 };
 use serde::Serialize;
 
@@ -53,6 +54,16 @@ impl PlatformService {
         application_id: ApplicationId,
         kind: EnvironmentKind,
     ) -> PlatformResult<EnvironmentView> {
+        self.create_environment_in(&self.db, application_id, kind)
+            .await
+    }
+
+    pub(crate) async fn create_environment_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        application_id: ApplicationId,
+        kind: EnvironmentKind,
+    ) -> PlatformResult<EnvironmentView> {
         let application = self.application(application_id).await?;
         let now = self.clock.now();
         let model = environments::ActiveModel {
@@ -65,7 +76,7 @@ impl PlatformService {
             created_at: Set(now),
             updated_at: Set(now),
         }
-        .insert(&self.db)
+        .insert(db)
         .await
         .map_err(|e| match PlatformError::from(e) {
             PlatformError::Conflict(_) => PlatformError::Conflict(format!(
@@ -124,8 +135,17 @@ impl PlatformService {
         id: EnvironmentId,
         status: EnvironmentStatus,
     ) -> PlatformResult<EnvironmentView> {
+        self.set_environment_status_in(&self.db, id, status).await
+    }
+
+    pub(crate) async fn set_environment_status_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        id: EnvironmentId,
+        status: EnvironmentStatus,
+    ) -> PlatformResult<EnvironmentView> {
         let model = environments::Entity::find_by_id(id.as_uuid())
-            .one(&self.db)
+            .one(db)
             .await?
             .ok_or(PlatformError::NotFound("environment"))?;
         if model.status == status {
@@ -134,7 +154,7 @@ impl PlatformService {
         let mut active: environments::ActiveModel = model.into();
         active.status = Set(status);
         active.updated_at = Set(self.clock.now());
-        let model = active.update(&self.db).await?;
+        let model = active.update(db).await?;
         tracing::info!(environment_id = %model.id, status = %model.status, "environment status changed");
         Ok(model.into())
     }
@@ -146,8 +166,18 @@ impl PlatformService {
         id: EnvironmentId,
         allowed: bool,
     ) -> PlatformResult<EnvironmentView> {
+        self.set_live_telecom_allowed_in(&self.db, id, allowed)
+            .await
+    }
+
+    pub(crate) async fn set_live_telecom_allowed_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        id: EnvironmentId,
+        allowed: bool,
+    ) -> PlatformResult<EnvironmentView> {
         let model = environments::Entity::find_by_id(id.as_uuid())
-            .one(&self.db)
+            .one(db)
             .await?
             .ok_or(PlatformError::NotFound("environment"))?;
         if allowed && !model.kind.may_allow_live_telecom() {
@@ -162,7 +192,7 @@ impl PlatformService {
         let mut active: environments::ActiveModel = model.into();
         active.live_telecom_allowed = Set(allowed);
         active.updated_at = Set(self.clock.now());
-        let model = active.update(&self.db).await?;
+        let model = active.update(db).await?;
         tracing::info!(
             environment_id = %model.id,
             live_telecom_allowed = model.live_telecom_allowed,

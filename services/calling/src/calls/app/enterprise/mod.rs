@@ -18,6 +18,7 @@
 mod capture;
 mod forward;
 mod ivr;
+mod orphans;
 mod queues;
 mod recording;
 mod ring_groups;

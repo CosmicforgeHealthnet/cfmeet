@@ -28,6 +28,7 @@ pub mod credentials;
 pub mod environments;
 pub mod error;
 pub mod limits;
+pub mod operator;
 pub mod principals;
 pub mod scopes;
 pub mod service_accounts;

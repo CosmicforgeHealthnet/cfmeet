@@ -403,13 +403,21 @@ impl PlatformService {
         tenant_id: TenantId,
         values: LimitValues,
     ) -> PlatformResult<LimitValues> {
+        self.set_tenant_limits_in(&self.db, tenant_id, values).await
+    }
+
+    pub(crate) async fn set_tenant_limits_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        tenant_id: TenantId,
+        values: LimitValues,
+    ) -> PlatformResult<LimitValues> {
         values.validate()?;
         let tenant = self.tenant(tenant_id).await?;
         let now = self.clock.now();
-        self.db
-            .execute(Statement::from_sql_and_values(
-                DbBackend::Postgres,
-                "INSERT INTO platform_tenant_limits (tenant_id, requests_per_minute, \
+        db.execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "INSERT INTO platform_tenant_limits (tenant_id, requests_per_minute, \
                    max_concurrent_communications, telecom_spend_daily_limit_minor, \
                    telecom_spend_monthly_limit_minor, created_at, updated_at) \
                  VALUES ($1, $2, $3, $4, $5, $6, $6) \
@@ -419,31 +427,31 @@ impl PlatformService {
                    telecom_spend_daily_limit_minor = EXCLUDED.telecom_spend_daily_limit_minor, \
                    telecom_spend_monthly_limit_minor = EXCLUDED.telecom_spend_monthly_limit_minor, \
                    updated_at = EXCLUDED.updated_at",
-                [
-                    tenant.id.as_uuid().into(),
-                    values.requests_per_minute.into(),
-                    values.max_concurrent_communications.into(),
-                    values.telecom_spend_daily_limit_minor.into(),
-                    values.telecom_spend_monthly_limit_minor.into(),
-                    now.into(),
-                ],
-            ))
-            .await?;
+            [
+                tenant.id.as_uuid().into(),
+                values.requests_per_minute.into(),
+                values.max_concurrent_communications.into(),
+                values.telecom_spend_daily_limit_minor.into(),
+                values.telecom_spend_monthly_limit_minor.into(),
+                now.into(),
+            ],
+        ))
+        .await?;
         tracing::info!(tenant_id = %tenant_id, "tenant limit policy set");
         Ok(values)
     }
 
     /// Upserts one owned limit row (service account / principal).
-    async fn upsert_owned_limits(
+    async fn upsert_owned_limits<C: ConnectionTrait>(
         &self,
+        db: &C,
         table: &str,
         key: &str,
         owner: (TenantId, ApplicationId, crate::domain::EnvironmentId, Uuid),
         values: LimitValues,
     ) -> PlatformResult<()> {
         let now = self.clock.now();
-        self.db
-            .execute(Statement::from_sql_and_values(
+        db.execute(Statement::from_sql_and_values(
                 DbBackend::Postgres,
                 format!(
                     "INSERT INTO {table} ({key}, tenant_id, application_id, environment_id, \
@@ -481,9 +489,20 @@ impl PlatformService {
         service_account_id: ServiceAccountId,
         values: LimitValues,
     ) -> PlatformResult<LimitValues> {
+        self.set_service_account_limits_in(&self.db, service_account_id, values)
+            .await
+    }
+
+    pub(crate) async fn set_service_account_limits_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        service_account_id: ServiceAccountId,
+        values: LimitValues,
+    ) -> PlatformResult<LimitValues> {
         values.validate()?;
         let sa = self.service_account(service_account_id).await?;
         self.upsert_owned_limits(
+            db,
             "platform_service_account_limits",
             "service_account_id",
             (
@@ -506,9 +525,20 @@ impl PlatformService {
         principal_id: PrincipalId,
         values: LimitValues,
     ) -> PlatformResult<LimitValues> {
+        self.set_principal_limits_in(&self.db, principal_id, values)
+            .await
+    }
+
+    pub(crate) async fn set_principal_limits_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        principal_id: PrincipalId,
+        values: LimitValues,
+    ) -> PlatformResult<LimitValues> {
         values.validate()?;
         let p = self.principal(principal_id).await?;
         self.upsert_owned_limits(
+            db,
             "platform_principal_limits",
             "principal_id",
             (
@@ -527,6 +557,16 @@ impl PlatformService {
     /// Replaces the application-level limit policy (`None` = not configured).
     pub async fn set_application_limits(
         &self,
+        application_id: ApplicationId,
+        values: LimitValues,
+    ) -> PlatformResult<LimitValues> {
+        self.set_application_limits_in(&self.db, application_id, values)
+            .await
+    }
+
+    pub(crate) async fn set_application_limits_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
         application_id: ApplicationId,
         values: LimitValues,
     ) -> PlatformResult<LimitValues> {
@@ -554,7 +594,7 @@ impl PlatformService {
                 ])
                 .to_owned(),
         )
-        .exec_without_returning(&self.db)
+        .exec_without_returning(db)
         .await?;
         tracing::info!(application_id = %application_id, "application limit policy set");
         Ok(values)
@@ -563,6 +603,16 @@ impl PlatformService {
     /// Replaces the credential-level limit policy (`None` = not configured).
     pub async fn set_credential_limits(
         &self,
+        credential_id: CredentialId,
+        values: LimitValues,
+    ) -> PlatformResult<LimitValues> {
+        self.set_credential_limits_in(&self.db, credential_id, values)
+            .await
+    }
+
+    pub(crate) async fn set_credential_limits_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
         credential_id: CredentialId,
         values: LimitValues,
     ) -> PlatformResult<LimitValues> {
@@ -591,7 +641,7 @@ impl PlatformService {
                 ])
                 .to_owned(),
         )
-        .exec_without_returning(&self.db)
+        .exec_without_returning(db)
         .await?;
         tracing::info!(credential_id = %credential_id, "credential limit policy set");
         Ok(values)

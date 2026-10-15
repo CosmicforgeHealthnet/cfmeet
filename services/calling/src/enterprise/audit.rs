@@ -54,6 +54,8 @@ text_enum!(
         Delete = "DELETE",
         RetentionDelete = "RETENTION_DELETE",
         MediaAccess = "MEDIA_ACCESS",
+        // Part H §79.29: voicemail metadata reads are access evidence too.
+        ReadMetadata = "READ_METADATA",
         RotateSecret = "ROTATE_SECRET",
         Replay = "REPLAY",
     }

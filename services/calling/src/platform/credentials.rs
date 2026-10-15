@@ -321,12 +321,22 @@ impl PlatformService {
         service_account_id: ServiceAccountId,
         request: IssueCredential,
     ) -> PlatformResult<IssuedCredential> {
+        self.issue_credential_in(&self.db, service_account_id, request)
+            .await
+    }
+
+    pub(crate) async fn issue_credential_in<C: ConnectionTrait + TransactionTrait>(
+        &self,
+        db: &C,
+        service_account_id: ServiceAccountId,
+        request: IssueCredential,
+    ) -> PlatformResult<IssuedCredential> {
         let label = optional_text(request.label.as_deref(), "label", 100)?;
         let now = self.clock.now();
         let (not_before, expires_at) =
             self.validity_window(now, request.not_before, request.expires_at)?;
 
-        let txn = self.db.begin().await?;
+        let txn = db.begin().await?;
         let chain = self.issuing_chain(&txn, service_account_id).await?;
         let scopes = self
             .validated_scopes(
@@ -350,7 +360,9 @@ impl PlatformService {
             environment_id = %model.environment_id,
             "API credential issued"
         );
-        let credential = self.credential(CredentialId::from_uuid(model.id)).await?;
+        let credential = self
+            .credential_in(db, CredentialId::from_uuid(model.id))
+            .await?;
         Ok(IssuedCredential { credential, secret })
     }
 
@@ -358,6 +370,16 @@ impl PlatformService {
     /// service account and limits the predecessor to `min(expiry, now + overlap)`.
     pub async fn rotate_credential(
         &self,
+        credential_id: CredentialId,
+        request: RotateCredential,
+    ) -> PlatformResult<IssuedCredential> {
+        self.rotate_credential_in(&self.db, credential_id, request)
+            .await
+    }
+
+    pub(crate) async fn rotate_credential_in<C: ConnectionTrait + TransactionTrait>(
+        &self,
+        db: &C,
         credential_id: CredentialId,
         request: RotateCredential,
     ) -> PlatformResult<IssuedCredential> {
@@ -373,7 +395,7 @@ impl PlatformService {
         let now = self.clock.now();
         let (not_before, expires_at) = self.validity_window(now, None, request.expires_at)?;
 
-        let txn = self.db.begin().await?;
+        let txn = db.begin().await?;
         let old = api_credentials::Entity::find_by_id(credential_id.as_uuid())
             .lock_exclusive()
             .one(&txn)
@@ -470,7 +492,9 @@ impl PlatformService {
             predecessor_valid_until = %valid_until,
             "API credential rotated"
         );
-        let credential = self.credential(CredentialId::from_uuid(new.id)).await?;
+        let credential = self
+            .credential_in(db, CredentialId::from_uuid(new.id))
+            .await?;
         Ok(IssuedCredential { credential, secret })
     }
 
@@ -478,6 +502,14 @@ impl PlatformService {
     /// returns it unchanged.
     pub async fn revoke_credential(
         &self,
+        credential_id: CredentialId,
+    ) -> PlatformResult<CredentialView> {
+        self.revoke_credential_in(&self.db, credential_id).await
+    }
+
+    pub(crate) async fn revoke_credential_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
         credential_id: CredentialId,
     ) -> PlatformResult<CredentialView> {
         let now = self.clock.now();
@@ -490,9 +522,9 @@ impl PlatformService {
             .col_expr(api_credentials::Column::UpdatedAt, Expr::value(now))
             .filter(api_credentials::Column::Id.eq(credential_id.as_uuid()))
             .filter(api_credentials::Column::Status.eq(CredentialStatus::Active))
-            .exec(&self.db)
+            .exec(db)
             .await?;
-        let view = self.credential(credential_id).await?;
+        let view = self.credential_in(db, credential_id).await?;
         if result.rows_affected > 0 {
             tracing::info!(credential_id = %credential_id, public_id = %view.public_id, "API credential revoked");
         }
@@ -500,11 +532,19 @@ impl PlatformService {
     }
 
     pub async fn credential(&self, id: CredentialId) -> PlatformResult<CredentialView> {
+        self.credential_in(&self.db, id).await
+    }
+
+    pub(crate) async fn credential_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        id: CredentialId,
+    ) -> PlatformResult<CredentialView> {
         let model = api_credentials::Entity::find_by_id(id.as_uuid())
-            .one(&self.db)
+            .one(db)
             .await?
             .ok_or(PlatformError::NotFound("credential"))?;
-        Ok(self.views(vec![model]).await?.remove(0))
+        Ok(self.views_in(db, vec![model]).await?.remove(0))
     }
 
     pub async fn credential_by_public_id(&self, public_id: &str) -> PlatformResult<CredentialView> {
@@ -544,6 +584,14 @@ impl PlatformService {
         &self,
         models: Vec<api_credentials::Model>,
     ) -> PlatformResult<Vec<CredentialView>> {
+        self.views_in(&self.db, models).await
+    }
+
+    async fn views_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        models: Vec<api_credentials::Model>,
+    ) -> PlatformResult<Vec<CredentialView>> {
         if models.is_empty() {
             return Ok(Vec::new());
         }
@@ -552,13 +600,13 @@ impl PlatformService {
         let env_ids: BTreeSet<_> = models.iter().map(|m| m.environment_id).collect();
         let kinds: HashMap<_, _> = environments::Entity::find()
             .filter(environments::Column::Id.is_in(env_ids))
-            .all(&self.db)
+            .all(db)
             .await?
             .into_iter()
             .map(|e| (e.id, e.kind))
             .collect();
         let mut scopes: HashMap<_, Vec<String>> = HashMap::new();
-        for row in scopes_of(&self.db, ids).await? {
+        for row in scopes_of(db, ids).await? {
             scopes.entry(row.credential_id).or_default().push(row.scope);
         }
         models

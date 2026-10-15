@@ -25,7 +25,7 @@ through the Asterisk REST Interface (ARI); business services never see SIP.
 
 | Plane | Listener | Exposure |
 |---|---|---|
-| Public SIP ingress | `<public-sip-ip>:5061/tls`, `:5060/udp` | carriers only: firewall allowlist of each interconnect's signalling CIDRs; PJSIP `identify` by IP; no anonymous endpoint (unidentified INVITEs are refused before any dialplan) |
+| Public SIP ingress | `<public-sip-ip>:5061/tls`, `:5060/udp` | carriers only: firewall allowlist of each interconnect's signalling CIDRs; PJSIP `identify` by IP **only** (`endpoint_identifier_order = ip`; the username identifier module is not loaded, so a forged From user never selects an endpoint); no anonymous endpoint (unidentified INVITEs are refused before any dialplan). Guarded by `services/telephony/tests/edge_config.rs` |
 | Media (RTP) | `10000-20000/udp` (`rtp.conf`) | carriers' media CIDRs and the RTC media gateway; media is anchored at the edge (`direct_media = no`) — never routed to application containers |
 | SIP control (ARI) | `<private-control-ip>:8088` (`http.conf`) | **private only**, Telephony instances only; TLS when not single-host. Telephony refuses a public ARI URL in `staging` / `production` |
 | Internal media peer | `<private-media-ip>:5070/udp` | the RTC media gateway only (`app-media` endpoint identified by its CIDR) |

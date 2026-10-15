@@ -1,8 +1,8 @@
 //! Abuse reports (Part H §69): a participant reports the Call it took part in.
 //!
 //! * `POST /v1/calls/:call_id/abuse-reports` (`calls.write`): the reporting principal
-//!   must be a participant of that Call (a foreign Call is 404, like every foreign
-//!   resource); the reported principal — the other party of a two-party Call — is
+//!   must be a participant of that Call (a foreign Call, or one the reporter took no
+//!   part in, is 404 like every foreign resource); the reported principal — the other party of a two-party Call — is
 //!   derived by the server and never supplied. One report per (Call, reporter): a repeat
 //!   returns the existing report.
 //! * `GET /v1/abuse-reports?principalId=` (`calls.read`): the reports a principal filed.
@@ -169,13 +169,10 @@ impl AppCallService {
             .into_iter()
             .map(|r| r.try_get_by_index::<Uuid>(0))
             .collect::<Result<_, _>>()?;
-        if participants.is_empty() {
+        // A Call the reporter took no part in is indistinguishable from a missing one:
+        // knowing a Call id never lets a principal report it.
+        if participants.is_empty() || !participants.contains(&principal_id) {
             return Err(CallError::NotFound);
-        }
-        if !participants.contains(&principal_id) {
-            return Err(CallError::Validation(
-                "principalId must be a participant of the call.",
-            ));
         }
         let others: Vec<Uuid> = participants
             .into_iter()
@@ -337,6 +334,55 @@ pub async fn set_status<C: ConnectionTrait>(
     ))
     .one(db)
     .await?)
+}
+
+/// `platform_admin abuse-report set-status` (audited, one transaction). `None` = no
+/// such report (nothing changed, nothing audited).
+pub async fn operator_set_status(
+    db: &sea_orm::DatabaseConnection,
+    operator: &crate::platform::operator::OperatorContext,
+    id: Uuid,
+    status: AbuseReportStatus,
+    now: DateTime<Utc>,
+) -> crate::platform::PlatformResult<AbuseReportView> {
+    use crate::platform::{
+        operator::{self, AuditEntry, AuditTargetKind, OperatorAction},
+        PlatformError,
+    };
+    let db_error = |e: CallError| PlatformError::Database {
+        summary: format!("abuse report ({})", e.code()),
+        connectivity: false,
+    };
+    operator::audited(db, operator, now, move |txn| {
+        Box::pin(async move {
+            let scope = txn
+                .query_one(stmt(
+                    "SELECT tenant_id, application_id, environment_id FROM calling_abuse_reports \
+                     WHERE id = $1 FOR UPDATE",
+                    vec![id.into()],
+                ))
+                .await?
+                .ok_or(PlatformError::NotFound("abuse report"))?;
+            let ids: (Uuid, Uuid, Uuid) = (
+                scope.try_get_by_index(0)?,
+                scope.try_get_by_index(1)?,
+                scope.try_get_by_index(2)?,
+            );
+            let view = set_status(txn, id, status, now)
+                .await
+                .map_err(db_error)?
+                .ok_or(PlatformError::NotFound("abuse report"))?;
+            let entry = AuditEntry::new(
+                OperatorAction::AbuseReportStatusSet,
+                AuditTargetKind::AbuseReport,
+                id,
+            )
+            .scope(Some(ids.0), Some(ids.1), Some(ids.2))
+            .detail(serde_json::json!({ "status": status.as_str(), "callId": view.call_id }));
+            Ok((view, entry))
+        })
+    })
+    .await
 }
 
 /// `platform_admin abuse-report show`.

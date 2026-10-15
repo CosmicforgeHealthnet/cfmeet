@@ -26,6 +26,11 @@ use uuid::Uuid;
 
 const SIGNATURE: &str = "x-cfmeet-provider-signature";
 
+/// The callback-rejection counters are process-wide: the tests that move them (and the
+/// ones asserting an exact delta) take this guard so they never count each other's
+/// rejections.
+static REJECTION_COUNTERS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 fn contracts() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/contracts")
 }
@@ -175,6 +180,7 @@ fn cb(
 
 #[tokio::test]
 async fn callbacks_are_authenticated_size_limited_and_strictly_parsed_before_any_effect() {
+    let _counters = REJECTION_COUNTERS.lock().await;
     let Some(h) = Harness::new().await else {
         return;
     };
@@ -595,6 +601,7 @@ async fn occurrences(h: &Harness, category: &str) -> i64 {
 
 #[tokio::test]
 async fn over_long_identifiers_are_refused_with_400_before_any_transaction() {
+    let _counters = REJECTION_COUNTERS.lock().await;
     let Some(h) = Harness::new().await else {
         return;
     };
@@ -665,6 +672,7 @@ async fn over_long_identifiers_are_refused_with_400_before_any_transaction() {
 
 #[tokio::test]
 async fn malformed_callbacks_aggregate_into_one_incident_without_leaking_into_logs() {
+    let _counters = REJECTION_COUNTERS.lock().await;
     let Some(h) = Harness::new().await else {
         return;
     };
@@ -742,6 +750,7 @@ async fn malformed_callbacks_aggregate_into_one_incident_without_leaking_into_lo
 
 #[tokio::test]
 async fn unknown_provider_callbacks_aggregate_under_the_unknown_subject() {
+    let _counters = REJECTION_COUNTERS.lock().await;
     let Some(h) = Harness::new().await else {
         return;
     };
@@ -835,6 +844,7 @@ async fn replay_bursts_become_one_incident_while_a_single_duplicate_is_normal() 
 
 #[tokio::test]
 async fn oversized_callbacks_are_counted_even_when_the_listener_refuses_them() {
+    let _counters = REJECTION_COUNTERS.lock().await;
     let Some(h) = Harness::new().await else {
         return;
     };
@@ -889,4 +899,253 @@ async fn a_callback_signed_with_the_previous_secret_is_accepted_during_the_overl
     );
     let r = post_raw(&h, "dp-a", body, Some(other)).await;
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+}
+
+/// Part H §76: an operator `disable` of an interconnect stops NEW originations only. The
+/// provider's callbacks are still authenticated with its secret and applied as evidence
+/// for the legs already in flight on it (refusing them would strand a live, paid call
+/// in a stale state); unauthenticated ones are still refused.
+#[tokio::test]
+async fn a_disabled_providers_callbacks_still_apply_to_its_in_flight_legs() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let (leg, call_ref, _) = live_leg(&h).await;
+    h.sql(
+        "UPDATE telecom_providers SET status = 'DISABLED', version = version + 1 WHERE id = 'dp-a'",
+    )
+    .await;
+    let ringing = cb("dis-1", &call_ref, "ringing", 1, h.now());
+    let r = post_raw(&h, "dp-a", ringing.body(), None).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{}", r.text);
+    assert_eq!(h.leg_status(leg).await, "ORIGINATING");
+    let r = post(&h, &ringing).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(disposition(&h, "dis-1").await, "APPLIED");
+    assert_eq!(h.leg_status(leg).await, "RINGING");
+    let ended = cb("dis-2", &call_ref, "completed", 2, h.now());
+    assert_eq!(post(&h, &ended).await.status, StatusCode::OK);
+    assert!(matches!(
+        h.leg_status(leg).await.as_str(),
+        "ENDED" | "FAILED"
+    ));
+    // Disabled for new work: the next origination does not use it.
+    let (next, _) = h.originate().await;
+    h.run().await;
+    assert_eq!(
+        h.text(&format!(
+            "SELECT provider_id FROM telephony_legs WHERE id = '{next}'"
+        ))
+        .await
+        .as_deref(),
+        Some("dp-b")
+    );
+}
+
+#[tokio::test]
+async fn malformed_provider_ids_are_refused_and_never_become_a_subject() {
+    let _counters = REJECTION_COUNTERS.lock().await;
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let (leg, call_ref, _) = live_leg(&h).await;
+    let body = cb("pid-1", &call_ref, "ringing", 1, h.now()).body();
+    let sig = h.provider_a.sign(&body);
+    let before = h.scalar("SELECT count(*) FROM provider_events").await;
+    let long = format!("evil{}", "a".repeat(36));
+    let over_long = format!("evil{}", "b".repeat(70));
+    for provider in [
+        "evil_provider",
+        "Evil-Provider",
+        "-evilprov",
+        "evil.provider",
+        "e",
+        long.as_str(),
+        over_long.as_str(),
+    ] {
+        let r = post_raw(&h, provider, body.clone(), Some(sig.clone())).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{provider}: {}", r.text);
+        assert_eq!(r.code(), "PROVIDER_EVENT_REJECTED", "{provider}");
+    }
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM provider_events").await,
+        before
+    );
+    assert_eq!(h.leg_status(leg).await, "ORIGINATING");
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM telephony_ingress_windows WHERE subject_id NOT IN ('unknown', 'dp-a', 'dp-b')")
+            .await,
+        0,
+        "never an attacker-supplied subject"
+    );
+    assert!(!h.dump().await.to_lowercase().contains("evil"));
+}
+
+#[tokio::test]
+async fn authenticated_but_malformed_payloads_are_refused_before_any_effect() {
+    let _counters = REJECTION_COUNTERS.lock().await;
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let (leg, call_ref, _) = live_leg(&h).await;
+    let before = h.scalar("SELECT count(*) FROM provider_events").await;
+    let rejections = metrics::counter(
+        "telephony_provider_callback_rejections_total",
+        &[("reason", "MALFORMED")],
+    );
+    let t = h.now();
+    let bodies: Vec<(&str, Vec<u8>)> = vec![
+        ("not json", b"ringing for sure".to_vec()),
+        ("empty", Vec::new()),
+        ("array", b"[]".to_vec()),
+        (
+            "missing event id",
+            serde_json::to_vec(&json!({ "event": "ringing", "occurredAt": t, "callRef": call_ref }))
+                .unwrap(),
+        ),
+        (
+            "missing event",
+            serde_json::to_vec(&json!({ "eventId": "mp-2", "occurredAt": t, "callRef": call_ref }))
+                .unwrap(),
+        ),
+        (
+            "numeric timestamp",
+            serde_json::to_vec(
+                &json!({ "eventId": "mp-3", "event": "ringing", "occurredAt": 12, "callRef": call_ref }),
+            )
+            .unwrap(),
+        ),
+        (
+            "null event",
+            serde_json::to_vec(
+                &json!({ "eventId": "mp-4", "event": null, "occurredAt": t, "callRef": call_ref }),
+            )
+            .unwrap(),
+        ),
+        (
+            "truncated",
+            br#"{"eventId":"mp-5","event":"ringing","occurredAt":"#.to_vec(),
+        ),
+    ];
+    let n = bodies.len() as u64;
+    for (what, body) in bodies {
+        let sig = h.provider_a.sign(&body);
+        let r = post_raw(&h, "dp-a", body, Some(sig)).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{what}: {}", r.text);
+        assert_eq!(r.code(), "VALIDATION_ERROR", "{what}");
+    }
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM provider_events").await,
+        before
+    );
+    assert_eq!(h.leg_status(leg).await, "ORIGINATING");
+    assert!(
+        metrics::counter(
+            "telephony_provider_callback_rejections_total",
+            &[("reason", "MALFORMED")]
+        ) >= rejections + n
+    );
+}
+
+#[tokio::test]
+async fn the_auth_failure_incident_starts_exactly_at_the_threshold() {
+    let _counters = REJECTION_COUNTERS.lock().await;
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let (_, call_ref, _) = live_leg(&h).await;
+    let body = cb("thr-1", &call_ref, "ringing", 1, h.now()).body();
+    let threshold = h.svc.settings.callback_auth_failure_incident_threshold;
+    assert_eq!(threshold, 5, "the harness threshold");
+    for i in 1..threshold {
+        let r = post_raw(
+            &h,
+            "dp-a",
+            body.clone(),
+            Some(format!("v1={}", "cd".repeat(32))),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            incident_count(&h, "CALLBACK_AUTH_FAILURES").await,
+            0,
+            "below the threshold ({i})"
+        );
+    }
+    post_raw(&h, "dp-a", body.clone(), None).await;
+    assert_eq!(incident_count(&h, "CALLBACK_AUTH_FAILURES").await, 1, "at");
+    assert_eq!(occurrences(&h, "CALLBACK_AUTH_FAILURES").await, 1);
+    post_raw(&h, "dp-a", body.clone(), None).await;
+    assert_eq!(
+        incident_count(&h, "CALLBACK_AUTH_FAILURES").await,
+        1,
+        "past it: one incident"
+    );
+    assert_eq!(occurrences(&h, "CALLBACK_AUTH_FAILURES").await, 2);
+    assert_eq!(
+        h.text(
+            "SELECT dedupe_key FROM telephony_incidents WHERE category = 'CALLBACK_AUTH_FAILURES'"
+        )
+        .await
+        .as_deref(),
+        Some("callback-auth:dp-a")
+    );
+    // The same applies to invalid callbacks: none below, one at the threshold.
+    let raw = br#"{"eventId":"thr-m","event":"ringing"}"#.to_vec();
+    let sig = h.provider_a.sign(&raw);
+    for _ in 1..h.svc.settings.callback_invalid_incident_threshold {
+        post_raw(&h, "dp-a", raw.clone(), Some(sig.clone())).await;
+    }
+    assert_eq!(incident_count(&h, "CALLBACK_MALFORMED").await, 0);
+    post_raw(&h, "dp-a", raw.clone(), Some(sig.clone())).await;
+    assert_eq!(incident_count(&h, "CALLBACK_MALFORMED").await, 1);
+}
+
+#[tokio::test]
+async fn token_route_callbacks_never_leak_the_token_signature_secret_or_body_into_logs() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let (leg, call_ref, _) = live_leg(&h).await;
+    let (logs, _guard) = capture_logs();
+    let token = "path-token-5be1c0d2e9";
+    let body = cb("tok-evt-31337", &call_ref, "ringing", 1, h.now()).body();
+    let sig = h.provider_a.sign(&body);
+    // Unsigned, wrongly signed, then genuine — all on the token route.
+    let route = format!("dp-a/{token}");
+    let r = post_raw(&h, &route, body.clone(), None).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    let wrong = telephony::providers::deterministic::sign_with(
+        b"attacker-secret-0123456789abcdefghijklmnop",
+        &body,
+    );
+    let r = post_raw(&h, &route, body.clone(), Some(wrong.clone())).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    let r = post_raw(&h, &route, body.clone(), Some(sig.clone())).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(h.leg_status(leg).await, "RINGING");
+    let text = logs.text();
+    assert!(!text.is_empty(), "logs were captured");
+    let secret = String::from_utf8_lossy(common::CALLBACK_SECRET).to_string();
+    let previous = String::from_utf8_lossy(common::PREVIOUS_CALLBACK_SECRET).to_string();
+    for forbidden in [
+        token,
+        sig.trim_start_matches("v1="),
+        wrong.trim_start_matches("v1="),
+        secret.as_str(),
+        previous.as_str(),
+        "tok-evt-31337",
+        call_ref.as_str(),
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "{forbidden} leaked into logs:\n{text}"
+        );
+    }
+    assert!(
+        text.contains("/provider-callbacks/:provider_id/:token"),
+        "the route pattern, not the path, is logged:\n{text}"
+    );
+    // Nor is the token persisted anywhere.
+    assert!(!h.dump().await.contains(token));
 }

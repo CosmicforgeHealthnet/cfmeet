@@ -68,7 +68,7 @@ struct Stack {
     w: AppWorld,
     _relay: Relay,
     calling_port: u16,
-    server: Option<JoinHandle<()>>,
+    server: Option<(JoinHandle<()>, tokio::sync::oneshot::Sender<()>)>,
     /// Customer credential with the privacy scopes.
     privacy: String,
     /// Privacy Relay's own base URL (its Contact Vault routes are served there).
@@ -351,15 +351,31 @@ impl Stack {
         }
         let listener = listener.expect("calling port");
         let app = self.w.h().router();
-        self.server = Some(tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        }));
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = stopped.await;
+                })
+                .await
+                .unwrap();
+        });
+        self.server = Some((server, stop));
     }
 
+    /// Takes Calling's internal listener down. Aborting the accept loop alone is not
+    /// enough: axum serves each connection on its own task, so a keep-alive connection
+    /// Privacy Relay pooled earlier would keep reaching Calling. The graceful shutdown
+    /// stops accepting AND closes every idle connection before the task ends.
     async fn stop_calling(&mut self) {
-        if let Some(server) = self.server.take() {
-            server.abort();
-            let _ = server.await;
+        if let Some((server, stop)) = self.server.take() {
+            let _ = stop.send(());
+            if tokio::time::timeout(Duration::from_secs(10), server)
+                .await
+                .is_err()
+            {
+                panic!("Calling's listener did not shut down");
+            }
         }
     }
 

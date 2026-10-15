@@ -53,6 +53,12 @@ pub struct CallingRuntime {
     /// Application (RTC) call media capture (Part F; default: unavailable).
     pub capture: Arc<dyn crate::calls::app::enterprise::CallMediaCapture>,
     pub webhooks: crate::webhooks::WebhookSettings,
+    /// Platform compliance overlay (Part H §78; `CALLING_COMPLIANCE_REQUIRED_COUNTRIES`,
+    /// default empty): countries whose paid routes always need compliance eligibility.
+    pub compliance_overlay: crate::routing::compliance::ComplianceOverlay,
+    /// Abuse incident thresholds (Part H §77; `CALLING_BLOCKED_ATTEMPTS_INCIDENT_THRESHOLD`,
+    /// `CALLING_ABUSE_REPORTS_INCIDENT_THRESHOLD`).
+    pub abuse_controls: crate::calls::app::AbuseControls,
 }
 
 #[derive(Clone)]
@@ -133,7 +139,9 @@ impl AppState {
             .with_public_network(runtime.public_network)
             .with_enterprise_flags(runtime.enterprise_flags)
             .with_artifacts(runtime.artifacts)
-            .with_capture(runtime.capture),
+            .with_capture(runtime.capture)
+            .with_compliance_overlay(runtime.compliance_overlay)
+            .with_abuse_controls(runtime.abuse_controls),
         );
         Self {
             authenticator: Arc::new(CredentialAuthenticator::new(

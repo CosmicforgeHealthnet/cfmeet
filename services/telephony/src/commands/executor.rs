@@ -12,10 +12,13 @@
 //!    chosen interconnect, and its assignment reference is kept on the leg as identity
 //!    evidence (Part H §78);
 //! 4. the TRANSMIT FENCE is committed (`transmitted_at`, binding SENT, leg ORIGINATING)
-//!    after re-checking the kill switches and that the chosen route and provider are
-//!    still ENABLED (an operator `disable` between route choice and the fence stops
-//!    the request: `ROUTE_DISABLED` / `PROVIDER_DISABLED`, definite, nothing sent);
-//!    if the database is unavailable here no provider request is ever sent;
+//!    after re-checking, inside the fence transaction (Part H §75): the kill switches,
+//!    that the chosen route and provider are still ENABLED, that neither circuit
+//!    opened, and the destination class decision. Any change since route choice stops
+//!    the request — definite, nothing sent (`ROUTE_DISABLED` / `PROVIDER_DISABLED` /
+//!    `CIRCUIT_OPEN` / `DESTINATION_CLASS_BLOCKED` / `DESTINATION_UNCLASSIFIED`); a
+//!    change committed after this read applies to the next request. If the database
+//!    is unavailable here no provider request is ever sent;
 //! 5. the provider request (bounded by a deadline);
 //! 6. the outcome is persisted: ACCEPTED, DEFINITE_FAILURE or UNKNOWN_OUTCOME.
 //!
@@ -391,18 +394,8 @@ impl TelephonyService {
         )
         .await?;
         if !classification.allowed() {
-            crate::metrics::inc(
-                "telephony_destination_class_refusals_total",
-                &[("class", classification.label())],
-            );
-            self.raise_abuse_signal("DESTINATION_CLASS_REFUSED", leg.application_id, 1, 0, now)
-                .await?;
-            let code = match classification {
-                Classification::Blocked(_) => "DESTINATION_CLASS_BLOCKED",
-                _ => "DESTINATION_UNCLASSIFIED",
-            };
             return self
-                .fail_before_send(&command, FailureCategory::Policy, code)
+                .refuse_destination(&command, &leg, classification, now)
                 .await;
         }
         let candidates: Vec<String> = command.payload["candidateRoutes"]
@@ -567,15 +560,27 @@ impl TelephonyService {
                 .await?;
             return Ok(Executed::Skipped);
         }
-        // Re-check immediately before the request leaves (Part H §45): the kill
-        // switches, and that the chosen route and its provider are still ENABLED. An
-        // operator `disable` is the lasting stop; a disabled route / provider between
-        // route choice and here means NO request (definite, safe to fail over).
-        if let Some(code) = self.transmit_gate(&txn, &route.id, class).await? {
-            drop(txn);
-            return self
-                .fail_before_send(&command, FailureCategory::Policy, code)
-                .await;
+        // Re-check immediately before the request leaves (Part H §45, §75): the kill
+        // switches, the chosen route and its provider still ENABLED, both circuits
+        // still allowing an attempt, and the destination class decision unchanged. An
+        // operator `disable` is the lasting stop; any change between route choice and
+        // here means NO request (definite, safe to fail over). Nothing awaits between
+        // this check and the fence commit except the fence's own statements.
+        match self
+            .transmit_gate(&txn, &route.id, class, &country, &resolved.destination)
+            .await?
+        {
+            None => {}
+            Some(GateRefusal::Destination(classification)) => {
+                drop(txn);
+                return self
+                    .refuse_destination(&command, &leg, classification, now)
+                    .await;
+            }
+            Some(GateRefusal::Code(code, category)) => {
+                drop(txn);
+                return self.fail_before_send(&command, category, code).await;
+            }
         }
         legs::transition_in(
             &txn,
@@ -654,32 +659,90 @@ impl TelephonyService {
         last
     }
 
-    /// The transmit gate: `Some(code)` when the request must NOT be sent.
+    /// Refuses a destination whose class may not be called (pre-toll, Part H §66):
+    /// bounded metric (the class only), abuse signal, definite unsent failure.
+    async fn refuse_destination(
+        &self,
+        command: &CommandRow,
+        leg: &LegRow,
+        classification: Classification,
+        now: DateTime<Utc>,
+    ) -> TelephonyResult<Executed> {
+        crate::metrics::inc(
+            "telephony_destination_class_refusals_total",
+            &[("class", classification.label())],
+        );
+        self.raise_abuse_signal("DESTINATION_CLASS_REFUSED", leg.application_id, 1, 0, now)
+            .await?;
+        let code = match classification {
+            Classification::Blocked(_) => "DESTINATION_CLASS_BLOCKED",
+            _ => "DESTINATION_UNCLASSIFIED",
+        };
+        self.fail_before_send(command, FailureCategory::Policy, code)
+            .await
+    }
+
+    /// The transmit gate, evaluated inside the fence transaction: `Some(refusal)` when
+    /// the request must NOT be sent.
     async fn transmit_gate<C: ConnectionTrait>(
         &self,
         txn: &C,
         route_id: &str,
         class: PublicRouteClass,
-    ) -> TelephonyResult<Option<&'static str>> {
+        country: &str,
+        destination: &crate::providers::ExecutionNumber,
+    ) -> TelephonyResult<Option<GateRefusal>> {
+        let refuse = |code, category| Ok(Some(GateRefusal::Code(code, category)));
         if !self.flags.telephony.enabled() || !self.flags.public_outbound.enabled() {
-            return Ok(Some("FEATURE_DISABLED"));
+            return refuse("FEATURE_DISABLED", FailureCategory::Policy);
         }
         if class == PublicRouteClass::CallbackRelay && !self.flags.callback_relay.enabled() {
-            return Ok(Some("FEATURE_DISABLED"));
+            return refuse("FEATURE_DISABLED", FailureCategory::Policy);
         }
         let gate: Option<GateRow> = db::one(
             txn,
-            "SELECT r.status AS route_status, p.status AS provider_status \
+            "SELECT r.status AS route_status, p.status AS provider_status, \
+               r.circuit_state AS route_circuit, r.circuit_opened_at AS route_opened_at, \
+               p.circuit_state AS provider_circuit, p.circuit_opened_at AS provider_opened_at \
              FROM telecom_routes r JOIN telecom_providers p ON p.id = r.provider_id WHERE r.id = $1",
             vec![route_id.into()],
         )
         .await?;
-        Ok(match gate {
-            None => Some("ROUTE_DISABLED"),
-            Some(g) if g.route_status != "ENABLED" => Some("ROUTE_DISABLED"),
-            Some(g) if g.provider_status != "ENABLED" => Some("PROVIDER_DISABLED"),
-            Some(_) => None,
-        })
+        let now = self.now();
+        match gate {
+            None => return refuse("ROUTE_DISABLED", FailureCategory::Policy),
+            Some(g) if g.route_status != "ENABLED" => {
+                return refuse("ROUTE_DISABLED", FailureCategory::Policy)
+            }
+            Some(g) if g.provider_status != "ENABLED" => {
+                return refuse("PROVIDER_DISABLED", FailureCategory::Policy)
+            }
+            Some(g)
+                if !crate::routing::circuit_allows(&g.route_circuit, g.route_opened_at, now)
+                    || !crate::routing::circuit_allows(
+                        &g.provider_circuit,
+                        g.provider_opened_at,
+                        now,
+                    ) =>
+            {
+                return refuse("CIRCUIT_OPEN", FailureCategory::Routing)
+            }
+            Some(_) => {}
+        }
+        // The destination class decision, re-read: a rule added or re-enabled (or the
+        // policy's data changed) since the pre-toll check still stops the request.
+        let classification = destinations::classify(
+            txn,
+            country,
+            destination,
+            &self.settings.blocked_destination_classes,
+            self.settings.unclassified_destination_policy,
+        )
+        .await?;
+        if !classification.allowed() {
+            return Ok(Some(GateRefusal::Destination(classification)));
+        }
+        Ok(None)
     }
 
     async fn record_originate_outcome(
@@ -1230,6 +1293,16 @@ struct RouteRef {
 struct GateRow {
     route_status: String,
     provider_status: String,
+    route_circuit: String,
+    route_opened_at: Option<DateTime<Utc>>,
+    provider_circuit: String,
+    provider_opened_at: Option<DateTime<Utc>>,
+}
+
+/// Why the transmit gate stopped a request.
+enum GateRefusal {
+    Code(&'static str, FailureCategory),
+    Destination(Classification),
 }
 
 #[derive(Debug, sea_orm::FromQueryResult)]

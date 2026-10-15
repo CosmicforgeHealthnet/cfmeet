@@ -15,8 +15,8 @@
 
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-    QueryOrder,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
+    EntityTrait, QueryFilter, QueryOrder,
 };
 use serde::Serialize;
 use uuid::Uuid;
@@ -166,6 +166,10 @@ fn looks_like_telephone_number(value: &str) -> bool {
 }
 
 /// Validates an opaque external reference for `kind` (mirrors the database `CHECK`s).
+/// Reserved prefix of the reference a tombstoned principal carries (Part H §80.42,
+/// `retention::tombstone`): `tombstoned:<principal id>`.
+pub const TOMBSTONE_REFERENCE_PREFIX: &str = "tombstoned:";
+
 pub fn validate_external_reference(kind: PrincipalKind, value: &str) -> PlatformResult<String> {
     if value.is_empty()
         || value.len() > MAX_REFERENCE_LEN
@@ -178,6 +182,13 @@ pub fn validate_external_reference(kind: PrincipalKind, value: &str) -> Platform
     if looks_like_telephone_number(value) {
         return Err(reference_error(
             "plaintext telephone numbers / tel: / sip: URIs are not accepted as principal references; use an opaque reference",
+        ));
+    }
+    // Reserved for tombstoned principals (Part H §80.42): a registration can never take
+    // (or pre-empt) a tombstone reference.
+    if value.starts_with(TOMBSTONE_REFERENCE_PREFIX) {
+        return Err(reference_error(
+            "the `tombstoned:` prefix is reserved and is not accepted as a principal reference",
         ));
     }
     match kind {
@@ -209,6 +220,16 @@ impl PlatformService {
         environment_id: EnvironmentId,
         new: NewPrincipal,
     ) -> PlatformResult<(PrincipalView, bool)> {
+        self.register_principal_in(&self.db, environment_id, new)
+            .await
+    }
+
+    pub(crate) async fn register_principal_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        environment_id: EnvironmentId,
+        new: NewPrincipal,
+    ) -> PlatformResult<(PrincipalView, bool)> {
         let environment = self.environment(environment_id).await?;
         let scope = OwnerScope {
             tenant_id: environment.tenant_id.as_uuid(),
@@ -226,7 +247,7 @@ impl PlatformService {
             ),
             NewPrincipal::ServiceAccount(service_account_id) => {
                 let sa = service_accounts::Entity::find_by_id(service_account_id.as_uuid())
-                    .one(&self.db)
+                    .one(db)
                     .await?
                     .filter(|sa| {
                         sa.tenant_id == scope.tenant_id
@@ -271,7 +292,7 @@ impl PlatformService {
             .do_nothing()
             .to_owned(),
         )
-        .exec_without_returning(&self.db)
+        .exec_without_returning(db)
         .await?;
         let model = principals::Entity::find()
             .filter(principals::Column::TenantId.eq(scope.tenant_id))
@@ -279,7 +300,7 @@ impl PlatformService {
             .filter(principals::Column::EnvironmentId.eq(scope.environment_id))
             .filter(principals::Column::Kind.eq(kind))
             .filter(principals::Column::ExternalReference.eq(reference))
-            .one(&self.db)
+            .one(db)
             .await?
             .ok_or(PlatformError::NotFound("principal"))?;
         let created = inserted > 0;
@@ -322,17 +343,41 @@ impl PlatformService {
         id: PrincipalId,
         status: PrincipalStatus,
     ) -> PlatformResult<PrincipalView> {
+        self.set_principal_status_in(&self.db, id, status).await
+    }
+
+    pub(crate) async fn set_principal_status_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        id: PrincipalId,
+        status: PrincipalStatus,
+    ) -> PlatformResult<PrincipalView> {
         let model = principals::Entity::find_by_id(id.as_uuid())
-            .one(&self.db)
+            .one(db)
             .await?
             .ok_or(PlatformError::NotFound("principal"))?;
         if model.status == status {
             return Ok(model.into());
         }
+        // A tombstoned principal (Part H §80.42) stays DEACTIVATED for ever (the database
+        // refuses any other status too).
+        let tombstoned = db
+            .query_one(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DbBackend::Postgres,
+                "SELECT 1 FROM platform_principals WHERE id = $1 AND tombstoned_at IS NOT NULL",
+                vec![model.id.into()],
+            ))
+            .await?
+            .is_some();
+        if tombstoned {
+            return Err(PlatformError::InvalidState(
+                "a tombstoned principal cannot change status".to_string(),
+            ));
+        }
         let mut active: principals::ActiveModel = model.into();
         active.status = Set(status);
         active.updated_at = Set(self.clock.now());
-        let model = active.update(&self.db).await?;
+        let model = active.update(db).await?;
         tracing::info!(principal_id = %model.id, status = %model.status, "principal status changed");
         Ok(model.into())
     }

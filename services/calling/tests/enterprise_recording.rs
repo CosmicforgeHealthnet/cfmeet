@@ -1301,3 +1301,489 @@ async fn stop_racing_the_call_end_stops_once() {
     }
     assert_eq!(rec.store.len(), 3, "one artifact per recording");
 }
+
+impl Rec {
+    /// A CONNECTED Call with a started recording, ended so the recording is STOPPING
+    /// (awaiting its capture). Returns (call, recording).
+    async fn stopped_recording(&self, caller: &Desk, number: &str, callee: &Desk) -> (Uuid, Uuid) {
+        let e = &self.e;
+        let call = self.connected(caller, number, callee).await;
+        let r = self.start(call, None).await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        let recording = recording_id(&r);
+        let (_, v) = e.a.state(call).await;
+        let r = e.a.command(call, "end", v).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        self.tick().await;
+        assert_eq!(
+            self.recording_state(recording).await,
+            "STOPPING:CALL_ENDED:"
+        );
+        (call, recording)
+    }
+
+    async fn try_deliver(
+        &self,
+        recording: Uuid,
+        call: Uuid,
+        bytes: &[u8],
+    ) -> Result<calling::calls::app::enterprise::CaptureDelivery, calling::calls::errors::CallError>
+    {
+        self.e
+            .h()
+            .state
+            .app
+            .deliver_capture(
+                recording,
+                call,
+                CapturedMedia {
+                    content_type: "audio/wav".into(),
+                    duration_ms: 2000,
+                    sha256: cf_object_storage::sha256_hex(bytes),
+                    bytes: bytes.to_vec(),
+                },
+            )
+            .await
+    }
+
+    async fn orphans(&self) -> i64 {
+        self.e
+            .count("SELECT count(*) FROM calling_orphan_objects")
+            .await
+    }
+
+    /// Media access for `principal`: the status, and whether a URL was handed out.
+    async fn media_access(&self, recording: Uuid, principal: Uuid) -> (StatusCode, bool) {
+        let r = self
+            .read(
+                Method::POST,
+                &format!("/v1/enterprise/recordings/{recording}/media-access"),
+                Some(json!({ "principalId": principal })),
+            )
+            .await;
+        (r.status, r.json.get("url").is_some())
+    }
+
+    /// Incidents about `recording` (category:occurrences), and their evidence.
+    async fn incidents_of(&self, recording: Uuid) -> (Vec<String>, String) {
+        let conn = self.e.h().conn();
+        (
+            strings(
+                conn,
+                &format!(
+                    "SELECT category || ':' || occurrences FROM calling_incidents \
+                      WHERE resource_id = '{recording}' ORDER BY first_seen_at, dedupe_key"
+                ),
+            )
+            .await,
+            strings(
+                conn,
+                &format!(
+                    "SELECT COALESCE(string_agg(restricted_evidence::text, ' '), '') \
+                       FROM calling_incidents WHERE resource_id = '{recording}'"
+                ),
+            )
+            .await
+            .join(" "),
+        )
+    }
+}
+
+/// Part H §79.26: the capture object is written BEFORE the state transaction. When the
+/// stored object fails integrity validation, or the finalizing transaction fails, the
+/// object is deleted at once — or, when storage refuses the delete too, queued (key kept
+/// only in `calling_orphan_objects`) and deleted later by the recording worker. An object
+/// a later delivery made the artifact is never deleted. No media access exists for any of
+/// it, and no incident evidence carries the key.
+#[tokio::test]
+async fn orphaned_capture_objects_are_never_left_behind() {
+    let Some(rec) = Rec::new().await else {
+        return;
+    };
+    let e = &rec.e;
+    let caller = rec.desk("caller").await;
+    let callee = rec.desk("callee").await;
+    e.extension("4250", "ENTERPRISE_MEMBER", callee.principal.id())
+        .await;
+    rec.policy("MANUAL_ALLOWED", false, "NONE", 600).await;
+    let owner = caller.principal.id().as_uuid();
+    let audio = wav(1200);
+
+    // 1. Integrity mismatch after the write: the object is removed immediately.
+    let (call, recording) = rec.stopped_recording(&caller, "4250", &callee).await;
+    rec.store.set_corrupt_writes(true);
+    assert!(matches!(
+        rec.try_deliver(recording, call, &audio).await,
+        Err(calling::calls::errors::CallError::ArtifactStorageUnavailable)
+    ));
+    assert!(rec.store.is_empty(), "{:?}", rec.store.keys());
+    assert_eq!(rec.orphans().await, 0);
+    assert_eq!(
+        rec.recording_state(recording).await,
+        "PROCESSING:CALL_ENDED:STORAGE_INTEGRITY"
+    );
+    assert!(!rec.media_access(recording, owner).await.1);
+
+    // 2. Mismatch AND the delete fails: queued (the key lives only in the orphan table),
+    //    an incident without the key; deferred while the capture is still awaited.
+    rec.store.set_failing_deletes(true);
+    assert!(rec.try_deliver(recording, call, &audio).await.is_err());
+    assert_eq!(rec.store.len(), 1);
+    assert_eq!(rec.orphans().await, 1);
+    let key = rec.store.keys().pop().unwrap();
+    assert_eq!(
+        strings(
+            e.h().conn(),
+            "SELECT object_key FROM calling_orphan_objects"
+        )
+        .await,
+        std::slice::from_ref(&key)
+    );
+    let (incidents, evidence) = rec.incidents_of(recording).await;
+    assert_eq!(incidents, ["RECORDING_ARTIFACT_FAILURE:1"]);
+    assert!(
+        !evidence.contains("recordings/") && !evidence.contains(&key),
+        "{evidence}"
+    );
+    assert_eq!(
+        e.count(&format!(
+            "SELECT count(*) FROM call_recordings t WHERE row_to_json(t)::text LIKE '%{key}%'"
+        ))
+        .await,
+        0
+    );
+    e.h().clock.advance(chrono::Duration::minutes(5));
+    rec.tick().await;
+    assert_eq!((rec.store.len(), rec.orphans().await), (1, 1), "deferred");
+    assert_eq!(
+        rec.media_access(recording, owner).await,
+        (StatusCode::CONFLICT, false)
+    );
+
+    // 3. A later delivery makes that very key the artifact: the queue entry is dropped
+    //    with the READY transaction and the worker never deletes the object.
+    rec.store.set_corrupt_writes(false);
+    rec.deliver(recording, call, &audio).await;
+    assert_eq!(rec.recording_state(recording).await, "READY:CALL_ENDED:");
+    assert_eq!(rec.orphans().await, 0);
+    rec.store.set_failing_deletes(false);
+    e.h().clock.advance(chrono::Duration::hours(2));
+    rec.tick().await;
+    assert_eq!(rec.store.get_raw(&key).unwrap(), audio);
+    assert_eq!(
+        rec.media_access(recording, owner).await,
+        (StatusCode::OK, true)
+    );
+
+    // 4. The finalizing transaction fails after the write: the object is deleted.
+    common::exec(
+        e.h().conn(),
+        "CREATE FUNCTION test_fail_recording_ready() RETURNS trigger LANGUAGE plpgsql AS $$ \
+         BEGIN IF NEW.state = 'READY' THEN RAISE EXCEPTION 'injected finalization failure'; END IF; \
+         RETURN NEW; END $$; \
+         CREATE TRIGGER trg_test_fail_recording_ready BEFORE UPDATE ON call_recordings \
+         FOR EACH ROW EXECUTE FUNCTION test_fail_recording_ready();",
+    )
+    .await
+    .unwrap();
+    let (call2, recording2) = rec.stopped_recording(&caller, "4250", &callee).await;
+    assert!(rec.try_deliver(recording2, call2, &audio).await.is_err());
+    assert_eq!(
+        rec.store.keys(),
+        std::slice::from_ref(&key),
+        "only the READY artifact remains"
+    );
+    assert_eq!(rec.orphans().await, 0);
+
+    // 5. ... and when that delete fails, it is queued and deleted once the recording can
+    //    no longer be finalized (lost capture) and storage recovers.
+    rec.store.set_failing_deletes(true);
+    assert!(rec.try_deliver(recording2, call2, &audio).await.is_err());
+    assert_eq!((rec.store.len(), rec.orphans().await), (2, 1));
+    assert!(!rec.media_access(recording2, owner).await.1);
+    common::exec(
+        e.h().conn(),
+        "DROP TRIGGER trg_test_fail_recording_ready ON call_recordings; \
+         DROP FUNCTION test_fail_recording_ready();",
+    )
+    .await
+    .unwrap();
+    rec.store.set_failing_deletes(false);
+    e.h().clock.advance(chrono::Duration::hours(2));
+    rec.tick().await;
+    assert_eq!(
+        rec.recording_state(recording2).await,
+        "FAILED:CALL_ENDED:CAPTURE_LOST"
+    );
+    assert_eq!(rec.orphans().await, 0);
+    assert_eq!(rec.store.keys(), std::slice::from_ref(&key));
+    assert!(!rec.media_access(recording2, owner).await.1);
+    let (_, evidence) = rec.incidents_of(recording2).await;
+    assert!(!evidence.contains("recordings/"), "{evidence}");
+}
+
+/// Part H §79.27: a FAILED recording carries a retention bound and the retention pass
+/// moves it to DELETED (deleting any object a capture may have written before it
+/// failed), audited as the system.
+#[tokio::test]
+async fn failed_recordings_are_retention_deleted() {
+    let Some(rec) = Rec::new().await else {
+        return;
+    };
+    let e = &rec.e;
+    let caller = rec.desk("caller").await;
+    let callee = rec.desk("callee").await;
+    e.extension("4260", "ENTERPRISE_MEMBER", callee.principal.id())
+        .await;
+    rec.policy("MANUAL_ALLOWED", false, "NONE", 600).await;
+    let (_, recording) = rec.stopped_recording(&caller, "4260", &callee).await;
+    // A stray write at the recording's key (e.g. an upload that timed out).
+    let scope = e.a.w.scope();
+    let stray = format!(
+        "recordings/{}/{}/{}/{recording}.wav",
+        scope.tenant_id().as_uuid().simple(),
+        scope.application_id().as_uuid().simple(),
+        scope.environment_id().as_uuid().simple()
+    );
+    use cf_object_storage::ObjectStore;
+    rec.store.put(&stray, wav(100), "audio/wav").await.unwrap();
+    e.h().clock.advance(chrono::Duration::hours(2));
+    rec.tick().await;
+    assert_eq!(
+        rec.recording_state(recording).await,
+        "FAILED:CALL_ENDED:CAPTURE_LOST"
+    );
+    assert_eq!(
+        e.count(&format!(
+            "SELECT count(*) FROM call_recordings WHERE id = '{recording}' \
+               AND retention_until BETWEEN failed_at + interval '29 days' AND failed_at + interval '31 days'"
+        ))
+        .await,
+        1
+    );
+    e.h().clock.advance(chrono::Duration::days(29));
+    rec.tick().await;
+    assert!(rec.recording_state(recording).await.starts_with("FAILED:"));
+    e.h().clock.advance(chrono::Duration::days(2));
+    rec.tick().await;
+    assert!(rec.recording_state(recording).await.starts_with("DELETED:"));
+    assert!(rec.store.is_empty(), "{:?}", rec.store.keys());
+    assert_eq!(
+        strings(
+            e.h().conn(),
+            &format!(
+                "SELECT actor_kind || ':' || operation || ':' || outcome FROM call_recording_access_audit \
+                  WHERE recording_id = '{recording}' ORDER BY seq"
+            ),
+        )
+        .await,
+        ["SYSTEM:RETENTION_DELETE:GRANTED"]
+    );
+    assert_eq!(
+        strings(
+            e.h().conn(),
+            &format!("SELECT delete_reason FROM call_recordings WHERE id = '{recording}'"),
+        )
+        .await,
+        ["RETENTION"]
+    );
+}
+
+/// Part H §79.28: when storage refuses the delete, the recording stays DELETING (never
+/// DELETED while its object may exist), is retried with backoff, raises ONE incident
+/// after the configured number of attempts, keeps a coherent audit (one DELETE), and
+/// becomes DELETED once storage recovers.
+#[tokio::test]
+async fn deletion_survives_a_storage_outage_with_one_incident() {
+    let Some(rec) = Rec::new().await else {
+        return;
+    };
+    let e = &rec.e;
+    let caller = rec.desk("caller").await;
+    let callee = rec.desk("callee").await;
+    e.extension("4270", "ENTERPRISE_MEMBER", callee.principal.id())
+        .await;
+    rec.policy("MANUAL_ALLOWED", false, "NONE", 600).await;
+    let (call, recording) = rec.stopped_recording(&caller, "4270", &callee).await;
+    rec.deliver(recording, call, &wav(800)).await;
+    let owner = caller.principal.id().as_uuid();
+    let version = rec
+        .manage(
+            Method::GET,
+            &format!("/v1/enterprise/recordings/{recording}"),
+            None,
+        )
+        .await
+        .json["version"]
+        .as_i64()
+        .unwrap();
+    rec.store.set_failing_deletes(true);
+    let r = rec
+        .manage(
+            Method::DELETE,
+            &format!("/v1/enterprise/recordings/{recording}?expectedVersion={version}&principalId={owner}"),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let threshold =
+        calling::calls::app::AppCallingConfig::default().artifact_delete_incident_attempts;
+    for attempt in 1..=threshold + 2 {
+        e.h().clock.advance(chrono::Duration::hours(1));
+        rec.tick().await;
+        assert!(
+            rec.recording_state(recording)
+                .await
+                .starts_with("DELETING:"),
+            "attempt {attempt}"
+        );
+        assert_eq!(rec.store.len(), 1);
+        assert_eq!(
+            e.count(&format!(
+                "SELECT delete_attempts::bigint FROM call_recordings WHERE id = '{recording}'"
+            ))
+            .await,
+            attempt as i64
+        );
+        let incidents = e
+            .count(&format!(
+                "SELECT count(*) FROM calling_incidents WHERE resource_id = '{recording}' \
+                   AND category = 'RECORDING_ARTIFACT_FAILURE' AND dedupe_key LIKE '%:delete'"
+            ))
+            .await;
+        assert_eq!(
+            incidents,
+            i64::from(attempt >= threshold),
+            "attempt {attempt}"
+        );
+    }
+    assert_eq!(
+        e.count(&format!(
+            "SELECT occurrences::bigint FROM calling_incidents WHERE resource_id = '{recording}' \
+               AND dedupe_key LIKE '%:delete'"
+        ))
+        .await,
+        1,
+        "raised once"
+    );
+    let (_, evidence) = rec.incidents_of(recording).await;
+    assert!(!evidence.contains("recordings/"), "{evidence}");
+    // No media access while DELETING.
+    assert!(!rec.media_access(recording, owner).await.1);
+    rec.store.set_failing_deletes(false);
+    e.h().clock.advance(chrono::Duration::hours(1));
+    rec.tick().await;
+    assert_eq!(rec.recording_state(recording).await, "DELETED:CALL_ENDED:");
+    assert!(rec.store.is_empty());
+    assert_eq!(rec.events(call).await.last().unwrap(), "RECORDING_DELETED");
+    assert_eq!(
+        strings(
+            e.h().conn(),
+            &format!(
+                "SELECT operation || ':' || outcome FROM call_recording_access_audit \
+                  WHERE recording_id = '{recording}' AND operation = 'DELETE'"
+            ),
+        )
+        .await,
+        ["DELETE:GRANTED"]
+    );
+}
+
+/// Part H §80 (ADR 0030): the recording retention pass honours retention holds (here a
+/// hold on the recording's Call), and a retention delete that storage refuses keeps the
+/// recording DELETING — retried with backoff, never DELETED while its object may still
+/// exist — until storage recovers. One RETENTION_DELETE access-audit row.
+#[tokio::test]
+async fn retention_honours_holds_and_survives_a_storage_outage() {
+    use calling::{
+        domain::Clock,
+        platform::operator::OperatorContext,
+        retention::{
+            holds::{self, HoldOwner, HoldReason, HoldScope},
+            DataClass,
+        },
+    };
+    let Some(rec) = Rec::new().await else {
+        return;
+    };
+    let e = &rec.e;
+    let caller = rec.desk("caller").await;
+    let callee = rec.desk("callee").await;
+    e.extension("4280", "ENTERPRISE_MEMBER", callee.principal.id())
+        .await;
+    rec.policy("MANUAL_ALLOWED", false, "NONE", 600).await;
+    let (call, recording) = rec.stopped_recording(&caller, "4280", &callee).await;
+    rec.deliver(recording, call, &wav(800)).await;
+    assert!(rec.recording_state(recording).await.starts_with("READY:"));
+    let scope = e.a.w.scope();
+    let mine = HoldOwner {
+        tenant_id: scope.tenant_id().as_uuid(),
+        application_id: scope.application_id().as_uuid(),
+        environment_id: scope.environment_id().as_uuid(),
+    };
+    let operator = OperatorContext::new("ops.legal").unwrap();
+    let hold = holds::operator_place(
+        e.h().conn(),
+        &operator,
+        HoldScope {
+            data_class: Some(DataClass::RecordingArtifact),
+            resource_id: Some(call),
+            owner: Some(mine),
+        },
+        HoldReason::Dispute,
+        e.h().clock.now(),
+    )
+    .await
+    .unwrap();
+    // Past the policy's 30 days: held, so still READY with its object.
+    e.h().clock.advance(chrono::Duration::days(31));
+    rec.tick().await;
+    assert!(rec.recording_state(recording).await.starts_with("READY:"));
+    assert_eq!(rec.store.len(), 1);
+
+    holds::operator_release(e.h().conn(), &operator, hold.id, e.h().clock.now())
+        .await
+        .unwrap();
+    rec.store.set_failing_deletes(true);
+    for attempt in 1..=2 {
+        rec.tick().await;
+        assert!(
+            rec.recording_state(recording)
+                .await
+                .starts_with("DELETING:"),
+            "attempt {attempt}"
+        );
+        assert_eq!(rec.store.len(), 1);
+        assert_eq!(
+            e.count(&format!(
+                "SELECT delete_attempts::bigint FROM call_recordings WHERE id = '{recording}'"
+            ))
+            .await,
+            attempt
+        );
+        e.h().clock.advance(chrono::Duration::hours(1));
+    }
+    rec.store.set_failing_deletes(false);
+    rec.tick().await;
+    assert!(rec.recording_state(recording).await.starts_with("DELETED:"));
+    assert!(rec.store.is_empty());
+    assert_eq!(
+        strings(
+            e.h().conn(),
+            &format!(
+                "SELECT actor_kind || ':' || operation || ':' || outcome FROM call_recording_access_audit \
+                  WHERE recording_id = '{recording}' AND operation = 'RETENTION_DELETE'"
+            ),
+        )
+        .await,
+        ["SYSTEM:RETENTION_DELETE:GRANTED"]
+    );
+    assert_eq!(
+        strings(
+            e.h().conn(),
+            &format!("SELECT delete_reason FROM call_recordings WHERE id = '{recording}'"),
+        )
+        .await,
+        ["RETENTION"]
+    );
+}

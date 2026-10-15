@@ -2,7 +2,8 @@
 
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
+    QueryOrder,
 };
 use serde::Serialize;
 
@@ -60,6 +61,14 @@ fn billing_currency(value: Option<&str>) -> PlatformResult<String> {
 
 impl PlatformService {
     pub async fn create_tenant(&self, new: NewTenant) -> PlatformResult<TenantView> {
+        self.create_tenant_in(&self.db, new).await
+    }
+
+    pub(crate) async fn create_tenant_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        new: NewTenant,
+    ) -> PlatformResult<TenantView> {
         let slug = Slug::parse(&new.slug).map_err(PlatformError::Validation)?;
         let display_name = display_name(&new.display_name)?;
         let currency = billing_currency(new.billing_currency.as_deref())?;
@@ -74,7 +83,7 @@ impl PlatformService {
             created_at: Set(now),
             updated_at: Set(now),
         }
-        .insert(&self.db)
+        .insert(db)
         .await
         .map_err(|e| match PlatformError::from(e) {
             PlatformError::Conflict(_) => {
@@ -120,8 +129,17 @@ impl PlatformService {
         id: TenantId,
         status: TenantStatus,
     ) -> PlatformResult<TenantView> {
+        self.set_tenant_status_in(&self.db, id, status).await
+    }
+
+    pub(crate) async fn set_tenant_status_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        id: TenantId,
+        status: TenantStatus,
+    ) -> PlatformResult<TenantView> {
         let model = tenants::Entity::find_by_id(id.as_uuid())
-            .one(&self.db)
+            .one(db)
             .await?
             .ok_or(PlatformError::NotFound("tenant"))?;
         if model.status == status {
@@ -130,7 +148,7 @@ impl PlatformService {
         let mut active: tenants::ActiveModel = model.into();
         active.status = Set(status);
         active.updated_at = Set(self.clock.now());
-        let model = active.update(&self.db).await?;
+        let model = active.update(db).await?;
         tracing::info!(tenant_id = %model.id, status = %model.status, "tenant status changed");
         Ok(model.into())
     }

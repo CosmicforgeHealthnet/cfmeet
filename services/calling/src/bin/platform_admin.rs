@@ -7,6 +7,14 @@
 //! Output is JSON on stdout; operator audit lines go to stderr. `credential create` and
 //! `credential rotate` print the raw credential exactly once; no command can recover it.
 //!
+//! Operator audit (Part H §72.8): every mutating command requires the acting operator —
+//! `--operator <id>` or `CF_OPERATOR_ID` — and is refused (exit 2, nothing changed)
+//! without one. Each mutation writes exactly one `platform_operator_audit` row (operator,
+//! generated correlation id, bounded action, target) in the same transaction as the
+//! change. Read-only commands (`list`, `show`, `registry`, `effective`, `key-status`,
+//! `retention list|policies`) need no operator. Retention holds, principal tombstones and
+//! webhook key reseals are audited too (Part H §80, ADR 0030).
+//!
 //! All arguments are generic: there are no product-specific commands or defaults.
 
 use std::{process::ExitCode, sync::Arc, time::Duration as StdDuration};
@@ -24,11 +32,17 @@ use calling::{
         environments::EnvironmentView,
         error::summarize_db_error,
         limits::LimitValues,
+        operator::{audited, AuditEntry, AuditTargetKind, OperatorAction, OperatorContext},
         principals::NewPrincipal,
         scopes::ScopeRegistry,
         service_accounts::{NewServiceAccount, ServiceAccountView},
         tenants::{NewTenant, TenantView},
         PlatformError, PlatformService,
+    },
+    retention::{
+        self,
+        holds::{self, HoldOwner, HoldReason, HoldScope},
+        tombstone, DataClass, RetentionSettings,
     },
     telemetry,
 };
@@ -46,6 +60,10 @@ use uuid::Uuid;
     about = "CF Meet Calling platform administration"
 )]
 struct Cli {
+    /// The acting operator (opaque id, `^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$`); required by
+    /// every mutating command and recorded in the operator audit.
+    #[arg(long, global = true, env = "CF_OPERATOR_ID")]
+    operator: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
@@ -92,6 +110,202 @@ enum Command {
     /// recording administration) are granted here only, never by the customer API.
     #[command(subcommand)]
     EnterpriseCapabilities(EnterpriseCapabilitiesCmd),
+    /// Compliance eligibility of an environment for compliance-required destination
+    /// countries (Part H §78). Opaque evidence references only, never documents.
+    #[command(subcommand)]
+    Compliance(ComplianceCmd),
+    /// Operator review of abuse reports (Part H §77).
+    #[command(subcommand)]
+    AbuseReport(AbuseReportCmd),
+    /// Operator handling of block rules (Part H §77).
+    #[command(subcommand)]
+    Block(BlockCmd),
+    /// Customer webhook signing-secret key rotation (Part H §74.12): reads the key ring
+    /// from `CALLING_WEBHOOK_SECRET_KEY[_FILE]` / `_ID` / `_PREVIOUS[_FILE]` / `_PREVIOUS_ID`.
+    #[command(subcommand)]
+    Webhooks(WebhooksCmd),
+    /// Retention policies and holds (Part H §80, ADR 0030). Holds are operator-audited.
+    #[command(subcommand)]
+    Retention(RetentionCmd),
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum HoldReasonArg {
+    PolicyReview,
+    Dispute,
+    SecurityInvestigation,
+    Other,
+}
+
+impl From<HoldReasonArg> for HoldReason {
+    fn from(r: HoldReasonArg) -> Self {
+        match r {
+            HoldReasonArg::PolicyReview => HoldReason::PolicyReview,
+            HoldReasonArg::Dispute => HoldReason::Dispute,
+            HoldReasonArg::SecurityInvestigation => HoldReason::SecurityInvestigation,
+            HoldReasonArg::Other => HoldReason::Other,
+        }
+    }
+}
+
+#[derive(Subcommand)]
+enum RetentionCmd {
+    /// Place a retention hold (audited): every retention action skips what it covers.
+    /// A scope hold names --tenant, --application AND --environment; --platform-wide
+    /// holds every class of every scope.
+    Hold {
+        /// A data class (e.g. CALL_RECORD, WEBHOOK_DELIVERY_HISTORY) or `*` for every class.
+        #[arg(long, default_value = "*")]
+        data_class: String,
+        /// One resource (Call, delivery, event, incident, recording, principal, … id).
+        #[arg(long)]
+        resource: Option<Uuid>,
+        /// Tenant slug.
+        #[arg(long)]
+        tenant: Option<String>,
+        /// Application slug.
+        #[arg(long)]
+        application: Option<String>,
+        #[arg(long, value_enum)]
+        environment: Option<EnvironmentArg>,
+        /// Hold everything, platform-wide (no scope, every class).
+        #[arg(long)]
+        platform_wide: bool,
+        #[arg(long, value_enum)]
+        reason: HoldReasonArg,
+    },
+    /// Release a hold (audited; idempotent).
+    Release {
+        #[arg(long)]
+        hold: Uuid,
+    },
+    /// Holds (active first). `--all` includes released ones.
+    List {
+        #[arg(long)]
+        all: bool,
+    },
+    /// The effective retention policies of this deployment's configuration.
+    Policies,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum EligibilityArg {
+    Eligible,
+    Ineligible,
+    NotAssessed,
+}
+
+impl From<EligibilityArg> for calling::routing::compliance::EligibilityStatus {
+    fn from(s: EligibilityArg) -> Self {
+        use calling::routing::compliance::EligibilityStatus as S;
+        match s {
+            EligibilityArg::Eligible => S::Eligible,
+            EligibilityArg::Ineligible => S::Ineligible,
+            EligibilityArg::NotAssessed => S::NotAssessed,
+        }
+    }
+}
+
+#[derive(Subcommand)]
+enum ComplianceCmd {
+    /// Replace the environment's assessment (audited).
+    Set {
+        #[command(flatten)]
+        environment: EnvironmentPath,
+        #[arg(long, value_enum)]
+        status: EligibilityArg,
+        /// Covered destination countries, comma separated ISO 3166-1 alpha-2 (empty =
+        /// every country).
+        #[arg(long, value_delimiter = ',')]
+        countries: Vec<String>,
+        /// RFC 3339 expiry (must be in the future).
+        #[arg(long)]
+        expires_at: Option<String>,
+        /// Opaque reference to the operator's record (`^[A-Za-z0-9._:-]{1,200}$`).
+        #[arg(long)]
+        evidence_ref: Option<String>,
+    },
+    /// Mark the environment INELIGIBLE (audited).
+    Revoke(EnvironmentPath),
+    /// Safe view: status, countries, expiry, whether an evidence reference exists.
+    Show(EnvironmentPath),
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum ReportStatusArg {
+    Open,
+    Reviewed,
+    Dismissed,
+}
+
+#[derive(Subcommand)]
+enum AbuseReportCmd {
+    /// Move a report to OPEN / REVIEWED / DISMISSED (audited).
+    SetStatus {
+        #[arg(long)]
+        report: Uuid,
+        #[arg(long, value_enum)]
+        status: ReportStatusArg,
+    },
+    Show {
+        #[arg(long)]
+        report: Uuid,
+    },
+}
+
+#[derive(Subcommand)]
+enum BlockCmd {
+    /// Release a block rule of any scope (audited; idempotent).
+    Release {
+        #[arg(long)]
+        block: Uuid,
+    },
+    Show {
+        #[arg(long)]
+        block: Uuid,
+    },
+}
+
+impl Command {
+    /// Whether the command changes state (and therefore needs an operator).
+    fn is_mutating(&self) -> bool {
+        match self {
+            Command::Tenant(c) => !matches!(c, TenantCmd::List | TenantCmd::Show(_)),
+            Command::Application(c) => !matches!(c, ApplicationCmd::List(_)),
+            Command::Environment(c) => !matches!(c, EnvironmentCmd::List(_)),
+            Command::ServiceAccount(c) => !matches!(c, ServiceAccountCmd::List(_)),
+            Command::Scope(c) => !matches!(c, ScopeCmd::Registry | ScopeCmd::List(_)),
+            Command::Credential(c) => {
+                !matches!(c, CredentialCmd::Show(_) | CredentialCmd::List { .. })
+            }
+            Command::Principal(c) => !matches!(c, PrincipalCmd::List(_) | PrincipalCmd::Show(_)),
+            Command::Limits(c) => !matches!(c, LimitsCmd::Effective(_)),
+            Command::RoutingPolicy(c) => !matches!(c, RoutingPolicyCmd::Show(_)),
+            Command::SpendPolicy(c) => !matches!(c, SpendPolicyCmd::Show(_)),
+            Command::InboundOwner(c) => !matches!(c, InboundOwnerCmd::Show(_)),
+            Command::EnterpriseCapabilities(c) => !matches!(c, EnterpriseCapabilitiesCmd::Show(_)),
+            Command::Compliance(c) => !matches!(c, ComplianceCmd::Show(_)),
+            Command::AbuseReport(c) => !matches!(c, AbuseReportCmd::Show { .. }),
+            Command::Block(c) => !matches!(c, BlockCmd::Show { .. }),
+            Command::Webhooks(c) => !matches!(c, WebhooksCmd::KeyStatus),
+            Command::Retention(c) => {
+                !matches!(c, RetentionCmd::List { .. } | RetentionCmd::Policies)
+            }
+        }
+    }
+}
+
+#[derive(Subcommand)]
+enum WebhooksCmd {
+    /// Subscriptions per sealing key id (current / previous / unknown). Never a secret.
+    KeyStatus,
+    /// Re-seal every subscription secret not under the current key, in bounded batches
+    /// (`FOR UPDATE SKIP LOCKED`; safe while the service runs; idempotent).
+    Reseal {
+        /// Rows per batch (1-1000).
+        #[arg(long, default_value_t = 100)]
+        batch: u64,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -452,6 +666,10 @@ enum PrincipalCmd {
     Suspend(PrincipalRef),
     Reactivate(PrincipalRef),
     Deactivate(PrincipalRef),
+    /// Minimize a principal for good (Part H §80.42, audited): DEACTIVATED for ever, its
+    /// reference replaced by a non-identifying tombstone, its participations' display
+    /// names erased. Calls and evidence keep the opaque id.
+    Tombstone(PrincipalRef),
 }
 
 #[derive(Args, Clone)]
@@ -526,9 +744,20 @@ struct Admin {
     platform: PlatformService,
     db: sea_orm::DatabaseConnection,
     clock: SystemClock,
+    /// The acting operator; present for every mutating command (checked before connect).
+    operator: Option<OperatorContext>,
 }
 
 impl Admin {
+    fn op(&self) -> Result<&OperatorContext, PlatformError> {
+        self.operator.as_ref().ok_or_else(|| {
+            PlatformError::Validation(
+                "this command changes state: --operator (or CF_OPERATOR_ID) is required"
+                    .to_string(),
+            )
+        })
+    }
+
     async fn tenant(&self, path: &TenantPath) -> Result<TenantView, PlatformError> {
         self.platform.tenant_by_slug(&path.tenant).await
     }
@@ -620,30 +849,40 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                 classification,
                 billing_currency,
             } => print(
-                &p.create_tenant(NewTenant {
-                    slug,
-                    display_name: name,
-                    classification: classification.into(),
-                    billing_currency,
-                })
+                &p.operator_create_tenant(
+                    admin.op()?,
+                    NewTenant {
+                        slug,
+                        display_name: name,
+                        classification: classification.into(),
+                        billing_currency,
+                    },
+                )
                 .await?,
             ),
             TenantCmd::List => print(&p.list_tenants().await?),
             TenantCmd::Show(path) => print(&admin.tenant(&path).await?),
             TenantCmd::Suspend(path) => {
                 let t = admin.tenant(&path).await?;
-                print(&p.set_tenant_status(t.id, TenantStatus::Suspended).await?)
+                print(
+                    &p.operator_set_tenant_status(admin.op()?, t.id, TenantStatus::Suspended)
+                        .await?,
+                )
             }
             TenantCmd::Reactivate(path) => {
                 let t = admin.tenant(&path).await?;
-                print(&p.set_tenant_status(t.id, TenantStatus::Active).await?)
+                print(
+                    &p.operator_set_tenant_status(admin.op()?, t.id, TenantStatus::Active)
+                        .await?,
+                )
             }
         },
         Command::Application(cmd) => match cmd {
             ApplicationCmd::Create { tenant, slug, name } => {
                 let t = admin.tenant(&tenant).await?;
                 print(
-                    &p.create_application(
+                    &p.operator_create_application(
+                        admin.op()?,
                         t.id,
                         NewApplication {
                             slug,
@@ -660,22 +899,33 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
             ApplicationCmd::Suspend(path) => {
                 let a = admin.application(&path).await?;
                 print(
-                    &p.set_application_status(a.id, ApplicationStatus::Suspended)
-                        .await?,
+                    &p.operator_set_application_status(
+                        admin.op()?,
+                        a.id,
+                        ApplicationStatus::Suspended,
+                    )
+                    .await?,
                 )
             }
             ApplicationCmd::Reactivate(path) => {
                 let a = admin.application(&path).await?;
                 print(
-                    &p.set_application_status(a.id, ApplicationStatus::Active)
-                        .await?,
+                    &p.operator_set_application_status(
+                        admin.op()?,
+                        a.id,
+                        ApplicationStatus::Active,
+                    )
+                    .await?,
                 )
             }
         },
         Command::Environment(cmd) => match cmd {
             EnvironmentCmd::Create(path) => {
                 let a = admin.application(&path.application).await?;
-                print(&p.create_environment(a.id, path.environment.into()).await?)
+                print(
+                    &p.operator_create_environment(admin.op()?, a.id, path.environment.into())
+                        .await?,
+                )
             }
             EnvironmentCmd::List(path) => {
                 let a = admin.application(&path).await?;
@@ -684,15 +934,23 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
             EnvironmentCmd::Suspend(path) => {
                 let e = admin.environment(&path).await?;
                 print(
-                    &p.set_environment_status(e.id, EnvironmentStatus::Suspended)
-                        .await?,
+                    &p.operator_set_environment_status(
+                        admin.op()?,
+                        e.id,
+                        EnvironmentStatus::Suspended,
+                    )
+                    .await?,
                 )
             }
             EnvironmentCmd::Reactivate(path) => {
                 let e = admin.environment(&path).await?;
                 print(
-                    &p.set_environment_status(e.id, EnvironmentStatus::Active)
-                        .await?,
+                    &p.operator_set_environment_status(
+                        admin.op()?,
+                        e.id,
+                        EnvironmentStatus::Active,
+                    )
+                    .await?,
                 )
             }
             EnvironmentCmd::SetLiveTelecom {
@@ -700,7 +958,10 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                 allowed,
             } => {
                 let e = admin.environment(&environment).await?;
-                print(&p.set_live_telecom_allowed(e.id, allowed).await?)
+                print(
+                    &p.operator_set_live_telecom_allowed(admin.op()?, e.id, allowed)
+                        .await?,
+                )
             }
         },
         Command::ServiceAccount(cmd) => match cmd {
@@ -711,8 +972,12 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
             } => {
                 let e = admin.environment(&environment).await?;
                 print(
-                    &p.create_service_account(e.id, NewServiceAccount { name, description })
-                        .await?,
+                    &p.operator_create_service_account(
+                        admin.op()?,
+                        e.id,
+                        NewServiceAccount { name, description },
+                    )
+                    .await?,
                 )
             }
             ServiceAccountCmd::List(path) => {
@@ -722,22 +987,34 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
             ServiceAccountCmd::Suspend(path) => {
                 let sa = admin.service_account(&path).await?;
                 print(
-                    &p.set_service_account_status(sa.id, ServiceAccountStatus::Suspended)
-                        .await?,
+                    &p.operator_set_service_account_status(
+                        admin.op()?,
+                        sa.id,
+                        ServiceAccountStatus::Suspended,
+                    )
+                    .await?,
                 )
             }
             ServiceAccountCmd::Reactivate(path) => {
                 let sa = admin.service_account(&path).await?;
                 print(
-                    &p.set_service_account_status(sa.id, ServiceAccountStatus::Active)
-                        .await?,
+                    &p.operator_set_service_account_status(
+                        admin.op()?,
+                        sa.id,
+                        ServiceAccountStatus::Active,
+                    )
+                    .await?,
                 )
             }
             ServiceAccountCmd::Revoke(path) => {
                 let sa = admin.service_account(&path).await?;
                 print(
-                    &p.set_service_account_status(sa.id, ServiceAccountStatus::Revoked)
-                        .await?,
+                    &p.operator_set_service_account_status(
+                        admin.op()?,
+                        sa.id,
+                        ServiceAccountStatus::Revoked,
+                    )
+                    .await?,
                 )
             }
         },
@@ -745,11 +1022,16 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
             ScopeCmd::Registry => print(&p.registry().definitions().collect::<Vec<_>>()),
             ScopeCmd::Grant { application, scope } => {
                 let a = admin.application(&application).await?;
-                print(&p.grant_application_scope(a.id, &scope).await?)
+                print(
+                    &p.operator_grant_application_scope(admin.op()?, a.id, &scope)
+                        .await?,
+                )
             }
             ScopeCmd::Revoke { application, scope } => {
                 let a = admin.application(&application).await?;
-                let removed = p.revoke_application_scope(a.id, &scope).await?;
+                let removed = p
+                    .operator_revoke_application_scope(admin.op()?, a.id, &scope)
+                    .await?;
                 print(&json!({ "application_id": a.id, "scope": scope, "removed": removed }))
             }
             ScopeCmd::List(path) => {
@@ -766,7 +1048,8 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
             } => {
                 let sa = admin.service_account(&service_account).await?;
                 let issued = p
-                    .issue_credential(
+                    .operator_issue_credential(
+                        admin.op()?,
                         sa.id,
                         IssueCredential {
                             scopes,
@@ -787,7 +1070,8 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
             } => {
                 let id = admin.credential_id(&credential).await?;
                 let issued = p
-                    .rotate_credential(
+                    .operator_rotate_credential(
+                        admin.op()?,
                         id,
                         RotateCredential {
                             overlap: overlap_minutes.map(Duration::minutes),
@@ -801,7 +1085,7 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
             }
             CredentialCmd::Revoke(reference) => {
                 let id = admin.credential_id(&reference).await?;
-                print(&p.revoke_credential(id).await?)
+                print(&p.operator_revoke_credential(admin.op()?, id).await?)
             }
             CredentialCmd::Show(reference) => {
                 let id = admin.credential_id(&reference).await?;
@@ -836,7 +1120,8 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
             } => {
                 let e = admin.environment(&environment).await?;
                 let (principal, created) = p
-                    .register_principal(
+                    .operator_register_principal(
+                        admin.op()?,
                         e.id,
                         NewPrincipal::External {
                             kind: kind.into(),
@@ -849,7 +1134,11 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
             PrincipalCmd::RegisterServiceAccount(path) => {
                 let sa = admin.service_account(&path).await?;
                 let (principal, created) = p
-                    .register_principal(sa.environment_id, NewPrincipal::ServiceAccount(sa.id))
+                    .operator_register_principal(
+                        admin.op()?,
+                        sa.environment_id,
+                        NewPrincipal::ServiceAccount(sa.id),
+                    )
                     .await?;
                 print(&json!({ "principal": principal, "created": created }))
             }
@@ -861,23 +1150,35 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                 print(&p.principal(PrincipalId::from_uuid(r.principal)).await?)
             }
             PrincipalCmd::Suspend(r) => print(
-                &p.set_principal_status(
+                &p.operator_set_principal_status(
+                    admin.op()?,
                     PrincipalId::from_uuid(r.principal),
                     PrincipalStatus::Suspended,
                 )
                 .await?,
             ),
             PrincipalCmd::Reactivate(r) => print(
-                &p.set_principal_status(
+                &p.operator_set_principal_status(
+                    admin.op()?,
                     PrincipalId::from_uuid(r.principal),
                     PrincipalStatus::Active,
                 )
                 .await?,
             ),
             PrincipalCmd::Deactivate(r) => print(
-                &p.set_principal_status(
+                &p.operator_set_principal_status(
+                    admin.op()?,
                     PrincipalId::from_uuid(r.principal),
                     PrincipalStatus::Deactivated,
+                )
+                .await?,
+            ),
+            PrincipalCmd::Tombstone(r) => print(
+                &tombstone::operator_tombstone(
+                    &admin.db,
+                    admin.op()?,
+                    r.principal,
+                    admin.clock.now(),
                 )
                 .await?,
             ),
@@ -885,29 +1186,45 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
         Command::Limits(cmd) => match cmd {
             LimitsCmd::SetTenant { tenant, limits } => {
                 let t = admin.tenant(&tenant).await?;
-                print(&p.set_tenant_limits(t.id, limits.into()).await?)
+                print(
+                    &p.operator_set_tenant_limits(admin.op()?, t.id, limits.into())
+                        .await?,
+                )
             }
             LimitsCmd::SetApplication {
                 application,
                 limits,
             } => {
                 let a = admin.application(&application).await?;
-                print(&p.set_application_limits(a.id, limits.into()).await?)
+                print(
+                    &p.operator_set_application_limits(admin.op()?, a.id, limits.into())
+                        .await?,
+                )
             }
             LimitsCmd::SetServiceAccount {
                 service_account,
                 limits,
             } => {
                 let sa = admin.service_account(&service_account).await?;
-                print(&p.set_service_account_limits(sa.id, limits.into()).await?)
+                print(
+                    &p.operator_set_service_account_limits(admin.op()?, sa.id, limits.into())
+                        .await?,
+                )
             }
             LimitsCmd::SetPrincipal { principal, limits } => print(
-                &p.set_principal_limits(PrincipalId::from_uuid(principal.principal), limits.into())
-                    .await?,
+                &p.operator_set_principal_limits(
+                    admin.op()?,
+                    PrincipalId::from_uuid(principal.principal),
+                    limits.into(),
+                )
+                .await?,
             ),
             LimitsCmd::SetCredential { credential, limits } => {
                 let id = admin.credential_id(&credential).await?;
-                print(&p.set_credential_limits(id, limits.into()).await?)
+                print(
+                    &p.operator_set_credential_limits(admin.op()?, id, limits.into())
+                        .await?,
+                )
             }
             LimitsCmd::Effective(reference) => {
                 let id = admin.credential_id(&reference).await?;
@@ -931,24 +1248,35 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                     })?;
                     let policy = RoutingPolicy::parse(&value)
                         .map_err(|e| PlatformError::Validation(e.to_string()))?;
-                    let revision = store::store_policy(
-                        &admin.db,
-                        env.tenant_id.as_uuid(),
-                        env.application_id.as_uuid(),
-                        env.id.as_uuid(),
-                        &policy,
-                        admin.clock.now(),
-                    )
-                    .await
-                    .map_err(|e| match e {
-                        store::PolicyStoreError::Invalid(m) => {
-                            PlatformError::Validation(m.to_string())
-                        }
-                        store::PolicyStoreError::Database(_) => PlatformError::Database {
-                            summary: "routing policy".to_string(),
-                            connectivity: false,
-                        },
-                    })?;
+                    let now = admin.clock.now();
+                    let (stored, target) = (policy.clone(), env.clone());
+                    let revision = audited(&admin.db, admin.op()?, now, move |txn| {
+                        Box::pin(async move {
+                            let revision = store::store_policy(
+                                txn,
+                                target.tenant_id.as_uuid(),
+                                target.application_id.as_uuid(),
+                                target.id.as_uuid(),
+                                &stored,
+                                now,
+                            )
+                            .await
+                            .map_err(|e| match e {
+                                store::PolicyStoreError::Invalid(m) => {
+                                    PlatformError::Validation(m.to_string())
+                                }
+                                store::PolicyStoreError::Database(_) => PlatformError::Database {
+                                    summary: "routing policy".to_string(),
+                                    connectivity: false,
+                                },
+                            })?;
+                            let entry =
+                                environment_entry(OperatorAction::RoutingPolicySet, &target)
+                                    .detail(json!({ "revision": revision }));
+                            Ok((revision, entry))
+                        })
+                    })
+                    .await?;
                     print(
                         &json!({ "environmentId": env.id, "revision": revision, "policy": policy }),
                     )
@@ -993,7 +1321,8 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                     let env = admin.environment(&environment).await?;
                     let scope = calling::calls::command::CallScope::of_environment(&env);
                     let view = enterprise
-                        .operator_set_capabilities(
+                        .operator_set_capabilities_by(
+                            admin.op()?,
                             scope,
                             capabilities.into_iter().map(Into::into).collect(),
                         )
@@ -1056,23 +1385,39 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                         max_per_context_per_hour,
                         enabled: !disabled,
                     };
-                    let revision = spend::store_policy(
-                        &admin.db,
-                        spend::SpendScope {
-                            tenant_id: env.tenant_id.as_uuid(),
-                            application_id: env.application_id.as_uuid(),
-                            environment_id: env.id.as_uuid(),
-                        },
-                        &policy,
-                        admin.clock.now(),
-                    )
-                    .await
-                    .map_err(|_| {
-                        PlatformError::Validation(
-                            "the spend policy was refused (limits must be positive and consistent)"
-                                .to_string(),
-                        )
-                    })?;
+                    let now = admin.clock.now();
+                    let target = env.clone();
+                    let revision = audited(&admin.db, admin.op()?, now, move |txn| {
+                        Box::pin(async move {
+                            let revision = spend::store_policy(
+                                txn,
+                                spend::SpendScope {
+                                    tenant_id: target.tenant_id.as_uuid(),
+                                    application_id: target.application_id.as_uuid(),
+                                    environment_id: target.id.as_uuid(),
+                                },
+                                &policy,
+                                now,
+                            )
+                            .await
+                            .map_err(|_| {
+                                PlatformError::Validation(
+                                    "the spend policy was refused (limits must be positive and consistent)"
+                                        .to_string(),
+                                )
+                            })?;
+                            let entry = environment_entry(OperatorAction::SpendPolicySet, &target)
+                                .detail(json!({
+                                    "revision": revision,
+                                    "enabled": policy.enabled,
+                                    "currency": policy.currency,
+                                    "legAllowanceMinor": policy.leg_allowance_minor,
+                                    "maxLegSeconds": policy.max_leg_seconds,
+                                }));
+                            Ok((revision, entry))
+                        })
+                    })
+                    .await?;
                     print(&json!({ "environmentId": env.id, "revision": revision }))
                 }
                 SpendPolicyCmd::Show(environment) => {
@@ -1100,6 +1445,141 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                 }
             }
         }
+        Command::Webhooks(cmd) => {
+            let settings =
+                calling::webhooks::WebhookSettings::secret_box_from_lookup(&|key: &str| {
+                    std::env::var(key).ok()
+                })
+                .map_err(|e| PlatformError::Validation(e.to_string()))?
+                .ok_or_else(|| {
+                    PlatformError::Validation(
+                        "CALLING_WEBHOOK_SECRET_KEY (or _FILE) is not configured".to_string(),
+                    )
+                })?;
+            let service = calling::webhooks::WebhookService::new(
+                admin.db.clone(),
+                Arc::new(SystemClock),
+                calling::webhooks::WebhookSettings {
+                    secret_box: Some(Arc::new(settings)),
+                    ..Default::default()
+                },
+            );
+            let failed = |e: calling::error::CallingError| {
+                PlatformError::Validation(format!("webhook key operation failed ({e})"))
+            };
+            match cmd {
+                WebhooksCmd::KeyStatus => print(&service.key_status().await.map_err(failed)?),
+                WebhooksCmd::Reseal { batch } => {
+                    if !(1..=1000).contains(&batch) {
+                        return Err(PlatformError::Validation(
+                            "--batch must be between 1 and 1000".to_string(),
+                        ));
+                    }
+                    // Every batch, then ONE operator-audit row (WEBHOOK_KEYS_RESEALED:
+                    // counts and batch size only).
+                    let summary = service
+                        .operator_reseal_all(admin.op()?, batch)
+                        .await
+                        .map_err(failed)?;
+                    eprintln!(
+                        "platform_admin: webhooks reseal resealed={} unopenable={} batches={}",
+                        summary.resealed, summary.unopenable, summary.batches
+                    );
+                    let status = service.key_status().await.map_err(failed)?;
+                    print(&json!({
+                        "resealed": summary.resealed,
+                        "unopenable": summary.unopenable,
+                        "batches": summary.batches,
+                        "keyStatus": status,
+                    }))
+                }
+            }
+        }
+        Command::Retention(cmd) => match cmd {
+            RetentionCmd::Hold {
+                data_class,
+                resource,
+                tenant,
+                application,
+                environment,
+                platform_wide,
+                reason,
+            } => {
+                let data_class = match data_class.trim() {
+                    "*" => None,
+                    other => Some(DataClass::parse(other).ok_or_else(|| {
+                        PlatformError::Validation(format!(
+                            "--data-class must be `*` or one of {}",
+                            DataClass::ALL
+                                .iter()
+                                .map(|c| c.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ))
+                    })?),
+                };
+                let owner = match (platform_wide, tenant, application, environment) {
+                    (true, None, None, None) => None,
+                    (false, Some(tenant), Some(application), Some(environment)) => {
+                        let env = admin
+                            .environment(&EnvironmentPath {
+                                application: ApplicationPath {
+                                    tenant: TenantPath { tenant },
+                                    application,
+                                },
+                                environment,
+                            })
+                            .await?;
+                        Some(HoldOwner {
+                            tenant_id: env.tenant_id.as_uuid(),
+                            application_id: env.application_id.as_uuid(),
+                            environment_id: env.id.as_uuid(),
+                        })
+                    }
+                    _ => {
+                        return Err(PlatformError::Validation(
+                            "a hold names --tenant, --application and --environment, or is --platform-wide"
+                                .to_string(),
+                        ))
+                    }
+                };
+                print(
+                    &holds::operator_place(
+                        &admin.db,
+                        admin.op()?,
+                        HoldScope {
+                            data_class,
+                            resource_id: resource,
+                            owner,
+                        },
+                        reason.into(),
+                        admin.clock.now(),
+                    )
+                    .await?,
+                )
+            }
+            RetentionCmd::Release { hold } => print(
+                &holds::operator_release(&admin.db, admin.op()?, hold, admin.clock.now()).await?,
+            ),
+            RetentionCmd::List { all } => print(&holds::list(&admin.db, !all).await?),
+            RetentionCmd::Policies => {
+                let settings = RetentionSettings::from_env()
+                    .map_err(|e| PlatformError::Validation(e.to_string()))?;
+                print(&json!({
+                    "policies": retention::policies(&settings)
+                        .iter()
+                        .map(|p| json!({
+                            "dataClass": p.class,
+                            "action": p.action,
+                            "days": p.days(),
+                            "configuredBy": p.configured_by,
+                            "description": p.description,
+                        }))
+                        .collect::<Vec<_>>(),
+                    "intervalSeconds": settings.interval.as_secs(),
+                }))
+            }
+        },
         Command::InboundOwner(cmd) => {
             use sea_orm::{ConnectionTrait, DbBackend, Statement};
             let db_error = |_| PlatformError::Database {
@@ -1114,8 +1594,11 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                 } => {
                     let env = admin.environment(&environment).await?;
                     let credential_id = admin.credential_id(&credential).await?;
-                    let row = admin
-                        .db
+                    let now = admin.clock.now();
+                    let target = env.clone();
+                    let revision = audited(&admin.db, admin.op()?, now, move |txn| {
+                        Box::pin(async move {
+                    let row = txn
                         .query_one(Statement::from_sql_and_values(
                             DbBackend::Postgres,
                             "INSERT INTO call_inbound_owners (tenant_id, application_id, environment_id, \
@@ -1130,15 +1613,25 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                              RETURNING revision",
                             vec![
                                 credential_id.as_uuid().into(),
-                                env.id.as_uuid().into(),
+                                target.id.as_uuid().into(),
                                 (!disabled).into(),
-                                admin.clock.now().into(),
+                                now.into(),
                             ],
                         ))
                         .await
                         .map_err(db_error)?
                         .ok_or(PlatformError::NotFound("credential in this environment"))?;
                     let revision: i32 = row.try_get_by_index(0).map_err(db_error)?;
+                    let entry = environment_entry(OperatorAction::InboundOwnerSet, &target)
+                        .detail(json!({
+                            "credentialId": credential_id,
+                            "enabled": !disabled,
+                            "revision": revision,
+                        }));
+                    Ok((revision, entry))
+                        })
+                    })
+                    .await?;
                     print(
                         &json!({ "environmentId": env.id, "credentialId": credential_id, "revision": revision }),
                     )
@@ -1166,12 +1659,151 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                 }
             }
         }
+        Command::Compliance(cmd) => {
+            use calling::routing::compliance;
+            match cmd {
+                ComplianceCmd::Set {
+                    environment,
+                    status,
+                    countries,
+                    expires_at,
+                    evidence_ref,
+                } => {
+                    let env = admin.environment(&environment).await?;
+                    let expires_at = match expires_at {
+                        None => None,
+                        Some(text) => Some(
+                            chrono::DateTime::parse_from_rfc3339(text.trim())
+                                .map_err(|_| {
+                                    PlatformError::Validation(
+                                        "--expires-at must be an RFC 3339 timestamp".to_string(),
+                                    )
+                                })?
+                                .with_timezone(&chrono::Utc),
+                        ),
+                    };
+                    let countries: Vec<String> = countries
+                        .iter()
+                        .map(|c| c.trim().to_string())
+                        .filter(|c| !c.is_empty())
+                        .collect();
+                    let now = admin.clock.now();
+                    let record = compliance::operator_set(
+                        &admin.db,
+                        admin.op()?,
+                        &env,
+                        status.into(),
+                        countries,
+                        evidence_ref.map(|e| e.trim().to_string()),
+                        expires_at,
+                        now,
+                    )
+                    .await?;
+                    print(&compliance::safe_view(&record, now))
+                }
+                ComplianceCmd::Revoke(environment) => {
+                    let env = admin.environment(&environment).await?;
+                    let now = admin.clock.now();
+                    let record =
+                        compliance::operator_revoke(&admin.db, admin.op()?, &env, now).await?;
+                    print(&compliance::safe_view(&record, now))
+                }
+                ComplianceCmd::Show(environment) => {
+                    let env = admin.environment(&environment).await?;
+                    let record = compliance::load_eligibility(&admin.db, env.id.as_uuid())
+                        .await
+                        .map_err(|_| PlatformError::Database {
+                            summary: "compliance eligibility".to_string(),
+                            connectivity: false,
+                        })?;
+                    let now = admin.clock.now();
+                    print(&json!({
+                        "environmentId": env.id,
+                        "eligibility": record.map(|r| compliance::safe_view(&r, now)),
+                    }))
+                }
+            }
+        }
+        Command::AbuseReport(cmd) => {
+            use calling::calls::app::abuse_reports::{self, AbuseReportStatus};
+            match cmd {
+                AbuseReportCmd::SetStatus { report, status } => {
+                    let status = match status {
+                        ReportStatusArg::Open => AbuseReportStatus::Open,
+                        ReportStatusArg::Reviewed => AbuseReportStatus::Reviewed,
+                        ReportStatusArg::Dismissed => AbuseReportStatus::Dismissed,
+                    };
+                    print(
+                        &abuse_reports::operator_set_status(
+                            &admin.db,
+                            admin.op()?,
+                            report,
+                            status,
+                            admin.clock.now(),
+                        )
+                        .await?,
+                    )
+                }
+                AbuseReportCmd::Show { report } => print(
+                    &abuse_reports::report(&admin.db, report)
+                        .await
+                        .map_err(|_| PlatformError::Database {
+                            summary: "abuse report".to_string(),
+                            connectivity: false,
+                        })?
+                        .ok_or(PlatformError::NotFound("abuse report"))?,
+                ),
+            }
+        }
+        Command::Block(cmd) => {
+            use calling::calls::app::blocks;
+            match cmd {
+                BlockCmd::Release { block } => print(
+                    &blocks::operator_release(&admin.db, admin.op()?, block, admin.clock.now())
+                        .await?,
+                ),
+                BlockCmd::Show { block } => print(
+                    &blocks::rule(&admin.db, block)
+                        .await
+                        .map_err(|_| PlatformError::Database {
+                            summary: "block rule".to_string(),
+                            connectivity: false,
+                        })?
+                        .ok_or(PlatformError::NotFound("block rule"))?,
+                ),
+            }
+        }
     }
+}
+
+/// The audit entry of an environment-level administration change.
+fn environment_entry(action: OperatorAction, env: &EnvironmentView) -> AuditEntry {
+    AuditEntry::new(action, AuditTargetKind::Environment, env.id.as_uuid()).scope(
+        Some(env.tenant_id.as_uuid()),
+        Some(env.application_id.as_uuid()),
+        Some(env.id.as_uuid()),
+    )
 }
 
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
+    // The operator is checked before anything else: a mutating command without one is
+    // refused before the database is even reached (nothing can change).
+    let operator = match cli.operator.as_deref().map(OperatorContext::new) {
+        Some(Ok(op)) => Some(op),
+        Some(Err(err)) => {
+            eprintln!("platform_admin: {err}");
+            return ExitCode::from(2);
+        }
+        None => None,
+    };
+    if operator.is_none() && cli.command.is_mutating() {
+        eprintln!(
+            "platform_admin: this command changes state: --operator <id> (or CF_OPERATOR_ID) is required"
+        );
+        return ExitCode::from(2);
+    }
     dotenvy::dotenv().ok();
     let config = match CallingConfig::from_env() {
         Ok(config) => config,
@@ -1208,7 +1840,15 @@ async fn main() -> ExitCode {
             config.limit_defaults,
         ),
         clock: SystemClock,
+        operator,
     };
+    if let Some(op) = &admin.operator {
+        eprintln!(
+            "platform_admin: operator {} correlation {}",
+            op.operator(),
+            op.correlation_id()
+        );
+    }
     match run(&admin, cli.command).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {

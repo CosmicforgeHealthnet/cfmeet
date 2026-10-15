@@ -193,6 +193,12 @@ impl S3Config {
     /// `{prefix}ACCESS_KEY_ID`, `{prefix}SECRET_ACCESS_KEY`, `{prefix}PATH_STYLE` (true/false,
     /// default true) and `{prefix}SERVER_SIDE_ENCRYPTION` (e.g. `AES256`). No endpoint = no
     /// store (`Ok(None)`); an endpoint with missing or invalid settings is an error.
+    ///
+    /// The secret access key may instead be a mounted secret file,
+    /// `{prefix}SECRET_ACCESS_KEY_FILE` (trimmed contents; preferred). Both set is refused
+    /// as ambiguous, an unreadable / empty file is an error (never a fallback), and outside
+    /// the `local` / `test` runtime environments (`CF_RUNTIME_ENVIRONMENT`, unset = strict)
+    /// a file readable by group or others is refused. Placeholder secrets are refused.
     pub fn from_lookup(
         prefix: &str,
         get: &impl Fn(&str) -> Option<String>,
@@ -217,7 +223,7 @@ impl S3Config {
             region: var("REGION").unwrap_or_else(|| "us-east-1".into()),
             bucket: required("BUCKET")?,
             access_key: required("ACCESS_KEY_ID")?,
-            secret_key: required("SECRET_ACCESS_KEY")?,
+            secret_key: secret_access_key(prefix, get)?,
             path_style,
             server_side_encryption: var("SERVER_SIDE_ENCRYPTION"),
         };
@@ -227,6 +233,76 @@ impl S3Config {
         }
         Ok(Some(config))
     }
+}
+
+/// `{prefix}SECRET_ACCESS_KEY` or `{prefix}SECRET_ACCESS_KEY_FILE` (see
+/// [`S3Config::from_lookup`]). Errors name the variable, never the value or the path.
+fn secret_access_key(
+    prefix: &str,
+    get: &impl Fn(&str) -> Option<String>,
+) -> Result<String, String> {
+    let name = format!("{prefix}SECRET_ACCESS_KEY");
+    let file_var = format!("{name}_FILE");
+    let inline = get(&name)
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let path = get(&file_var)
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let value = match (inline, path) {
+        (Some(_), Some(_)) => {
+            return Err(format!(
+                "both {name} and {file_var} are set; configure exactly one"
+            ))
+        }
+        (None, None) => return Err(format!("{name} is required")),
+        (Some(value), None) => value,
+        (None, Some(path)) => {
+            let permissive = matches!(
+                get("CF_RUNTIME_ENVIRONMENT").as_deref().map(str::trim),
+                Some("local") | Some("test")
+            );
+            read_secret_file(&file_var, &path, permissive)?
+        }
+    };
+    let lowered = value.to_ascii_lowercase();
+    if value.len() < 8
+        || ["changeme", "change-me", "placeholder", "your-", "secret123"]
+            .iter()
+            .any(|p| lowered.contains(p))
+    {
+        return Err(format!(
+            "{name} must be a generated secret, not a placeholder"
+        ));
+    }
+    Ok(value)
+}
+
+fn read_secret_file(var: &str, path: &str, permissive: bool) -> Result<String, String> {
+    let unreadable = || format!("{var}: the secret file cannot be read");
+    let meta = std::fs::metadata(path).map_err(|_| unreadable())?;
+    if !meta.is_file() || meta.len() > 16 * 1024 {
+        return Err(format!(
+            "{var}: not a regular secret file of at most 16 KiB"
+        ));
+    }
+    #[cfg(unix)]
+    if !permissive {
+        use std::os::unix::fs::PermissionsExt;
+        if meta.permissions().mode() & 0o077 != 0 {
+            return Err(format!(
+                "{var}: the secret file must not be readable by group or others"
+            ));
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = permissive;
+    let text = std::fs::read_to_string(path).map_err(|_| unreadable())?;
+    let value = text.trim();
+    if value.is_empty() {
+        return Err(format!("{var}: the secret file is empty"));
+    }
+    Ok(value.to_string())
 }
 
 type HmacSha256 = Hmac<Sha256>;
@@ -628,6 +704,10 @@ impl ObjectStore for S3ObjectStore {
 pub struct MemoryObjectStore {
     objects: Mutex<HashMap<String, (Vec<u8>, String)>>,
     unavailable: AtomicBool,
+    /// Failure injection: writes store the bytes but report a different digest.
+    corrupt_writes: AtomicBool,
+    /// Failure injection: deletes fail (Unavailable) while everything else works.
+    failing_deletes: AtomicBool,
 }
 
 impl MemoryObjectStore {
@@ -639,6 +719,18 @@ impl MemoryObjectStore {
     /// [`StorageError::Unavailable`].
     pub fn set_available(&self, available: bool) {
         self.unavailable.store(!available, Ordering::SeqCst);
+    }
+
+    /// Failure injection: while set, `put` stores the object but reports a digest that
+    /// does not match the bytes (an integrity failure discovered after the write).
+    pub fn set_corrupt_writes(&self, corrupt: bool) {
+        self.corrupt_writes.store(corrupt, Ordering::SeqCst);
+    }
+
+    /// Failure injection: while set, `delete` fails with [`StorageError::Unavailable`]
+    /// (writes and reads keep working).
+    pub fn set_failing_deletes(&self, failing: bool) {
+        self.failing_deletes.store(failing, Ordering::SeqCst);
     }
 
     pub fn get_raw(&self, key: &str) -> Option<Vec<u8>> {
@@ -695,9 +787,14 @@ impl ObjectStore for MemoryObjectStore {
         if !valid_key(key) {
             return Err(StorageError::Rejected(400));
         }
+        let sha256 = if self.corrupt_writes.load(Ordering::SeqCst) {
+            sha256_hex(&[bytes.as_slice(), b"corrupted"].concat())
+        } else {
+            sha256_hex(&bytes)
+        };
         let out = StoredObject {
             size: bytes.len() as u64,
-            sha256: sha256_hex(&bytes),
+            sha256,
             content_type: content_type.to_string(),
             encrypted: true,
         };
@@ -732,6 +829,9 @@ impl ObjectStore for MemoryObjectStore {
 
     async fn delete(&self, key: &str) -> StorageResult<()> {
         self.check()?;
+        if self.failing_deletes.load(Ordering::SeqCst) {
+            return Err(StorageError::Unavailable);
+        }
         self.objects
             .lock()
             .unwrap_or_else(|p| p.into_inner())
@@ -897,5 +997,146 @@ mod tests {
         );
         store.set_available(true);
         assert!(store.put("v/2.wav", vec![1], "audio/wav").await.is_ok());
+    }
+
+    struct TempSecret(std::path::PathBuf);
+
+    impl TempSecret {
+        fn new(contents: &str, mode: u32) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "cf-object-storage-secret-{}-{}",
+                std::process::id(),
+                sha256_hex(
+                    format!("{contents}{mode}{:?}", std::time::SystemTime::now()).as_bytes()
+                )
+            ));
+            std::fs::write(&path, contents).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+            }
+            #[cfg(not(unix))]
+            let _ = mode;
+            Self(path)
+        }
+    }
+
+    impl Drop for TempSecret {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    fn lookup(pairs: Vec<(&'static str, String)>) -> impl Fn(&str) -> Option<String> {
+        move |k| {
+            pairs
+                .iter()
+                .find(|(key, _)| *key == k)
+                .map(|(_, v)| v.clone())
+        }
+    }
+
+    const SECRET: &str = "s3-secret-access-key-0123456789abcdef";
+
+    fn base() -> Vec<(&'static str, String)> {
+        vec![
+            ("X_ENDPOINT", "http://127.0.0.1:9000".into()),
+            ("X_BUCKET", "artifacts".into()),
+            ("X_ACCESS_KEY_ID", "access".into()),
+        ]
+    }
+
+    #[test]
+    fn the_secret_access_key_may_be_a_secret_file() {
+        let file = TempSecret::new(&format!("{SECRET}\n"), 0o600);
+        let mut pairs = base();
+        pairs.push(("CF_RUNTIME_ENVIRONMENT", "production".into()));
+        pairs.push((
+            "X_SECRET_ACCESS_KEY_FILE",
+            file.0.to_string_lossy().into_owned(),
+        ));
+        let config = S3Config::from_lookup("X_", &lookup(pairs))
+            .unwrap()
+            .unwrap();
+        assert_eq!(config.secret_key, SECRET);
+        assert!(!format!("{config:?}").contains(SECRET));
+        // Inline still works.
+        let mut pairs = base();
+        pairs.push(("X_SECRET_ACCESS_KEY", SECRET.into()));
+        assert_eq!(
+            S3Config::from_lookup("X_", &lookup(pairs))
+                .unwrap()
+                .unwrap()
+                .secret_key,
+            SECRET
+        );
+    }
+
+    #[test]
+    fn ambiguous_missing_permissive_or_placeholder_secrets_are_refused() {
+        let file = TempSecret::new(SECRET, 0o600);
+        let path = file.0.to_string_lossy().into_owned();
+        // Both set.
+        let mut pairs = base();
+        pairs.push(("X_SECRET_ACCESS_KEY", SECRET.into()));
+        pairs.push(("X_SECRET_ACCESS_KEY_FILE", path.clone()));
+        let err = S3Config::from_lookup("X_", &lookup(pairs)).unwrap_err();
+        assert!(
+            err.contains("exactly one") && !err.contains(SECRET),
+            "{err}"
+        );
+        // Missing file: an error, never a fallback.
+        let mut pairs = base();
+        pairs.push(("X_SECRET_ACCESS_KEY_FILE", "/nonexistent/s3-secret".into()));
+        let err = S3Config::from_lookup("X_", &lookup(pairs)).unwrap_err();
+        assert!(!err.contains("/nonexistent"), "{err}");
+        // Neither set.
+        assert!(S3Config::from_lookup("X_", &lookup(base())).is_err());
+        // Placeholder.
+        let mut pairs = base();
+        pairs.push(("X_SECRET_ACCESS_KEY", "changeme-changeme".into()));
+        assert!(S3Config::from_lookup("X_", &lookup(pairs)).is_err());
+        #[cfg(unix)]
+        {
+            let readable = TempSecret::new(SECRET, 0o644);
+            let readable_path = readable.0.to_string_lossy().into_owned();
+            for runtime in [Some("production"), Some("staging"), None] {
+                let mut pairs = base();
+                pairs.push(("X_SECRET_ACCESS_KEY_FILE", readable_path.clone()));
+                if let Some(r) = runtime {
+                    pairs.push(("CF_RUNTIME_ENVIRONMENT", r.into()));
+                }
+                let err = S3Config::from_lookup("X_", &lookup(pairs)).unwrap_err();
+                assert!(err.contains("group or others"), "{runtime:?}: {err}");
+            }
+            let mut pairs = base();
+            pairs.push(("X_SECRET_ACCESS_KEY_FILE", readable_path));
+            pairs.push(("CF_RUNTIME_ENVIRONMENT", "local".into()));
+            assert!(S3Config::from_lookup("X_", &lookup(pairs)).is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn memory_store_corrupt_writes_and_failing_deletes() {
+        let store = MemoryObjectStore::new();
+        store.set_corrupt_writes(true);
+        let stored = store
+            .put("v/3.wav", b"RIFF".to_vec(), "audio/wav")
+            .await
+            .unwrap();
+        assert_ne!(stored.sha256, sha256_hex(b"RIFF"));
+        assert_eq!(store.len(), 1, "the object is written");
+        store.set_corrupt_writes(false);
+        store.set_failing_deletes(true);
+        assert_eq!(
+            store.delete("v/3.wav").await,
+            Err(StorageError::Unavailable)
+        );
+        assert_eq!(store.len(), 1);
+        assert!(store.head("v/3.wav").await.unwrap().is_some());
+        store.set_failing_deletes(false);
+        store.delete("v/3.wav").await.unwrap();
+        assert!(store.is_empty());
     }
 }

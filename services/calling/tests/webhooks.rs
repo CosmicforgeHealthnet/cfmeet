@@ -108,9 +108,19 @@ impl Receiver {
     }
 }
 
+/// A deterministic, non-weak 32-byte test key (Part H §74.12 refuses all-equal or
+/// low-entropy keys, so the former `[42u8; 32]` is no longer accepted).
+fn key_bytes(seed: u8) -> [u8; 32] {
+    let mut k = [0u8; 32];
+    for (i, b) in k.iter_mut().enumerate() {
+        *b = seed.wrapping_add((i as u8).wrapping_mul(7));
+    }
+    k
+}
+
 fn dev_settings() -> WebhookSettings {
     WebhookSettings {
-        secret_box: Some(Arc::new(SecretBox::from_bytes(&[42u8; 32]).unwrap())),
+        secret_box: Some(Arc::new(SecretBox::from_bytes(&key_bytes(42)).unwrap())),
         policy: EndpointPolicy {
             allow_insecure_http: true,
             allow_private_networks: true,
@@ -985,5 +995,270 @@ async fn deliveries_never_connect_to_rebound_addresses() {
         w.one("SELECT failure_category FROM webhook_deliveries")
             .await,
         "ENDPOINT_BLOCKED"
+    );
+}
+
+fn keyring(current: (&str, u8), previous: Option<(&str, u8)>) -> WebhookSettings {
+    use cf_webhooks::secret_box::SealingKey;
+    WebhookSettings {
+        secret_box: Some(Arc::new(
+            SecretBox::new(
+                SealingKey::from_bytes(current.0, &key_bytes(current.1)).unwrap(),
+                previous.map(|(kid, seed)| SealingKey::from_bytes(kid, &key_bytes(seed)).unwrap()),
+            )
+            .unwrap(),
+        )),
+        ..dev_settings()
+    }
+}
+
+/// Part H §74.12: the deployment key that seals signing secrets rotates without
+/// downtime. Subscriptions created under key A keep delivering correctly signed requests
+/// after B becomes current (A previous); `reseal` moves every row to B in bounded,
+/// idempotent batches; with A removed everything still works; a row under a key the
+/// deployment does not hold is refused, counted and never delivered unsigned — and is what
+/// startup refuses to run with.
+#[tokio::test]
+async fn deployment_key_rotation_keeps_deliveries_signed_and_reseals() {
+    use calling::webhooks::{keys::unknown_key_ids, WebhookService};
+    let Some(w) = World::new(keyring(("key-a", 1), None)).await else {
+        return;
+    };
+    let rx = Receiver::start().await;
+    let mut subs = Vec::new();
+    for _ in 0..3 {
+        subs.push(w.subscribe(&rx.url, &["call.requested"]).await);
+    }
+    assert_eq!(
+        w.one("SELECT COALESCE(string_agg(DISTINCT secret_key_id, ','), 'none') FROM webhook_subscriptions")
+            .await,
+        "key-a"
+    );
+    assert_eq!(
+        w.one("SELECT count(*)::text FROM webhook_subscriptions WHERE secret_sealed LIKE 'v2.key-a.%'")
+            .await,
+        "3"
+    );
+    let h = w.e.h();
+    let service = |settings: WebhookSettings| {
+        WebhookService::new(h.conn().clone(), Arc::new(h.clock.clone()), settings)
+    };
+    let verify_all = |seen: &[Received]| {
+        for r in seen {
+            let id = header(r, signing::HEADER_DELIVERY_ID);
+            let ts = header(r, signing::HEADER_TIMESTAMP);
+            let sig = header(r, signing::HEADER_SIGNATURE);
+            let now: i64 = ts.parse().unwrap();
+            // Exactly one subscription's secret verifies each request.
+            let ok = subs
+                .iter()
+                .filter(|(_, secret)| {
+                    signing::verify(secret.as_bytes(), &sig, &ts, &id, &r.body, now, 300).is_ok()
+                })
+                .count();
+            assert_eq!(
+                ok, 1,
+                "delivery {id} not signed with its subscription secret"
+            );
+        }
+    };
+
+    // Rotate: B current, A previous. Deliveries of rows still sealed under A are signed.
+    let rotated = service(keyring(("key-b", 2), Some(("key-a", 1))));
+    assert!(unknown_key_ids(h.conn(), rotated.key_ring().unwrap())
+        .await
+        .unwrap()
+        .is_empty());
+    w.call().await;
+    w.publish().await;
+    let report = rotated.deliver_due_once(100).await.unwrap();
+    assert_eq!(report.succeeded, 3, "{report:?}");
+    verify_all(&rx.seen());
+    // A new subscription made under the rotated deployment seals with B.
+    let status = rotated.key_status().await.unwrap();
+    assert_eq!(status.current_key_id, "key-b");
+    assert_eq!(status.pending_reseal, 3);
+    assert_eq!(
+        status
+            .keys
+            .iter()
+            .map(|k| (k.resolved_key_id.as_str(), k.role, k.subscriptions))
+            .collect::<Vec<_>>(),
+        [("key-a", "PREVIOUS", 3)]
+    );
+
+    // Reseal in batches of 2: every row ends under B; re-running is a no-op.
+    let first = rotated.reseal_batch(None, 2).await.unwrap();
+    assert_eq!((first.resealed, first.unopenable), (2, 0));
+    let second = rotated.reseal_batch(first.last_id, 2).await.unwrap();
+    assert_eq!((second.resealed, second.unopenable), (1, 0));
+    let done = rotated.reseal_batch(second.last_id, 2).await.unwrap();
+    assert_eq!((done.resealed, done.last_id), (0, None));
+    assert_eq!(rotated.reseal_batch(None, 100).await.unwrap().resealed, 0);
+    assert_eq!(
+        w.one(
+            "SELECT count(*)::text FROM webhook_subscriptions WHERE secret_key_id = 'key-b' \
+                AND secret_sealed LIKE 'v2.key-b.%'"
+        )
+        .await,
+        "3"
+    );
+    assert_eq!(rotated.key_status().await.unwrap().pending_reseal, 0);
+    // The sealed value never contains the secret, and the secret itself is unchanged
+    // (customers do not have to update their receivers for a deployment-key rotation).
+    let sealed = strings(h.conn(), "SELECT secret_sealed FROM webhook_subscriptions").await;
+    for (_, secret) in &subs {
+        assert!(sealed.iter().all(|s| !s.contains(secret.as_str())));
+    }
+
+    // Drop A: B alone still signs every subscription correctly.
+    let only_b = service(keyring(("key-b", 2), None));
+    assert!(unknown_key_ids(h.conn(), only_b.key_ring().unwrap())
+        .await
+        .unwrap()
+        .is_empty());
+    let before = rx.seen().len();
+    w.call().await;
+    w.publish().await;
+    let report = only_b.deliver_due_once(100).await.unwrap();
+    assert_eq!(report.succeeded, 3, "{report:?}");
+    let seen = rx.seen();
+    assert_eq!(seen.len(), before + 3);
+    verify_all(&seen[before..]);
+
+    // A row sealed under a key this deployment does not hold: refused and counted, never
+    // sent unsigned; startup would refuse to run with it.
+    let (victim, _) = &subs[0];
+    let foreign = cf_webhooks::secret_box::SecretBox::new(
+        cf_webhooks::secret_box::SealingKey::from_bytes("key-z", &key_bytes(9)).unwrap(),
+        None,
+    )
+    .unwrap()
+    .seal("whsec_foreign", &victim.to_string());
+    common::exec(
+        h.conn(),
+        &format!(
+            "UPDATE webhook_subscriptions SET secret_sealed = '{foreign}', secret_key_id = 'key-z' \
+              WHERE id = '{victim}'"
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        unknown_key_ids(h.conn(), only_b.key_ring().unwrap())
+            .await
+            .unwrap(),
+        ["key-z"]
+    );
+    let refusals = || {
+        calling::metrics::counter(
+            "calling_webhook_signing_refusals_total",
+            &[("reason", "SIGNING_KEY_UNKNOWN")],
+        )
+    };
+    let refused_before = refusals();
+    let before = rx.seen().len();
+    w.call().await;
+    w.publish().await;
+    let report = only_b.deliver_due_once(100).await.unwrap();
+    assert_eq!((report.succeeded, report.retried), (2, 1), "{report:?}");
+    assert_eq!(
+        rx.seen().len(),
+        before + 2,
+        "nothing sent for the unknown key"
+    );
+    // The two delivered requests are the other subscriptions', correctly signed.
+    verify_all(&rx.seen()[before..]);
+    assert_eq!(
+        strings(
+            h.conn(),
+            &format!(
+                "SELECT COALESCE(failure_category, '') FROM webhook_deliveries \
+                  WHERE subscription_id = '{victim}' AND status = 'RETRY_SCHEDULED'"
+            ),
+        )
+        .await,
+        ["SIGNING_KEY_UNKNOWN"]
+    );
+    assert!(refusals() > refused_before);
+    // Reseal cannot open it either: counted, left untouched (no silent re-keying).
+    let report = only_b.reseal_batch(None, 100).await.unwrap();
+    assert_eq!((report.resealed, report.unopenable), (0, 1));
+    assert_eq!(
+        w.one(&format!(
+            "SELECT secret_key_id FROM webhook_subscriptions WHERE id = '{victim}'"
+        ))
+        .await,
+        "key-z"
+    );
+}
+
+/// Part H §72.8 / §74.12: the operator reseal (`platform_admin webhooks reseal`) re-seals
+/// every row in bounded batches and then writes exactly ONE operator-audit row
+/// (`WEBHOOK_KEYS_RESEALED`, target the key ring) carrying counts and the batch size only
+/// — never a key, a seal or a secret.
+#[tokio::test]
+async fn operator_reseal_writes_one_audit_row_with_counts_only() {
+    use calling::{platform::operator::OperatorContext, webhooks::WebhookService};
+    let Some(w) = World::new(keyring(("key-a", 1), None)).await else {
+        return;
+    };
+    let rx = Receiver::start().await;
+    let mut secrets = Vec::new();
+    for _ in 0..3 {
+        secrets.push(w.subscribe(&rx.url, &["call.requested"]).await.1);
+    }
+    let h = w.e.h();
+    let rotated = WebhookService::new(
+        h.conn().clone(),
+        Arc::new(h.clock.clone()),
+        keyring(("key-b", 2), Some(("key-a", 1))),
+    );
+    let op = OperatorContext::new("ops.keys").unwrap();
+    let summary = rotated.operator_reseal_all(&op, 2).await.unwrap();
+    assert_eq!(
+        (
+            summary.resealed,
+            summary.unopenable,
+            summary.batches,
+            summary.batch_size
+        ),
+        (3, 0, 3, 2)
+    );
+    assert_eq!(rotated.key_status().await.unwrap().pending_reseal, 0);
+    let rows = strings(
+        h.conn(),
+        &format!(
+            "SELECT actor || '|' || target_kind || '|' || COALESCE(target_id::text, '-') || '|' || \
+               COALESCE(tenant_id::text, '-') || '|' || detail::text FROM platform_operator_audit \
+             WHERE action = 'WEBHOOK_KEYS_RESEALED' AND correlation_id = '{}'",
+            op.correlation_id()
+        ),
+    )
+    .await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    let detail: Value = serde_json::from_str(rows[0].rsplit('|').next().unwrap()).unwrap();
+    assert!(
+        rows[0].starts_with("ops.keys|WEBHOOK_KEY_RING|-|-|"),
+        "{rows:?}"
+    );
+    assert_eq!(
+        detail,
+        json!({ "resealed": 3, "unopenable": 0, "batches": 3, "batchSize": 2 })
+    );
+    for secret in &secrets {
+        assert!(!rows[0].contains(secret.as_str()));
+    }
+    assert!(!rows[0].contains("v2.") && !rows[0].contains("key-"));
+    // Re-running is a no-op reseal, audited again (one row per command).
+    let again = rotated.operator_reseal_all(&op, 2).await.unwrap();
+    assert_eq!((again.resealed, again.batches), (0, 1));
+    assert_eq!(
+        strings(
+            h.conn(),
+            "SELECT count(*)::text FROM platform_operator_audit WHERE action = 'WEBHOOK_KEYS_RESEALED'",
+        )
+        .await,
+        ["2"]
     );
 }

@@ -63,6 +63,17 @@ impl AppWorld {
         telephony: std::sync::Arc<dyn calling::telephony::TelephonyPort>,
         bridge: Option<std::sync::Arc<dyn calling::telephony::media::PublicMediaGateway>>,
     ) -> Option<Self> {
+        Self::with_public_network_configured(privacy, telephony, bridge, |_| {}).await
+    }
+
+    /// [`with_public_network`](Self::with_public_network) whose runtime is further
+    /// adjusted by `configure` (e.g. the compliance overlay or abuse thresholds).
+    pub async fn with_public_network_configured(
+        privacy: std::sync::Arc<dyn calling::privacy_relay::PrivacyRelayAuthority>,
+        telephony: std::sync::Arc<dyn calling::telephony::TelephonyPort>,
+        bridge: Option<std::sync::Arc<dyn calling::telephony::media::PublicMediaGateway>>,
+        configure: impl FnOnce(&mut calling::state::CallingRuntime),
+    ) -> Option<Self> {
         use std::sync::Arc;
         let db = Arc::new(super::TestDb::new().await?);
         let media = Arc::new(FakeMediaProvider::default());
@@ -78,6 +89,7 @@ impl AppWorld {
                 callback_relay: true,
             },
         };
+        configure(&mut runtime);
         let h = Harness::with_runtime(
             db,
             super::TEST_PEPPER,

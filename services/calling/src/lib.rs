@@ -36,6 +36,7 @@ pub mod middleware;
 pub mod models;
 pub mod platform;
 pub mod privacy_relay;
+pub mod retention;
 pub mod routes;
 pub mod routing;
 pub mod signaling;

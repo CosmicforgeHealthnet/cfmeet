@@ -142,6 +142,11 @@ impl CallService {
         &self.config
     }
 
+    /// The service clock (shared with background workers).
+    pub(crate) fn clock(&self) -> SharedClock {
+        self.clock.clone()
+    }
+
     pub(crate) fn now(&self) -> DateTime<Utc> {
         self.clock.now()
     }

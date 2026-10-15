@@ -1,5 +1,6 @@
 //! Durable background work (Part C §85, §86): invitation expiry and media
-//! reconciliation. Multi-instance safe without coordination services:
+//! reconciliation, and the retention loop (Part H §80, [`crate::retention::worker`]).
+//! Multi-instance safe without coordination services:
 //!
 //! * a sweep picks candidates from partial indexes (live invitations by expiry,
 //!   non-terminated media bindings by due time) — never scanning call history;
@@ -147,6 +148,19 @@ impl AppCallService {
             }
         }
         Ok(report)
+    }
+
+    /// Runs the retention worker (Part H §80) forever on this instance, one bounded tick
+    /// per `settings.interval` (spawned by the composition root; multi-instance safe:
+    /// `FOR UPDATE SKIP LOCKED` claims, one transaction per class batch).
+    pub async fn run_retention(self, settings: crate::retention::RetentionSettings) {
+        crate::retention::worker::RetentionWorker::new(
+            self.db().clone(),
+            self.calls.clock(),
+            settings,
+        )
+        .run()
+        .await
     }
 
     /// Runs both sweeps forever on this instance (spawned by the composition root).

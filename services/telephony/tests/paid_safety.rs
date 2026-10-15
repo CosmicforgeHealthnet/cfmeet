@@ -1,6 +1,8 @@
 //! Paid-action safety at Telephony (Part E §160–§162, §192–§193): the durable call
 //! duration limit, operator disable of one interconnect / route without touching
-//! anything else, abuse signals, and bounded metrics.
+//! anything else, the transmit-time re-check (Part H §75: a route / provider disable,
+//! an opened circuit or a newly blocked destination class between route choice and the
+//! transmit fence means no provider request), abuse signals, and bounded metrics.
 
 mod common;
 
@@ -128,6 +130,111 @@ async fn an_operator_disables_one_route_or_interconnect_without_disabling_teleph
     let (leg, _) = h.originate().await;
     h.run().await;
     assert_eq!(h.leg_status(leg).await, "ORIGINATING");
+}
+
+/// Installs a test-only trigger that runs `change` in the route-choice transaction (when
+/// the PREPARED binding is inserted): the state the executor chose a route under changes
+/// after the choice and before the transmit fence — exactly the window the fence
+/// re-check exists for.
+async fn change_after_route_choice(h: &Harness, change: &str) {
+    h.sql(&format!(
+        "CREATE FUNCTION test_change_after_route_choice() RETURNS trigger LANGUAGE plpgsql AS $$ \
+         BEGIN {change}; RETURN NEW; END; $$; \
+         CREATE TRIGGER trg_test_change_after_route_choice AFTER INSERT ON provider_call_bindings \
+         FOR EACH ROW EXECUTE FUNCTION test_change_after_route_choice();"
+    ))
+    .await;
+}
+
+#[tokio::test]
+async fn a_change_between_route_choice_and_the_transmit_fence_stops_the_request() {
+    for (change, code, class) in [
+        (
+            "UPDATE telecom_routes SET status = 'DISABLED', version = version + 1 WHERE id = NEW.route_id",
+            "ROUTE_DISABLED",
+            None,
+        ),
+        (
+            "UPDATE telecom_providers SET status = 'DISABLED', version = version + 1 WHERE id = NEW.provider_id",
+            "PROVIDER_DISABLED",
+            None,
+        ),
+        (
+            "UPDATE telecom_routes SET circuit_state = 'OPEN', circuit_opened_at = NEW.created_at, \
+             version = version + 1 WHERE id = NEW.route_id",
+            "CIRCUIT_OPEN",
+            None,
+        ),
+        (
+            "UPDATE telecom_providers SET circuit_state = 'OPEN', circuit_opened_at = NEW.created_at, \
+             version = version + 1 WHERE id = NEW.provider_id",
+            "CIRCUIT_OPEN",
+            None,
+        ),
+        (
+            "INSERT INTO telecom_destination_classes (id, country, prefix, class, source, created_at, updated_at) \
+             VALUES (gen_random_uuid(), 'NG', '803', 'PREMIUM', 'test-load', NEW.created_at, NEW.created_at)",
+            "DESTINATION_CLASS_BLOCKED",
+            Some("PREMIUM"),
+        ),
+    ] {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        change_after_route_choice(&h, change).await;
+        let refusals = class.map(|c| {
+            metrics::counter("telephony_destination_class_refusals_total", &[("class", c)])
+        });
+        let (leg, _) = h.originate().await;
+        h.run().await;
+        // The route was chosen (the binding exists) — and nothing left this process.
+        assert_eq!(h.leg_status(leg).await, "FAILED", "{code}");
+        assert_eq!(
+            h.text(&format!(
+                "SELECT end_reason FROM telephony_legs WHERE id = '{leg}'"
+            ))
+            .await
+            .as_deref(),
+            Some("NOT_SENT"),
+            "{code}"
+        );
+        assert_eq!(
+            h.text(&format!(
+                "SELECT result_code FROM telephony_commands WHERE telephony_leg_id = '{leg}' AND kind = 'ORIGINATE'"
+            ))
+            .await
+            .as_deref(),
+            Some(code)
+        );
+        assert_eq!(
+            h.scalar(&format!(
+                "SELECT count(*) FROM telephony_commands WHERE telephony_leg_id = '{leg}' \
+                 AND status = 'FAILED' AND transmitted_at IS NULL"
+            ))
+            .await,
+            1,
+            "{code}: completed without transmission"
+        );
+        assert_eq!(
+            h.text(&format!(
+                "SELECT status FROM provider_call_bindings WHERE telephony_leg_id = '{leg}'"
+            ))
+            .await
+            .as_deref(),
+            Some("ABSENT"),
+            "{code}"
+        );
+        assert!(
+            h.provider_a.requests().is_empty() && h.provider_b.requests().is_empty(),
+            "{code}: zero provider originates"
+        );
+        if let (Some(c), Some(before)) = (class, refusals) {
+            assert!(
+                metrics::counter("telephony_destination_class_refusals_total", &[("class", c)])
+                    > before
+            );
+        }
+    }
 }
 
 #[tokio::test]

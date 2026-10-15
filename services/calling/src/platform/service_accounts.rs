@@ -2,7 +2,8 @@
 
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
+    QueryOrder,
 };
 use serde::Serialize;
 
@@ -59,6 +60,16 @@ impl PlatformService {
         environment_id: EnvironmentId,
         new: NewServiceAccount,
     ) -> PlatformResult<ServiceAccountView> {
+        self.create_service_account_in(&self.db, environment_id, new)
+            .await
+    }
+
+    pub(crate) async fn create_service_account_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        environment_id: EnvironmentId,
+        new: NewServiceAccount,
+    ) -> PlatformResult<ServiceAccountView> {
         let name = Slug::parse(&new.name).map_err(PlatformError::Validation)?;
         let description = optional_text(new.description.as_deref(), "description", 500)?;
         let environment = self.environment(environment_id).await?;
@@ -75,7 +86,7 @@ impl PlatformService {
             created_at: Set(now),
             updated_at: Set(now),
         }
-        .insert(&self.db)
+        .insert(db)
         .await
         .map_err(|e| match PlatformError::from(e) {
             PlatformError::Conflict(_) => PlatformError::Conflict(format!(
@@ -136,8 +147,18 @@ impl PlatformService {
         id: ServiceAccountId,
         status: ServiceAccountStatus,
     ) -> PlatformResult<ServiceAccountView> {
+        self.set_service_account_status_in(&self.db, id, status)
+            .await
+    }
+
+    pub(crate) async fn set_service_account_status_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        id: ServiceAccountId,
+        status: ServiceAccountStatus,
+    ) -> PlatformResult<ServiceAccountView> {
         let model = service_accounts::Entity::find_by_id(id.as_uuid())
-            .one(&self.db)
+            .one(db)
             .await?
             .ok_or(PlatformError::NotFound("service account"))?;
         if model.status == status {
@@ -155,7 +176,7 @@ impl PlatformService {
             active.revoked_at = Set(Some(now));
         }
         active.updated_at = Set(now);
-        let model = active.update(&self.db).await?;
+        let model = active.update(db).await?;
         tracing::info!(service_account_id = %model.id, status = %model.status, "service account status changed");
         Ok(model.into())
     }

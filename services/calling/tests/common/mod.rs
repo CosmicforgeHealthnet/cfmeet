@@ -16,6 +16,7 @@ pub mod enterprise;
 pub mod fake_media;
 pub mod privacy;
 pub mod provider_contract;
+pub mod public;
 pub mod telephony;
 
 use std::{collections::HashMap, sync::Arc};
@@ -478,6 +479,8 @@ pub fn test_runtime(
         artifacts: Arc::new(cf_object_storage::MemoryObjectStore::new()),
         capture: Arc::new(calling::calls::app::enterprise::UnavailableCapture),
         webhooks: calling::webhooks::WebhookSettings::default(),
+        compliance_overlay: Default::default(),
+        abuse_controls: Default::default(),
     }
 }
 

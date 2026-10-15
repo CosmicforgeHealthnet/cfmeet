@@ -973,7 +973,8 @@ async fn retrieval_is_authorized_and_audited() {
     assert_eq!(
         e.count(&format!(
             "SELECT count(*) FROM enterprise_admin_audit WHERE resource_type = 'VOICEMAIL_MESSAGE' \
-               AND resource_id = '{message}' AND operation = 'MEDIA_ACCESS'"
+               AND resource_id = '{message}' AND operation = 'MEDIA_ACCESS' \
+               AND details->>'outcome' = 'GRANTED'"
         ))
         .await,
         2
@@ -1027,7 +1028,7 @@ async fn retrieval_is_authorized_and_audited() {
             e.h().conn(),
             &format!(
                 "SELECT operation FROM enterprise_admin_audit WHERE resource_id = '{message}' \
-                   AND operation LIKE 'MARK_%' ORDER BY seq"
+                   AND operation LIKE 'MARK_%' AND details->>'outcome' = 'GRANTED' ORDER BY seq"
             ),
         )
         .await,
@@ -1441,4 +1442,322 @@ async fn delete_racing_retention_deletes_once() {
         reasons == ["USER"] || reasons == ["RETENTION"] || reasons == ["ADMIN"],
         "{reasons:?}"
     );
+}
+
+/// Part H §79.29: every voicemail access decision on a message of the caller's own scope
+/// is audited — GRANTED reads / media accesses / deletes, and DENIED attempts by a
+/// non-owner (answered 404, byte-identical to an unknown id) or by a credential missing
+/// the voicemail scope (403). Another tenant gets the same 404 as for an unknown id and
+/// leaves NO audit row anywhere. No audit row carries an object key.
+#[tokio::test]
+async fn voicemail_access_decisions_are_audited_without_revealing_existence() {
+    let Some(vm) = Vm::new().await else {
+        return;
+    };
+    let e = &vm.e;
+    let caller = desk(e, "caller").await;
+    let (member, _) = member_with_mailbox(&vm, "4900").await;
+    let stranger = desk(e, "stranger").await;
+    let (call, message) = unanswered(&vm, &caller, "4900").await;
+    vm.deliver(message, call, &wav(700)).await.unwrap();
+    let path = format!("/v1/enterprise/voicemail/messages/{message}");
+    let owner = member.principal.id();
+    let audit = |filter: &str| {
+        format!(
+            "SELECT operation || ':' || COALESCE(details->>'outcome', '') || ':' || \
+                    COALESCE(details->>'reason', '') FROM enterprise_admin_audit \
+              WHERE resource_id = '{message}' {filter} ORDER BY seq"
+        )
+    };
+    let trail = || async { strings(e.h().conn(), &audit("")).await };
+
+    // Granted read.
+    let r = vm
+        .read(Method::GET, &format!("{path}?principalId={owner}"), None)
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(trail().await, ["READ_METADATA:GRANTED:"]);
+
+    // A non-owner: 404 exactly like an unknown id — and audited DENIED.
+    let denied = vm
+        .read(
+            Method::GET,
+            &format!("{path}?principalId={}", stranger.principal.id()),
+            None,
+        )
+        .await;
+    let unknown = vm
+        .read(
+            Method::GET,
+            &format!(
+                "/v1/enterprise/voicemail/messages/{}?principalId={}",
+                Uuid::new_v4(),
+                stranger.principal.id()
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(denied.status, StatusCode::NOT_FOUND);
+    assert_eq!(unknown.status, StatusCode::NOT_FOUND);
+    assert_eq!(denied.normalized_error(), unknown.normalized_error());
+    let r = vm
+        .read(
+            Method::POST,
+            &format!("{path}/media-access"),
+            Some(json!({ "principalId": stranger.principal.id() })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    assert!(r.json.get("url").is_none());
+    let r = vm
+        .manage(
+            Method::DELETE,
+            &format!(
+                "{path}?expectedVersion=1&principalId={}",
+                stranger.principal.id()
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    assert_eq!(vm.message_state(message).await, "READY:", "no mutation");
+    // Missing scopes: 403, audited DENIED.
+    let r = vm
+        .read(
+            Method::DELETE,
+            &format!("{path}?expectedVersion=1&principalId={owner}"),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    let r = e
+        .admin(Method::GET, &format!("{path}?principalId={owner}"), None)
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    assert_eq!(
+        trail().await,
+        [
+            "READ_METADATA:GRANTED:",
+            "READ_METADATA:DENIED:NOT_OWNER",
+            "MEDIA_ACCESS:DENIED:NOT_OWNER",
+            "DELETE:DENIED:NOT_OWNER",
+            "DELETE:DENIED:MISSING_SCOPE",
+            "READ_METADATA:DENIED:MISSING_SCOPE",
+        ]
+    );
+    // An unknown id leaves no trace.
+    let unknown_id = Uuid::new_v4();
+    let r = vm
+        .read(
+            Method::DELETE,
+            &format!("/v1/enterprise/voicemail/messages/{unknown_id}?expectedVersion=1"),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        e.count(&format!(
+            "SELECT count(*) FROM enterprise_admin_audit WHERE resource_id = '{unknown_id}'"
+        ))
+        .await,
+        0
+    );
+
+    // Another tenant (with every voicemail scope): 404 like an unknown id, no audit row
+    // anywhere, nothing changes.
+    let (other_consumer, _) = e.other_tenant("initech").await;
+    let other = credential(
+        e.h(),
+        &other_consumer,
+        e.a.w.kind,
+        &[
+            names::ENTERPRISE_VOICEMAIL_READ,
+            names::ENTERPRISE_VOICEMAIL_MANAGE,
+        ],
+    )
+    .await;
+    let before = trail().await;
+    for (method, p, body) in [
+        (Method::GET, path.clone(), None),
+        (
+            Method::POST,
+            format!("{path}/media-access"),
+            Some(json!({})),
+        ),
+        (
+            Method::PUT,
+            format!("{path}/read-state"),
+            Some(json!({ "expectedVersion": 1, "readState": "READ" })),
+        ),
+        (Method::DELETE, format!("{path}?expectedVersion=1"), None),
+    ] {
+        let foreign = e
+            .send(other.secret.expose_once(), method.clone(), &p, body.clone())
+            .await;
+        let missing = e
+            .send(
+                other.secret.expose_once(),
+                method,
+                &p.replace(&message.to_string(), &Uuid::new_v4().to_string()),
+                body,
+            )
+            .await;
+        assert_eq!(
+            foreign.status,
+            StatusCode::NOT_FOUND,
+            "{p}: {}",
+            foreign.text
+        );
+        assert_eq!(
+            foreign.normalized_error(),
+            missing.normalized_error(),
+            "{p}"
+        );
+    }
+    assert_eq!(trail().await, before);
+    assert_eq!(
+        e.count(&format!(
+            "SELECT count(*) FROM enterprise_admin_audit WHERE tenant_id = '{}'",
+            other_consumer.tenant.id
+        ))
+        .await,
+        0
+    );
+    assert_eq!(vm.message_state(message).await, "READY:");
+
+    // Granted media access and delete.
+    let r = vm
+        .read(
+            Method::POST,
+            &format!("{path}/media-access"),
+            Some(json!({ "principalId": owner })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let version = vm.manage(Method::GET, &path, None).await.json["version"]
+        .as_i64()
+        .unwrap();
+    let r = vm
+        .manage(
+            Method::DELETE,
+            &format!("{path}?expectedVersion={version}&principalId={owner}"),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let granted = strings(e.h().conn(), &audit("AND details->>'outcome' = 'GRANTED'")).await;
+    assert_eq!(
+        granted,
+        [
+            "READ_METADATA:GRANTED:",
+            "MEDIA_ACCESS:GRANTED:",
+            "READ_METADATA:GRANTED:",
+            "DELETE:GRANTED:USER",
+        ]
+    );
+    // Denied rows name the credential that tried (who), never a key.
+    assert_eq!(
+        e.count(&format!(
+            "SELECT count(*) FROM enterprise_admin_audit WHERE resource_id = '{message}' \
+               AND details->>'outcome' = 'DENIED' AND actor_credential_id IS NULL"
+        ))
+        .await,
+        0
+    );
+    assert_eq!(
+        e.count(
+            "SELECT count(*) FROM enterprise_admin_audit WHERE details::text LIKE '%voicemail/%' \
+               OR details::text LIKE '%memory://%'"
+        )
+        .await,
+        0
+    );
+}
+
+/// Whether a media-access request for `message` on behalf of `owner` hands out a URL.
+async fn media_url(vm: &Vm, message: Uuid, owner: impl std::fmt::Display) -> bool {
+    let r = vm
+        .read(
+            Method::POST,
+            &format!("/v1/enterprise/voicemail/messages/{message}/media-access"),
+            Some(json!({ "principalId": owner.to_string() })),
+        )
+        .await;
+    r.json.get("url").is_some()
+}
+
+/// Part H §79.26 for voicemail: an integrity mismatch after the write, or a failed READY
+/// transaction, never leaves the object behind — deleted at once, or queued (key only in
+/// `calling_orphan_objects`) and deleted by the worker once the message can no longer be
+/// finalized. No media access exists for it.
+#[tokio::test]
+async fn voicemail_capture_objects_are_never_left_behind() {
+    let Some(vm) = Vm::new().await else {
+        return;
+    };
+    let e = &vm.e;
+    let caller = desk(e, "caller").await;
+    let (member, _) = member_with_mailbox(&vm, "4950").await;
+    let owner = member.principal.id();
+    let orphans = || async { e.count("SELECT count(*) FROM calling_orphan_objects").await };
+
+    // Integrity mismatch: removed at once.
+    let (call, message) = unanswered(&vm, &caller, "4950").await;
+    vm.store.set_corrupt_writes(true);
+    assert!(matches!(
+        vm.deliver(message, call, &wav(500)).await,
+        Err(CallError::ArtifactStorageUnavailable)
+    ));
+    assert!(vm.store.is_empty(), "{:?}", vm.store.keys());
+    assert_eq!(orphans().await, 0);
+    assert!(!media_url(&vm, message, owner).await);
+    vm.store.set_corrupt_writes(false);
+
+    // The READY transaction fails after the write: removed at once ...
+    common::exec(
+        e.h().conn(),
+        "CREATE FUNCTION test_fail_voicemail_ready() RETURNS trigger LANGUAGE plpgsql AS $$ \
+         BEGIN IF NEW.state = 'READY' THEN RAISE EXCEPTION 'injected finalization failure'; END IF; \
+         RETURN NEW; END $$; \
+         CREATE TRIGGER trg_test_fail_voicemail_ready BEFORE UPDATE ON voicemail_messages \
+         FOR EACH ROW EXECUTE FUNCTION test_fail_voicemail_ready();",
+    )
+    .await
+    .unwrap();
+    assert!(vm.deliver(message, call, &wav(500)).await.is_err());
+    assert!(vm.store.is_empty());
+    assert_eq!(orphans().await, 0);
+    // ... or, when storage refuses the delete, queued with an incident (no key in it).
+    vm.store.set_failing_deletes(true);
+    assert!(vm.deliver(message, call, &wav(500)).await.is_err());
+    assert_eq!((vm.store.len(), orphans().await), (1, 1));
+    let key = vm.store.keys().pop().unwrap();
+    assert!(!media_url(&vm, message, owner).await);
+    let evidence = strings(
+        e.h().conn(),
+        &format!(
+            "SELECT restricted_evidence::text FROM calling_incidents WHERE resource_id = '{message}'"
+        ),
+    )
+    .await
+    .join(" ");
+    assert!(
+        !evidence.is_empty() && !evidence.contains("voicemail/"),
+        "{evidence}"
+    );
+    common::exec(
+        e.h().conn(),
+        "DROP TRIGGER trg_test_fail_voicemail_ready ON voicemail_messages; \
+         DROP FUNCTION test_fail_voicemail_ready();",
+    )
+    .await
+    .unwrap();
+    // Storage recovers; the message is lost (never finalized): the worker deletes it.
+    vm.store.set_failing_deletes(false);
+    e.h().clock.advance(chrono::Duration::hours(2));
+    vm.tick().await;
+    assert!(vm.message_state(message).await.starts_with("FAILED:"));
+    assert_eq!(orphans().await, 0);
+    assert!(vm.store.get_raw(&key).is_none());
+    assert!(vm.store.is_empty());
 }
