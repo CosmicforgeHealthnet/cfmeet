@@ -77,6 +77,7 @@ impl AppState {
         crate::acquisition::Acquisition::new(
             self.numbers.clone(),
             self.providers.clone(),
+            self.eligibility.clone(),
             self.acquisition_settings.clone(),
         )
     }

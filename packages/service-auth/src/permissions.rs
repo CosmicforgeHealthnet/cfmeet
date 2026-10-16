@@ -139,6 +139,11 @@ pub enum InternalPermission {
     /// provider-independent; no provider binding identifiers).
     #[serde(rename = "number-resource.read")]
     NumberResourceRead,
+    /// Numbering: acknowledge that a configured number route is ready in the consumer that
+    /// carries its traffic (Telephony for voice, the SMS Gateway for SMS) — an activation
+    /// prerequisite, never fabricated by Numbering.
+    #[serde(rename = "number-route.acknowledge")]
+    NumberRouteAcknowledge,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -403,6 +408,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: false,
         description: "Read canonical Number Resources and DCN assignments (CF Meet ids only, no provider binding identifiers)",
     },
+    PermissionDefinition {
+        permission: InternalPermission::NumberRouteAcknowledge,
+        name: "number-route.acknowledge",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::TELEPHONY, services::SMS_GATEWAY],
+        sensitive: false,
+        description: "Acknowledge that a configured number route (voice: Telephony, SMS: SMS Gateway) is ready to carry traffic; an activation prerequisite",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -441,6 +454,7 @@ impl InternalPermission {
         InternalPermission::PlatformIdentityRead,
         InternalPermission::PlatformIdentityAdminister,
         InternalPermission::NumberResourceRead,
+        InternalPermission::NumberRouteAcknowledge,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {

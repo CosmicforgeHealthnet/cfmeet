@@ -11,6 +11,7 @@
 //! Every non-probe route runs behind its authentication BY CONSTRUCTION, including
 //! unknown paths; extractor rejections are normalized to the error envelope.
 
+pub mod acquisitions;
 pub mod callbacks;
 pub mod catalog;
 pub mod customer;

@@ -15,6 +15,9 @@ pub mod services {
     pub const PLATFORM_ACCESS: &str = "cfmeet.platform-access";
     /// Digital Communications Numbers (Part IV Workstreams C–D).
     pub const NUMBERING: &str = "cfmeet.numbering";
+    /// SMS transport (Part IV Workstreams M–O). Numbering already authorizes it (route
+    /// readiness, inbound destinations, sender grants); the service itself is later.
+    pub const SMS_GATEWAY: &str = "cfmeet.sms-gateway";
     /// Operator administration tooling. Not a deployable service: an issuer identity
     /// that only Platform Access trusts, for identity administration.
     pub const OPERATOR_CONSOLE: &str = "cfmeet.operator-console";
@@ -84,6 +87,10 @@ impl ServiceId {
 
     pub fn numbering() -> Self {
         Self(services::NUMBERING.to_string())
+    }
+
+    pub fn sms_gateway() -> Self {
+        Self(services::SMS_GATEWAY.to_string())
     }
 
     pub fn operator_console() -> Self {

@@ -32,6 +32,7 @@ pub fn routes() -> Router<AppState> {
             get(get_reservation),
         )
         .merge(super::numbers::routes())
+        .merge(super::acquisitions::routes())
         .merge(super::catalog::customer_routes())
         .merge(super::catalog::admin_routes())
         .merge(super::kyc::customer_routes())

@@ -137,6 +137,8 @@ jobs:
         run: cargo test --locked --test provider_contract
       - name: Inventory search and reservation (Workstream H)
         run: cargo test --locked --test inventory_reservations
+      - name: Provisioning and activation prerequisites (Workstream I)
+        run: cargo test --locked --test provisioning_activation
       - name: cargo test (whole workspace)
         run: cargo test --workspace --no-fail-fast --locked
 
@@ -182,7 +184,7 @@ jobs:
           # Foundation (outbox, jobs, idempotency) + the D9 number domain + the E catalog +
           # the F KYC / eligibility tables + the G provider command / event / incident tables —
           # and nothing of any other service.
-          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'numbering_seaql_migrations'")" = "30"
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'numbering_seaql_migrations'")" = "33"
           test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'numbering_seaql_migrations' AND tablename !~ '^(number_|numbering_|dcn_)'")" = "0"
           # No provider identifier column outside bindings / inventory snapshots and the
           # internal applicability of catalog entries, KYC requirement sets and KYC cases, and

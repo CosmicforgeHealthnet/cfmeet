@@ -1,0 +1,20 @@
+{
+  "event_id": "evt_0123456789abcdef0123456789abcdef",
+  "event_type": "number.route.changed",
+  "schema_version": 1,
+  "occurred_at": "2031-03-01T10:05:00.000000Z",
+  "producer_service": "cfmeet.numbering",
+  "runtime_environment": "staging",
+  "correlation_id": "corr_0123456789abcdef0123456789abcdef",
+  "payload": {
+    "number_resource_id": "00000001-1c3e-4a5b-8c7d-9e0f1a2b3c4d",
+    "family": "VOICE",
+    "route_ref": "00000007-1c3e-4a5b-8c7d-9e0f1a2b3c4d",
+    "route_revision": 2,
+    "binding_revision": 1,
+    "status": "CONFIGURED",
+    "reason_code": "ROUTE_CONFIGURED",
+    "external_ref": "syn-voice-only"
+  },
+  "causation_id": "evt_fedcba9876543210fedcba9876543210"
+}

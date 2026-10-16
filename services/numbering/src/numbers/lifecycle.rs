@@ -284,17 +284,22 @@ async fn check_prerequisites(
             }
         }
         (_, S::Provisioning) => {
-            let assignments = count(
+            // The acquisition basis: an assignment holding the reservation (D), or an
+            // eligibility-bound PROVISIONING acquisition of the current HELD reservation
+            // (Workstream I) — never a bare number.
+            let basis = count(
                 txn,
-                "SELECT count(*) AS n FROM dcn_assignments WHERE number_resource_id = $1 \
-                   AND status IN ('RESERVED', 'ACTIVATING')",
+                "SELECT (SELECT count(*) FROM dcn_assignments WHERE number_resource_id = $1 \
+                          AND status IN ('RESERVED', 'ACTIVATING')) \
+                      + (SELECT count(*) FROM number_acquisitions q JOIN number_reservations r ON r.id = q.reservation_id \
+                          WHERE q.number_resource_id = $1 AND q.status = 'PROVISIONING' AND r.status = 'HELD') AS n",
                 vec![id.into()],
             )
             .await?;
-            if assignments == 0 {
+            if basis == 0 {
                 return Err(precondition(
                     "ASSIGNMENT_REQUIRED",
-                    "provisioning needs an assignment holding the reservation",
+                    "provisioning needs an assignment holding the reservation or a provisioning acquisition of it",
                 ));
             }
         }

@@ -135,6 +135,27 @@
     },
     {
       "$ref": "#/$defs/ReservationList"
+    },
+    {
+      "$ref": "#/$defs/Acquisition"
+    },
+    {
+      "$ref": "#/$defs/AcquisitionList"
+    },
+    {
+      "$ref": "#/$defs/CreateAcquisitionRequest"
+    },
+    {
+      "$ref": "#/$defs/ConfigureRoutesRequest"
+    },
+    {
+      "$ref": "#/$defs/NumberRoutes"
+    },
+    {
+      "$ref": "#/$defs/RouteReadinessRequest"
+    },
+    {
+      "$ref": "#/$defs/RouteReadiness"
     }
   ],
   "$defs": {
@@ -2164,7 +2185,13 @@
         "PROVIDER_OBJECT_UNKNOWN",
         "PROVIDER_UNAVAILABLE",
         "RESERVATION_BUSY",
-        "REQUEST_IN_PROGRESS"
+        "REQUEST_IN_PROGRESS",
+        "ACQUISITION_EXISTS",
+        "HOLD_LOST",
+        "ROUTE_ACK_CONFLICT",
+        "CONSUMER_MISMATCH",
+        "STALE_ROUTE_REVISION",
+        "ROUTE_NOT_CONFIGURED"
       ]
     },
     "Error": {
@@ -4582,6 +4609,512 @@
         },
         "notice": {
           "$ref": "#/$defs/ExternalVerificationNotice"
+        }
+      }
+    },
+    "AcquisitionStatus": {
+      "description": "PROVISIONING until the provider's acquisition is proven (PROVISIONED, with a binding), FAILED on a definite refusal (retryable), UNKNOWN while the outcome is reconciled from read-back (never resent).",
+      "type": "string",
+      "enum": [
+        "PROVISIONING",
+        "PROVISIONED",
+        "FAILED",
+        "UNKNOWN"
+      ]
+    },
+    "RouteFamily": {
+      "description": "A capability family routed by one provider configuration: VOICE (carried by Telephony) or SMS (carried by the SMS Gateway).",
+      "type": "string",
+      "enum": [
+        "VOICE",
+        "SMS"
+      ]
+    },
+    "RouteStatus": {
+      "description": "Provider route configuration: REQUESTED, CONFIGURED (provider acknowledgement evidence), FAILED, UNKNOWN (reconciled from read-back), SUPERSEDED.",
+      "type": "string",
+      "enum": [
+        "REQUESTED",
+        "CONFIGURED",
+        "FAILED",
+        "UNKNOWN",
+        "SUPERSEDED"
+      ]
+    },
+    "RouteReadinessReason": {
+      "description": "Why a family is not ready to carry traffic.",
+      "type": "string",
+      "enum": [
+        "ROUTE_NOT_CONFIGURED",
+        "ROUTE_CONFIGURATION_PENDING",
+        "ROUTE_CONFIGURATION_FAILED",
+        "BINDING_CHANGED",
+        "CAPABILITY_NOT_BOUND",
+        "CONSUMER_NOT_READY"
+      ]
+    },
+    "FamilyReadiness": {
+      "description": "One family of a number: the provider route configured on the CURRENT binding AND acknowledged by the family's consumer.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "family",
+        "routeRevision",
+        "routeStatus",
+        "acknowledgedBy",
+        "ready",
+        "reason"
+      ],
+      "properties": {
+        "family": {
+          "$ref": "#/$defs/RouteFamily"
+        },
+        "routeRevision": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "routeStatus": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RouteStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "acknowledgedBy": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ServiceId"
+          }
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "reason": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RouteReadinessReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Acquisition": {
+      "description": "A reservation being (or having been) provisioned for the caller's scope. PROVISIONED means the platform acquired the number — NOT an active customer number (that needs an eligible owner, routing and readiness: a DCN assignment). Provider identifiers and route references never appear.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "acquisitionId",
+        "reservationId",
+        "numberResourceId",
+        "status",
+        "revision",
+        "requestedCapabilities",
+        "eligibilityDecisionId",
+        "failureCode",
+        "provisioning",
+        "servedCapabilities",
+        "routes",
+        "activationReady",
+        "liveRouting",
+        "createdAt",
+        "updatedAt",
+        "completedAt"
+      ],
+      "properties": {
+        "acquisitionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "reservationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "numberResourceId": {
+          "$ref": "#/$defs/NumberResourceId"
+        },
+        "status": {
+          "$ref": "#/$defs/AcquisitionStatus"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "requestedCapabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "VOICE_INBOUND",
+              "VOICE_OUTBOUND",
+              "SMS_INBOUND",
+              "SMS_OUTBOUND",
+              "MMS_RICH"
+            ]
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "eligibilityDecisionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "failureCode": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ReasonCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provisioning": {
+          "oneOf": [
+            {
+              "description": "The durable PROVISION command (provider-neutral).",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "status",
+                "attempts",
+                "failureCode"
+              ],
+              "properties": {
+                "status": {
+                  "$ref": "#/$defs/ProviderCommandStatus"
+                },
+                "attempts": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "failureCode": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/ReasonCode"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "servedCapabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "VOICE_INBOUND",
+              "VOICE_OUTBOUND",
+              "SMS_INBOUND",
+              "SMS_OUTBOUND",
+              "MMS_RICH"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "routes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FamilyReadiness"
+          }
+        },
+        "activationReady": {
+          "type": "boolean"
+        },
+        "liveRouting": {
+          "description": "false for synthetic test inventory: never live public routing.",
+          "type": "boolean"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "completedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "AcquisitionList": {
+      "description": "GET /v1/numbers/acquisitions: the caller's acquisitions, newest first.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "nextCursor"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Acquisition"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "CreateAcquisitionRequest": {
+      "description": "POST /v1/numbers/acquisitions (Idempotency-Key required): provision a reservation that holds the number.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reservationId",
+        "capabilities"
+      ],
+      "properties": {
+        "reservationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "VOICE_INBOUND",
+              "VOICE_OUTBOUND",
+              "SMS_INBOUND",
+              "SMS_OUTBOUND",
+              "MMS_RICH"
+            ]
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 5
+        },
+        "eligibilityDecisionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "ConfigureRoutesRequest": {
+      "description": "POST /v1/numbers/acquisitions/{acquisitionId}/routes (Idempotency-Key required): configure the provider routes of these capabilities' families on the current binding.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capabilities"
+      ],
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "VOICE_INBOUND",
+              "VOICE_OUTBOUND",
+              "SMS_INBOUND",
+              "SMS_OUTBOUND",
+              "MMS_RICH"
+            ]
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 5
+        }
+      }
+    },
+    "NumberRoutes": {
+      "description": "GET /internal/v1/number-resources/{id}/routes: the current provider route configuration of every family and consumer readiness (internal; route references are opaque CF Meet ids).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numberResourceId",
+        "bindingRevision",
+        "routingRevision",
+        "synthetic",
+        "routes",
+        "readiness"
+      ],
+      "properties": {
+        "numberResourceId": {
+          "$ref": "#/$defs/NumberResourceId"
+        },
+        "bindingRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "routingRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "routes": {
+          "type": "array",
+          "items": {
+            "description": "A current route configuration.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "family",
+              "routeRef",
+              "routeRevision",
+              "bindingRevision",
+              "status",
+              "acknowledgedAt"
+            ],
+            "properties": {
+              "family": {
+                "$ref": "#/$defs/RouteFamily"
+              },
+              "routeRef": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "routeRevision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "bindingRevision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "status": {
+                "$ref": "#/$defs/RouteStatus"
+              },
+              "acknowledgedAt": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/Timestamp"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "readiness": {
+          "type": "array",
+          "items": {
+            "description": "Readiness of a family.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "family",
+              "ready",
+              "reason",
+              "acknowledgedBy"
+            ],
+            "properties": {
+              "family": {
+                "$ref": "#/$defs/RouteFamily"
+              },
+              "ready": {
+                "type": "boolean"
+              },
+              "reason": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/RouteReadinessReason"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "acknowledgedBy": {
+                "type": "array",
+                "items": {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ServiceId"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "RouteReadinessRequest": {
+      "description": "POST /internal/v1/number-resources/{id}/route-readiness (number-route.acknowledge): the consumer of the family (Telephony: VOICE, SMS Gateway: SMS) acknowledges the CONFIGURED revision it routes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "family",
+        "routeRef",
+        "routeRevision"
+      ],
+      "properties": {
+        "family": {
+          "$ref": "#/$defs/RouteFamily"
+        },
+        "routeRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "routeRevision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "RouteReadiness": {
+      "description": "A recorded consumer acknowledgement.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numberResourceId",
+        "family",
+        "routeRevision",
+        "consumerService",
+        "status",
+        "acknowledgedAt"
+      ],
+      "properties": {
+        "numberResourceId": {
+          "$ref": "#/$defs/NumberResourceId"
+        },
+        "family": {
+          "$ref": "#/$defs/RouteFamily"
+        },
+        "routeRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "consumerService": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ServiceId"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "READY",
+            "WITHDRAWN"
+          ]
+        },
+        "acknowledgedAt": {
+          "$ref": "#/$defs/Timestamp"
         }
       }
     }

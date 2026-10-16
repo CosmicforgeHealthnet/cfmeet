@@ -4,10 +4,11 @@
 
 use axum::{
     extract::{Path, State},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use cf_service_auth::InternalPermission;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -28,6 +29,102 @@ pub fn routes() -> Router<AppState> {
             "/assignments/:assignment_id/kyc-status",
             get(assignment_kyc_status),
         )
+        .route(
+            "/number-resources/:number_resource_id/routes",
+            get(number_routes),
+        )
+        .route(
+            "/number-resources/:number_resource_id/route-readiness",
+            post(acknowledge_route),
+        )
+}
+
+/// The current provider route configuration of every family of a number, with consumer
+/// readiness (Workstream I): what a consumer needs to acknowledge a route revision.
+async fn number_routes(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    if caller
+        .context()
+        .require_permission(InternalPermission::NumberRouteAcknowledge)
+        .is_err()
+    {
+        caller.require_permission(InternalPermission::NumberResourceRead)?;
+    }
+    let resource = s.numbers.resource(id).await?;
+    let routes = s.numbers.current_routes(id).await?;
+    let caps: Vec<crate::numbers::Capability> = s
+        .numbers
+        .bindings(id)
+        .await?
+        .into_iter()
+        .filter(|b| b.status == "ACTIVE")
+        .flat_map(|b| b.capabilities)
+        .filter_map(|c| crate::numbers::Capability::parse(&c))
+        .collect();
+    let readiness = s.numbers.activation_readiness(id, &caps).await?;
+    Ok(Json(json!({
+        "numberResourceId": resource.id,
+        "bindingRevision": resource.binding_revision,
+        "routingRevision": resource.routing_revision,
+        "synthetic": resource.inventory_source == "SYNTHETIC_TEST",
+        "routes": routes.iter().map(|r| json!({
+            "family": r.family,
+            "routeRef": r.route_ref,
+            "routeRevision": r.route_revision,
+            "bindingRevision": r.binding_revision,
+            "status": r.status,
+            "acknowledgedAt": r.acknowledged_at,
+        })).collect::<Vec<_>>(),
+        "readiness": readiness.iter().map(|f| json!({
+            "family": f.family,
+            "ready": f.ready,
+            "reason": f.reason,
+            "acknowledgedBy": f.acknowledged_by,
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReadinessBody {
+    family: crate::numbers::acquisitions::RouteFamily,
+    route_ref: Uuid,
+    route_revision: i64,
+}
+
+/// The consumer of a family (Telephony: voice, SMS Gateway: SMS) acknowledges that it
+/// routes a CONFIGURED revision (`number-route.acknowledge`).
+async fn acknowledge_route(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    Path(id): Path<Uuid>,
+    Json(body): Json<ReadinessBody>,
+) -> Result<Json<Value>, ApiError> {
+    caller.require_permission(InternalPermission::NumberRouteAcknowledge)?;
+    let ctx =
+        crate::domain::current_context().unwrap_or_else(crate::domain::RequestContext::generate);
+    let row = s
+        .numbers
+        .acknowledge_route(
+            &ctx,
+            caller.service(),
+            id,
+            body.family,
+            body.route_ref,
+            body.route_revision,
+        )
+        .await?;
+    Ok(Json(json!({
+        "numberResourceId": row.number_resource_id,
+        "family": row.family,
+        "routeRevision": row.route_revision,
+        "consumerService": row.consumer_service,
+        "status": row.status,
+        "acknowledgedAt": row.acknowledged_at,
+    })))
 }
 
 /// Whether an assignment's KYC basis is in force (Workstream F), for consumers that must

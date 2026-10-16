@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Numbering API",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "description": "HTTP surface of services/numbering: GET /health, /ready and /openapi.json (public, no data); the customer API under /v1 (credential verified by Platform Access on every request; normalized 401, 429 when Platform Access throttles or a quota is exhausted, 503 when it is unreachable — fail closed): assignment / reservation reads, the catalog, KYC and eligibility (F), provider-neutral inventory search and reservations (H); provider callbacks (G); and the service-authenticated /internal/v1 API (cfmeet.platform.internal-http; permission from Numbering's own trust bundle). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 64 KiB."
   },
   "components": {
@@ -2378,6 +2378,415 @@
                 "schema": {
                   "type": "object"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/numbers/acquisitions": {
+      "get": {
+        "operationId": "listAcquisitions",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "The caller's acquisitions, newest first. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1-100, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "nextCursor of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/AcquisitionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createAcquisition",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Provision a reservation that holds the number (202: PROVISIONING until the provider's acquisition is proven; poll GET). In order: the reservation is the caller's and still holds the number (HELD and unexpired, or taken over by an assignment of the scope); eligibility is RE-EVALUATED (KYC, risk, limits, capabilities, the serving provider's requirements) — a pre-eligibility hold never provisions; every capability is supported; the provider hold is read back (HOLD_LOST otherwise). One transaction then records the scoped idempotency key, the acquisition, the number's PROVISIONING and the durable PROVISION command. A provider timeout after possible execution is reconciled from read-back, never resent; a refusal FAILS the acquisition (retryable). PROVISIONED is not an active customer number. Requires scope `numbers.manage`.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Required. Scoped to the caller's application environment and this operation: a replay returns the original result (200, Idempotent-Replayed: true); a different request with the key is IDEMPOTENCY_KEY_REUSED (422).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Acquisition"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "200": {
+            "description": "Replayed (same Idempotency-Key and request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Acquisition"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CreateAcquisitionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/numbers/acquisitions/{acquisitionId}": {
+      "get": {
+        "operationId": "getAcquisition",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "An acquisition of the caller's scope: provisioning status, served capabilities, per-family route configuration and consumer readiness. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
+        "parameters": [
+          {
+            "name": "acquisitionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Acquisition"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/numbers/acquisitions/{acquisitionId}/routes": {
+      "post": {
+        "operationId": "configureAcquisitionRoutes",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Configure the provider voice / SMS routes of these capabilities' families on the current binding (durable CONFIGURE_* commands; 202). A configuration is CONFIGURED only on the provider's acknowledgement; a response for a superseded configuration or a changed binding never applies. A family is READY only once its consumer (Telephony / SMS Gateway) acknowledged the revision. Requires scope `numbers.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
+        "parameters": [
+          {
+            "name": "acquisitionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Required. Scoped to the caller's application environment and this operation: a replay returns the original result (200, Idempotent-Replayed: true); a different request with the key is IDEMPOTENCY_KEY_REUSED (422).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Acquisition"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "200": {
+            "description": "Replayed (same Idempotency-Key and request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Acquisition"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ConfigureRoutesRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/number-resources/{numberResourceId}/routes": {
+      "get": {
+        "operationId": "getNumberRoutes",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "description": "The current provider route configuration (opaque route references, revisions) and consumer readiness of a number. Permission `number-route.acknowledge` or `number-resource.read`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "numberResourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResourceId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberRoutes"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/number-resources/{numberResourceId}/route-readiness": {
+      "post": {
+        "operationId": "acknowledgeRouteReadiness",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "description": "The consumer that carries a family's traffic acknowledges that it routes the CONFIGURED revision (Telephony: VOICE, SMS Gateway: SMS; any other caller is CONSUMER_MISMATCH). Idempotent. A stale revision is STALE_ROUTE_REVISION. Permission `number-route.acknowledge`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "numberResourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResourceId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RouteReadiness"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RouteReadinessRequest"
               }
             }
           }

@@ -928,6 +928,35 @@ impl NumberDomain {
         Ok(row)
     }
 
+    /// HELD → CONVERTED into a provisioned ACQUISITION (the provider acquisition is
+    /// committed: a later expiry can no longer release it).
+    pub(crate) async fn convert_to_acquisition_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        reservation_id: Uuid,
+        now: DateTime<Utc>,
+    ) -> DomainResult<ReservationRow> {
+        let current = lock_reservation(txn, reservation_id).await?;
+        if current.status() != ReservationStatus::Held {
+            return Err(DomainError::InvalidTransition {
+                entity: "reservation",
+                from: current.status.clone(),
+                to: "CONVERTED".into(),
+            });
+        }
+        let row = ReservationRow::find_by_statement(stmt(
+            "UPDATE number_reservations SET status = 'CONVERTED', converted_to = 'ACQUISITION', revision = revision + 1, \
+               updated_at = $3, ended_at = $3 WHERE id = $1 AND revision = $2 RETURNING *",
+            vec![current.id.into(), current.revision.into(), now.into()],
+        ))
+        .one(txn)
+        .await?
+        .ok_or(DomainError::VersionConflict("reservation"))?;
+        event(txn, ctx, &row, "PROVISIONED_ACQUISITION", now).await?;
+        Ok(row)
+    }
+
     /// The caller scope's reservations, newest first (bounded keyset page). `before` is
     /// the `(created_at, id)` of the last row of the previous page.
     pub async fn list_reservations(

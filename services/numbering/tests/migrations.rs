@@ -24,6 +24,7 @@ const FOUNDATION: &[&str] = &[
 ];
 const DOMAIN: &[&str] = &[
     "dcn_assignments",
+    "number_acquisitions",
     "number_assignment_history",
     "number_capabilities",
     "number_catalog_revisions",
@@ -46,6 +47,8 @@ const DOMAIN: &[&str] = &[
     "number_provider_inventory_refs",
     "number_reservations",
     "number_resources",
+    "number_route_configurations",
+    "number_route_readiness",
     "number_routing_profiles",
     "number_search_windows",
     "number_type_catalog",

@@ -43,6 +43,7 @@ macro_rules! text_enum {
     };
 }
 
+pub mod acquisitions;
 pub mod assignments;
 pub mod bindings;
 pub mod capabilities;

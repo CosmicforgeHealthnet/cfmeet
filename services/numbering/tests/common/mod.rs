@@ -266,6 +266,8 @@ pub fn trust_bundle_json(
 pub struct Peers {
     pub calling: Arc<ServiceTokenSigner>,
     pub telephony: Arc<ServiceTokenSigner>,
+    /// The (future) SMS Gateway: route readiness and SMS authorization only.
+    pub sms_gateway: Arc<ServiceTokenSigner>,
     /// Correctly signing, but not in Numbering's trust bundle.
     pub privacy_relay: Arc<ServiceTokenSigner>,
     /// Trusted Calling identity name, but a key the bundle does not list.
@@ -280,6 +282,7 @@ pub fn service_auth(
     let clock: SharedClock = Arc::new(SystemClock);
     let calling = key("calling-test-1");
     let telephony = key("telephony-test-1");
+    let sms_gateway = key("sms-gateway-test-1");
     let policy = TrustPolicy::from_json(
         &trust_bundle_json(
             cf_service_auth::services::NUMBERING,
@@ -292,7 +295,12 @@ pub fn service_auth(
                 (
                     cf_service_auth::services::TELEPHONY,
                     vec![telephony.public_jwk()],
-                    &["number-resource.read"],
+                    &["number-resource.read", "number-route.acknowledge"],
+                ),
+                (
+                    cf_service_auth::services::SMS_GATEWAY,
+                    vec![sms_gateway.public_jwk()],
+                    &["number-route.acknowledge"],
                 ),
             ],
         ),
@@ -326,6 +334,7 @@ pub fn service_auth(
     let peers = Peers {
         calling: signer(ServiceId::calling(), calling),
         telephony: signer(ServiceId::telephony(), telephony),
+        sms_gateway: signer(ServiceId::sms_gateway(), sms_gateway),
         privacy_relay: signer(ServiceId::privacy_relay(), key("privacy-relay-test-1")),
         rogue_calling: signer(ServiceId::calling(), key("calling-rogue-1")),
     };
@@ -437,6 +446,30 @@ impl Harness {
             body,
             headers,
         }
+    }
+
+    /// A signed internal request with a JSON body.
+    pub async fn internal_json(
+        &self,
+        signer: &ServiceTokenSigner,
+        method: Method,
+        path: &str,
+        body: Value,
+    ) -> Reply {
+        let signed = signer
+            .sign(&OutboundServiceRequest::new_operation(
+                ServiceId::numbering(),
+            ))
+            .unwrap();
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("content-type", "application/json");
+        for (name, value) in signed.headers().iter() {
+            builder = builder.header(name, value);
+        }
+        self.raw(builder.body(Body::from(body.to_string())).unwrap())
+            .await
     }
 
     /// A signed internal request from `signer`.
@@ -1363,7 +1396,12 @@ pub mod acquisition {
     use super::{providers, Harness};
 
     pub fn of(h: &Harness, p: &providers::Providers, settings: AcquisitionSettings) -> Acquisition {
-        Acquisition::new(h.numbers.clone(), Some(p.commands.clone()), settings)
+        Acquisition::new(
+            h.numbers.clone(),
+            Some(p.commands.clone()),
+            h.state.eligibility.clone(),
+            settings,
+        )
     }
 
     /// The provider dispatch / reconcile handlers plus the reservation expiry handler.

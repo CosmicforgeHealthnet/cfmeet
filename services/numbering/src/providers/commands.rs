@@ -42,7 +42,7 @@ use crate::{
         outbox::{self, NewEvent},
     },
     numbers::{
-        bindings::NewBinding,
+        bindings::{BindingRow, NewBinding},
         capabilities::NewCapability,
         inventory::NewObservation,
         lifecycle::{transition_in, TransitionRequest},
@@ -881,12 +881,32 @@ impl ProviderCommands {
         capabilities: Vec<Capability>,
         idempotency_key: &str,
     ) -> DomainResult<Submitted> {
+        let txn = self.numbers.db().begin().await?;
+        let out = self
+            .request_provision_in(&txn, ctx, actor, resource_id, capabilities, idempotency_key)
+            .await?;
+        txn.commit().await?;
+        Ok(out)
+    }
+
+    /// [`Self::request_provision`] inside the caller's transaction (the acquisition
+    /// orchestration commits it with the acquisition and its idempotency record).
+    pub(crate) async fn request_provision_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        actor: Actor,
+        resource_id: Uuid,
+        capabilities: Vec<Capability>,
+        idempotency_key: &str,
+    ) -> DomainResult<Submitted> {
         if capabilities.is_empty() || capabilities.iter().any(|c| !c.is_routable()) {
             return Err(DomainError::Validation(
                 "provisioning names the routable capabilities to serve".into(),
             ));
         }
-        self.lifecycle_command(
+        self.lifecycle_command_in(
+            txn,
             ctx,
             resource_id,
             idempotency_key,
@@ -1006,6 +1026,25 @@ impl ProviderCommands {
         route_ref: Uuid,
         idempotency_key: &str,
     ) -> DomainResult<Submitted> {
+        let txn = self.numbers.db().begin().await?;
+        let out = self
+            .request_route_in(&txn, ctx, resource_id, voice, route_ref, idempotency_key)
+            .await?;
+        txn.commit().await?;
+        Ok(out)
+    }
+
+    /// [`Self::request_route`] inside the caller's transaction (the route configuration
+    /// orchestration commits it with the configuration record).
+    pub(crate) async fn request_route_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        resource_id: Uuid,
+        voice: bool,
+        route_ref: Uuid,
+        idempotency_key: &str,
+    ) -> DomainResult<Submitted> {
         let operation = if voice {
             OperationKind::ConfigureVoice { route_ref }
         } else {
@@ -1017,14 +1056,12 @@ impl ProviderCommands {
             &[Capability::SmsInbound, Capability::SmsOutbound]
         };
         let now = self.now();
-        let txn = self.numbers.db().begin().await?;
-        let row = lock(&txn, resource_id).await?;
-        let (provider_id, external_ref) = Self::provider_object(&txn, resource_id).await?;
+        let row = lock(txn, resource_id).await?;
+        let (provider_id, external_ref) = Self::provider_object(txn, resource_id).await?;
         if let Some(c) = self
-            .existing(&txn, &provider_id, idempotency_key, resource_id, &operation)
+            .existing(txn, &provider_id, idempotency_key, resource_id, &operation)
             .await?
         {
-            txn.commit().await?;
             return Ok(Submitted {
                 command: c,
                 replayed: true,
@@ -1039,17 +1076,18 @@ impl ProviderCommands {
                 "routes are configured on a provisioned number",
             ));
         }
-        let served = self
-            .numbers
-            .bindings(resource_id)
-            .await?
-            .into_iter()
-            .filter(|b| b.status == "ACTIVE")
-            .any(|b| {
-                b.capabilities
-                    .iter()
-                    .any(|c| family.iter().any(|f| f.as_str() == c))
-            });
+        let served = BindingRow::find_by_statement(stmt(
+            "SELECT * FROM number_provider_bindings WHERE number_resource_id = $1 AND status = 'ACTIVE'",
+            vec![resource_id.into()],
+        ))
+        .all(txn)
+        .await?
+        .into_iter()
+        .any(|b| {
+            b.capabilities
+                .iter()
+                .any(|c| family.iter().any(|f| f.as_str() == c))
+        });
         if !served {
             return Err(DomainError::precondition(
                 "CAPABILITY_NOT_SUPPORTED",
@@ -1058,7 +1096,7 @@ impl ProviderCommands {
         }
         let command = self
             .insert(
-                &txn,
+                txn,
                 ctx,
                 resource_id,
                 idempotency_key,
@@ -1071,7 +1109,6 @@ impl ProviderCommands {
                 now,
             )
             .await?;
-        txn.commit().await?;
         Ok(Submitted {
             command,
             replayed: false,
@@ -1086,26 +1123,41 @@ impl ProviderCommands {
         operation: OperationKind,
         intent: impl FnOnce(&ResourceRow) -> DomainResult<Option<TransitionRequest>>,
     ) -> DomainResult<Submitted> {
-        let now = self.now();
         let txn = self.numbers.db().begin().await?;
-        let row = lock(&txn, resource_id).await?;
-        let (provider_id, external_ref) = Self::provider_object(&txn, resource_id).await?;
+        let out = self
+            .lifecycle_command_in(&txn, ctx, resource_id, idempotency_key, operation, intent)
+            .await?;
+        txn.commit().await?;
+        Ok(out)
+    }
+
+    async fn lifecycle_command_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        resource_id: Uuid,
+        idempotency_key: &str,
+        operation: OperationKind,
+        intent: impl FnOnce(&ResourceRow) -> DomainResult<Option<TransitionRequest>>,
+    ) -> DomainResult<Submitted> {
+        let now = self.now();
+        let row = lock(txn, resource_id).await?;
+        let (provider_id, external_ref) = Self::provider_object(txn, resource_id).await?;
         if let Some(c) = self
-            .existing(&txn, &provider_id, idempotency_key, resource_id, &operation)
+            .existing(txn, &provider_id, idempotency_key, resource_id, &operation)
             .await?
         {
-            txn.commit().await?;
             return Ok(Submitted {
                 command: c,
                 replayed: true,
             });
         }
         if let Some(t) = intent(&row)? {
-            transition_in(&txn, ctx, resource_id, t, now).await?;
+            transition_in(txn, ctx, resource_id, t, now).await?;
         }
         let command = self
             .insert(
-                &txn,
+                txn,
                 ctx,
                 resource_id,
                 idempotency_key,
@@ -1118,7 +1170,6 @@ impl ProviderCommands {
                 now,
             )
             .await?;
-        txn.commit().await?;
         Ok(Submitted {
             command,
             replayed: false,
@@ -1403,7 +1454,16 @@ impl ProviderCommands {
                 }
                 None
             }
-            CommandOperation::Provision => Some((S::Provisioning, UncertainOperation::Provision)),
+            CommandOperation::Provision => {
+                self.numbers
+                    .acquisition_unknown_in(txn, ctx, cmd.id, now)
+                    .await?;
+                Some((S::Provisioning, UncertainOperation::Provision))
+            }
+            CommandOperation::ConfigureVoice | CommandOperation::ConfigureSms => {
+                self.numbers.route_unknown_in(txn, ctx, cmd.id, now).await?;
+                None
+            }
             CommandOperation::Release => Some((S::Releasing, UncertainOperation::Release)),
             _ => None,
         };
@@ -1631,14 +1691,32 @@ impl ProviderCommands {
                             .filter(|c| c.is_routable() && capabilities.contains(c))
                             .collect()
                     })
-                    .unwrap_or(capabilities);
+                    .unwrap_or(capabilities.clone());
                 if served.is_empty() {
                     return Err(DomainError::precondition(
                         "BINDING_REQUIRED",
                         "the provider serves none of the capabilities",
                     ));
                 }
-                self.numbers
+                if served.len() < capabilities.len() {
+                    // The provider serves less than requested: only what it serves is
+                    // bound; the gap is drift for operators, never assumed.
+                    incidents::raise(
+                        txn,
+                        incidents::Category::ProviderStateDrift,
+                        &format!("partial:{}", cmd.id),
+                        incidents::Subject {
+                            provider_id: Some(cmd.provider_id.clone()),
+                            number_resource_id: Some(cmd.number_resource_id),
+                            command_id: Some(cmd.id),
+                        },
+                        json!({ "reason": "PARTIAL_PROVISIONING", "served": served, "requested": capabilities }),
+                        now,
+                    )
+                    .await?;
+                }
+                let binding = self
+                    .numbers
                     .activate_binding_in(
                         txn,
                         ctx,
@@ -1671,6 +1749,20 @@ impl ProviderCommands {
                     now,
                 )
                 .await?;
+                self.numbers
+                    .acquisition_provisioned_in(
+                        txn,
+                        ctx,
+                        cmd.id,
+                        binding.id,
+                        if reconciling {
+                            "RECONCILED_PROVISIONED"
+                        } else {
+                            "PROVISIONED"
+                        },
+                        now,
+                    )
+                    .await?;
             }
             CommandOperation::Suspend => {
                 let OperationKind::Suspend { reason_code } = cmd.request().operation else {
@@ -1745,9 +1837,19 @@ impl ProviderCommands {
                 )
                 .await?;
             }
-            CommandOperation::ConfigureVoice
-            | CommandOperation::ConfigureSms
-            | CommandOperation::PortIn => {}
+            CommandOperation::ConfigureVoice | CommandOperation::ConfigureSms => {
+                let acknowledged = receipt.state.as_ref().and_then(|s| {
+                    if cmd.operation() == CommandOperation::ConfigureVoice {
+                        s.voice_route
+                    } else {
+                        s.sms_route
+                    }
+                });
+                self.numbers
+                    .route_configured_in(txn, ctx, cmd.id, acknowledged, evidence, now)
+                    .await?;
+            }
+            CommandOperation::PortIn => {}
         }
         Ok(())
     }
@@ -1809,7 +1911,15 @@ impl ProviderCommands {
                     _ => {}
                 }
             }
+            CommandOperation::ConfigureVoice | CommandOperation::ConfigureSms => {
+                self.numbers
+                    .route_failed_in(txn, ctx, cmd.id, category.as_str(), now)
+                    .await?;
+            }
             CommandOperation::Provision => {
+                self.numbers
+                    .acquisition_failed_in(txn, ctx, cmd.id, category.as_str(), now)
+                    .await?;
                 if matches!(
                     row.lifecycle_state(),
                     S::Provisioning | S::UnknownProviderState

@@ -852,6 +852,7 @@ async fn eligibility_bounds_every_reservation_and_production_never_holds_before_
     let loose = Acquisition::new(
         t.h.numbers.clone(),
         Some(t.p.commands.clone()),
+        t.h.state.eligibility.clone(),
         AcquisitionSettings {
             pre_eligibility_hold_environments: [EnvironmentKind::Production].into_iter().collect(),
             ..Default::default()
@@ -997,7 +998,12 @@ async fn unsupported_quarantined_and_uncertain_numbers_are_never_reserved() {
         .iter()
         .all(|r| r.resource.id != q && r.resource.id != u));
     // No provider configured: fail closed, nothing written.
-    let bare = Acquisition::new(t.h.numbers.clone(), None, AcquisitionSettings::default());
+    let bare = Acquisition::new(
+        t.h.numbers.clone(),
+        None,
+        t.h.state.eligibility.clone(),
+        AcquisitionSettings::default(),
+    );
     assert_eq!(
         bare.create_reservation(
             &ctx(),

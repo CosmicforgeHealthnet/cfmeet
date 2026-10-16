@@ -7,20 +7,23 @@
 //! * [`search`] — provider-neutral inventory search with freshness, capability and KYC
 //!   indicators, bounded pages and per-environment quotas (H);
 //! * [`reservations`] — eligibility-bound, idempotent, concurrency-safe reservations with
-//!   provider holds, cancellation and the expiry worker (H).
+//!   provider holds, cancellation and the expiry worker (H);
+//! * [`provisioning`] — provisioning a reservation into a proven acquisition, provider
+//!   voice / SMS route configuration and consumer readiness (I).
 //!
 //! Every operation runs in the TRUSTED scope from Platform Access; a request body never
 //! names a tenant, application or environment. Provider identifiers never leave here.
 
+pub mod provisioning;
 pub mod reservations;
 pub mod search;
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 use chrono::Duration;
 
 use crate::{
-    numbers::{EnvironmentKind, NumberDomain},
+    numbers::{eligibility::EligibilityPolicy, EnvironmentKind, NumberDomain},
     providers::commands::ProviderCommands,
 };
 
@@ -73,6 +76,7 @@ impl AcquisitionSettings {
 pub struct Acquisition {
     pub(crate) numbers: NumberDomain,
     pub(crate) providers: Option<ProviderCommands>,
+    pub(crate) eligibility: Arc<EligibilityPolicy>,
     pub(crate) settings: AcquisitionSettings,
 }
 
@@ -80,11 +84,13 @@ impl Acquisition {
     pub fn new(
         numbers: NumberDomain,
         providers: Option<ProviderCommands>,
+        eligibility: Arc<EligibilityPolicy>,
         settings: AcquisitionSettings,
     ) -> Self {
         Self {
             numbers,
             providers,
+            eligibility,
             settings,
         }
     }

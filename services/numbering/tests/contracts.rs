@@ -466,3 +466,84 @@ fn every_event_type_the_source_writes_is_a_contract_variant() {
     }
     assert_eq!(written, declared);
 }
+
+/// Workstreams H–I: the acquisition and route-configuration state machines are one edge
+/// set in Rust and SQL, and their vocabularies equal the contract and the CHECKs.
+#[tokio::test]
+async fn acquisition_and_route_states_are_one_vocabulary_and_edge_set() {
+    use numbering::numbers::{
+        acquisitions::{
+            acquisition_allowed, readiness, route_allowed, AcquisitionStatus, RouteFamily,
+            RouteStatus,
+        },
+        reservations::HoldBasis,
+    };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    for (def, rust, checks) in [
+        (
+            "AcquisitionStatus",
+            all!(AcquisitionStatus),
+            vec!["ck_number_acquisitions_status"],
+        ),
+        (
+            "RouteFamily",
+            all!(RouteFamily),
+            vec![
+                "ck_number_route_configurations_family",
+                "ck_number_route_readiness_family",
+            ],
+        ),
+        (
+            "RouteStatus",
+            all!(RouteStatus),
+            vec!["ck_number_route_configurations_status"],
+        ),
+        ("HoldBasis", all!(HoldBasis), vec![]),
+    ] {
+        assert_eq!(contract(def), rust, "{def}");
+        for c in checks {
+            assert_eq!(check_values(&h, c).await, rust, "{c}");
+        }
+    }
+    assert_eq!(
+        contract("RouteReadinessReason"),
+        set(readiness::ALL.iter().copied())
+    );
+    let mut edges = 0;
+    for from in AcquisitionStatus::ALL {
+        for to in AcquisitionStatus::ALL {
+            let sql = scalar(
+                h.conn(),
+                &format!("SELECT CASE WHEN number_acquisition_transition_allowed('{from}', '{to}') THEN 1 ELSE 0 END::bigint"),
+            )
+            .await;
+            assert_eq!(sql == 1, acquisition_allowed(*from, *to), "{from} -> {to}");
+            edges += sql;
+        }
+    }
+    assert_eq!(edges, 6);
+    let mut edges = 0;
+    for from in RouteStatus::ALL {
+        for to in RouteStatus::ALL {
+            let sql = scalar(
+                h.conn(),
+                &format!("SELECT CASE WHEN number_route_configuration_transition_allowed('{from}', '{to}') THEN 1 ELSE 0 END::bigint"),
+            )
+            .await;
+            assert_eq!(sql == 1, route_allowed(*from, *to), "{from} -> {to}");
+            edges += sql;
+        }
+    }
+    assert_eq!(edges, 8);
+    // The provider command operation vocabulary includes RELEASE_HOLD everywhere.
+    assert_eq!(
+        contract("ProviderCommandOperation"),
+        all!(providers::CommandOperation)
+    );
+    assert_eq!(
+        check_values(&h, "ck_number_provider_commands_operation").await,
+        all!(providers::CommandOperation)
+    );
+}

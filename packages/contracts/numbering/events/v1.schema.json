@@ -48,6 +48,12 @@
     },
     {
       "$ref": "#/$defs/ProviderEventReceived"
+    },
+    {
+      "$ref": "#/$defs/AcquisitionChanged"
+    },
+    {
+      "$ref": "#/$defs/RouteChanged"
     }
   ],
   "$defs": {
@@ -1208,6 +1214,157 @@
             },
             "payload": {
               "$ref": "#/$defs/ProviderEventReceivedPayload"
+            }
+          },
+          "not": {
+            "required": [
+              "ownership"
+            ]
+          }
+        }
+      ]
+    },
+    "AcquisitionChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "acquisition_id",
+        "reservation_id",
+        "number_resource_id",
+        "status",
+        "revision",
+        "requested_capabilities",
+        "failure_code",
+        "reason_code"
+      ],
+      "properties": {
+        "acquisition_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "reservation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResourceId"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/AcquisitionStatus"
+        },
+        "revision": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Revision"
+        },
+        "requested_capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Capability"
+          }
+        },
+        "failure_code": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+        }
+      }
+    },
+    "AcquisitionChanged": {
+      "description": "An acquisition of a customer scope changed (provisioning requested, provisioned, failed, uncertain).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.acquisition.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/AcquisitionChangedPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
+        }
+      ]
+    },
+    "RouteChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number_resource_id",
+        "family",
+        "route_ref",
+        "route_revision",
+        "binding_revision",
+        "status",
+        "reason_code"
+      ],
+      "properties": {
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResourceId"
+        },
+        "family": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RouteFamily"
+        },
+        "route_ref": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "route_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "binding_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RouteStatus"
+        },
+        "reason_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+        }
+      }
+    },
+    "RouteChanged": {
+      "description": "A provider route configuration of a number changed (requested, configured, failed, uncertain, superseded) or its consumer acknowledged readiness. route_ref is an opaque CF Meet id (never a provider reference or number).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.route.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/RouteChangedPayload"
             }
           },
           "not": {
