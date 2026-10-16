@@ -13,7 +13,8 @@
 //! `packages/contracts`, but are not exposed by this public documentation router.
 
 use axum::{
-    http::header,
+    extract::Path,
+    http::{header, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
     routing::get,
     Router,
@@ -21,6 +22,8 @@ use axum::{
 use serde_json::{json, Value};
 
 use crate::state::AppState;
+
+const SCHEMA_BASE: &str = "https://schemas.cfmeet.com/";
 
 const CALLING_OPENAPI: &str =
     include_str!("../../../packages/contracts/calling/http/v1.openapi.json");
@@ -75,6 +78,7 @@ pub fn routes() -> Router<AppState> {
             "/api-docs/privacy-relay/openapi.json",
             get(privacy_relay_openapi),
         )
+        .route("/api-docs/schemas/*path", get(schema))
 }
 
 async fn swagger_redirect() -> Redirect {
@@ -98,8 +102,18 @@ async fn privacy_relay_openapi() -> Response {
     json_response(public_privacy_relay_document())
 }
 
+async fn schema(Path(path): Path<String>) -> Response {
+    let Some(raw) = schema_file(&path) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let mut document: Value =
+        serde_json::from_str(raw).expect("embedded public schema must be valid JSON");
+    rewrite_schema_refs(&mut document);
+    json_response(document)
+}
+
 fn json_response(document: Value) -> Response {
-    let body = serde_json::to_string(&document).expect("embedded OpenAPI must serialize");
+    let body = serde_json::to_string(&document).expect("embedded API document must serialize");
     let mut response = body.into_response();
     response.headers_mut().insert(
         header::CONTENT_TYPE,
@@ -156,6 +170,7 @@ fn public_calling_document() -> Value {
         {"name": "Safety & Abuse", "description": "Blocks and abuse-report workflows."},
         {"name": "Service", "description": "Public service health."}
     ]);
+    rewrite_schema_refs(&mut document);
 
     document
 }
@@ -184,8 +199,88 @@ fn public_privacy_relay_document() -> Value {
         {"name": "Contact Vault", "description": "Protected-contact grants, creation, metadata and verification."},
         {"name": "Privacy Evidence", "description": "Privacy-safe authorization and call evidence."}
     ]);
+    rewrite_schema_refs(&mut document);
 
     document
+}
+
+/// Public docs must not depend on the separate schemas.cfmeet.com deployment. Rewrite
+/// every authoritative schema URL to the allow-listed same-origin schema endpoint below.
+fn rewrite_schema_refs(value: &mut Value) {
+    match value {
+        Value::Array(values) => {
+            for value in values {
+                rewrite_schema_refs(value);
+            }
+        }
+        Value::Object(object) => {
+            if let Some(reference) = object.get_mut("$ref").and_then(Value::as_str) {
+                if let Some(path) = reference.strip_prefix(SCHEMA_BASE) {
+                    object.insert(
+                        "$ref".to_string(),
+                        Value::String(format!("/api-docs/schemas/{path}")),
+                    );
+                }
+            }
+            for value in object.values_mut() {
+                rewrite_schema_refs(value);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Only schema dependencies reachable from the PUBLIC Calling and Privacy Relay OpenAPI
+/// documents are served. Internal Telephony/provider/service-auth API contracts are not.
+fn schema_file(path: &str) -> Option<&'static str> {
+    match path {
+        "calling/common/v1.schema.json" => Some(include_str!(
+            "../../../packages/contracts/calling/common/v1.schema.json"
+        )),
+        "calling/control/v1.schema.json" => Some(include_str!(
+            "../../../packages/contracts/calling/control/v1.schema.json"
+        )),
+        "calling/enterprise/v1.schema.json" => Some(include_str!(
+            "../../../packages/contracts/calling/enterprise/v1.schema.json"
+        )),
+        "platform/common/v1.schema.json" => Some(include_str!(
+            "../../../packages/contracts/platform/common/v1.schema.json"
+        )),
+        "platform/usage/v1.schema.json" => Some(include_str!(
+            "../../../packages/contracts/platform/usage/v1.schema.json"
+        )),
+        "platform/webhooks/v1.schema.json" => Some(include_str!(
+            "../../../packages/contracts/platform/webhooks/v1.schema.json"
+        )),
+        "platform/service-auth/delegated-platform-context/v1.schema.json" => Some(include_str!(
+            "../../../packages/contracts/platform/service-auth/delegated-platform-context/v1.schema.json"
+        )),
+        "platform/service-auth/trust-bundle/v1.schema.json" => Some(include_str!(
+            "../../../packages/contracts/platform/service-auth/trust-bundle/v1.schema.json"
+        )),
+        "privacy-relay/common/v1.schema.json" => Some(include_str!(
+            "../../../packages/contracts/privacy-relay/common/v1.schema.json"
+        )),
+        "privacy-relay/contact-delegation/v1.schema.json" => Some(include_str!(
+            "../../../packages/contracts/privacy-relay/contact-delegation/v1.schema.json"
+        )),
+        "privacy-relay/contact/v1.schema.json" => Some(include_str!(
+            "../../../packages/contracts/privacy-relay/contact/v1.schema.json"
+        )),
+        "privacy-relay/context/v1.schema.json" => Some(include_str!(
+            "../../../packages/contracts/privacy-relay/context/v1.schema.json"
+        )),
+        "privacy-relay/evidence/v1.schema.json" => Some(include_str!(
+            "../../../packages/contracts/privacy-relay/evidence/v1.schema.json"
+        )),
+        "privacy-relay/events/v1.schema.json" => Some(include_str!(
+            "../../../packages/contracts/privacy-relay/events/v1.schema.json"
+        )),
+        "privacy-relay/session/v1.schema.json" => Some(include_str!(
+            "../../../packages/contracts/privacy-relay/session/v1.schema.json"
+        )),
+        _ => None,
+    }
 }
 
 fn tag_operations(
@@ -227,7 +322,9 @@ fn calling_tag(path: &str) -> &'static str {
         "Recordings"
     } else if path.starts_with("/v1/enterprise/") || path.ends_with("/ivr/input") {
         "Enterprise Calling"
-    } else if path == "/v1/calls" || path.matches('/').count() == 3 && path.starts_with("/v1/calls/") {
+    } else if path == "/v1/calls"
+        || (path.matches('/').count() == 3 && path.starts_with("/v1/calls/"))
+    {
         "Calling"
     } else {
         "Call Control"
@@ -256,8 +353,32 @@ mod tests {
             .into_iter()
             .flat_map(|paths| paths.values())
             .filter_map(Value::as_object)
-            .map(|item| METHODS.iter().filter(|method| item.contains_key(*method)).count())
+            .map(|item| {
+                METHODS
+                    .iter()
+                    .filter(|method| item.contains_key(*method))
+                    .count()
+            })
             .sum()
+    }
+
+    fn references(value: &Value, output: &mut Vec<String>) {
+        match value {
+            Value::Array(values) => {
+                for value in values {
+                    references(value, output);
+                }
+            }
+            Value::Object(object) => {
+                if let Some(reference) = object.get("$ref").and_then(Value::as_str) {
+                    output.push(reference.to_string());
+                }
+                for value in object.values() {
+                    references(value, output);
+                }
+            }
+            _ => {}
+        }
     }
 
     #[test]
@@ -280,6 +401,12 @@ mod tests {
         assert!(!security.contains_key("cfServiceAuth"));
         assert!(!security.contains_key("mediaProviderSignature"));
         assert!(security.contains_key("platformCredential"));
+
+        let mut refs = Vec::new();
+        references(&document, &mut refs);
+        assert!(refs
+            .iter()
+            .all(|reference| !reference.starts_with(SCHEMA_BASE)));
     }
 
     #[test]
@@ -293,6 +420,47 @@ mod tests {
         assert!(paths.contains_key("/v1/privacy-relay/sessions"));
         assert!(paths.contains_key("/v1/privacy-relay/contacts"));
         assert!(paths.keys().all(|path| !path.starts_with("/internal/")));
+
+        let mut refs = Vec::new();
+        references(&document, &mut refs);
+        assert!(refs
+            .iter()
+            .all(|reference| !reference.starts_with(SCHEMA_BASE)));
+    }
+
+    #[test]
+    fn every_public_schema_dependency_is_same_origin_and_allow_listed() {
+        for path in [
+            "calling/common/v1.schema.json",
+            "calling/control/v1.schema.json",
+            "calling/enterprise/v1.schema.json",
+            "platform/common/v1.schema.json",
+            "platform/usage/v1.schema.json",
+            "platform/webhooks/v1.schema.json",
+            "platform/service-auth/delegated-platform-context/v1.schema.json",
+            "platform/service-auth/trust-bundle/v1.schema.json",
+            "privacy-relay/common/v1.schema.json",
+            "privacy-relay/contact-delegation/v1.schema.json",
+            "privacy-relay/contact/v1.schema.json",
+            "privacy-relay/context/v1.schema.json",
+            "privacy-relay/evidence/v1.schema.json",
+            "privacy-relay/events/v1.schema.json",
+            "privacy-relay/session/v1.schema.json",
+        ] {
+            let raw = schema_file(path).expect("public dependency is allow-listed");
+            let mut document: Value = serde_json::from_str(raw).expect("valid schema");
+            rewrite_schema_refs(&mut document);
+            let mut refs = Vec::new();
+            references(&document, &mut refs);
+            assert!(
+                refs.iter()
+                    .all(|reference| !reference.starts_with(SCHEMA_BASE)),
+                "{path} still depends on the external schema host"
+            );
+        }
+
+        assert!(schema_file("telephony/internal/v1.openapi.json").is_none());
+        assert!(schema_file("privacy-relay/internal/v1.openapi.json").is_none());
     }
 
     #[test]
