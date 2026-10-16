@@ -143,6 +143,8 @@ jobs:
         run: cargo test --locked --test ownership_assignment
       - name: Routing grants, inbound resolution, caller / sender identity (Workstream K)
         run: cargo test --locked --test routing_grants
+      - name: DCN lifecycle milestone, Scenarios A-D (Part IV Step 21)
+        run: cargo test --locked --test dcn_lifecycle
       - name: cargo test (whole workspace)
         run: cargo test --workspace --no-fail-fast --locked
 
