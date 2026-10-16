@@ -594,6 +594,70 @@ pub async fn verify_reset_token(
     }))
 }
 
+/// Change password for authenticated user
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/change-password",
+    tag = "Authentication",
+    security(
+        ("bearer_auth" = [])
+    ),
+    request_body = ChangePasswordRequest,
+    responses(
+        (status = 200, description = "Password changed successfully", body = MessageResponse),
+        (status = 400, description = "Invalid current password or validation error"),
+        (status = 401, description = "Unauthorized"),
+    )
+)]
+pub async fn change_password(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::services::auth::Claims>,
+    Json(payload): Json<ChangePasswordRequest>,
+) -> ApiResult<Json<MessageResponse>> {
+    payload
+        .validate()
+        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+
+    // Get current user
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|_| ApiError::Unauthorized("Invalid token".to_string()))?;
+
+    let user = Users::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
+
+    // Check if user uses local auth (not OAuth)
+    if user.auth_type != users::AuthType::Local {
+        return Err(ApiError::BadRequest(
+            "Password change is not available for OAuth accounts".to_string(),
+        ));
+    }
+
+    // Verify current password
+    let password_hash = user
+        .password_hash
+        .as_ref()
+        .ok_or_else(|| ApiError::BadRequest("No password set for this account".to_string()))?;
+
+    let is_valid = verify_password(&payload.current_password, password_hash)?;
+    if !is_valid {
+        return Err(ApiError::BadRequest("Current password is incorrect".to_string()));
+    }
+
+    // Hash new password and update
+    let new_password_hash = hash_password(&payload.new_password)?;
+
+    let mut user_active: users::ActiveModel = user.into();
+    user_active.password_hash = Set(Some(new_password_hash));
+    user_active.updated_at = Set(now_utc());
+    user_active.update(&state.db).await?;
+
+    Ok(Json(MessageResponse {
+        message: "Password changed successfully".to_string(),
+    }))
+}
+
 
 // ============================================================================
 // Google OAuth Handlers

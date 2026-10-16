@@ -6,6 +6,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Home, Video, Calendar, Code2, Settings, Menu, X } from "lucide-react";
 import ProfileMenu from "./ProfileMenu";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 const menu = [
   { label: "Dashboard", icon: Home, href: "/dashboard" },
@@ -26,7 +27,7 @@ export default function MobileSidebar() {
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed top-4 right-4 z-40 w-10 h-10 rounded-full bg-[#FAFAFB] shadow-sm flex items-center justify-center text-[#029CD4] md:hidden"
+          className="fixed top-4 right-4 z-40 w-10 h-10 rounded-full bg-sidebar shadow-sm flex items-center justify-center text-primary md:hidden"
           aria-label="Open menu"
         >
           <Menu size={20} />
@@ -52,20 +53,20 @@ export default function MobileSidebar() {
         )}
       >
         {/* Inner container matching AppSidebar design */}
-        <div className="h-[calc(100vh-2rem)] my-4 ml-4 bg-[#FAFAFB] rounded-[40px] shadow-sm flex flex-col">
+        <div className="h-[calc(100vh-2rem)] my-4 ml-4 bg-sidebar rounded-[40px] shadow-sm flex flex-col">
           {/* Top row: Logo + Close button */}
           <div className="h-16 flex items-center justify-between pl-5 pr-4">
             <Image
-              src="/logo.png"
-              alt="CosmicForge Logo"
-              width={140}
-              height={32}
-              className="w-[120px] min-w-[120px] object-contain object-left"
+              src="/CFLogo.png"
+              alt="CF Meet Logo"
+              width={40}
+              height={40}
+              className="w-[40px] min-w-[40px] object-contain object-left"
               priority
             />
             <button
               onClick={() => setOpen(false)}
-              className="w-8 h-8 rounded-full flex items-center justify-center text-[#B6B6B6] hover:text-[#029CD4] transition-colors"
+              className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-primary transition-colors"
               aria-label="Close menu"
             >
               <X size={18} />
@@ -88,14 +89,14 @@ export default function MobileSidebar() {
                   }}
                   className={cn(
                     "relative w-full flex items-center gap-3 px-5 py-3 transition-colors",
-                    isActive ? "text-[#029CD4]" : "text-[#B6B6B6]",
+                    isActive ? "text-primary" : "text-muted-foreground",
                   )}
                 >
                   <Icon className="w-5 h-5" />
                   <span className="text-sm font-medium">{label}</span>
 
                   {isActive && (
-                    <span className="absolute right-0 top-1/2 -translate-y-1/2 h-6 w-[3px] bg-[#029CD4] rounded-full" />
+                    <span className="absolute right-0 top-1/2 -translate-y-1/2 h-6 w-[3px] bg-primary rounded-full" />
                   )}
                 </button>
               );
@@ -104,6 +105,7 @@ export default function MobileSidebar() {
 
           {/* Bottom Section */}
           <div className="pb-8 px-5 space-y-4">
+            <ThemeToggle />
             <ProfileMenu expanded={true} mobile={true} />
           </div>
         </div>

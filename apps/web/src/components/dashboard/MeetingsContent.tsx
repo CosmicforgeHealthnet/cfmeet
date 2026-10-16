@@ -38,7 +38,7 @@ const STATUS_FILTERS: { label: string; value: MeetingStatus | "all" }[] = [
 const STATUS_STYLES: Record<MeetingStatus, string> = {
   scheduled: "bg-blue-50 text-blue-600",
   live: "bg-green-50 text-green-600",
-  ended: "bg-gray-100 text-gray-500",
+  ended: "bg-muted text-muted-foreground",
   cancelled: "bg-red-50 text-red-500",
 };
 
@@ -73,15 +73,15 @@ export default function MeetingsContent() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 sm:mb-8">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-[#343434]">
+          <h2 className="text-xl sm:text-2xl font-bold text-foreground">
             Meetings
           </h2>
-          <p className="text-sm text-[#00000080] mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             View and manage your meetings
           </p>
         </div>
         {meta && (
-          <span className="text-sm text-[#00000080]">
+          <span className="text-sm text-muted-foreground">
             {meta.total} meeting{meta.total !== 1 ? "s" : ""} total
           </span>
         )}
@@ -98,8 +98,8 @@ export default function MeetingsContent() {
             }}
             className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
               statusFilter === filter.value
-                ? "bg-[#029CD4] text-white shadow-sm"
-                : "bg-[#FAFAFB] text-[#00000080] hover:bg-gray-200"
+                ? "bg-primary text-white shadow-sm"
+                : "bg-sidebar text-muted-foreground hover:bg-muted"
             }`}
           >
             {filter.label}
@@ -115,15 +115,15 @@ export default function MeetingsContent() {
       ) : isError ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <p className="text-red-500 font-medium">Failed to load meetings</p>
-          <p className="text-sm text-[#00000080] mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             Please check your connection and try again.
           </p>
         </div>
       ) : meetings.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
-          <Calendar className="w-12 h-12 text-gray-300 mb-3" />
-          <p className="text-[#343434] font-medium">No meetings found</p>
-          <p className="text-sm text-[#00000080] mt-1">
+          <Calendar className="w-12 h-12 text-muted-foreground mb-3" />
+          <p className="text-foreground font-medium">No meetings found</p>
+          <p className="text-sm text-muted-foreground mt-1">
             {statusFilter !== "all"
               ? `No ${statusFilter} meetings to show.`
               : "You haven't scheduled any meetings yet."}
@@ -154,7 +154,7 @@ export default function MeetingsContent() {
               >
                 <ChevronLeft className="w-4 h-4" />
               </Button>
-              <span className="text-sm text-[#00000080]">
+              <span className="text-sm text-muted-foreground">
                 Page {meta.page} of {meta.total_pages}
               </span>
               <Button
@@ -202,12 +202,12 @@ function MeetingCard({
   };
 
   return (
-    <div className="bg-white border border-gray-100 rounded-xl p-4 sm:p-5 shadow-sm hover:shadow-md transition-shadow">
+    <div className="bg-card border border-border rounded-xl p-4 sm:p-5 shadow-sm hover:shadow-md transition-shadow">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         {/* Left */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1.5">
-            <h4 className="font-semibold text-[#343434] text-sm sm:text-base truncate">
+            <h4 className="font-semibold text-foreground text-sm sm:text-base truncate">
               {meeting.title}
             </h4>
             <span
@@ -217,7 +217,7 @@ function MeetingCard({
             </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[#00000080] text-xs sm:text-sm">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground text-xs sm:text-sm">
             <span className="flex items-center gap-1">
               <Calendar className="w-3.5 h-3.5" />
               {formatShortDateForDisplay(meeting.start_time)}
@@ -241,19 +241,19 @@ function MeetingCard({
             </span>
           </div>
 
-          <div className="flex items-center gap-2 mt-2 text-xs text-[#00000060]">
-            <span className="font-mono bg-gray-50 px-2 py-0.5 rounded">
+          <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+            <span className="font-mono bg-muted px-2 py-0.5 rounded">
               {meeting.meeting_identifier}
             </span>
             <button
               onClick={handleCopy}
-              className="p-1 hover:bg-gray-100 rounded transition-colors"
+              className="p-1 hover:bg-muted rounded transition-colors"
               title="Copy meeting link"
             >
               {copied ? (
                 <Check className="w-3.5 h-3.5 text-green-500" />
               ) : (
-                <Copy className="w-3.5 h-3.5 text-[#00000060] hover:text-[#029CD4]" />
+                <Copy className="w-3.5 h-3.5 text-muted-foreground hover:text-primary" />
               )}
             </button>
           </div>
@@ -266,7 +266,7 @@ function MeetingCard({
               <Button
                 variant="ghost"
                 size="sm"
-                className="gap-1.5 text-[#029CD4] px-2 sm:px-3"
+                className="gap-1.5 text-primary px-2 sm:px-3"
                 onClick={onEdit}
                 title="Edit meeting"
               >
@@ -333,14 +333,14 @@ function DeleteMeetingModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 text-center">
+      <div className="relative bg-card rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 text-center">
         <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-4">
           <Trash2 className="w-5 h-5 text-red-500" />
         </div>
-        <h3 className="text-lg font-bold text-[#343434] mb-1">
+        <h3 className="text-lg font-bold text-foreground mb-1">
           Delete Meeting
         </h3>
-        <p className="text-sm text-[#00000080] mb-6">
+        <p className="text-sm text-muted-foreground mb-6">
           Are you sure? This action cannot be undone.
         </p>
 

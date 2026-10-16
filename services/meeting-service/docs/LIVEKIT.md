@@ -81,9 +81,77 @@ LIVEKIT_API_SECRET=your-api-secret-here
 
 **Option 2: Self-Hosted LiveKit**
 
-1. Deploy LiveKit server using Docker or Kubernetes
-2. Generate API keys using the LiveKit CLI
-3. Configure your server URL
+For production, self-host LiveKit on your VPS. See [INFRASTRUCTURE.md](../../../docs/INFRASTRUCTURE.md) for the complete guide.
+
+**Quick Setup:**
+
+1. **Generate API credentials:**
+```bash
+# Generate API key
+LIVEKIT_API_KEY="cfmeet_$(openssl rand -hex 4)"
+
+# Generate API secret
+LIVEKIT_API_SECRET=$(openssl rand -base64 32)
+
+echo "LIVEKIT_API_KEY=$LIVEKIT_API_KEY"
+echo "LIVEKIT_API_SECRET=$LIVEKIT_API_SECRET"
+```
+
+2. **Create LiveKit config** (`/opt/livekit/livekit.yaml`):
+```yaml
+port: 7880
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 60000
+  use_external_ip: true
+  node_ip: YOUR_VPS_IP  # Replace with your VPS public IP
+keys:
+  your_api_key: your_api_secret  # Use generated values
+logging:
+  level: info
+  json: true
+room:
+  auto_create: true
+  empty_timeout: 300
+  max_participants: 100
+turn:
+  enabled: true
+  domain: livekit.yourdomain.com
+  tls_port: 5349
+  udp_port: 3478
+  cert_file: /etc/livekit/ssl/fullchain.pem
+  key_file: /etc/livekit/ssl/privkey.pem
+```
+
+3. **Start LiveKit container:**
+```bash
+docker run -d --name livekit \
+  --restart unless-stopped \
+  -p 7880:7880 \
+  -p 7881:7881 \
+  -p 5349:5349 \
+  -p 3478:3478/udp \
+  -v /opt/livekit/livekit.yaml:/etc/livekit.yaml:ro \
+  -v /opt/livekit/ssl:/etc/livekit/ssl:ro \
+  livekit/livekit-server:latest \
+  --config /etc/livekit.yaml
+```
+
+4. **Configure Nginx** for SSL termination (see [INFRASTRUCTURE.md](../../../docs/INFRASTRUCTURE.md#step-6-create-nginx-configuration))
+
+5. **Update backend .env:**
+```env
+LIVEKIT_URL=wss://livekit.yourdomain.com
+LIVEKIT_API_KEY=your_api_key
+LIVEKIT_API_SECRET=your_api_secret
+```
+
+**Verify LiveKit is running:**
+```bash
+curl https://livekit.yourdomain.com
+docker logs livekit
+```
 
 ## Usage
 

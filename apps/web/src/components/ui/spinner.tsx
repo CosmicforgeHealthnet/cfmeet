@@ -28,11 +28,11 @@ export function Spinner({
     >
       <div
         className={cn(
-          "border-[#029CD4] border-t-transparent rounded-full animate-spin",
+          "border-primary border-t-transparent rounded-full animate-spin",
           sizeClasses[size],
         )}
       />
-      {label && <p className="text-sm text-[#00000080]">{label}</p>}
+      {label && <p className="text-sm text-muted-foreground">{label}</p>}
     </div>
   );
 }

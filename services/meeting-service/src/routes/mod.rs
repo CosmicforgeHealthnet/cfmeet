@@ -23,6 +23,7 @@ pub fn create_routes(state: AppState) -> Router {
         .route("/", get(handlers::root::get_app_info))
         .route("/health", get(handlers::root::health_check))
         .nest("/api/v1/auth", auth::auth_routes())
+        .nest("/api/v1/auth", auth::auth_protected_routes(state.clone()))
         // Legacy meeting surfaces: writes retire behind FEATURE_LEGACY_MEETING_WRITE_DISABLED.
         .nest(
             "/api/v1/meetings",

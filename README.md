@@ -11,48 +11,57 @@ This monorepo contains the platform's applications, domain services, shared cont
 | Status | Capability |
 |---|---|
 | **Current** | Video meetings: scheduled and instant meetings, pre-join, LiveKit rooms, waiting room/admission, participant list and media state, screen share, in-meeting chat |
-| **Current** | Accounts: email/password with verification, Google OAuth, password reset |
+| **Current** | Accounts: email/password with verification, Google OAuth, password reset/change-password |
 | **Current** | Developer basics: API keys, external meeting create/join API, webhook registration, OpenAPI/Swagger |
-| **Implemented (staging)** | Realtime calling — `services/calling`: platform trust foundation (tenants, applications, environments, service accounts, API credentials, scopes, principals), the canonical Call aggregate, app voice / video / group calls, routing, public-network calls through Telephony, enterprise calling (extensions, ring groups, queues, IVR, hours, hold / transfer, voicemail, recording), customer webhooks, usage and limits |
-| **Implemented (staging)** | Privacy Relay communications — `services/privacy-relay`: communication contexts, relay sessions, Contact Vault, temporary relay numbers |
-| **Implemented (staging)** | SIP/PSTN telephony — `services/telephony` with the CF-owned SIP / media edge (`infra/telephony`); **real-carrier certification is pending** an external lawful interconnect (ADR 0016) |
+| **Implemented (software)** | Realtime calling — `services/calling`: platform trust foundation (tenants, applications, environments, service accounts, API credentials, scopes, principals), canonical Call aggregate, app voice/video/group calls, routing, public-network calls through Telephony, enterprise calling (extensions, ring groups, queues, IVR, hours, hold/transfer, voicemail, recording), customer webhooks, usage and limits |
+| **Implemented (software)** | Privacy Relay communications — `services/privacy-relay`: communication contexts, relay sessions, Contact Vault and temporary relay numbers |
+| **Implemented (software)** | SIP/PSTN telephony — `services/telephony` with the CF-owned SIP/media edge (`infra/telephony`); **real-carrier certification remains pending** an external lawful interconnect (ADR 0016) |
 | **Planned** | Unified messaging |
 | **Planned** | Digital Communications Numbers |
 | **Planned** | Admin console, developer portal / CPaaS SDKs |
 | **Future** | Intelligence: transcription, translation and meeting/call assistance |
 
-Planned items are not implemented yet. See [`docs/architecture/platform-overview.md`](docs/architecture/platform-overview.md).
+Part III software is implemented and certified. Full Part III production acceptance remains pending on real lawful carrier certification and the remaining external scale gates. See `docs/architecture/part-l-final-closure-register.md`.
 
 ## Repository layout
 
 ```text
 cfmeet/
 ├── apps/
-│   └── web/                  Next.js CF Meet web application                         (current)
+│   ├── web/                  Next.js CF Meet web application
+│   └── mobile/               Expo React Native application
 ├── services/
-│   ├── meeting-service/      Rust/Axum Meeting & Conference Platform service         (current)
-│   ├── calling/              Rust/Axum Calling service (trust foundation, Calls, enterprise) (active)
-│   ├── privacy-relay/        Rust/Axum Privacy Relay + Contact Vault                  (active)
-│   └── telephony/            Rust/Axum Telephony core (SIP / PSTN legs, providers)     (active)
+│   ├── meeting-service/      Rust/Axum Meeting & Conference Platform service
+│   ├── calling/              Rust/Axum Calling service (trust foundation, Calls, enterprise)
+│   ├── privacy-relay/        Rust/Axum Privacy Relay + Contact Vault
+│   └── telephony/            Rust/Axum Telephony core (SIP/PSTN legs, providers)
 ├── packages/
-│   ├── contracts/            Contract authority: manifest, schemas, OpenAPI, validator (authority)
-│   ├── service-auth/         Internal service authentication library (Ed25519)       (active)
-│   ├── webhooks/             Webhook signing / SSRF / retry primitives               (active)
-│   └── object-storage/       Protected S3-compatible object storage client            (active)
+│   ├── contracts/            Contract authority: manifest, schemas, OpenAPI, validator
+│   ├── service-auth/         Internal service authentication library (Ed25519)
+│   ├── webhooks/             Webhook signing / SSRF / retry primitives
+│   └── object-storage/       Protected S3-compatible object storage client
 ├── infra/
 │   ├── livekit/              LiveKit configuration
-│   ├── telephony/            SIP / media edge (Asterisk) configuration and certification
+│   ├── telephony/            SIP/media edge (Asterisk) configuration and certification
 │   ├── docker/               Container/local orchestration notes
-│   └── deployment/           Deployment guide, per-service backup / restore and database roles
+│   └── deployment/           Deployment guide, per-service backup/restore and database roles
 ├── docs/
-│   ├── architecture/         Platform architecture and service boundaries
+│   ├── architecture/         Platform architecture, boundaries, certification and runbooks
 │   ├── api/                  API documentation entry point
 │   ├── decisions/            Architecture decision records
 │   ├── phases/               Meeting-platform delivery specifications and closure reports
-│   └── migration/            Monorepo migration history
-├── scripts/                  dev helpers; service-boundaries/ data-ownership guard; secret-scan/
+│   ├── migration/            Monorepo migration history
+│   ├── DEPLOYMENT.md         Deployment guide
+│   ├── INFRASTRUCTURE.md     Infrastructure guide
+│   ├── BACKEND.md            Backend deployment options
+│   ├── VERCEL.md             Web deployment guide
+│   ├── MOBILE.md             Expo/EAS deployment guide
+│   ├── ENVIRONMENT.md        Environment variables reference
+│   └── TROUBLESHOOTING.md    Common issues and solutions
+├── scripts/                  dev helpers, service-boundary guard and secret scan
 ├── .github/workflows/
 ├── docker-compose.yml
+├── docker-compose.prod.yml
 └── Makefile
 ```
 
@@ -61,32 +70,30 @@ cfmeet/
 | Path | Responsibility | Deploys as |
 |---|---|---|
 | `apps/web/` | CF Meet web experience | Vercel |
+| `apps/mobile/` | CF Meet mobile experience | Expo / EAS |
 | `services/meeting-service/` | Meeting/conference control plane: auth, meetings, participants, waiting room, chat, LiveKit token/control integration, API keys, webhooks, workers and related meeting-domain functionality | Docker image |
-| `services/calling/` | Calling domain service: the platform trust foundation (tenant / application / environment / service-account model, API credentials, scopes, limits, communication principals) and the Calling core — the canonical, provider-independent Call aggregate, state machine, participants / sessions, legs / routes / attempts, authorizations, immutable events with a transactional outbox, the call API, application calling (endpoints, signaling, ringing / arbitration, media provider boundary, call control), routing, Calling's side of public-network calls, enterprise calling, webhooks, usage and limits ([README](services/calling/README.md)) | Docker image (context: repository root, `-f services/calling/Dockerfile`) |
-| `services/privacy-relay/` | Communication Contexts, Privacy Relay Sessions, Contact Vault, temporary relay numbers ([README](services/privacy-relay/README.md)) | Docker image (context: repository root, `-f services/privacy-relay/Dockerfile`) |
-| `services/telephony/` | Public-network leg execution, provider adapters, provider events, reconciliation; drives the SIP / media edge in `infra/telephony/` ([README](services/telephony/README.md)) | Docker image (context: repository root, `-f services/telephony/Dockerfile`) |
+| `services/calling/` | Calling domain service: tenant/application/environment/service-account trust, credentials/scopes/limits, canonical provider-independent Call state, app calling, routing, public-network control, enterprise calling, webhooks and usage | Docker image (repository-root context, `-f services/calling/Dockerfile`) |
+| `services/privacy-relay/` | Communication Contexts, Privacy Relay Sessions, Contact Vault and temporary relay numbers | Docker image (repository-root context, `-f services/privacy-relay/Dockerfile`) |
+| `services/telephony/` | Public-network leg execution, provider adapters, provider events and reconciliation; drives the SIP/media edge in `infra/telephony/` | Docker image (repository-root context, `-f services/telephony/Dockerfile`) |
 
-The current Rust service is intentionally named **meeting-service** because it is the backend for the meeting/conferencing domain, not the universal backend for all future CF Meet capabilities.
+The meeting service remains the backend for the meeting/conferencing domain; it is not the universal backend for all CF Meet capabilities. Calling, Privacy Relay and Telephony are independent domain services with their own databases, migrations, images and credentials. They communicate through authenticated APIs/events rather than shared source or databases.
 
-`services/calling/`, `services/privacy-relay/` and `services/telephony/` are independent domain services: each has its own database, migrations, image and credentials, and they talk only through authenticated APIs and events (no shared source or database). Future services such as `messaging` and `numbering` will be added under `services/` when their implementation begins; they are not scaffolded prematurely.
+Future services such as `messaging` and `numbering` are added only when their implementation begins.
 
 ## Phase 2 implementation home
 
 **Phase 2 — Meeting & Conference Platform** is implemented primarily in:
 
-- `services/meeting-service/` — backend/control-plane implementation
-- `apps/web/` — meeting/conference user experience
-- `packages/contracts/` — shared API/event/permission contracts
-- `infra/livekit/` — media-plane configuration and infrastructure
-- `docs/phases/phase-02/` — implementation specification, decisions and acceptance evidence
+- `services/meeting-service/`
+- `apps/web/`
+- `apps/mobile/`
+- `packages/contracts/`
+- `infra/livekit/`
+- `docs/phases/phase-02/`
 
-Phase 2 does **not** belong in future calling, telephony, numbering or messaging services.
+Phase 2 does not own Calling, Telephony, Privacy Relay, Numbering or Messaging.
 
 ## Service evolution
-
-The current meeting service remains one deployable **modular monolith** during Phase 2. We do not split auth, participants, waiting room or permissions into separate microservices merely for structure.
-
-Future domain services are created only when a real boundary exists, for example:
 
 ```text
 services/
@@ -100,13 +107,15 @@ services/
 └── workers/               future if extracted
 ```
 
-See [`docs/architecture/platform-boundaries.md`](docs/architecture/platform-boundaries.md).
+See `docs/architecture/platform-boundaries.md`.
 
 ## Prerequisites
 
 - Rust stable with `rustfmt` and `clippy`
 - Node.js 22 and npm
-- PostgreSQL 16 (required for every backend service and its tests). Redis and LiveKit only for the meeting service / real-media certification. Docker with Compose v2 is **optional** (convenience for dependencies, image builds and certification); ordinary backend development and tests run against directly reachable services.
+- PostgreSQL 16
+- Redis and LiveKit where required by the meeting service or real-media certification
+- Docker with Compose v2 is optional for normal backend development; it is used for convenience, packaging and certification
 
 ## Environment files
 
@@ -116,27 +125,17 @@ cp services/calling/.env.example         services/calling/.env
 cp services/privacy-relay/.env.example   services/privacy-relay/.env
 cp services/telephony/.env.example       services/telephony/.env
 cp apps/web/.env.example                 apps/web/.env.local
+cp apps/mobile/.env.example              apps/mobile/.env
 ```
-
-`services/meeting-service/.env.example` documents PostgreSQL, Redis, JWT, LiveKit, OAuth, SMTP, CORS and application URL configuration. `apps/web/.env.example` documents `NEXT_PUBLIC_API_URL`.
 
 ## Local development
 
-Start dependencies:
-
 ```bash
 make deps
-```
-
-Run migrations and the meeting service:
-
-```bash
 make migrate
 make meeting-service
 curl http://localhost:8080/health
 ```
-
-`make backend` remains as a temporary compatibility alias for `make meeting-service`.
 
 Run the web app:
 
@@ -158,42 +157,75 @@ OpenAPI: `http://localhost:8080/api-docs/openapi.json`
 ## Deployment roots
 
 - Vercel Root Directory: `apps/web`
-- Meeting service Docker build context: `services/meeting-service/`
-- Meeting service Dockerfile: `services/meeting-service/Dockerfile`
-- Calling service Docker build context: repository root (`docker build -f services/calling/Dockerfile .`; the context is filtered to `packages/service-auth`, `packages/object-storage`, `packages/webhooks` and `services/calling`)
-- Privacy Relay / Telephony Docker build context: repository root (`docker build -f services/privacy-relay/Dockerfile .`, `docker build -f services/telephony/Dockerfile .`; each context is filtered to `packages/service-auth` and its own service)
-- Per-service PostgreSQL provisioning, backup and restore: [`infra/deployment/README.md`](infra/deployment/README.md)
-
-The web app and meeting service remain independently deployable and communicate over published APIs only.
+- Mobile: `apps/mobile` via Expo/EAS
+- Meeting service: `services/meeting-service/Dockerfile`
+- Calling: repository-root build context with `services/calling/Dockerfile`
+- Privacy Relay: repository-root build context with `services/privacy-relay/Dockerfile`
+- Telephony: repository-root build context with `services/telephony/Dockerfile`
+- Per-service PostgreSQL provisioning/backup/restore: `infra/deployment/README.md`
 
 ## CI
 
-Workflows under `.github/workflows/` are path-aware:
+Workflows under `.github/workflows/` are path-aware and include:
 
-- **Meeting service:** `services/meeting-service/**` → fmt, clippy, test, build and Docker image
-- **Calling service:** `services/calling/**`, `packages/service-auth/**`, Calling / platform contracts → fmt, check, clippy, PostgreSQL tests (incl. internal service auth, the call state machine, concurrency races, transactional events / outbox and contract conformance), architecture guards, migration smoke, startup refusal checks, build and Docker image
-- **Contracts and service auth:** `packages/contracts/**`, `packages/service-auth/**` → contract validation (`make contracts-validate`), validator mutation tests, service-auth fmt / check / clippy / tests for both feature sets, private-key scan
-- **Privacy Relay / Telephony services:** their service, its shared packages and contracts (Telephony also Calling's telephony paths, Privacy Relay and `infra/telephony/**`) → fmt, check, clippy, PostgreSQL tests, migration smoke, cross-service e2e against the real binaries, build and Docker image
-- **Certification:** Calling RTC (real LiveKit), Telephony SIP (real Asterisk + SIPp) and enterprise calling (Asterisk + SIPp + S3) workflows; each runs with its `*_CERT_REQUIRED=1` flag, so a missing dependency fails instead of passing as SKIPPED
-- **Dependency and image security:** RustSec advisories for every Part III lockfile, image secret scan and pending Debian security updates per service image (also weekly)
-- **Service boundaries:** every push → repository data-ownership guard, secret scan, per-service database isolation check and their mutation tests (`make service-boundaries`, `make secret-scan`)
-- **Frontend:** `apps/web/**` → install, lint, typecheck and Next.js build
-- **Compose:** root compose/infra/meeting-service Dockerfile validation
+- meeting service;
+- Calling;
+- Privacy Relay;
+- Telephony;
+- contracts and service-auth;
+- real RTC certification;
+- Asterisk/SIP certification;
+- enterprise calling certification;
+- dependency/image security;
+- service-boundary, database-isolation and secret-scan checks;
+- frontend;
+- mobile;
+- compose/deployment validation.
 
 ## Documentation
+
+Platform / architecture:
 
 - [Platform overview](docs/architecture/platform-overview.md)
 - [Platform boundaries](docs/architecture/platform-boundaries.md)
 - [Service data ownership](docs/architecture/service-data-ownership.md)
+- [Architecture decisions](docs/decisions/README.md)
 - [API docs](docs/api/README.md)
+
+Part III:
+
+- [Part F certification](docs/architecture/part-f-certification.md)
+- [Part G certification](docs/architecture/part-g-certification.md)
+- [Part H security certification](docs/architecture/part-h-security-certification.md)
+- [Part I reliability certification](docs/architecture/part-i-reliability-certification.md)
+- [Part J persistence/deployment certification](docs/architecture/part-j-persistence-deployment-certification.md)
+- [Part K production acceptance](docs/architecture/part-k-production-acceptance.md)
+- [Part L closure register](docs/architecture/part-l-final-closure-register.md)
+
+Operations:
+
+- [Deployment](infra/deployment/README.md)
+- [Provider/carrier outage runbook](docs/architecture/provider-outage-runbook.md)
+- [Secret rotation](docs/architecture/secret-rotation-runbook.md)
+- [Security deployment checklist](docs/architecture/security-deployment-checklist.md)
+
+Additional deployment guides:
+
+- [Deployment index](docs/README.md)
+- [Infrastructure](docs/INFRASTRUCTURE.md)
+- [Backend](docs/BACKEND.md)
+- [Vercel](docs/VERCEL.md)
+- [Mobile](docs/MOBILE.md)
+- [Environment](docs/ENVIRONMENT.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+
+Other:
+
 - [Meeting service guides](services/meeting-service/docs/README.md)
 - [Calling service](services/calling/README.md)
 - [Privacy Relay service](services/privacy-relay/README.md)
-- [Telephony service](services/telephony/README.md) and [SIP / media edge](infra/telephony/README.md)
+- [Telephony service](services/telephony/README.md)
+- [SIP/media edge](infra/telephony/README.md)
 - [Contracts](packages/contracts/README.md)
-- [Deployment](infra/deployment/README.md)
-- Part III certification: [Part F](docs/architecture/part-f-certification.md) · [Part G](docs/architecture/part-g-certification.md) · [Part H](docs/architecture/part-h-security-certification.md) · [Part I](docs/architecture/part-i-reliability-certification.md) · [Part J](docs/architecture/part-j-persistence-deployment-certification.md) · [Part K](docs/architecture/part-k-production-acceptance.md) · [Part L closure register](docs/architecture/part-l-final-closure-register.md)
-- Runbooks: [provider / carrier outage](docs/architecture/provider-outage-runbook.md) · [secret rotation](docs/architecture/secret-rotation-runbook.md) · [security deployment checklist](docs/architecture/security-deployment-checklist.md)
-- [Architecture decisions](docs/decisions/README.md)
 - [Delivery phases](docs/phases/README.md)
 - [Monorepo migration record](docs/migration/MONOREPO_MIGRATION.md)

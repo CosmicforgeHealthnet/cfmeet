@@ -10,20 +10,20 @@ export default function NotFound() {
   const router = useRouter();
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 py-8">
-      <div className="bg-white rounded-2xl sm:rounded-3xl shadow-xl w-full max-w-lg px-6 py-8 sm:px-10 sm:py-10 text-center">
+    <div className="min-h-screen flex items-center justify-center bg-muted px-4 py-8">
+      <div className="bg-background rounded-2xl sm:rounded-3xl shadow-xl w-full max-w-lg px-6 py-8 sm:px-10 sm:py-10 text-center">
         {/* 404 Number */}
-        <h1 className="text-7xl sm:text-8xl font-bold bg-gradient-to-r from-[#029CD4] to-[#0284c7] bg-clip-text text-transparent mb-4">
+        <h1 className="text-7xl sm:text-8xl font-bold bg-gradient-to-r from-[var(--primary)] to-[#0284c7] bg-clip-text text-transparent mb-4">
           404
         </h1>
 
         {/* Title */}
-        <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">
+        <h2 className="text-xl sm:text-2xl font-bold text-foreground mb-2">
           Page Not Found
         </h2>
 
         {/* Description */}
-        <p className="text-gray-600 text-sm sm:text-base mb-6">
+        <p className="text-muted-foreground text-sm sm:text-base mb-6">
           The page you&apos;re looking for doesn&apos;t exist or has been moved.
         </p>
 
@@ -47,23 +47,23 @@ export default function NotFound() {
         </div>
 
         {/* Quick Links */}
-        <div className="pt-6 border-t border-gray-200">
-          <p className="text-xs text-gray-500 mb-3">Quick Links</p>
+        <div className="pt-6 border-t border-border">
+          <p className="text-xs text-muted-foreground mb-3">Quick Links</p>
           <div className="flex flex-wrap gap-4 justify-center">
             <Link href="/login">
-              <Button variant="ghost" size="sm" className="text-[#029CD4]">
+              <Button variant="ghost" size="sm" className="text-primary">
                 <LogIn className="w-4 h-4 mr-1.5" />
                 Login
               </Button>
             </Link>
             <Link href="/register">
-              <Button variant="ghost" size="sm" className="text-[#029CD4]">
+              <Button variant="ghost" size="sm" className="text-primary">
                 <UserPlus className="w-4 h-4 mr-1.5" />
                 Register
               </Button>
             </Link>
             <Link href="/forgot-password">
-              <Button variant="ghost" size="sm" className="text-[#029CD4]">
+              <Button variant="ghost" size="sm" className="text-primary">
                 <KeyRound className="w-4 h-4 mr-1.5" />
                 Reset Password
               </Button>

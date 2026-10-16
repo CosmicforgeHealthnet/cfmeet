@@ -1,0 +1,145 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * CF Meet Brand Colors
+ * Cyan: #00C6FF
+ * Electric Blue: #006BFF
+ * Deep Blue: #2563EB
+ * Violet: #A855F7
+ * White: #FFFFFF
+ * Deep Navy: #0F172A
+ */
+
+:root {
+  --radius: 10px;
+
+  /* CF Meet Brand - Light Theme */
+  --background: #FFFFFF;
+  --foreground: #0F172A;
+
+  --card: #FFFFFF;
+  --card-foreground: #0F172A;
+
+  --popover: #FFFFFF;
+  --popover-foreground: #0F172A;
+
+  /* Primary uses Electric Blue */
+  --primary: #006BFF;
+  --primary-foreground: #FFFFFF;
+
+  --secondary: #F1F5F9;
+  --secondary-foreground: #0F172A;
+
+  --muted: #F1F5F9;
+  --muted-foreground: #64748B;
+
+  /* Accent uses Cyan */
+  --accent: #00C6FF;
+  --accent-foreground: #0F172A;
+
+  --destructive: #EF4444;
+  --destructive-foreground: #FFFFFF;
+
+  --success: #22C55E;
+  --success-foreground: #FFFFFF;
+
+  --warning: #F59E0B;
+  --warning-foreground: #0F172A;
+
+  --border: #E2E8F0;
+  --input: #E2E8F0;
+  --ring: #006BFF;
+
+  /* Chart colors using brand palette */
+  --chart-1: #00C6FF;
+  --chart-2: #006BFF;
+  --chart-3: #2563EB;
+  --chart-4: #A855F7;
+  --chart-5: #0F172A;
+
+  /* Sidebar */
+  --sidebar: #FAFBFC;
+  --sidebar-foreground: #0F172A;
+  --sidebar-primary: #006BFF;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #F1F5F9;
+  --sidebar-accent-foreground: #006BFF;
+  --sidebar-border: #E2E8F0;
+  --sidebar-ring: #006BFF;
+
+  /* Tab bar */
+  --tab-bar: #FFFFFF;
+  --tab-bar-active: #006BFF;
+  --tab-bar-inactive: #64748B;
+
+  /* Brand gradient colors */
+  --brand-cyan: #00C6FF;
+  --brand-electric-blue: #006BFF;
+  --brand-deep-blue: #2563EB;
+  --brand-violet: #A855F7;
+  --brand-white: #FFFFFF;
+  --brand-navy: #0F172A;
+}
+
+.dark {
+  /* CF Meet Brand - Dark Theme */
+  --background: #0F172A;
+  --foreground: #F8FAFC;
+
+  --card: #1E293B;
+  --card-foreground: #F8FAFC;
+
+  --popover: #1E293B;
+  --popover-foreground: #F8FAFC;
+
+  /* Primary uses Electric Blue */
+  --primary: #006BFF;
+  --primary-foreground: #FFFFFF;
+
+  --secondary: #334155;
+  --secondary-foreground: #F8FAFC;
+
+  --muted: #334155;
+  --muted-foreground: #94A3B8;
+
+  /* Accent uses Cyan */
+  --accent: #00C6FF;
+  --accent-foreground: #0F172A;
+
+  --destructive: #EF4444;
+  --destructive-foreground: #FFFFFF;
+
+  --success: #22C55E;
+  --success-foreground: #0F172A;
+
+  --warning: #F59E0B;
+  --warning-foreground: #0F172A;
+
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.15);
+  --ring: #00C6FF;
+
+  /* Chart colors using brand palette */
+  --chart-1: #00C6FF;
+  --chart-2: #006BFF;
+  --chart-3: #2563EB;
+  --chart-4: #A855F7;
+  --chart-5: #F8FAFC;
+
+  /* Sidebar */
+  --sidebar: #1E293B;
+  --sidebar-foreground: #F8FAFC;
+  --sidebar-primary: #00C6FF;
+  --sidebar-primary-foreground: #0F172A;
+  --sidebar-accent: #334155;
+  --sidebar-accent-foreground: #00C6FF;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #00C6FF;
+
+  /* Tab bar */
+  --tab-bar: #1E293B;
+  --tab-bar-active: #00C6FF;
+  --tab-bar-inactive: #94A3B8;
+}

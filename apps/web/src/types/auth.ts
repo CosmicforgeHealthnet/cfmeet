@@ -69,3 +69,13 @@ export interface VerifyResetTokenResponse {
   message: string;
   valid: boolean;
 }
+
+export interface ChangePasswordRequest {
+  current_password: string;
+  new_password: string;
+  confirm_password: string;
+}
+
+export interface ChangePasswordResponse {
+  message: string;
+}

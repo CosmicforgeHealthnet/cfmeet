@@ -1,0 +1,184 @@
+name: Deploy Backend
+
+# Deploy meeting-service to production VPS on push to main.
+# Requires GitHub Secrets:
+#   - VPS_HOST: VPS IP or hostname (e.g., 173.249.30.55)
+#   - VPS_USER: SSH user (e.g., root)
+#   - VPS_SSH_KEY: Private SSH key for authentication
+#   - VPS_DEPLOY_PATH: Deployment path (e.g., /opt/cfmeet-production)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/meeting-service/**"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+concurrency:
+  group: deploy-backend-${{ github.ref }}
+  cancel-in-progress: false  # Don't cancel in-progress deployments
+
+env:
+  DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH || '/opt/cfmeet-production' }}
+
+jobs:
+  # Run tests before deployment
+  test:
+    name: Pre-deploy tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      TEST_REDIS_URL: redis://127.0.0.1:6379
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    defaults:
+      run:
+        working-directory: services/meeting-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        working-directory: .
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/meeting-service -> target
+          key: deploy-test
+
+      - name: Run tests
+        run: cargo test --workspace --no-fail-fast
+
+  deploy:
+    name: Deploy to VPS
+    needs: test
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'production' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Get commit info
+        id: commit
+        run: |
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "message=$(git log -1 --pretty=%B | head -1)" >> $GITHUB_OUTPUT
+
+      - name: Deploy to VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          COMMIT_SHA: ${{ steps.commit.outputs.sha_short }}
+        run: |
+          ssh $VPS_USER@$VPS_HOST << 'DEPLOY_SCRIPT'
+            set -e
+
+            DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
+            COMMIT="${{ steps.commit.outputs.sha_short }}"
+
+            echo "=== Deploying CF Meet Backend (commit: $COMMIT) ==="
+
+            # Navigate to source directory
+            cd "$DEPLOY_PATH/source"
+
+            # Pull latest changes
+            echo "Pulling latest changes..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Build new Docker image
+            echo "Building Docker image..."
+            cd services/meeting-service
+            docker build -t cfmeet-meeting-service:prod-$COMMIT -t cfmeet-meeting-service:prod-latest .
+
+            # Run migrations
+            echo "Running migrations..."
+            docker run --rm \
+              --network rtc_backend_cosmicforge-network \
+              --env-file "$DEPLOY_PATH/.env" \
+              cfmeet-meeting-service:prod-$COMMIT \
+              ./migration up
+
+            # Stop old container
+            echo "Stopping old container..."
+            docker rm -f cfmeet-production-backend 2>/dev/null || true
+
+            # Start new container
+            echo "Starting new container..."
+            docker run -d \
+              --name cfmeet-production-backend \
+              --restart unless-stopped \
+              --env-file "$DEPLOY_PATH/.env" \
+              --network rtc_backend_cosmicforge-network \
+              -p 127.0.0.1:18081:8080 \
+              cfmeet-meeting-service:prod-$COMMIT
+
+            # Wait for health check
+            echo "Waiting for health check..."
+            sleep 5
+
+            # Verify deployment
+            if docker ps | grep -q cfmeet-production-backend; then
+              echo "=== Deployment successful! ==="
+              docker logs cfmeet-production-backend --tail 10
+            else
+              echo "=== Deployment failed! ==="
+              docker logs cfmeet-production-backend --tail 50
+              exit 1
+            fi
+
+            # Cleanup old images (keep last 3)
+            echo "Cleaning up old images..."
+            docker images cfmeet-meeting-service --format "{{.Tag}}" | grep "^prod-" | sort -r | tail -n +4 | xargs -I {} docker rmi cfmeet-meeting-service:{} 2>/dev/null || true
+
+            echo "=== Done ==="
+          DEPLOY_SCRIPT
+
+      - name: Verify deployment
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh $VPS_USER@$VPS_HOST "curl -sf http://localhost:18081/health || exit 1"
+          echo "Health check passed!"
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Deployment failed! Check the logs above for details."

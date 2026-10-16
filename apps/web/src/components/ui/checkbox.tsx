@@ -14,7 +14,7 @@ function Checkbox({
     <CheckboxPrimitive.Root
       data-slot="checkbox"
       className={cn(
-        "peer shrink-0 h-5 w-5 border rounded-md border-[#029CD4] shadow-xs transition-shadow outline-none focus-visible:ring-[3px] focus-visible:ring-[#029CD4]/30 focus-visible:border-[#029CD4] data-[state=checked]:bg-[#029CD4] data-[state=checked]:text-white data-[state=checked]:border-[#029CD4] disabled:cursor-not-allowed disabled:opacity-50",
+        "peer shrink-0 h-5 w-5 border rounded-md border-primary shadow-xs transition-shadow outline-none focus-visible:ring-[3px] focus-visible:ring-primary/30 focus-visible:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground data-[state=checked]:border-primary disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       {...props}

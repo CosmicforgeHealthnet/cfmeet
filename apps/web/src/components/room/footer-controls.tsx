@@ -104,20 +104,20 @@ export default function FooterControls({
   };
 
   return (
-    <footer className="p-2 sm:p-6 flex items-center justify-center gap-2 sm:gap-4 bg-white border-t border-gray-100 z-10 relative">
+    <footer className="p-2 sm:p-6 flex items-center justify-center gap-2 sm:gap-4 bg-card border-t border-border z-10 relative">
       <div className="flex flex-wrap items-center justify-between w-full max-w-5xl rounded-lg gap-2 sm:gap-4 px-1 sm:px-6">
         {/* Audio Controls Group */}
-        <div className="relative flex items-center gap-1 bg-white/50 rounded-lg p-1">
+        <div className="relative flex items-center gap-1 bg-card/50 rounded-lg p-1">
           <Button
             onClick={toggleSpeaker}
             className={`p-2 sm:p-3 rounded-md transition-colors ${
               !isSpeakerOn
                 ? "bg-red-50 text-red-500 hover:bg-red-100"
-                : "bg-[#FAFAFB] text-sky-500 hover:bg-gray-200"
+                : "bg-sidebar text-primary hover:bg-muted"
             }`}
           >
             {isSpeakerOn ? (
-              <Volume2 className="text-[#029CD4]" size={24} />
+              <Volume2 className="text-primary" size={24} />
             ) : (
               <VolumeX className="text-red-500" size={24} />
             )}
@@ -125,14 +125,14 @@ export default function FooterControls({
 
           <Button
             onClick={() => setIsDeviceMenuOpen(!isDeviceMenuOpen)}
-            className="p-1 h-full rounded-md bg-[#FAFAFB] text-sky-500 hover:bg-gray-200"
+            className="p-1 h-full rounded-md bg-sidebar text-primary hover:bg-muted"
           >
             <ChevronUp size={16} />
           </Button>
 
           {isDeviceMenuOpen && (
-            <div className="absolute bottom-full left-0 mb-2 w-64 bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden z-50">
-              <div className="p-2 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <div className="absolute bottom-full left-0 mb-2 w-64 bg-card border border-border rounded-lg shadow-xl overflow-hidden z-50">
+              <div className="p-2 border-b border-border text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Select Audio Output
               </div>
               <div className="max-h-60 overflow-y-auto">
@@ -143,10 +143,10 @@ export default function FooterControls({
                       setActiveAudioOutputDevice(device.deviceId);
                       setIsDeviceMenuOpen(false);
                     }}
-                    className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between hover:bg-gray-50 ${
+                    className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between hover:bg-muted ${
                       activeAudioOutputDeviceId === device.deviceId
                         ? "text-sky-600 bg-sky-50"
-                        : "text-gray-700"
+                        : "text-foreground"
                     }`}
                   >
                     <span className="truncate">{device.label}</span>
@@ -165,12 +165,12 @@ export default function FooterControls({
             className={`p-2 sm:p-3 rounded-lg transition-colors ${
               isScreenShareEnabled
                 ? "bg-green-100 text-green-600 hover:bg-green-200"
-                : "bg-[#FAFAFB] text-sky-500 hover:bg-gray-200"
+                : "bg-sidebar text-primary hover:bg-muted"
             }`}
           >
             <Upload
               className={
-                isScreenShareEnabled ? "text-green-600" : "text-[#029CD4]"
+                isScreenShareEnabled ? "text-green-600" : "text-primary"
               }
               size={24}
             />
@@ -182,11 +182,11 @@ export default function FooterControls({
               className={`p-2 sm:p-3 rounded-lg transition-colors relative z-10 ${
                 !isMicrophoneEnabled
                   ? "bg-red-50 text-red-500 hover:bg-red-100"
-                  : "bg-[#FAFAFB] text-sky-500 hover:bg-gray-200"
+                  : "bg-sidebar text-primary hover:bg-muted"
               }`}
             >
               {isMicrophoneEnabled ? (
-                <Mic className="text-[#029CD4]" size={24} />
+                <Mic className="text-primary" size={24} />
               ) : (
                 <MicOff className="text-red-500" size={24} />
               )}
@@ -228,11 +228,11 @@ export default function FooterControls({
             className={`p-2 sm:p-3 rounded-lg transition-colors ${
               !isCameraEnabled
                 ? "bg-red-50 text-red-500 hover:bg-red-100"
-                : "bg-[#FAFAFB] text-sky-500 hover:bg-gray-200"
+                : "bg-sidebar text-primary hover:bg-muted"
             }`}
           >
             {isCameraEnabled ? (
-              <Video className="text-[#029CD4]" size={24} />
+              <Video className="text-primary" size={24} />
             ) : (
               <VideoOff className="text-red-500" size={24} />
             )}
@@ -244,7 +244,7 @@ export default function FooterControls({
           className={`p-2 sm:p-3 rounded-lg transition-colors hover:text-white ${
             isSidebarOpen
               ? "bg-sky-100 text-sky-600"
-              : "bg-gray-100 text-gray-500"
+              : "bg-muted text-muted-foreground"
           }`}
         >
           <Maximize size={24} />

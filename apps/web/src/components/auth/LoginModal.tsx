@@ -94,7 +94,7 @@ const LoginModal = () => {
   };
 
   return (
-    <div className="relative z-10 bg-white rounded-2xl sm:rounded-[40px] shadow-2xl w-full max-w-[520px] px-5 py-6 sm:p-8 md:p-12 my-4 sm:my-6">
+    <div className="relative z-10 bg-card rounded-2xl sm:rounded-[40px] shadow-2xl w-full max-w-[520px] px-5 py-6 sm:p-8 md:p-12 my-4 sm:my-6">
       {/* Header */}
       <AuthHeader title="Welcome Back" subtitle="Log in to your account." />
 
@@ -128,7 +128,7 @@ const LoginModal = () => {
         <div className="flex justify-end">
           <Link
             href="/forgot-password"
-            className="text-sm text-[#029CD4] font-semibold hover:underline"
+            className="text-sm text-primary font-semibold hover:underline"
           >
             Forgot Password?
           </Link>
@@ -143,7 +143,7 @@ const LoginModal = () => {
           />
           <label
             htmlFor="remember-me"
-            className="text-sm text-[#029CD4] cursor-pointer"
+            className="text-sm text-primary cursor-pointer"
           >
             Remember Me
           </label>
@@ -179,7 +179,7 @@ const LoginModal = () => {
       <Button
         type="button"
         variant="outline"
-        className="w-full border-gray-100 text-gray-500 hover:bg-gray-50 rounded-2xl group"
+        className="w-full border-border text-muted-foreground hover:bg-muted rounded-2xl group"
         onClick={authService.initiateGoogleOAuth}
       >
         <div className="relative w-5 h-5 group-hover:scale-110 transition-transform">

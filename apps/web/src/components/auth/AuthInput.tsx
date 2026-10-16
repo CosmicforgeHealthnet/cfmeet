@@ -36,7 +36,7 @@ const AuthInput = ({ label, type = "text", placeholder, id, value, onChange, err
           <button
             type="button"
             onClick={() => setShowPassword(!showPassword)}
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-[#029CD4] opacity-60 hover:opacity-100 transition-opacity"
+            className="absolute right-4 top-1/2 -translate-y-1/2 text-primary opacity-60 hover:opacity-100 transition-opacity"
             aria-label={showPassword ? "Hide password" : "Show password"}
           >
             {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}

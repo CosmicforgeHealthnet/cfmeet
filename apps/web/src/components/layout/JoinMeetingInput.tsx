@@ -50,7 +50,7 @@ export default function JoinMeetingInput({
       <Button
         size="sm"
         className={cn(
-          "bg-[#029CD4] hover:bg-[#028bbd] shrink-0",
+          "shrink-0",
           buttonClassName,
         )}
         onClick={handleJoin}

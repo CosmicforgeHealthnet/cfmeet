@@ -17,7 +17,7 @@ function ResetPasswordContent() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-muted px-4">
       <PasswordResetModal email={email} token={token} />
     </div>
   );
@@ -27,8 +27,8 @@ const ResetPasswordPage = () => {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen flex items-center justify-center bg-gray-50">
-          <div className="text-gray-500">Loading...</div>
+        <div className="min-h-screen flex items-center justify-center bg-muted">
+          <div className="text-muted-foreground">Loading...</div>
         </div>
       }
     >

@@ -119,7 +119,7 @@ const Hero = () => {
         {/* Navigation Arrows */}
         <button
           onClick={prevSlide}
-          className="absolute left-0 z-10 text-[#029CD4] opacity-50 hover:opacity-100 transition-opacity"
+          className="absolute left-0 z-10 text-primary opacity-50 hover:opacity-100 transition-opacity"
           aria-label="Previous slide"
         >
           <ChevronLeft size={28} className="sm:hidden" />
@@ -140,7 +140,7 @@ const Hero = () => {
 
         <button
           onClick={nextSlide}
-          className="absolute right-0 z-10 text-[#029CD4] opacity-50 hover:opacity-100 transition-opacity"
+          className="absolute right-0 z-10 text-primary opacity-50 hover:opacity-100 transition-opacity"
           aria-label="Next slide"
         >
           <ChevronRight size={28} className="sm:hidden" />
@@ -150,10 +150,10 @@ const Hero = () => {
 
       {/* Text Content */}
       <div className={`overflow-hidden w-full ${getClasses(textPhase)}`}>
-        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-3 sm:mb-4 px-2">
+        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground mb-3 sm:mb-4 px-2">
           {slide.heading}
         </h1>
-        <p className="max-w-2xl mx-auto text-sm sm:text-base text-gray-600 leading-relaxed mb-6 sm:mb-8 px-2">
+        <p className="max-w-2xl mx-auto text-sm sm:text-base text-muted-foreground leading-relaxed mb-6 sm:mb-8 px-2">
           {slide.description}
         </p>
       </div>
@@ -165,7 +165,7 @@ const Hero = () => {
             key={index}
             onClick={() => changeSlide(index)}
             className={`w-2.5 h-2.5 rounded-full transition-colors ${
-              index === currentSlide ? "bg-[#029CD4]" : "bg-gray-300"
+              index === currentSlide ? "bg-primary" : "bg-muted"
             }`}
             aria-label={`Go to slide ${index + 1}`}
           />
@@ -181,7 +181,7 @@ const Hero = () => {
       {/* Join Link Input */}
       <JoinMeetingInput
         className="max-w-xs sm:max-w-md mb-6 sm:mb-12"
-        inputClassName="border-[#029CD4] focus:ring-[#029CD44D] text-sm sm:text-base"
+        inputClassName="border-primary focus:ring-primary/30 text-sm sm:text-base"
         buttonClassName="px-5 sm:px-8"
       />
     </main>

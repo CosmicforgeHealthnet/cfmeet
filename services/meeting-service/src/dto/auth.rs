@@ -171,3 +171,39 @@ pub struct VerifyResetTokenResponse {
     pub valid: bool,
 }
 
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+#[validate(schema(function = "validate_change_passwords"))]
+pub struct ChangePasswordRequest {
+    #[validate(length(min = 1, message = "Current password is required"))]
+    pub current_password: String,
+
+    #[validate(length(
+        min = 8,
+        max = 128,
+        message = "New password must be between 8 and 128 characters"
+    ))]
+    pub new_password: String,
+
+    #[validate(length(min = 1, message = "Confirm password is required"))]
+    pub confirm_password: String,
+}
+
+fn validate_change_passwords(req: &ChangePasswordRequest) -> Result<(), ValidationError> {
+    if req.new_password != req.confirm_password {
+        return Err(ValidationError::new("passwords_mismatch")
+            .with_message("Passwords do not match".into()));
+    }
+
+    if req.current_password == req.new_password {
+        return Err(ValidationError::new("same_password")
+            .with_message("New password must be different from current password".into()));
+    }
+
+    if !validate_password_strength(&req.new_password) {
+        return Err(ValidationError::new("password_strength")
+            .with_message("Password must contain at least one uppercase letter, one lowercase letter, one digit, and one special character (!@#$%^&*(),.?:{}|<>)".into()));
+    }
+
+    Ok(())
+}
+

@@ -61,7 +61,7 @@ export default function ProfileMenu({
       {showProfileMenu && (
         <div
           className={cn(
-            "absolute bottom-full left-0 mb-3 w-60 bg-white rounded-xl shadow-xl border border-gray-100 p-2 z-50 animate-in fade-in slide-in-from-bottom-2",
+            "absolute bottom-full left-0 mb-3 w-60 bg-card rounded-xl shadow-xl border border-border p-2 z-50 animate-in fade-in slide-in-from-bottom-2",
             // Responsive positioning logic
             mobile
               ? "min-w-[200px]"
@@ -70,18 +70,18 @@ export default function ProfileMenu({
                 : "min-w-[200px] left-8",
           )}
         >
-          <div className="px-3 py-2 border-b border-gray-50 mb-1">
-            <p className="font-medium text-sm text-gray-900 truncate">
+          <div className="px-3 py-2 border-b border-border mb-1">
+            <p className="font-medium text-sm text-foreground truncate">
               {user?.username || "User"}
             </p>
-            <p className="text-xs text-gray-500 truncate">
+            <p className="text-xs text-muted-foreground truncate">
               {user?.email || "user@example.com"}
             </p>
           </div>
 
           <button
             onClick={() => router.push("/dashboard/settings")}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 hover:text-[#029CD4] rounded-lg transition-colors text-left"
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-primary rounded-lg transition-colors text-left"
           >
             <Settings className="w-4 h-4" />
             My Account
@@ -130,26 +130,26 @@ export default function ProfileMenu({
       <button
         onClick={() => setShowProfileMenu(!showProfileMenu)}
         className={cn(
-          "w-full flex items-center gap-3 p-2 rounded-xl transition-all hover:bg-white hover:shadow-sm border border-transparent hover:border-gray-100 group",
-          showProfileMenu && "bg-white shadow-sm border-gray-100",
+          "w-full flex items-center gap-3 p-2 rounded-xl transition-all hover:bg-card hover:shadow-sm border border-transparent hover:border-border group",
+          showProfileMenu && "bg-card shadow-sm border-border",
           !expanded && "rounded-full w-10 h-10 p-0 justify-center",
         )}
       >
         <div className="relative">
-          <Avatar className="w-9 h-9 border border-gray-100 shrink-0">
-            <AvatarFallback className="bg-[#E6F5FA] text-[#029CD4] text-xs font-semibold">
+          <Avatar className="w-9 h-9 border border-border shrink-0">
+            <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
               {initials}
             </AvatarFallback>
           </Avatar>
-          <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white rounded-full z-10" />
+          <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-background rounded-full z-10" />
         </div>
 
         {expanded && (
           <div className="flex-1 text-left overflow-hidden">
-            <p className="text-sm font-medium text-gray-700 truncate group-hover:text-[#029CD4] transition-colors">
+            <p className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">
               {user?.username || "Profile"}
             </p>
-            <p className="text-xs text-gray-400 truncate">View Profile</p>
+            <p className="text-xs text-muted-foreground truncate">View Profile</p>
           </div>
         )}
       </button>

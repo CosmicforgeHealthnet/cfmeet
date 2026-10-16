@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - "docker-compose.yml"
+      - "docker-compose.prod.yml"
       - "infra/**"
       - "services/meeting-service/Dockerfile"
       - ".github/workflows/compose.yml"
@@ -12,6 +13,7 @@ on:
     branches: [main]
     paths:
       - "docker-compose.yml"
+      - "docker-compose.prod.yml"
       - "infra/**"
       - "services/meeting-service/Dockerfile"
       - ".github/workflows/compose.yml"
@@ -21,8 +23,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate root docker-compose.yml
+
+      - name: Validate root docker-compose.yml (development)
         run: |
           cp services/meeting-service/.env.example services/meeting-service/.env
           docker compose config --quiet
           docker compose --profile app config --quiet
+
+      - name: Validate docker-compose.prod.yml (production)
+        run: |
+          # Create minimal .env for validation
+          cat > .env << 'EOF'
+          POSTGRES_PASSWORD=test
+          DATABASE_URL=postgres://user:pass@postgres:5432/cfmeet
+          JWT_SECRET=test-secret-key
+          LIVEKIT_URL=wss://livekit.example.com
+          LIVEKIT_API_KEY=test-key
+          LIVEKIT_API_SECRET=test-secret
+          APP_URL=https://example.com
+          FRONTEND_URLS=https://example.com
+          EOF
+          docker compose -f docker-compose.prod.yml config --quiet

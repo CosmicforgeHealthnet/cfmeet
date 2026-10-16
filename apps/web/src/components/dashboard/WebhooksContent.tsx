@@ -141,11 +141,11 @@ export default function WebhooksContent() {
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-6">
+      <div className="bg-card p-6 rounded-2xl shadow-sm border border-border space-y-6">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold mb-1">Webhooks</h2>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-muted-foreground">
               Receive real-time notifications for meeting events.
             </p>
           </div>
@@ -181,7 +181,7 @@ export default function WebhooksContent() {
                     id="event-type"
                     value={eventType}
                     onChange={(e) => setEventType(e.target.value)}
-                    className="flex h-9 sm:h-10 w-full rounded-xl border border-[#029CD44D] bg-transparent px-3 sm:px-5 py-2 text-sm sm:text-base font-medium focus:outline-none focus:border-[#029CD4] focus:ring-1 focus:ring-[#029CD4]"
+                    className="flex h-9 sm:h-10 w-full rounded-xl border border-[var(--primary)4D] bg-transparent px-3 sm:px-5 py-2 text-sm sm:text-base font-medium focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)]"
                   >
                     <option value="">Select an event type</option>
                     {WEBHOOK_EVENT_TYPES.map((type) => (
@@ -216,7 +216,7 @@ export default function WebhooksContent() {
         </div>
 
         {webhooks && webhooks.length === 0 ? (
-          <div className="text-center py-10 text-gray-500">
+          <div className="text-center py-10 text-muted-foreground">
             <p>No webhooks configured yet.</p>
             <p className="text-sm mt-1">
               Create a webhook to start receiving event notifications.
@@ -263,7 +263,7 @@ export default function WebhooksContent() {
                 id="edit-status"
                 value={editStatus}
                 onChange={(e) => setEditStatus(e.target.value)}
-                className="flex h-9 sm:h-10 w-full rounded-xl border border-[#029CD44D] bg-transparent px-3 sm:px-5 py-2 text-sm sm:text-base font-medium focus:outline-none focus:border-[#029CD4] focus:ring-1 focus:ring-[#029CD4]"
+                className="flex h-9 sm:h-10 w-full rounded-xl border border-[var(--primary)4D] bg-transparent px-3 sm:px-5 py-2 text-sm sm:text-base font-medium focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)]"
               >
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
@@ -273,10 +273,10 @@ export default function WebhooksContent() {
             {editingWebhook && (
               <div className="space-y-2">
                 <Label>Event Type</Label>
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-muted-foreground">
                   {WEBHOOK_EVENT_TYPES.find((t) => t.value === editingWebhook.event_type)?.label || editingWebhook.event_type}
                 </p>
-                <p className="text-xs text-gray-400">Event type cannot be changed.</p>
+                <p className="text-xs text-muted-foreground">Event type cannot be changed.</p>
               </div>
             )}
 
@@ -340,20 +340,20 @@ export default function WebhooksContent() {
             <div className="space-y-4 py-4">
               <div className="space-y-2">
                 <Label>Endpoint URL</Label>
-                <p className="text-sm text-gray-700 break-all">
+                <p className="text-sm text-foreground break-all">
                   {createdWebhook.endpoint_url}
                 </p>
               </div>
               <div className="space-y-2">
                 <Label>Event Type</Label>
-                <p className="text-sm text-gray-700">
+                <p className="text-sm text-foreground">
                   {WEBHOOK_EVENT_TYPES.find((t) => t.value === createdWebhook.event_type)?.label || createdWebhook.event_type}
                 </p>
               </div>
               <div className="space-y-2">
                 <Label>Secret Key</Label>
                 <div className="flex items-center gap-2">
-                  <code className="flex-1 text-sm bg-gray-100 px-3 py-2 rounded font-mono break-all">
+                  <code className="flex-1 text-sm bg-muted px-3 py-2 rounded font-mono break-all">
                     {createdWebhook.secret}
                   </code>
                   <CopySecretButton secret={createdWebhook.secret} />
@@ -409,7 +409,7 @@ function WebhookCard({
     webhook.event_type;
 
   return (
-    <div className="p-4 border border-gray-100 rounded-xl bg-gray-50/50">
+    <div className="p-4 border border-border rounded-xl bg-muted/50">
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0 space-y-2">
           <div className="flex items-center gap-2">
@@ -417,7 +417,7 @@ function WebhookCard({
               className={`px-2 py-0.5 rounded-full text-xs font-medium ${
                 webhook.status === "active"
                   ? "bg-green-100 text-green-700"
-                  : "bg-gray-100 text-gray-600"
+                  : "bg-muted text-muted-foreground"
               }`}
             >
               {webhook.status}
@@ -427,11 +427,11 @@ function WebhookCard({
             </span>
           </div>
 
-          <p className="text-sm font-medium text-gray-900 truncate">
+          <p className="text-sm font-medium text-foreground truncate">
             {webhook.endpoint_url}
           </p>
 
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-muted-foreground">
             Created {new Date(webhook.created_at).toLocaleDateString()}
           </p>
         </div>
@@ -440,7 +440,7 @@ function WebhookCard({
           <Button
             variant="ghost"
             size="sm"
-            className="text-gray-500 hover:text-[#029CD4] hover:bg-blue-50"
+            className="text-muted-foreground hover:text-primary hover:bg-blue-50"
             onClick={onEdit}
           >
             <Pencil className="w-4 h-4" />

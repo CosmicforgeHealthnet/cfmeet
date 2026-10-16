@@ -18,6 +18,7 @@ use utoipa_swagger_ui::SwaggerUi;
         crate::handlers::auth::forgot_password,
         crate::handlers::auth::verify_reset_token,
         crate::handlers::auth::reset_password,
+        crate::handlers::auth::change_password,
         // OAuth endpoints
         crate::handlers::auth::oauth_google_init,
         crate::handlers::auth::oauth_google_callback,
@@ -223,6 +224,7 @@ use utoipa_swagger_ui::SwaggerUi;
             crate::dto::VerifyResetTokenRequest,
             crate::dto::VerifyResetTokenResponse,
             crate::dto::ResetPasswordRequest,
+            crate::dto::ChangePasswordRequest,
             // API Key schemas
             crate::dto::CreateApiKeyRequest,
             crate::dto::CreateApiKeyResponse,
