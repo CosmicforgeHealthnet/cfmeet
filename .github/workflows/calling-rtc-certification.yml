@@ -1,0 +1,145 @@
+name: Calling RTC certification
+
+# Part C §49: certifies Calling's media provider boundary against a REAL self-hosted
+# LiveKit server with real WebRTC clients and real signed webhooks — room creation and
+# deterministic naming, join-only credentials, server-side admission / permission
+# updates, voice / video / group calls, hold / resume at the provider, session removal
+# and stale re-entry, room termination, forged-webhook rejection, reconciliation and
+# unknown-participant quarantine (services/calling/tests/rtc_certification.rs), plus
+# the shared provider contract (tests/common/provider_contract.rs).
+#
+# Security closure (ADR 0007 §5): every client media connection goes through Calling's
+# media connection gateway. The suite captures a REAL server-refreshed privileged token
+# from the real SDK, revokes its session and proves the saved token cannot re-enter —
+# neither through the gateway (refused before LiveKit) nor around it (LiveKit does not
+# accept edge-sealed tokens) — with no media window; it also proves superseded
+# generations / terminal Calls are refused and a legitimate reconnect works. The job
+# fails if the refreshed token cannot be captured, if a stale token re-enters, or if
+# the adversarial rounds did not run.
+#
+# CI-only: containers are allowed here. Local development never needs Docker (the
+# suite runs against any reachable LiveKit binary; see infra/livekit/README.md). The
+# LiveKit key pair is the loopback-only certification credential from
+# infra/livekit/livekit.calling-cert.yaml — never a deployment secret.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/calling/**"
+      - "packages/service-auth/**"
+      - "packages/object-storage/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
+      - "infra/livekit/**"
+      - ".github/workflows/calling-rtc-certification.yml"
+  pull_request:
+    paths:
+      - "services/calling/**"
+      - "packages/service-auth/**"
+      - "packages/object-storage/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
+      - "infra/livekit/**"
+      - ".github/workflows/calling-rtc-certification.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: calling-rtc-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  certify:
+    name: real LiveKit certification
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/calling -> target
+          key: rtc-certification
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the WebRTC test client
+        run: python -m pip install -r services/calling/tests/rtc/requirements.txt
+
+      - name: Start LiveKit (certification configuration, loopback)
+        run: |
+          set -euo pipefail
+          docker run -d --name livekit --network host \
+            -v "$PWD/infra/livekit/livekit.calling-cert.yaml:/etc/livekit.yaml:ro" \
+            livekit/livekit-server:v1.13.9 --config /etc/livekit.yaml
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:7880/ >/dev/null; then echo "LiveKit is up"; exit 0; fi
+            sleep 1
+          done
+          docker logs livekit; exit 1
+
+      - name: Certification suite (fails if LiveKit is unreachable)
+        working-directory: services/calling
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          CALLING_RTC_CERT_REQUIRED: "1"
+          CALLING_RTC_CERT_LIVEKIT_URL: ws://127.0.0.1:7880
+          CALLING_RTC_CERT_LIVEKIT_API_URL: http://127.0.0.1:7880
+          CALLING_RTC_CERT_LIVEKIT_API_KEY: calling-cert
+          CALLING_RTC_CERT_LIVEKIT_API_SECRET: calling-cert-only-key-not-a-secret-0123456789
+          CALLING_RTC_CERT_PYTHON: python
+        run: |
+          set -euo pipefail
+          cargo test --locked --test rtc_certification -- --nocapture 2>&1 | tee "$RUNNER_TEMP/cert.log"
+          # The adversarial refreshed-token rounds must have run (and passed above).
+          rounds=$(grep -c '^refreshed-token re-entry (round' "$RUNNER_TEMP/cert.log" || true)
+          if [ "$rounds" -lt 3 ]; then
+            echo "::error::the refreshed-token re-entry certification did not run ($rounds rounds)"; exit 1
+          fi
+          grep '^refreshed-token re-entry' "$RUNNER_TEMP/cert.log"
+          # Part F: the enterprise scenarios must have run with real media (and passed above).
+          grep -q '^enterprise extension call certified' "$RUNNER_TEMP/cert.log" \
+            || { echo "::error::the enterprise extension certification did not run"; exit 1; }
+          for strategy in SIMULTANEOUS ORDERED; do
+            grep -q "^enterprise ring group certified: $strategy" "$RUNNER_TEMP/cert.log" \
+              || { echo "::error::the $strategy ring-group certification did not run"; exit 1; }
+          done
+          grep -q '^enterprise queue certified' "$RUNNER_TEMP/cert.log" \
+            || { echo "::error::the call-queue certification did not run"; exit 1; }
+          grep -q '^enterprise transfer certified' "$RUNNER_TEMP/cert.log" \
+            || { echo "::error::the enterprise transfer certification did not run"; exit 1; }
+          grep -q '^enterprise failed transfer certified' "$RUNNER_TEMP/cert.log" \
+            || { echo "::error::the failed-transfer certification did not run"; exit 1; }
+          grep -q 'test real_livekit_certification ... ok' "$RUNNER_TEMP/cert.log"
+
+      - name: LiveKit logs
+        if: always()
+        run: docker logs livekit 2>&1 | tail -200 || true
+
+      - name: WebRTC client logs
+        if: failure()
+        working-directory: services/calling
+        run: |
+          for f in target/tmp/rtc-clients/*.log; do
+            [ -s "$f" ] || continue
+            echo "== $f"; tail -50 "$f"
+          done

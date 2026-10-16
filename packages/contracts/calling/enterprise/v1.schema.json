@@ -1,0 +1,4584 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json",
+  "title": "CF Meet enterprise calling bodies v1",
+  "description": "Request and response bodies of Calling's enterprise calling API (Part F sections 52-62): the typed enterprise call policy, departments, extensions, ring groups, call queues, IVR flows, business hours, forwarding rules, voicemail mailboxes and messages, call-recording policies and recordings, administrative audit and the enterprise call context. Scope (tenant, application, environment) comes only from the authenticated credential and is never a body field. Mutations of existing resources carry expectedVersion. No body carries a raw telephone number (public forwarding targets are opaque ContactReferences), a provider, SIP or edge identifier, a DTMF digit sequence, an object-storage key or a public media URL. The root accepts exactly one of the bodies (fixtures); the HTTP contract references the $defs.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/CreatePolicyRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdatePolicyRequest"
+    },
+    {
+      "$ref": "#/$defs/CallPolicy"
+    },
+    {
+      "$ref": "#/$defs/CallPolicyList"
+    },
+    {
+      "$ref": "#/$defs/EffectivePolicy"
+    },
+    {
+      "$ref": "#/$defs/CreateDepartmentRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdateDepartmentRequest"
+    },
+    {
+      "$ref": "#/$defs/ReplaceDepartmentMembersRequest"
+    },
+    {
+      "$ref": "#/$defs/Department"
+    },
+    {
+      "$ref": "#/$defs/DepartmentList"
+    },
+    {
+      "$ref": "#/$defs/AuditRecordList"
+    },
+    {
+      "$ref": "#/$defs/CreateExtensionRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdateExtensionRequest"
+    },
+    {
+      "$ref": "#/$defs/Extension"
+    },
+    {
+      "$ref": "#/$defs/ExtensionList"
+    },
+    {
+      "$ref": "#/$defs/EnterpriseCallContext"
+    },
+    {
+      "$ref": "#/$defs/CreateRingGroupRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdateRingGroupRequest"
+    },
+    {
+      "$ref": "#/$defs/ReplaceRingGroupMembersRequest"
+    },
+    {
+      "$ref": "#/$defs/RingGroup"
+    },
+    {
+      "$ref": "#/$defs/RingGroupList"
+    },
+    {
+      "$ref": "#/$defs/CreateQueueRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdateQueueRequest"
+    },
+    {
+      "$ref": "#/$defs/ReplaceQueueMembersRequest"
+    },
+    {
+      "$ref": "#/$defs/Queue"
+    },
+    {
+      "$ref": "#/$defs/QueueList"
+    },
+    {
+      "$ref": "#/$defs/QueueEntryList"
+    },
+    {
+      "$ref": "#/$defs/CreateIvrFlowRequest"
+    },
+    {
+      "$ref": "#/$defs/RenameIvrFlowRequest"
+    },
+    {
+      "$ref": "#/$defs/PublishIvrVersionRequest"
+    },
+    {
+      "$ref": "#/$defs/ActivateIvrVersionRequest"
+    },
+    {
+      "$ref": "#/$defs/IvrFlow"
+    },
+    {
+      "$ref": "#/$defs/IvrFlowList"
+    },
+    {
+      "$ref": "#/$defs/IvrFlowVersion"
+    },
+    {
+      "$ref": "#/$defs/IvrFlowVersionList"
+    },
+    {
+      "$ref": "#/$defs/IvrInputRequest"
+    },
+    {
+      "$ref": "#/$defs/IvrInputResult"
+    },
+    {
+      "$ref": "#/$defs/BindSipDeviceRequest"
+    },
+    {
+      "$ref": "#/$defs/SipDevice"
+    },
+    {
+      "$ref": "#/$defs/SipDeviceList"
+    },
+    {
+      "$ref": "#/$defs/CreateBusinessHoursRequest"
+    },
+    {
+      "$ref": "#/$defs/ReplaceBusinessHoursRequest"
+    },
+    {
+      "$ref": "#/$defs/BusinessHours"
+    },
+    {
+      "$ref": "#/$defs/BusinessHoursList"
+    },
+    {
+      "$ref": "#/$defs/EvaluateBusinessHoursRequest"
+    },
+    {
+      "$ref": "#/$defs/BusinessHoursEvaluation"
+    },
+    {
+      "$ref": "#/$defs/CreatePublicContactRequest"
+    },
+    {
+      "$ref": "#/$defs/PublicContact"
+    },
+    {
+      "$ref": "#/$defs/PublicContactList"
+    },
+    {
+      "$ref": "#/$defs/CreateForwardingRuleRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdateForwardingRuleRequest"
+    },
+    {
+      "$ref": "#/$defs/ForwardingRule"
+    },
+    {
+      "$ref": "#/$defs/ForwardingRuleList"
+    },
+    {
+      "$ref": "#/$defs/CreateVoicemailMailboxRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdateVoicemailMailboxRequest"
+    },
+    {
+      "$ref": "#/$defs/VoicemailMailbox"
+    },
+    {
+      "$ref": "#/$defs/VoicemailMailboxList"
+    },
+    {
+      "$ref": "#/$defs/VoicemailMessage"
+    },
+    {
+      "$ref": "#/$defs/VoicemailMessageList"
+    },
+    {
+      "$ref": "#/$defs/SetVoicemailReadStateRequest"
+    },
+    {
+      "$ref": "#/$defs/VoicemailMediaAccessRequest"
+    },
+    {
+      "$ref": "#/$defs/VoicemailMediaAccess"
+    },
+    {
+      "$ref": "#/$defs/CreateRecordingPolicyRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdateRecordingPolicyRequest"
+    },
+    {
+      "$ref": "#/$defs/RecordingPolicy"
+    },
+    {
+      "$ref": "#/$defs/RecordingPolicyList"
+    },
+    {
+      "$ref": "#/$defs/RecordingConsentRequest"
+    },
+    {
+      "$ref": "#/$defs/RecordingConsent"
+    },
+    {
+      "$ref": "#/$defs/RecordingActorRequest"
+    },
+    {
+      "$ref": "#/$defs/CallRecording"
+    },
+    {
+      "$ref": "#/$defs/CallRecordingEnvelope"
+    },
+    {
+      "$ref": "#/$defs/CallRecordingList"
+    },
+    {
+      "$ref": "#/$defs/RecordingAuthorization"
+    },
+    {
+      "$ref": "#/$defs/RecordingAuthorizationList"
+    },
+    {
+      "$ref": "#/$defs/RecordingMediaAccess"
+    },
+    {
+      "$ref": "#/$defs/RecordingAccessList"
+    }
+  ],
+  "$defs": {
+    "ResourceStatus": {
+      "description": "Lifecycle of an enterprise configuration resource. Configuration is never deleted: DISABLED stops future routing and keeps historical Call references valid.",
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "DISABLED"
+      ]
+    },
+    "AdminCapability": {
+      "description": "Organization-level administrative capabilities (second key after the credential's enterprise scopes). MANAGE_PUBLIC_FORWARDING and MANAGE_RECORDING are granted by a CF Meet operator only.",
+      "type": "string",
+      "enum": [
+        "MANAGE_ROUTING",
+        "MANAGE_PUBLIC_FORWARDING",
+        "MANAGE_VOICEMAIL",
+        "MANAGE_RECORDING"
+      ]
+    },
+    "ExtensionFormat": {
+      "description": "Extension number format of the namespace.",
+      "type": "string",
+      "enum": [
+        "NUMERIC",
+        "ALPHANUMERIC"
+      ]
+    },
+    "SpendPolicy": {
+      "description": "Where public-network spend of enterprise calls is accounted: the application's Part E telecom spend limits (one spend authority, referenced — never duplicated).",
+      "type": "string",
+      "enum": [
+        "APPLICATION_TELECOM_LIMITS"
+      ]
+    },
+    "CountryCode": {
+      "description": "ISO 3166-1 alpha-2 country code.",
+      "type": "string",
+      "pattern": "^[A-Z]{2}$"
+    },
+    "PolicyRules": {
+      "description": "The typed enterprise call policy (§18). Every hook is a typed field; unknown fields are refused. publicForwardingAllowed requires forwardingAllowed and externalPublicCallingAllowed; public effects still pass every Part E gate (routing policy, live telecom, ContactReference verification, destination country, spend, Privacy Relay, Telephony route).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "internalCallingEnabled",
+        "externalPublicCallingAllowed",
+        "forwardingAllowed",
+        "publicForwardingAllowed",
+        "spendPolicy",
+        "voicemailAllowed",
+        "transferAllowed",
+        "maxRingGroupFanout",
+        "maxQueueCapacity",
+        "maxQueueWaitSeconds",
+        "maxRoutingHops",
+        "extensionFormat",
+        "extensionMinLength",
+        "extensionMaxLength"
+      ],
+      "properties": {
+        "internalCallingEnabled": {
+          "type": "boolean"
+        },
+        "externalPublicCallingAllowed": {
+          "type": "boolean"
+        },
+        "publicDestinationCountries": {
+          "description": "Countries enterprise public forwarding may reach, in addition to the environment's routing policy. Empty = none.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CountryCode"
+          },
+          "maxItems": 300
+        },
+        "forwardingAllowed": {
+          "type": "boolean"
+        },
+        "publicForwardingAllowed": {
+          "type": "boolean"
+        },
+        "spendPolicy": {
+          "$ref": "#/$defs/SpendPolicy"
+        },
+        "voicemailAllowed": {
+          "type": "boolean"
+        },
+        "transferAllowed": {
+          "type": "boolean"
+        },
+        "maxRingGroupFanout": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 15
+        },
+        "maxQueueCapacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "maxQueueWaitSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 3600
+        },
+        "maxRoutingHops": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "extensionFormat": {
+          "$ref": "#/$defs/ExtensionFormat"
+        },
+        "extensionMinLength": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 32
+        },
+        "extensionMaxLength": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 32
+        },
+        "adminCapabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AdminCapability"
+          },
+          "maxItems": 4
+        }
+      }
+    },
+    "CreatePolicyRequest": {
+      "description": "Body of POST /v1/enterprise/policies.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "rules"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "isDefault": {
+          "type": "boolean",
+          "default": false
+        },
+        "rules": {
+          "$ref": "#/$defs/PolicyRules"
+        }
+      }
+    },
+    "UpdatePolicyRequest": {
+      "description": "Body of PATCH /v1/enterprise/policies/{policy_id}: absent fields keep their value; rules replaces the rule set.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "isDefault": {
+          "type": "boolean"
+        },
+        "rules": {
+          "$ref": "#/$defs/PolicyRules"
+        }
+      }
+    },
+    "CallPolicy": {
+      "description": "A stored enterprise call policy.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyId",
+        "name",
+        "isDefault",
+        "status",
+        "rules",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "policyId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "isDefault": {
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "rules": {
+          "$ref": "#/$defs/PolicyRules"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "CallPolicyList": {
+      "description": "A page of policies (keyset, creation order).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policies",
+        "nextCursor"
+      ],
+      "properties": {
+        "policies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CallPolicy"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "EffectivePolicy": {
+      "description": "The policy in force for the environment: its ACTIVE default, else the restrictive built-in default (policyId null, version 0).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyId",
+        "version",
+        "rules"
+      ],
+      "properties": {
+        "policyId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rules": {
+          "$ref": "#/$defs/PolicyRules"
+        }
+      }
+    },
+    "DepartmentRole": {
+      "description": "A member's organizational role (grants no scope or capability).",
+      "type": "string",
+      "enum": [
+        "MEMBER",
+        "MANAGER"
+      ]
+    },
+    "CreateDepartmentRequest": {
+      "description": "Body of POST /v1/enterprise/departments.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
+        }
+      }
+    },
+    "UpdateDepartmentRequest": {
+      "description": "Body of PATCH /v1/enterprise/departments/{department_id}; description null clears it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
+        }
+      }
+    },
+    "DepartmentMemberInput": {
+      "description": "One member: an ACTIVE principal of the same scope (a foreign or unknown principal is 404).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "principalId"
+      ],
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "role": {
+          "$ref": "#/$defs/DepartmentRole"
+        }
+      }
+    },
+    "ReplaceDepartmentMembersRequest": {
+      "description": "Body of PUT /v1/enterprise/departments/{department_id}/members: replaces the whole member list atomically.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "members"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DepartmentMemberInput"
+          },
+          "maxItems": 500
+        }
+      }
+    },
+    "DepartmentMember": {
+      "description": "A department member.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "principalId",
+        "role",
+        "addedAt"
+      ],
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "role": {
+          "$ref": "#/$defs/DepartmentRole"
+        },
+        "addedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "Department": {
+      "description": "An administrative / routing group of principals.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "departmentId",
+        "name",
+        "description",
+        "status",
+        "memberCount",
+        "members",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "departmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "memberCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 500
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DepartmentMember"
+          },
+          "maxItems": 500
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "DepartmentList": {
+      "description": "A page of departments.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "departments",
+        "nextCursor"
+      ],
+      "properties": {
+        "departments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Department"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "AuditRecord": {
+      "description": "Durable evidence of one administrative change (append-only). details holds bounded safe values only.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "auditId",
+        "actorKind",
+        "actorServiceAccountId",
+        "actorCredentialId",
+        "resourceType",
+        "resourceId",
+        "operation",
+        "oldVersion",
+        "newVersion",
+        "requestId",
+        "correlationId",
+        "details",
+        "occurredAt"
+      ],
+      "properties": {
+        "auditId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "actorKind": {
+          "description": "Who the change is attributed to.",
+          "type": "string",
+          "enum": [
+            "CUSTOMER_APPLICATION",
+            "OPERATOR",
+            "SYSTEM"
+          ]
+        },
+        "actorServiceAccountId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actorCredentialId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resourceType": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,63}$"
+        },
+        "resourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "operation": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,63}$"
+        },
+        "oldVersion": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "newVersion": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "requestId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "correlationId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "details": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/SafeEventData"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "AuditRecordList": {
+      "description": "Newest-first audit records.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "records",
+        "nextCursor"
+      ],
+      "properties": {
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AuditRecord"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "DestinationType": {
+      "description": "Kinds of enterprise destination. SCHEDULE is a business-hours schedule (its OPEN / CLOSED route). PUBLIC_CONTACT is a registered public contact (an opaque Privacy Relay ContactReference; forwarding and closed-hours routes only), never a telephone number.",
+      "type": "string",
+      "enum": [
+        "ENTERPRISE_MEMBER",
+        "PRINCIPAL",
+        "EXTENSION",
+        "RING_GROUP",
+        "QUEUE",
+        "IVR",
+        "VOICEMAIL",
+        "SCHEDULE",
+        "PUBLIC_CONTACT"
+      ]
+    },
+    "Destination": {
+      "description": "A typed destination: an ACTIVE resource of the SAME tenant / application / environment (a foreign or unknown one is 404).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "id"
+      ],
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/DestinationType"
+        },
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "ExtensionNumber": {
+      "description": "An internal short code — never a public telephone number: 2-6 digits, or a lower-case word (letters, digits, '-') starting with a letter. Matched case-insensitively.",
+      "type": "string",
+      "pattern": "^([0-9]{2,6}|[A-Za-z][A-Za-z0-9-]{1,31})$"
+    },
+    "CreateExtensionRequest": {
+      "description": "Body of POST /v1/enterprise/extensions. The number must match the governing policy's format, be unused and unambiguous (numeric extensions are never prefixes of each other) in the namespace (the credential's scope).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "extensionNumber",
+        "displayLabel",
+        "destination"
+      ],
+      "properties": {
+        "extensionNumber": {
+          "$ref": "#/$defs/ExtensionNumber"
+        },
+        "displayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "destination": {
+          "$ref": "#/$defs/Destination"
+        },
+        "policyId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "UpdateExtensionRequest": {
+      "description": "Body of PATCH /v1/enterprise/extensions/{extension_id}; policyId null = the environment default.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "extensionNumber": {
+          "$ref": "#/$defs/ExtensionNumber"
+        },
+        "displayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "destination": {
+          "$ref": "#/$defs/Destination"
+        },
+        "policyId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Extension": {
+      "description": "An enterprise extension.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "extensionId",
+        "extensionNumber",
+        "displayLabel",
+        "destination",
+        "policyId",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "extensionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "extensionNumber": {
+          "$ref": "#/$defs/ExtensionNumber"
+        },
+        "displayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "destination": {
+          "$ref": "#/$defs/Destination"
+        },
+        "policyId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "ExtensionList": {
+      "description": "A page of extensions.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "extensions",
+        "nextCursor"
+      ],
+      "properties": {
+        "extensions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Extension"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "EnterpriseCallContext": {
+      "description": "The safe enterprise context of a Call (create result and call history): the dialled extension's number and label as they were when the Call was placed (a snapshot that survives renumbering and offboarding), the policy version relied on, the routing phase, the current destination kind and the enterprise outcome. No member, device, provider or contact data.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "extensionId",
+        "extensionNumber",
+        "extensionLabel",
+        "policyVersion",
+        "phase",
+        "destinationType",
+        "outcome"
+      ],
+      "properties": {
+        "extensionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "extensionNumber": {
+          "$ref": "#/$defs/ExtensionNumber"
+        },
+        "extensionLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "policyVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "phase": {
+          "description": "Routing phase.",
+          "type": "string",
+          "enum": [
+            "ROUTING",
+            "RINGING",
+            "RING_GROUP",
+            "QUEUED",
+            "IVR",
+            "VOICEMAIL",
+            "FORWARDED",
+            "ANSWERED",
+            "ENDED"
+          ]
+        },
+        "destinationType": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DestinationType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "ANSWERED",
+            "VOICEMAIL",
+            "NO_ANSWER",
+            "DECLINED",
+            "ABANDONED",
+            "FAILED",
+            "FORWARDED_PUBLIC",
+            "BUSY",
+            "COMPLETED_IN_IVR",
+            null
+          ]
+        },
+        "queue": {
+          "$ref": "#/$defs/EnterpriseQueueState"
+        },
+        "ivr": {
+          "$ref": "#/$defs/EnterpriseIvrState"
+        }
+      }
+    },
+    "RingStrategy": {
+      "description": "SIMULTANEOUS rings every eligible member at once (bounded by the policy's fan-out); ORDERED rings one member at a time for memberRingSeconds within groupTimeoutSeconds.",
+      "type": "string",
+      "enum": [
+        "SIMULTANEOUS",
+        "ORDERED"
+      ]
+    },
+    "CreateRingGroupRequest": {
+      "description": "Body of POST /v1/enterprise/ring-groups. fallback (EXTENSION, QUEUE or VOICEMAIL of the same scope) takes the SAME Call when no member answers.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "strategy",
+        "memberRingSeconds",
+        "groupTimeoutSeconds"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "strategy": {
+          "$ref": "#/$defs/RingStrategy"
+        },
+        "memberRingSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 120
+        },
+        "groupTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 600
+        },
+        "fallback": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "UpdateRingGroupRequest": {
+      "description": "Body of PATCH /v1/enterprise/ring-groups/{ring_group_id}; fallback null removes it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "strategy": {
+          "$ref": "#/$defs/RingStrategy"
+        },
+        "memberRingSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 120
+        },
+        "groupTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 600
+        },
+        "fallback": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ReplaceRingGroupMembersRequest": {
+      "description": "Body of PUT /v1/enterprise/ring-groups/{ring_group_id}/members: the members IN RING ORDER (at most 50, distinct). A member is a PRINCIPAL, ENTERPRISE_MEMBER or an EXTENSION that routes directly to a principal: groups never nest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "members"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Destination"
+          },
+          "maxItems": 50
+        }
+      }
+    },
+    "RingGroupMember": {
+      "description": "A member and its ring position.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position",
+        "member"
+      ],
+      "properties": {
+        "position": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "member": {
+          "$ref": "#/$defs/Destination"
+        }
+      }
+    },
+    "RingGroup": {
+      "description": "A ring group.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ringGroupId",
+        "name",
+        "strategy",
+        "memberRingSeconds",
+        "groupTimeoutSeconds",
+        "fallback",
+        "members",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "ringGroupId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "strategy": {
+          "$ref": "#/$defs/RingStrategy"
+        },
+        "memberRingSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 120
+        },
+        "groupTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 600
+        },
+        "fallback": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RingGroupMember"
+          },
+          "maxItems": 50
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "RingGroupList": {
+      "description": "A page of ring groups.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ringGroups",
+        "nextCursor"
+      ],
+      "properties": {
+        "ringGroups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RingGroup"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "AgentStatus": {
+      "description": "ACTIVE agents receive offers; PAUSED agents stay members but receive none.",
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "PAUSED"
+      ]
+    },
+    "QueueEntryState": {
+      "description": "WAITING / OFFERING are active (OFFERING: one agent is being offered the Call); ANSWERED, ABANDONED (the caller hung up), TIMED_OUT (maximum wait, no overflow), OVERFLOWED (sent to the overflow destination) and CANCELLED (the Call ended otherwise) are final.",
+      "type": "string",
+      "enum": [
+        "WAITING",
+        "OFFERING",
+        "ANSWERED",
+        "ABANDONED",
+        "TIMED_OUT",
+        "OVERFLOWED",
+        "CANCELLED"
+      ]
+    },
+    "CreateQueueRequest": {
+      "description": "Body of POST /v1/enterprise/queues. offerTimeoutSeconds is the ring time of one offer to one agent and is at most maxWaitSeconds.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "maxWaitSeconds",
+        "offerTimeoutSeconds",
+        "capacity"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "maxWaitSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 3600
+        },
+        "offerTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 120
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "overflow": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where a Call goes when the queue is full or its maximum wait elapses: an EXTENSION, RING_GROUP, another QUEUE, IVR or VOICEMAIL of the same scope (never the queue itself). Without one a full queue ends the Call BUSY and an elapsed wait NO_ANSWER."
+        }
+      }
+    },
+    "UpdateQueueRequest": {
+      "description": "Body of PATCH /v1/enterprise/queues/{queue_id}; overflow null removes it. Calls already waiting keep their entry time and deadline.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "maxWaitSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 3600
+        },
+        "offerTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 120
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "overflow": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where a Call goes when the queue is full or its maximum wait elapses: an EXTENSION, RING_GROUP, another QUEUE, IVR or VOICEMAIL of the same scope (never the queue itself). Without one a full queue ends the Call BUSY and an elapsed wait NO_ANSWER."
+        }
+      }
+    },
+    "QueueMemberInput": {
+      "description": "An agent: an ACTIVE principal of the same scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "principalId"
+      ],
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "$ref": "#/$defs/AgentStatus"
+        }
+      }
+    },
+    "ReplaceQueueMembersRequest": {
+      "description": "Body of PUT /v1/enterprise/queues/{queue_id}/members: every agent (at most 100, distinct). Waiting Calls are not affected; new or resumed agents receive offers right away.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "members"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QueueMemberInput"
+          },
+          "maxItems": 100
+        }
+      }
+    },
+    "QueueMember": {
+      "description": "An agent and its tie-break position.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position",
+        "principalId",
+        "status"
+      ],
+      "properties": {
+        "position": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "$ref": "#/$defs/AgentStatus"
+        }
+      }
+    },
+    "Queue": {
+      "description": "A call queue. waiting is the number of active entries now.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "queueId",
+        "name",
+        "maxWaitSeconds",
+        "offerTimeoutSeconds",
+        "capacity",
+        "overflow",
+        "members",
+        "waiting",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "queueId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "maxWaitSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 3600
+        },
+        "offerTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 120
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "overflow": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where a Call goes when the queue is full or its maximum wait elapses: an EXTENSION, RING_GROUP, another QUEUE, IVR or VOICEMAIL of the same scope (never the queue itself). Without one a full queue ends the Call BUSY and an elapsed wait NO_ANSWER."
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QueueMember"
+          },
+          "maxItems": 100
+        },
+        "waiting": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "QueueList": {
+      "description": "A page of queues.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "queues",
+        "nextCursor"
+      ],
+      "properties": {
+        "queues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Queue"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "QueueEntry": {
+      "description": "One Call in a queue as the administrator sees it: the Call id, its authoritative FIFO position (1 = offered next; null once finished), timing and the answering agent. Never the caller's contact data.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entryId",
+        "callId",
+        "state",
+        "position",
+        "enteredAt",
+        "deadlineAt",
+        "offerCount",
+        "assignedPrincipalId",
+        "exitedAt"
+      ],
+      "properties": {
+        "entryId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "state": {
+          "$ref": "#/$defs/QueueEntryState"
+        },
+        "position": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "enteredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "deadlineAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "offerCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assignedPrincipalId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exitedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "QueueEntryList": {
+      "description": "Active entries in FIFO order, or the most recent finished ones.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entries"
+      ],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QueueEntry"
+          },
+          "maxItems": 100
+        }
+      }
+    },
+    "EnterpriseQueueState": {
+      "description": "The queue state of a queued enterprise Call (caller view): the queue, the entry state and the authoritative position (null once the entry finished).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "queueId",
+        "state",
+        "position",
+        "enteredAt"
+      ],
+      "properties": {
+        "queueId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "state": {
+          "$ref": "#/$defs/QueueEntryState"
+        },
+        "position": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "enteredAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "BuiltinPrompt": {
+      "description": "The controlled built-in prompt catalog. The media plane plays its own copy (Telephony maps it to edge-local audio; an application client to its own asset). Never a URL, path, file name or synthesized text. Each prompt has a nominal length the media plane's audio must fit (WELCOME, MENU, NO_INPUT, GOODBYE 2 s; PLEASE_HOLD, TRANSFERRING, CLOSED 3 s; INVALID_OPTION 4 s; VOICEMAIL_GREETING 6 s; BEEP 1 s): a menu's input timer starts after the prompts it queued, and a HANGUP node's prompt plays for its nominal length before the platform ends the Call.",
+      "type": "string",
+      "enum": [
+        "WELCOME",
+        "MENU",
+        "INVALID_OPTION",
+        "NO_INPUT",
+        "PLEASE_HOLD",
+        "TRANSFERRING",
+        "GOODBYE",
+        "CLOSED",
+        "VOICEMAIL_GREETING",
+        "BEEP"
+      ]
+    },
+    "PromptRef": {
+      "description": "A prompt: a built-in prompt (customer audio artifacts are not accepted by this deployment).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "builtin"
+      ],
+      "properties": {
+        "builtin": {
+          "$ref": "#/$defs/BuiltinPrompt"
+        }
+      }
+    },
+    "IvrMenuOption": {
+      "description": "One key of a menu and the node it leads to.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "digit",
+        "next"
+      ],
+      "properties": {
+        "digit": {
+          "type": "string",
+          "pattern": "^[0-9*#]$"
+        },
+        "next": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        }
+      }
+    },
+    "IvrPromptNode": {
+      "description": "Play a prompt, then continue to `next`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "prompt",
+        "next"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "kind": {
+          "const": "PROMPT"
+        },
+        "prompt": {
+          "$ref": "#/$defs/PromptRef"
+        },
+        "next": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        }
+      }
+    },
+    "IvrMenuNode": {
+      "description": "Play a prompt and wait for ONE key (1-12 distinct options). An invalid key or no key within inputTimeoutSeconds replays the menu up to maxRetries times, then continues to onInvalid / onTimeout.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "prompt",
+        "inputTimeoutSeconds",
+        "maxRetries",
+        "options",
+        "onInvalid",
+        "onTimeout"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "kind": {
+          "const": "MENU"
+        },
+        "prompt": {
+          "$ref": "#/$defs/PromptRef"
+        },
+        "inputTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 60
+        },
+        "maxRetries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IvrMenuOption"
+          },
+          "maxItems": 12
+        },
+        "onInvalid": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "onTimeout": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        }
+      }
+    },
+    "IvrRouteExtensionNode": {
+      "description": "Route the SAME Call to an extension of the scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "extensionId"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "kind": {
+          "const": "ROUTE_EXTENSION"
+        },
+        "extensionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "IvrRouteRingGroupNode": {
+      "description": "Route the SAME Call to a ring group of the scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "ringGroupId"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "kind": {
+          "const": "ROUTE_RING_GROUP"
+        },
+        "ringGroupId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "IvrRouteQueueNode": {
+      "description": "Route the SAME Call to a call queue of the scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "queueId"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "kind": {
+          "const": "ROUTE_QUEUE"
+        },
+        "queueId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "IvrRouteVoicemailNode": {
+      "description": "Route the SAME Call to a voicemail mailbox of the scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "mailboxId"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "kind": {
+          "const": "ROUTE_VOICEMAIL"
+        },
+        "mailboxId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "IvrRouteScheduleNode": {
+      "description": "Route the SAME Call by a business-hours schedule of the scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "scheduleId"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "kind": {
+          "const": "ROUTE_SCHEDULE"
+        },
+        "scheduleId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "IvrHangupNode": {
+      "description": "Optionally play a prompt; the IVR ends the Call (outcome COMPLETED_IN_IVR).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "kind": {
+          "const": "HANGUP"
+        },
+        "prompt": {
+          "$ref": "#/$defs/PromptRef"
+        }
+      }
+    },
+    "IvrNode": {
+      "description": "A typed IVR node. Never a script, expression, dialplan fragment or URL.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/IvrPromptNode"
+        },
+        {
+          "$ref": "#/$defs/IvrMenuNode"
+        },
+        {
+          "$ref": "#/$defs/IvrRouteExtensionNode"
+        },
+        {
+          "$ref": "#/$defs/IvrRouteRingGroupNode"
+        },
+        {
+          "$ref": "#/$defs/IvrRouteQueueNode"
+        },
+        {
+          "$ref": "#/$defs/IvrRouteVoicemailNode"
+        },
+        {
+          "$ref": "#/$defs/IvrRouteScheduleNode"
+        },
+        {
+          "$ref": "#/$defs/IvrHangupNode"
+        }
+      ]
+    },
+    "IvrGraph": {
+      "description": "A declarative IVR graph: 1-32 uniquely named nodes, every node reachable from startNode, every reference to an existing node or an ACTIVE destination of the same scope, no loop without caller input. Validated on publish.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "startNode",
+        "nodes"
+      ],
+      "properties": {
+        "startNode": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Node id (1-32 lower-case letters, digits, underscores)."
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IvrNode"
+          },
+          "maxItems": 32
+        }
+      }
+    },
+    "CreateIvrFlowRequest": {
+      "description": "Body of POST /v1/enterprise/ivr-flows.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        }
+      }
+    },
+    "RenameIvrFlowRequest": {
+      "description": "Body of PATCH /v1/enterprise/ivr-flows/{ivr_flow_id}.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "name"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        }
+      }
+    },
+    "PublishIvrVersionRequest": {
+      "description": "Body of POST /v1/enterprise/ivr-flows/{ivr_flow_id}/versions: a new immutable version (not yet active).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "graph"
+      ],
+      "properties": {
+        "graph": {
+          "$ref": "#/$defs/IvrGraph"
+        }
+      }
+    },
+    "ActivateIvrVersionRequest": {
+      "description": "Body of PUT /v1/enterprise/ivr-flows/{ivr_flow_id}/activation: the published version NEW Calls run (Calls already in the IVR keep theirs). Its destinations are re-validated.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "versionNumber"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "versionNumber": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "IvrFlow": {
+      "description": "An IVR flow.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ivrFlowId",
+        "name",
+        "activeVersionNumber",
+        "latestVersionNumber",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "ivrFlowId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "activeVersionNumber": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "latestVersionNumber": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "IvrFlowList": {
+      "description": "A page of IVR flows.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ivrFlows",
+        "nextCursor"
+      ],
+      "properties": {
+        "ivrFlows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IvrFlow"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "IvrFlowVersion": {
+      "description": "A published, immutable IVR version.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ivrFlowId",
+        "versionNumber",
+        "nodeCount",
+        "active",
+        "graph",
+        "createdAt"
+      ],
+      "properties": {
+        "ivrFlowId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "versionNumber": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "nodeCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "graph": {
+          "$ref": "#/$defs/IvrGraph"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "IvrFlowVersionList": {
+      "description": "The most recent versions of a flow (newest first).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "versions"
+      ],
+      "properties": {
+        "versions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IvrFlowVersion"
+          },
+          "maxItems": 100
+        }
+      }
+    },
+    "EnterpriseIvrState": {
+      "description": "The IVR state of a Call (caller view): what the caller hears (recent built-in prompts) and may press (allowed keys) while a menu waits. Never the keys pressed; selectedBranch is a node id. ACTIVE without awaitingInput and with an inputDeadline: a HANGUP prompt is playing and the Call ends at the deadline.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ivrFlowId",
+        "state",
+        "awaitingInput",
+        "prompts",
+        "options",
+        "inputTimeoutSeconds",
+        "inputDeadline",
+        "retries",
+        "selectedBranch"
+      ],
+      "properties": {
+        "ivrFlowId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "state": {
+          "description": "IVR session state.",
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "ROUTED",
+            "COMPLETED",
+            "ABANDONED",
+            "FAILED"
+          ]
+        },
+        "awaitingInput": {
+          "type": "boolean"
+        },
+        "prompts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BuiltinPrompt"
+          },
+          "maxItems": 8
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9*#]$"
+          },
+          "maxItems": 12
+        },
+        "inputTimeoutSeconds": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "inputDeadline": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "selectedBranch": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{0,31}$",
+              "description": "Node id (1-32 lower-case letters, digits, underscores)."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "IvrInputRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/ivr/input: one key of the RTC caller (the Call's initiator endpoint only). Used once, never stored or logged.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpointId",
+        "digit"
+      ],
+      "properties": {
+        "endpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "digit": {
+          "type": "string",
+          "pattern": "^[0-9*#]$"
+        }
+      }
+    },
+    "IvrInputResult": {
+      "description": "Whether the IVR took the key (false: the Call does not wait for one).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "callId",
+        "accepted"
+      ],
+      "properties": {
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "accepted": {
+          "type": "boolean"
+        }
+      }
+    },
+    "BindSipDeviceRequest": {
+      "description": "Body of POST /v1/enterprise/sip-devices: binds an operator-minted opaque device reference to an ACTIVE principal of the scope. Never a SIP URI, address, credential or number.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deviceRef",
+        "principalId",
+        "displayLabel"
+      ],
+      "properties": {
+        "deviceRef": {
+          "type": "string",
+          "pattern": "^dev-[a-z0-9-]{4,60}$"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "displayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        }
+      }
+    },
+    "SipDevice": {
+      "description": "An enterprise SIP device binding.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sipDeviceId",
+        "deviceRef",
+        "principalId",
+        "displayLabel",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "sipDeviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "deviceRef": {
+          "type": "string",
+          "pattern": "^dev-[a-z0-9-]{4,60}$"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "displayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "SipDeviceList": {
+      "description": "A page of SIP device bindings.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sipDevices",
+        "nextCursor"
+      ],
+      "properties": {
+        "sipDevices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SipDevice"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "DayOfWeek": {
+      "description": "ISO day of the week.",
+      "type": "string",
+      "enum": [
+        "MONDAY",
+        "TUESDAY",
+        "WEDNESDAY",
+        "THURSDAY",
+        "FRIDAY",
+        "SATURDAY",
+        "SUNDAY"
+      ]
+    },
+    "WeeklyWindow": {
+      "description": "A weekly open window in the schedule's local time. An end before the start crosses midnight into the next day (FRIDAY 22:00-02:00). Windows never overlap anywhere on the week.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dayOfWeek",
+        "start",
+        "end"
+      ],
+      "properties": {
+        "dayOfWeek": {
+          "$ref": "#/$defs/DayOfWeek"
+        },
+        "start": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "description": "Local wall-clock time HH:MM."
+        },
+        "end": {
+          "type": "string",
+          "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+          "description": "Local wall-clock time HH:MM (24:00 = end of day)."
+        }
+      }
+    },
+    "DayWindow": {
+      "description": "An open window inside one exception date (start before end).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "description": "Local wall-clock time HH:MM."
+        },
+        "end": {
+          "type": "string",
+          "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+          "description": "Local wall-clock time HH:MM (24:00 = end of day)."
+        }
+      }
+    },
+    "HoursExceptionKind": {
+      "description": "CLOSED: closed the whole local date. CUSTOM_HOURS: open only in its windows.",
+      "type": "string",
+      "enum": [
+        "CLOSED",
+        "CUSTOM_HOURS"
+      ]
+    },
+    "HoursException": {
+      "description": "An exception date (holiday, special hours). It governs its whole local date: the date's weekly windows, and a previous day's window crossing midnight, do not apply on it. No global holiday calendar is used.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "date",
+        "kind"
+      ],
+      "properties": {
+        "date": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "Local date YYYY-MM-DD."
+        },
+        "kind": {
+          "$ref": "#/$defs/HoursExceptionKind"
+        },
+        "windows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DayWindow"
+          },
+          "maxItems": 6
+        }
+      }
+    },
+    "CreateBusinessHoursRequest": {
+      "description": "Body of POST /v1/enterprise/business-hours.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "timezone",
+        "openDestination",
+        "closedDestination",
+        "weeklyWindows"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$",
+          "description": "An IANA time-zone identifier (e.g. Africa/Lagos, Europe/London). Never a raw UTC offset: DST and historical offset changes come from the IANA database."
+        },
+        "openDestination": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            }
+          ],
+          "description": "The OPEN route: an ENTERPRISE_MEMBER, PRINCIPAL, EXTENSION, RING_GROUP, QUEUE or IVR of the same scope."
+        },
+        "closedDestination": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            }
+          ],
+          "description": "The CLOSED route: an ENTERPRISE_MEMBER, PRINCIPAL, EXTENSION, RING_GROUP, QUEUE, IVR, VOICEMAIL or (where the enterprise policy permits public forwarding) a PUBLIC_CONTACT of the same scope."
+        },
+        "weeklyWindows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WeeklyWindow"
+          },
+          "maxItems": 42
+        },
+        "exceptions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HoursException"
+          },
+          "maxItems": 400
+        }
+      }
+    },
+    "ReplaceBusinessHoursRequest": {
+      "description": "Body of PUT /v1/enterprise/business-hours/{business_hours_id}: replaces the whole schedule atomically (a Call already routed keeps its route).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "name",
+        "timezone",
+        "openDestination",
+        "closedDestination",
+        "weeklyWindows"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$",
+          "description": "An IANA time-zone identifier (e.g. Africa/Lagos, Europe/London). Never a raw UTC offset: DST and historical offset changes come from the IANA database."
+        },
+        "openDestination": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            }
+          ],
+          "description": "The OPEN route: an ENTERPRISE_MEMBER, PRINCIPAL, EXTENSION, RING_GROUP, QUEUE or IVR of the same scope."
+        },
+        "closedDestination": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            }
+          ],
+          "description": "The CLOSED route: an ENTERPRISE_MEMBER, PRINCIPAL, EXTENSION, RING_GROUP, QUEUE, IVR, VOICEMAIL or (where the enterprise policy permits public forwarding) a PUBLIC_CONTACT of the same scope."
+        },
+        "weeklyWindows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WeeklyWindow"
+          },
+          "maxItems": 42
+        },
+        "exceptions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HoursException"
+          },
+          "maxItems": 400
+        }
+      }
+    },
+    "BusinessHours": {
+      "description": "A business-hours schedule.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "businessHoursId",
+        "name",
+        "timezone",
+        "openDestination",
+        "closedDestination",
+        "weeklyWindows",
+        "exceptions",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "businessHoursId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$",
+          "description": "An IANA time-zone identifier (e.g. Africa/Lagos, Europe/London). Never a raw UTC offset: DST and historical offset changes come from the IANA database."
+        },
+        "openDestination": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "closedDestination": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "weeklyWindows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WeeklyWindow"
+          },
+          "maxItems": 42
+        },
+        "exceptions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HoursException"
+          },
+          "maxItems": 400
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "BusinessHoursList": {
+      "description": "A page of business-hours schedules.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "businessHours",
+        "nextCursor"
+      ],
+      "properties": {
+        "businessHours": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BusinessHours"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "EvaluateBusinessHoursRequest": {
+      "description": "Body of POST /v1/enterprise/business-hours/{business_hours_id}/evaluation: the instant to evaluate (now when absent).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "HoursStatus": {
+      "description": "Whether the schedule is open.",
+      "type": "string",
+      "enum": [
+        "OPEN",
+        "CLOSED"
+      ]
+    },
+    "HoursReason": {
+      "description": "Why (bounded).",
+      "type": "string",
+      "enum": [
+        "WEEKLY_WINDOW",
+        "OUTSIDE_WEEKLY_WINDOWS",
+        "EXCEPTION_CLOSED",
+        "EXCEPTION_HOURS",
+        "OUTSIDE_EXCEPTION_HOURS"
+      ]
+    },
+    "BusinessHoursEvaluation": {
+      "description": "A deterministic evaluation: (schedule version, instant) -> OPEN / CLOSED, the local date / time / UTC offset it used and the route it selects.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "businessHoursId",
+        "version",
+        "at",
+        "status",
+        "reason",
+        "timezone",
+        "localDate",
+        "localTime",
+        "utcOffset",
+        "destination"
+      ],
+      "properties": {
+        "businessHoursId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "$ref": "#/$defs/HoursStatus"
+        },
+        "reason": {
+          "$ref": "#/$defs/HoursReason"
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$",
+          "description": "An IANA time-zone identifier (e.g. Africa/Lagos, Europe/London). Never a raw UTC offset: DST and historical offset changes come from the IANA database."
+        },
+        "localDate": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "Local date YYYY-MM-DD."
+        },
+        "localTime": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "description": "Local wall-clock time HH:MM."
+        },
+        "utcOffset": {
+          "type": "string",
+          "pattern": "^[+-][0-9]{2}:[0-9]{2}$"
+        },
+        "destination": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "CreatePublicContactRequest": {
+      "description": "Body of POST /v1/enterprise/public-contacts: registers a PROTECTED public destination for forwarding / closed routes — an opaque Privacy Relay ContactReference and the Privacy Relay Session whose authority covers it. Never a telephone number. Requires an enterprise policy that permits public forwarding.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "contactReference",
+        "privacyRelaySessionId"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "contactReference": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "privacyRelaySessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "PublicContact": {
+      "description": "A registered protected public destination (the PUBLIC_CONTACT destination type names it). Every use still passes every Part E gate: enterprise policy, public route flags, Privacy Relay's current authority, verified contact, destination country, spend / concurrency limits and an available Telephony route.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "publicContactId",
+        "label",
+        "contactReference",
+        "privacyRelaySessionId",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "publicContactId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "contactReference": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "privacyRelaySessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "PublicContactList": {
+      "description": "A page of public contacts.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "publicContacts",
+        "nextCursor"
+      ],
+      "properties": {
+        "publicContacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PublicContact"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "ForwardingCondition": {
+      "description": "ALWAYS: before ringing. BUSY: every ring offer to the principal was declined. NO_ANSWER: the offers expired. UNAVAILABLE: the principal has no eligible endpoint.",
+      "type": "string",
+      "enum": [
+        "ALWAYS",
+        "BUSY",
+        "NO_ANSWER",
+        "UNAVAILABLE"
+      ]
+    },
+    "CreateForwardingRuleRequest": {
+      "description": "Body of POST /v1/enterprise/forwarding-rules. At most one ACTIVE rule per principal and condition; an ALWAYS rule that would close a cycle of principals is refused (routing also stops loops with its visited set and hop budget).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "principalId",
+        "condition",
+        "destination"
+      ],
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "condition": {
+          "$ref": "#/$defs/ForwardingCondition"
+        },
+        "destination": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            }
+          ],
+          "description": "An ENTERPRISE_MEMBER, PRINCIPAL (not the owner), EXTENSION, RING_GROUP, QUEUE, IVR, VOICEMAIL or PUBLIC_CONTACT of the same scope. Never a number."
+        }
+      }
+    },
+    "UpdateForwardingRuleRequest": {
+      "description": "Body of PATCH /v1/enterprise/forwarding-rules/{forwarding_rule_id}: a new target (principal and condition are fixed).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "destination"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "destination": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            }
+          ],
+          "description": "An ENTERPRISE_MEMBER, PRINCIPAL (not the owner), EXTENSION, RING_GROUP, QUEUE, IVR, VOICEMAIL or PUBLIC_CONTACT of the same scope. Never a number."
+        }
+      }
+    },
+    "ForwardingRule": {
+      "description": "A principal's typed call forwarding.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "forwardingRuleId",
+        "principalId",
+        "condition",
+        "destination",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "forwardingRuleId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "condition": {
+          "$ref": "#/$defs/ForwardingCondition"
+        },
+        "destination": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Destination"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "ForwardingRuleList": {
+      "description": "A page of forwarding rules.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "forwardingRules",
+        "nextCursor"
+      ],
+      "properties": {
+        "forwardingRules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ForwardingRule"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "MailboxOwnerType": {
+      "description": "What a mailbox belongs to: a PRINCIPAL, an EXTENSION (its member owns the messages), a QUEUE (its agents) or a RING_GROUP (its principal members).",
+      "type": "string",
+      "enum": [
+        "PRINCIPAL",
+        "EXTENSION",
+        "QUEUE",
+        "RING_GROUP"
+      ]
+    },
+    "MailboxOwner": {
+      "description": "A mailbox owner of the same scope (never a telephone number).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "id"
+      ],
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/MailboxOwnerType"
+        },
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "CreateVoicemailMailboxRequest": {
+      "description": "Body of POST /v1/enterprise/voicemail/mailboxes. Requires an enterprise policy permitting voicemail.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "displayLabel",
+        "maxMessageSeconds",
+        "retentionDays"
+      ],
+      "properties": {
+        "owner": {
+          "$ref": "#/$defs/MailboxOwner"
+        },
+        "displayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "maxMessageSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 600,
+          "description": "Maximum message length in seconds; the edge stops capturing at this length."
+        },
+        "retentionDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650,
+          "description": "Days a READY message is kept before the retention worker deletes it (audited as the system)."
+        }
+      }
+    },
+    "UpdateVoicemailMailboxRequest": {
+      "description": "Body of PATCH /v1/enterprise/voicemail/mailboxes/{mailbox_id} (the owner is fixed). A new retention applies to messages that become READY afterwards.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "displayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "maxMessageSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 600,
+          "description": "Maximum message length in seconds; the edge stops capturing at this length."
+        },
+        "retentionDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650,
+          "description": "Days a READY message is kept before the retention worker deletes it (audited as the system)."
+        }
+      }
+    },
+    "VoicemailMailbox": {
+      "description": "A voicemail mailbox. The VOICEMAIL destination type names it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mailboxId",
+        "owner",
+        "displayLabel",
+        "maxMessageSeconds",
+        "retentionDays",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "mailboxId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "owner": {
+          "$ref": "#/$defs/MailboxOwner"
+        },
+        "displayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "maxMessageSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 600,
+          "description": "Maximum message length in seconds; the edge stops capturing at this length."
+        },
+        "retentionDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650,
+          "description": "Days a READY message is kept before the retention worker deletes it (audited as the system)."
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "VoicemailMailboxList": {
+      "description": "A page of mailboxes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mailboxes",
+        "nextCursor"
+      ],
+      "properties": {
+        "mailboxes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VoicemailMailbox"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "VoicemailMessageState": {
+      "description": "RECORDING: the edge / capture adapter is capturing. PROCESSING: the audio arrived and is being stored (a storage outage keeps it here while the deliverer retries — never a fake READY). READY: stored in protected object storage. FAILED: the capture failed or never arrived (a late delivery can still make it READY). DELETING: deletion requested (user, administrator or retention); the object is being removed. DELETED: the object is gone; the row and the originating Call's history remain.",
+      "type": "string",
+      "enum": [
+        "RECORDING",
+        "PROCESSING",
+        "READY",
+        "FAILED",
+        "DELETING",
+        "DELETED"
+      ]
+    },
+    "VoicemailReadState": {
+      "description": "Whether the owner has read the message.",
+      "type": "string",
+      "enum": [
+        "UNREAD",
+        "READ"
+      ]
+    },
+    "VoicemailCaptureSource": {
+      "description": "Where the audio is captured: SIP (Telephony's edge, behind a provider-neutral command) or APPLICATION (the neutral call media capture interface for RTC callers).",
+      "type": "string",
+      "enum": [
+        "SIP",
+        "APPLICATION"
+      ]
+    },
+    "VoicemailMessage": {
+      "description": "A voicemail message of ONE originating canonical Call. Integrity metadata only: never an object-storage key, a bucket or a stored URL (media is reached through media-access).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "messageId",
+        "mailboxId",
+        "callId",
+        "callerPrincipalId",
+        "captureSource",
+        "state",
+        "readState",
+        "contentType",
+        "sizeBytes",
+        "durationMs",
+        "sha256",
+        "receivedAt",
+        "readyAt",
+        "readAt",
+        "failureCode",
+        "retentionUntil",
+        "deletedAt",
+        "version"
+      ],
+      "properties": {
+        "messageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "mailboxId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callerPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "captureSource": {
+          "$ref": "#/$defs/VoicemailCaptureSource"
+        },
+        "state": {
+          "$ref": "#/$defs/VoicemailMessageState"
+        },
+        "readState": {
+          "$ref": "#/$defs/VoicemailReadState"
+        },
+        "contentType": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "audio/wav",
+            "audio/ogg",
+            null
+          ]
+        },
+        "sizeBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "durationMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Lower-case hex SHA-256 of the stored audio (integrity)."
+        },
+        "receivedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "readyAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "readAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "failureCode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Z][A-Z_]{1,63}$",
+          "description": "Bounded failure code (e.g. STORAGE_UNAVAILABLE, CAPTURE_LOST)."
+        },
+        "retentionUntil": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "deletedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        }
+      }
+    },
+    "VoicemailMessageList": {
+      "description": "A page of messages, newest first (keyset).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "messages",
+        "nextCursor"
+      ],
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VoicemailMessage"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "SetVoicemailReadStateRequest": {
+      "description": "Body of PUT /v1/enterprise/voicemail/messages/{message_id}/read-state. With principalId the application acts for that principal, who must own the mailbox (else 404); without it the credential acts as a voicemail administrator.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "readState"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "readState": {
+          "$ref": "#/$defs/VoicemailReadState"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "VoicemailMediaAccessRequest": {
+      "description": "Body of POST /v1/enterprise/voicemail/messages/{message_id}/media-access: principalId as for read state.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "VoicemailMediaAccess": {
+      "description": "A short-lived (at most 300 s), read-only, single-object signed URL minted AFTER authorization and audited. It is never stored and never returned again; ask anew each time.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "messageId",
+        "url",
+        "expiresAt",
+        "contentType",
+        "sizeBytes",
+        "sha256"
+      ],
+      "properties": {
+        "messageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "contentType": {
+          "type": "string",
+          "enum": [
+            "audio/wav",
+            "audio/ogg"
+          ]
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "RecordingMode": {
+      "description": "DISABLED: never recorded. MANUAL_ALLOWED: recorded only on an explicit, authorized request. AUTO_WHEN_AUTHORIZED: the platform starts recording a CONNECTED Call by itself — only once every configured notice / consent requirement is met (never assumed).",
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "MANUAL_ALLOWED",
+        "AUTO_WHEN_AUTHORIZED"
+      ]
+    },
+    "ConsentParticipants": {
+      "description": "Who must consent: NONE, every participant, or every participant other than the one requesting the recording (a system / administrator request: everyone).",
+      "type": "string",
+      "enum": [
+        "NONE",
+        "ALL_PARTICIPANTS",
+        "OTHER_PARTICIPANTS"
+      ]
+    },
+    "CreateRecordingPolicyRequest": {
+      "description": "Body of POST /v1/enterprise/recording-policies. A recording policy is SEPARATE from the right to call, enterprise membership, Privacy Relay authorization and any meeting recording policy.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "mode",
+        "noticeRequired",
+        "consentParticipants",
+        "jurisdictionRef",
+        "retentionDays",
+        "maxRecordingSeconds"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "mode": {
+          "$ref": "#/$defs/RecordingMode"
+        },
+        "noticeRequired": {
+          "type": "boolean",
+          "description": "Every participant must be notified (the server issues the notice: a realtime notice to application endpoints, a tone at the edge for SIP legs) before capture starts."
+        },
+        "consentParticipants": {
+          "$ref": "#/$defs/ConsentParticipants"
+        },
+        "jurisdictionRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "description": "Opaque reference to the compliance configuration this policy implements (e.g. NG-NDPA-2023/v2). Authoritative input from compliance / legal — the platform never infers recording law from a country. Never a telephone number."
+        },
+        "retentionDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650,
+          "description": "Days a READY recording is kept before the retention worker deletes it (audited)."
+        },
+        "maxRecordingSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 1440,
+          "description": "Maximum recording length in seconds (the recording then stops: MAX_DURATION)."
+        },
+        "isDefault": {
+          "type": "boolean",
+          "description": "The scope's effective policy (one ACTIVE default)."
+        }
+      }
+    },
+    "UpdateRecordingPolicyRequest": {
+      "description": "Body of PATCH /v1/enterprise/recording-policies/{recording_policy_id}. A change that stops permitting a running recording (DISABLED, no longer the default, stricter notice / consent) stops it (POLICY_REVOKED).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "mode": {
+          "$ref": "#/$defs/RecordingMode"
+        },
+        "noticeRequired": {
+          "type": "boolean",
+          "description": "Every participant must be notified (the server issues the notice: a realtime notice to application endpoints, a tone at the edge for SIP legs) before capture starts."
+        },
+        "consentParticipants": {
+          "$ref": "#/$defs/ConsentParticipants"
+        },
+        "jurisdictionRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "description": "Opaque reference to the compliance configuration this policy implements (e.g. NG-NDPA-2023/v2). Authoritative input from compliance / legal — the platform never infers recording law from a country. Never a telephone number."
+        },
+        "retentionDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650,
+          "description": "Days a READY recording is kept before the retention worker deletes it (audited)."
+        },
+        "maxRecordingSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 1440,
+          "description": "Maximum recording length in seconds (the recording then stops: MAX_DURATION)."
+        },
+        "isDefault": {
+          "type": "boolean",
+          "description": "The scope's effective policy (one ACTIVE default)."
+        }
+      }
+    },
+    "RecordingPolicy": {
+      "description": "A call recording policy.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recordingPolicyId",
+        "name",
+        "mode",
+        "noticeRequired",
+        "consentParticipants",
+        "jurisdictionRef",
+        "retentionDays",
+        "maxRecordingSeconds",
+        "isDefault",
+        "consentRequired",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "disabledAt"
+      ],
+      "properties": {
+        "recordingPolicyId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Bounded display name (no control characters, never a telephone number)."
+        },
+        "mode": {
+          "$ref": "#/$defs/RecordingMode"
+        },
+        "noticeRequired": {
+          "type": "boolean",
+          "description": "Every participant must be notified (the server issues the notice: a realtime notice to application endpoints, a tone at the edge for SIP legs) before capture starts."
+        },
+        "consentParticipants": {
+          "$ref": "#/$defs/ConsentParticipants"
+        },
+        "jurisdictionRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "description": "Opaque reference to the compliance configuration this policy implements (e.g. NG-NDPA-2023/v2). Authoritative input from compliance / legal — the platform never infers recording law from a country. Never a telephone number."
+        },
+        "retentionDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650,
+          "description": "Days a READY recording is kept before the retention worker deletes it (audited)."
+        },
+        "maxRecordingSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 1440,
+          "description": "Maximum recording length in seconds (the recording then stops: MAX_DURATION)."
+        },
+        "isDefault": {
+          "type": "boolean",
+          "description": "The scope's effective policy (one ACTIVE default)."
+        },
+        "consentRequired": {
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/ResourceStatus"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "RecordingPolicyList": {
+      "description": "A page of recording policies.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recordingPolicies",
+        "nextCursor"
+      ],
+      "properties": {
+        "recordingPolicies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordingPolicy"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "ConsentDecision": {
+      "description": "A participant's decision.",
+      "type": "string",
+      "enum": [
+        "GRANTED",
+        "DECLINED"
+      ]
+    },
+    "RecordingConsentRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/recording-consent: ONE participant's own decision, taken through that participant's endpoint (an endpoint with a session of an active participant of this Call; anything else is 404). There is no 'everyone consented' flag. Replaying the same decision is idempotent; a DECLINED by a participant a running recording relies on stops it (CONSENT_WITHDRAWN).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpointId",
+        "decision"
+      ],
+      "properties": {
+        "endpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "decision": {
+          "$ref": "#/$defs/ConsentDecision"
+        }
+      }
+    },
+    "RecordingConsent": {
+      "description": "A recorded consent decision (append-only; the latest per participant counts).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "consentId",
+        "callId",
+        "participantId",
+        "decision",
+        "recordedAt"
+      ],
+      "properties": {
+        "consentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "decision": {
+          "$ref": "#/$defs/ConsentDecision"
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "RecordingActorRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/recordings, POST .../recordings/{recording_id}/stop and POST /v1/enterprise/recordings/{recording_id}/media-access. With principalId the application acts for that principal, who must be a participant of the Call (else 404); without it the credential acts as a recording administrator (enterprise.recording.manage).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "RecordingState": {
+      "description": "STARTING / RECORDING: capturing. STOPPING: stop requested (explicit, Call end, policy revocation, consent withdrawal, maximum length). PROCESSING: the audio arrived and is being stored (a storage outage keeps it here — never a fake READY). READY: in protected object storage. FAILED: the capture failed or never arrived. DELETING / DELETED: removed (user, administrator or retention); the Call's history remains.",
+      "type": "string",
+      "enum": [
+        "STARTING",
+        "RECORDING",
+        "STOPPING",
+        "PROCESSING",
+        "READY",
+        "FAILED",
+        "DELETING",
+        "DELETED"
+      ]
+    },
+    "RecordingStopReason": {
+      "description": "Why a recording stopped.",
+      "type": "string",
+      "enum": [
+        "EXPLICIT",
+        "CALL_ENDED",
+        "POLICY_REVOKED",
+        "CONSENT_WITHDRAWN",
+        "CAPTURE_FAILED",
+        "MAX_DURATION",
+        "KILL_SWITCH"
+      ]
+    },
+    "CallRecording": {
+      "description": "A recording of ONE canonical Call. Integrity metadata only: never an object-storage key, a bucket, a stored URL, a telephone number or a provider identity (media through media-access).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recordingId",
+        "callId",
+        "authorizationId",
+        "recordingPolicyId",
+        "captureSource",
+        "state",
+        "startedAt",
+        "stoppedAt",
+        "stopReason",
+        "contentType",
+        "sizeBytes",
+        "durationMs",
+        "sha256",
+        "readyAt",
+        "failureCode",
+        "retentionUntil",
+        "deletedAt",
+        "version"
+      ],
+      "properties": {
+        "recordingId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "authorizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "recordingPolicyId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "captureSource": {
+          "type": "string",
+          "enum": [
+            "SIP",
+            "APPLICATION"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/RecordingState"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "stoppedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "stopReason": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RecordingStopReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contentType": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "audio/wav",
+            "audio/ogg",
+            null
+          ]
+        },
+        "sizeBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "durationMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Lower-case hex SHA-256 of the audio."
+        },
+        "readyAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "failureCode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Z][A-Z_]{1,63}$"
+        },
+        "retentionUntil": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "deletedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optimistic version of the resource (1 at creation, +1 per change)."
+        }
+      }
+    },
+    "CallRecordingEnvelope": {
+      "description": "A recording (start / stop responses).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recording"
+      ],
+      "properties": {
+        "recording": {
+          "$ref": "#/$defs/CallRecording"
+        }
+      }
+    },
+    "CallRecordingList": {
+      "description": "The recordings of a Call (oldest first).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recordings",
+        "nextCursor"
+      ],
+      "properties": {
+        "recordings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CallRecording"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque keyset cursor of the next page; null on the last page."
+        }
+      }
+    },
+    "RecordingNoticeEvidence": {
+      "description": "Notice evidence: whether notice was required and, if so, the channel the server issued it through to each participant.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required"
+      ],
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "deliveries": {
+          "type": "array",
+          "items": {
+            "description": "One participant's notice.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "participantId",
+              "channel"
+            ],
+            "properties": {
+              "participantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "channel": {
+                "type": "string",
+                "enum": [
+                  "APPLICATION_SIGNAL",
+                  "EDGE_TONE"
+                ]
+              }
+            }
+          },
+          "maxItems": 64
+        }
+      }
+    },
+    "RecordingConsentEvidence": {
+      "description": "Consent evidence: each required participant's latest decision for THIS Call at decision time (null: none).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required"
+      ],
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "participants": {
+          "type": "array",
+          "items": {
+            "description": "One required participant.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "participantId",
+              "consentId",
+              "decision"
+            ],
+            "properties": {
+              "participantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "consentId": {
+                "oneOf": [
+                  {
+                    "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "decision": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/ConsentDecision"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "maxItems": 64
+        }
+      }
+    },
+    "RecordingAuthorizationReason": {
+      "description": "Why a recording was (not) authorized.",
+      "type": "string",
+      "enum": [
+        "AUTHORIZED",
+        "RECORDING_DISABLED",
+        "NOT_AN_ENTERPRISE_CALL",
+        "NO_RECORDING_POLICY",
+        "POLICY_DISABLED",
+        "AUTO_RECORDING_NOT_CONFIGURED",
+        "CALL_STATE_NOT_ELIGIBLE",
+        "ACTOR_NOT_PARTICIPANT",
+        "NOTICE_UNDELIVERABLE",
+        "CONSENT_MISSING",
+        "CONSENT_DECLINED",
+        "ARTIFACT_STORAGE_UNAVAILABLE",
+        "CAPTURE_UNAVAILABLE"
+      ]
+    },
+    "RecordingAuthorization": {
+      "description": "An immutable, server-authoritative recording decision taken before any capture.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorizationId",
+        "callId",
+        "recordingPolicyId",
+        "policyVersion",
+        "mode",
+        "jurisdictionRef",
+        "actor",
+        "requiredParticipantIds",
+        "notice",
+        "consent",
+        "decision",
+        "reason",
+        "createdAt"
+      ],
+      "properties": {
+        "authorizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "recordingPolicyId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "policyVersion": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "NONE",
+            "DISABLED",
+            "MANUAL_ALLOWED",
+            "AUTO_WHEN_AUTHORIZED"
+          ]
+        },
+        "jurisdictionRef": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+              "description": "Opaque reference to the compliance configuration this policy implements (e.g. NG-NDPA-2023/v2). Authoritative input from compliance / legal — the platform never infers recording law from a country. Never a telephone number."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actor": {
+          "description": "Who asked.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "principalId"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "PRINCIPAL",
+                "ADMINISTRATOR",
+                "SYSTEM"
+              ]
+            },
+            "principalId": {
+              "oneOf": [
+                {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "requiredParticipantIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "maxItems": 64
+        },
+        "notice": {
+          "$ref": "#/$defs/RecordingNoticeEvidence"
+        },
+        "consent": {
+          "$ref": "#/$defs/RecordingConsentEvidence"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "ALLOWED",
+            "DENIED"
+          ]
+        },
+        "reason": {
+          "$ref": "#/$defs/RecordingAuthorizationReason"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "RecordingAuthorizationList": {
+      "description": "The recording decisions of a Call (oldest first).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorizations"
+      ],
+      "properties": {
+        "authorizations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordingAuthorization"
+          },
+          "maxItems": 200
+        }
+      }
+    },
+    "RecordingMediaAccess": {
+      "description": "A short-lived (at most 300 s), read-only, single-object signed URL minted AFTER authorization and audited; never stored.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recordingId",
+        "url",
+        "expiresAt",
+        "contentType",
+        "sizeBytes",
+        "sha256"
+      ],
+      "properties": {
+        "recordingId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "contentType": {
+          "type": "string",
+          "enum": [
+            "audio/wav",
+            "audio/ogg"
+          ]
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "RecordingAccessRecord": {
+      "description": "One access-audit record (granted or denied).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "recordingId",
+        "callId",
+        "actorKind",
+        "actorCredentialId",
+        "onBehalfOfPrincipalId",
+        "operation",
+        "outcome",
+        "reason",
+        "requestId",
+        "correlationId",
+        "occurredAt"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "recordingId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "actorKind": {
+          "type": "string",
+          "enum": [
+            "APPLICATION_CREDENTIAL",
+            "SYSTEM"
+          ]
+        },
+        "actorCredentialId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onBehalfOfPrincipalId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "READ_METADATA",
+            "MEDIA_ACCESS",
+            "DELETE",
+            "RETENTION_DELETE",
+            "STOP"
+          ]
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "GRANTED",
+            "DENIED"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Z][A-Z_]{1,63}$"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 36
+        },
+        "correlationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 37
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "RecordingAccessList": {
+      "description": "A recording's access-audit trail.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "records"
+      ],
+      "properties": {
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordingAccessRecord"
+          },
+          "maxItems": 500
+        }
+      }
+    }
+  }
+}

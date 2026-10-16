@@ -1,0 +1,21 @@
+{
+  "ver": 1,
+  "use": "CONTACT_VAULT_ACCESS",
+  "iss": "cfmeet.calling",
+  "aud": "cfmeet.privacy-relay",
+  "runtime_environment": "staging",
+  "iat": 1930212000,
+  "nbf": 1930212000,
+  "exp": 1930212120,
+  "jti": "0123456789abcdef0123456789abcdef",
+  "delegated_context": {
+    "tenant_id": "11111111-2222-4333-8444-555555555555",
+    "application_id": "22222222-3333-4444-8555-666666666666",
+    "application_environment_id": "33333333-4444-4555-8666-777777777777",
+    "application_environment_kind": "PRODUCTION",
+    "initiating_service_account_id": "44444444-5555-4666-8777-888888888888"
+  },
+  "scopes": [
+    "privacy.contacts.write"
+  ]
+}

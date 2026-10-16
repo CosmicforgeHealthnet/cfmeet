@@ -1,0 +1,402 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/platform/usage/v1.schema.json",
+  "title": "CF Meet usage and limits v1",
+  "description": "Usage facts and limit status of the authenticated application environment (Part G §69 / §70). Usage is a ledger of final consumption facts — NOT a bill: no price list, invoice, tax or balance. Public-network legs carry cost evidence (KNOWN / ESTIMATED / UNKNOWN; UNKNOWN has no amount). No provider identifier, telephone number, SIP URI, object key or credential appears. Limits are enforced at every applicable level: the API-client chain tenant → application → service account → credential (the effective per-credential value is the most restrictive configured one; every configured parent is also an aggregate ceiling) and the independent principal axis of a server-resolved principal, plus the environment's telecom-spend policy. Tenant, application, service account and credential come only from the authenticated credential; a principal only after resolution in that scope.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/UsageList"
+    },
+    {
+      "$ref": "#/$defs/Limits"
+    }
+  ],
+  "$defs": {
+    "UsageType": {
+      "type": "string",
+      "enum": [
+        "CALL_CONNECTED_TIME",
+        "PARTICIPANT_CONNECTED_TIME",
+        "SESSION_CONNECTED_TIME",
+        "LEG_CONNECTED_TIME",
+        "VOICEMAIL_ARTIFACT",
+        "RECORDING_ARTIFACT"
+      ]
+    },
+    "ResourceClass": {
+      "type": "string",
+      "enum": [
+        "APP_MEDIA",
+        "PUBLIC_NETWORK",
+        "STORAGE"
+      ],
+      "description": "APP_MEDIA: application call / participant / session connected time. PUBLIC_NETWORK: one public telephone-network leg. STORAGE: a stored voicemail message or call recording."
+    },
+    "UsageCost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "description": "Cost EVIDENCE of a public-network leg, not a price or a charge. KNOWN: reported by the network provider. ESTIMATED: an estimate the provider did not confirm. UNKNOWN: no figure exists — it carries no amount (never zero).",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "KNOWN",
+            "ESTIMATED",
+            "UNKNOWN"
+          ]
+        },
+        "amountMinor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "UNKNOWN"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "amountMinor"
+                  ]
+                },
+                {
+                  "required": [
+                    "currency"
+                  ]
+                }
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "amountMinor",
+              "currency"
+            ]
+          }
+        }
+      ]
+    },
+    "UsageRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "callId",
+        "usageType",
+        "resourceClass",
+        "quantity",
+        "unit",
+        "recordedAt"
+      ],
+      "description": "One FINAL consumption fact (Part G §69). Recorded once per subject (idempotent): a late or repeated provider event never changes or doubles it.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "callId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "usageType": {
+          "$ref": "#/$defs/UsageType"
+        },
+        "resourceClass": {
+          "$ref": "#/$defs/ResourceClass"
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Connected time, or the stored artifact's duration."
+        },
+        "unit": {
+          "const": "MILLISECONDS"
+        },
+        "participantId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "sessionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "legId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "routeClass": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "destinationCountry": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}$",
+          "description": "ISO 3166-1 alpha-2 country of the public destination — never the number."
+        },
+        "billableSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cost": {
+          "$ref": "#/$defs/UsageCost"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "usageStartedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "usageEndedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "usageType": {
+                "const": "LEG_CONNECTED_TIME"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "legId",
+              "cost"
+            ]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "routeClass"
+                  ]
+                },
+                {
+                  "required": [
+                    "destinationCountry"
+                  ]
+                },
+                {
+                  "required": [
+                    "billableSeconds"
+                  ]
+                },
+                {
+                  "required": [
+                    "cost"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "usageType": {
+                "enum": [
+                  "VOICEMAIL_ARTIFACT",
+                  "RECORDING_ARTIFACT"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "sizeBytes"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "sizeBytes"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "UsageList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "nextCursor"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UsageRecord"
+          }
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "LimitLevel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "ceiling",
+        "current",
+        "remaining"
+      ],
+      "properties": {
+        "scope": {
+          "type": "string",
+          "enum": [
+            "TENANT",
+            "APPLICATION",
+            "SERVICE_ACCOUNT",
+            "CREDENTIAL",
+            "PRINCIPAL",
+            "ENVIRONMENT",
+            "PLATFORM_DEFAULT"
+          ],
+          "description": "The level: the API-client chain TENANT → APPLICATION → SERVICE_ACCOUNT → CREDENTIAL (every configured parent is also an aggregate ceiling), the independent PRINCIPAL axis (only for a principal resolved in the caller's scope, `?principalId=`), the ENVIRONMENT telecom-spend policy. Never an identifier."
+        },
+        "ceiling": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "current": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "remaining": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "LimitStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "limit",
+        "window",
+        "scope",
+        "ceiling",
+        "current",
+        "remaining",
+        "levels"
+      ],
+      "description": "One limit: every configured level — the API-client chain TENANT → APPLICATION → SERVICE_ACCOUNT → CREDENTIAL, the requested principal's PRINCIPAL axis, and the environment's telecom-spend policy for spend — with ceiling / current / remaining, and the BINDING level (least remaining) at the top level. No level carries an identifier.",
+      "properties": {
+        "limit": {
+          "type": "string",
+          "enum": [
+            "REQUEST_RATE",
+            "CONCURRENT_CALLS",
+            "TELECOM_SPEND_DAILY",
+            "TELECOM_SPEND_MONTHLY"
+          ]
+        },
+        "window": {
+          "type": "string",
+          "enum": [
+            "MINUTE",
+            "NONE",
+            "DAY",
+            "MONTH"
+          ]
+        },
+        "resetsAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "TENANT",
+            "APPLICATION",
+            "SERVICE_ACCOUNT",
+            "CREDENTIAL",
+            "PRINCIPAL",
+            "ENVIRONMENT",
+            "PLATFORM_DEFAULT"
+          ],
+          "description": "The binding level (least remaining)."
+        },
+        "ceiling": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "current": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "remaining": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "levels": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/LimitLevel"
+          }
+        }
+      }
+    },
+    "Limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generatedAt",
+        "limits"
+      ],
+      "properties": {
+        "generatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "limits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LimitStatus"
+          }
+        }
+      }
+    }
+  }
+}

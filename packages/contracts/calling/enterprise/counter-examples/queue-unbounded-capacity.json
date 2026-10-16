@@ -1,0 +1,6 @@
+{
+  "name": "Support",
+  "maxWaitSeconds": 600,
+  "offerTimeoutSeconds": 20,
+  "capacity": 1000000
+}

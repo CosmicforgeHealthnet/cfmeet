@@ -1,0 +1,375 @@
+name: Calling service
+
+# services/calling — the Rust/Axum Calling service (platform consumer, credential and
+# principal trust foundation; internal service authentication; Calling core: canonical
+# Call aggregate, state machine, events + transactional outbox, call API; application
+# calling: endpoints, signaling, ringing / arbitration, media provider boundary, call
+# control; the Privacy Relay ingress, protected calls and active-call enforcement).
+# Real-provider (LiveKit) certification runs in calling-rtc-certification.yml; the
+# cross-service Privacy Relay e2e runs in privacy-relay.yml.
+# Independent of
+# services/meeting-service: this workflow never builds or starts the Meeting Service.
+# It depends only on the shared packages/service-auth crate and the Calling / platform
+# contracts in packages/contracts.
+#
+# CI builds carry no debug info and no incremental state (as in backend.yml);
+# debug assertions stay on.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/calling/**"
+      - "packages/service-auth/**"
+      - "packages/object-storage/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
+      - ".github/workflows/calling.yml"
+  pull_request:
+    paths:
+      - "services/calling/**"
+      - "packages/service-auth/**"
+      - "packages/object-storage/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
+      - ".github/workflows/calling.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: calling-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: services/calling
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  lint:
+    name: fmt / check / clippy / boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/calling -> target
+          key: lint
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo check
+        run: cargo check --workspace --locked
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Architecture / boundary tests
+        run: cargo test --locked --test architecture_boundaries
+
+      - name: Repository guards (no Meeting Service source coupling, no phase-03 paths)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -i 'phase-03'; then
+            echo "::error::a phase-03 path exists in the repository"; exit 1
+          fi
+          # Code lines only (comments may describe the boundary).
+          if grep -rIn --include='*.rs' -E 'meeting-service|meeting_service' services/calling/src services/calling/migration/src \
+               | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//'; then
+            echo "::error::services/calling source references the Meeting Service"; exit 1
+          fi
+          if grep -n -E 'meeting-service|meeting_service' services/calling/Cargo.toml services/calling/migration/Cargo.toml; then
+            echo "::error::services/calling depends on the Meeting Service"; exit 1
+          fi
+
+  test:
+    name: test (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      # Each test clones its own database from a migrated template.
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      # Part K §88: the disaster-recovery certification must run (pg_dump / pg_restore are
+      # on the runner), never print SKIPPED.
+      DISASTER_RECOVERY_CERT_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/calling -> target
+          key: test
+
+      # Unit + PostgreSQL integration tests: migrations, tenant isolation, first-party vs
+      # external, credential storage, authentication, environment isolation, scopes,
+      # rotation, secret leakage, principals, limits, admin CLI, architecture, internal
+      # service authentication, outbound delegation / internal client, HTTP contract
+      # conformance, and the Calling core: call state machine, concurrency races
+      # (stale versions, concurrent-call limits, reconnects), authorization and the paid
+      # public-network guard, participants / sessions / intervals, immutable events and
+      # the transactional outbox (with injected failures), routes / legs / attempts /
+      # quality / usage, the call API, and application calling (§20–§25): endpoints and
+      # signaling credentials, ring offers and single-winner arbitration (concurrent
+      # races, the database-level constraint mutation), group calls, the media boundary
+      # on the test provider (provider contract, credential security, callbacks,
+      # reconciliation), call control / transfer / idempotency, WebSocket signaling,
+      # two-instance LISTEN / NOTIFY fan-out, contract conformance and load paths.
+      - name: cargo test
+        run: cargo test --workspace --no-fail-fast --locked
+
+  build:
+    name: build / migration smoke
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/calling -> target
+          key: build
+
+      - name: cargo build
+        run: cargo build --workspace --locked
+
+      - name: Migration smoke (up / reset / up)
+        env:
+          PGPASSWORD: postgres
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/calling_migration_smoke
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE calling_migration_smoke"
+          cargo run -q --locked -p calling-migration -- up
+          cargo run -q --locked -p calling-migration -- status
+          cargo run -q --locked -p calling-migration -- reset
+          cargo run -q --locked -p calling-migration -- up
+          # Platform tables: 11 (Part B) + tenant / service-account / principal limits,
+          # compliance eligibility, operator audit + the failed-authentication windows (000043).
+          test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
+            "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'platform\_%'")" = "17"
+          # Call domain (Part C §15–§25, Part D §26–§30 evidence, Part E §37–§51 routing,
+          # public-network parties / bridges / telephony commands and events, spend): calls
+          # + 28 call_* tables + the outbox; Part F §55 adds call_answer_group_claims (the
+          # group-level single-winner claim of ring groups / queue offers) and §61 the five
+          # call_recording_* tables. The count is updated intentionally with each family and
+          # paired with the structural checks below (required tables, no foreign domain).
+          test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
+            "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' \
+             AND (tablename = 'calls' OR tablename LIKE 'call\_%' OR tablename = 'calling_outbox_events')")" = "36"
+          # Applied = registered migrations (derived from the migrator, never hand-counted).
+          registered="$(grep -c 'Box::new(m20' migration/src/lib.rs)"
+          test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
+            "SELECT count(*) FROM calling_seaql_migrations")" = "$registered"
+          # Part F (ADR 0018, 0023, 0024): the enterprise foundation, voicemail and call
+          # recording exist, and there is no second Call authority.
+          for t in enterprise_call_policies enterprise_departments enterprise_department_members \
+                   enterprise_admin_audit enterprise_extensions enterprise_call_contexts \
+                   enterprise_routing_steps enterprise_ring_groups enterprise_ring_group_members \
+                   call_answer_group_claims enterprise_call_queues enterprise_queue_members \
+                   enterprise_queue_entries enterprise_queue_offers enterprise_ivr_flows \
+                   enterprise_ivr_flow_versions enterprise_ivr_flow_destinations \
+                   enterprise_ivr_sessions enterprise_sip_devices enterprise_business_hours \
+                   enterprise_business_hours_windows enterprise_business_hours_exceptions \
+                   enterprise_public_contacts enterprise_forwarding_rules \
+                   voicemail_mailboxes voicemail_messages call_recording_policies \
+                   call_recording_consents call_recording_authorizations call_recordings \
+                   call_recording_access_audit; do
+            test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
+              "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename = '$t'")" = "1" \
+              || { echo "::error::missing enterprise table $t"; exit 1; }
+          done
+          test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
+            "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename IN \
+             ('enterprise_calls', 'pbx_calls', 'voicemail_calls', 'ivr_calls', 'queue_calls', \
+              'enterprise_call_legs', 'enterprise_participants')")" = "0"
+          # Every public table is Calling's own.
+          test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
+            "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND NOT ( \
+               tablename LIKE 'platform\_%' OR tablename LIKE 'call\_%' OR tablename IN ('calls', \
+               'calling_outbox_events', 'calling_seaql_migrations', 'calling_incidents', \
+               'calling_block_rules', 'calling_abuse_windows', 'calling_abuse_reports', 'calling_orphan_objects', \
+               'calling_retention_holds', 'calling_retention_audit') OR tablename LIKE 'enterprise\_%' \
+               OR tablename LIKE 'voicemail\_%' OR tablename LIKE 'webhook\_%')")" = "0"
+
+      # Part K §120: the REAL Calling migrations apply as the least-privilege migrator role,
+      # the DML-only runtime role reads every table they create, and no role of one service
+      # can connect to another service's database (infra/deployment/postgres).
+      - name: Per-service database roles with the real migrations
+        env:
+          CALLING_MIGRATION_BIN: ${{ github.workspace }}/services/calling/target/debug/calling-migration
+        run: |
+          set -euo pipefail
+          test -x "$CALLING_MIGRATION_BIN"
+          "$GITHUB_WORKSPACE/infra/deployment/postgres/verify-service-isolation.sh" \
+            --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres
+
+      - name: Service starts against the migrated database and refuses unsafe configuration
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/calling_migration_smoke
+          CALLING_BIND_ADDRESS: 127.0.0.1:8090
+        run: |
+          set -euo pipefail
+          # Fresh per-run signing key (never committed) and a trust bundle with no peers.
+          K="$RUNNER_TEMP/service-auth"
+          mkdir -p "$K"
+          cargo run -q --locked --manifest-path ../../packages/service-auth/Cargo.toml --bin cf-service-keygen -- \
+            generate --kid calling-ci-1 --out "$K/calling-ci-1.pem" > "$K/calling-ci-1.jwk.json"
+          test "$(stat -c %a "$K/calling-ci-1.pem")" = "600"
+          echo '{"bundle_version":1,"receiver":"cfmeet.calling","runtime_environment":"local","trusted_issuers":[]}' > "$K/bundle.json"
+          echo '{"bundle_version":1,"receiver":"cfmeet.calling","runtime_environment":"staging","trusted_issuers":[]}' > "$K/staging-bundle.json"
+          export CF_RUNTIME_ENVIRONMENT=local CF_SERVICE_AUTH_KEY_ID=calling-ci-1
+          export CF_SERVICE_AUTH_PRIVATE_KEY_FILE="$K/calling-ci-1.pem" CF_SERVICE_TRUST_BUNDLE_FILE="$K/bundle.json"
+          export API_CREDENTIAL_PEPPER="$(openssl rand -base64 48)"
+          export CALLING_SIGNALING_SIGNING_KEY="$(openssl rand -base64 48)"
+          LK_SECRET="$(openssl rand -hex 32)"
+          EDGE_KEY="$(openssl rand -hex 32)"
+          LK_OK="CALLING_MEDIA_PROVIDER=livekit CALLING_LIVEKIT_URL=ws://127.0.0.1:7880 CALLING_LIVEKIT_API_URL=http://127.0.0.1:7880 CALLING_LIVEKIT_API_KEY=calling-ci CALLING_MEDIA_GATEWAY_URL=ws://127.0.0.1:8090/v1/calling/media"
+
+          refuses() { # refuses <description> <env assignments...>: must exit 2 (config error)
+            local what="$1"; shift
+            set +e; env "$@" timeout 30 ./target/debug/calling > "$K/out.log" 2>&1; local rc=$?; set -e
+            if [ "$rc" != "2" ]; then
+              echo "::error::service did not refuse to start ($what): exit $rc"; cat "$K/out.log"; exit 1
+            fi
+            if grep -q -- "PRIVATE KEY" "$K/out.log"; then echo "::error::key material in startup output"; exit 1; fi
+            echo "refused as expected: $what"
+          }
+          refuses "placeholder pepper" API_CREDENTIAL_PEPPER=changeme
+          refuses "missing signing key" CF_SERVICE_AUTH_PRIVATE_KEY_FILE=
+          refuses "unreadable signing key" CF_SERVICE_AUTH_PRIVATE_KEY_FILE="$K/missing.pem"
+          refuses "inline private key" CF_SERVICE_AUTH_PRIVATE_KEY=inline
+          refuses "missing trust bundle" CF_SERVICE_TRUST_BUNDLE_FILE=
+          refuses "bundle for another runtime environment" CF_SERVICE_TRUST_BUNDLE_FILE="$K/staging-bundle.json"
+          refuses "wrong service identity" CF_SERVICE_ID=cfmeet.meeting-service
+          refuses "unknown runtime environment" CF_RUNTIME_ENVIRONMENT=prod
+          refuses "token TTL above the hard maximum" CF_SERVICE_TOKEN_TTL_SECONDS=301
+          refuses "missing signaling signing key" CALLING_SIGNALING_SIGNING_KEY=
+          refuses "weak signaling signing key" CALLING_SIGNALING_SIGNING_KEY=short
+          refuses "unknown media provider" CALLING_MEDIA_PROVIDER=other
+          refuses "LiveKit selected without configuration" CALLING_MEDIA_PROVIDER=livekit
+          refuses "weak LiveKit secret" CALLING_MEDIA_PROVIDER=livekit CALLING_LIVEKIT_URL=wss://media.example.com \
+            CALLING_LIVEKIT_API_KEY=k CALLING_LIVEKIT_API_URL=https://media.example.com CALLING_LIVEKIT_API_SECRET=short \
+            CALLING_MEDIA_GATEWAY_URL=wss://calling.example.com/v1/calling/media CALLING_MEDIA_EDGE_SIGNING_KEY="$EDGE_KEY"
+          refuses "LiveKit without TLS off loopback" CALLING_MEDIA_PROVIDER=livekit CALLING_LIVEKIT_URL=ws://media.example.com \
+            CALLING_LIVEKIT_API_KEY=k CALLING_LIVEKIT_API_URL=https://media.example.com CALLING_LIVEKIT_API_SECRET="$LK_SECRET" \
+            CALLING_MEDIA_GATEWAY_URL=wss://calling.example.com/v1/calling/media CALLING_MEDIA_EDGE_SIGNING_KEY="$EDGE_KEY"
+          refuses "media credential TTL above the maximum" CALLING_MEDIA_CREDENTIAL_TTL_SECONDS=3600
+          # The media edge key seals every client media credential; LiveKit must never know it.
+          refuses "missing media edge key" $LK_OK CALLING_LIVEKIT_API_SECRET="$LK_SECRET"
+          refuses "media edge key equal to the LiveKit secret" $LK_OK CALLING_LIVEKIT_API_SECRET="$LK_SECRET" \
+            CALLING_MEDIA_EDGE_SIGNING_KEY="$LK_SECRET"
+          refuses "missing media gateway URL" CALLING_MEDIA_PROVIDER=livekit CALLING_LIVEKIT_URL=ws://127.0.0.1:7880 \
+            CALLING_LIVEKIT_API_URL=http://127.0.0.1:7880 CALLING_LIVEKIT_API_KEY=calling-ci \
+            CALLING_LIVEKIT_API_SECRET="$LK_SECRET" CALLING_MEDIA_EDGE_SIGNING_KEY="$EDGE_KEY"
+          refuses "media gateway without TLS off loopback" CALLING_MEDIA_PROVIDER=livekit CALLING_LIVEKIT_URL=ws://127.0.0.1:7880 \
+            CALLING_LIVEKIT_API_URL=http://127.0.0.1:7880 CALLING_LIVEKIT_API_KEY=calling-ci \
+            CALLING_LIVEKIT_API_SECRET="$LK_SECRET" CALLING_MEDIA_EDGE_SIGNING_KEY="$EDGE_KEY" \
+            CALLING_MEDIA_GATEWAY_URL=ws://calling.example.com/v1/calling/media
+
+          # A valid LiveKit configuration (loopback; no server needed to start).
+          env $LK_OK CALLING_LIVEKIT_API_SECRET="$LK_SECRET" CALLING_MEDIA_EDGE_SIGNING_KEY="$EDGE_KEY" \
+            ./target/debug/calling > "$K/run.log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8090/health; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8090/health | grep -q '"status":"ok"'
+          # Internal routes require a service token, including unknown paths and requests
+          # that carry a customer credential instead.
+          code=$(curl -s -o "$K/a.json" -w '%{http_code}' http://127.0.0.1:8090/internal/v1/anything)
+          test "$code" = "401" && grep -q '"code":"INTERNAL_AUTHENTICATION_FAILED"' "$K/a.json"
+          code=$(curl -s -o "$K/b.json" -w '%{http_code}' -H 'Authorization: Bearer cfmk_live_x_y' http://127.0.0.1:8090/internal/v1/anything)
+          test "$code" = "401" && grep -q '"code":"INTERNAL_AUTHENTICATION_FAILED"' "$K/b.json"
+          # The call API and call control require a platform credential.
+          code=$(curl -s -o "$K/c.json" -w '%{http_code}' http://127.0.0.1:8090/v1/calls)
+          test "$code" = "401" && grep -q '"code":"AUTHENTICATION_FAILED"' "$K/c.json"
+          for path in /v1/calls /v1/calling/endpoints /v1/calling/signaling-credentials /v1/privacy-relay/contexts; do
+            code=$(curl -s -o "$K/d.json" -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{}' "http://127.0.0.1:8090$path")
+            test "$code" = "401" && grep -q '"code":"AUTHENTICATION_FAILED"' "$K/d.json"
+          done
+          # Privacy Relay enforcement is internal: service token only.
+          code=$(curl -s -o "$K/g.json" -w '%{http_code}' -X POST -H 'Authorization: Bearer cfmk_live_x_y' \
+            -H 'content-type: application/json' -d '{}' http://127.0.0.1:8090/internal/v1/privacy-relay/enforcement)
+          test "$code" = "401" && grep -q '"code":"INTERNAL_AUTHENTICATION_FAILED"' "$K/g.json"
+          # Endpoint signaling routes take a signaling credential only (never cfmk_*).
+          for path in /v1/calling/invitations /v1/calling/signaling; do
+            code=$(curl -s -o "$K/e.json" -w '%{http_code}' -H 'Authorization: Bearer cfmk_live_x_y' "http://127.0.0.1:8090$path")
+            test "$code" = "401" && grep -q '"code":"AUTHENTICATION_FAILED"' "$K/e.json"
+          done
+          # Unsigned / forged provider callbacks are refused.
+          code=$(curl -s -o "$K/f.json" -w '%{http_code}' -X POST -d '{"event":"room_started"}' http://127.0.0.1:8090/internal/provider/media/events)
+          test "$code" = "401"
+          code=$(curl -s -o "$K/f.json" -w '%{http_code}' -X POST -H 'Authorization: eyJhbGciOiJIUzI1NiJ9.e30.forged' \
+            -d '{"event":"room_started"}' http://127.0.0.1:8090/internal/provider/media/events)
+          test "$code" = "401"
+          # The media connection gateway admits nothing without an edge-sealed media credential
+          # (API credentials, forged tokens and LiveKit-signed tokens are all refused).
+          for auth in "" "Bearer cfmk_live_x_y" "Bearer eyJhbGciOiJIUzI1NiJ9.e30.forged"; do
+            for path in /v1/calling/media/rtc/v1 /v1/calling/media/rtc /v1/calling/media/rtc/v1/validate; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' ${auth:+-H "Authorization: $auth"} "http://127.0.0.1:8090$path")
+              test "$code" = "401"
+            done
+          done
+          # There is no generic state mutation.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH http://127.0.0.1:8090/v1/calls/00000000-0000-4000-8000-000000000000)
+          test "$code" = "401" -o "$code" = "405"
+          grep -q "internal service authentication ready" "$K/run.log"
+          if grep -q -- "PRIVATE KEY" "$K/run.log"; then echo "::error::key material in logs"; exit 1; fi
+          for secret in "$LK_SECRET" "$EDGE_KEY" "$CALLING_SIGNALING_SIGNING_KEY" "$API_CREDENTIAL_PEPPER"; do
+            if grep -qF -- "$secret" "$K/run.log" "$K"/*.json; then echo "::error::a secret appears in logs or responses"; exit 1; fi
+          done
+          rm -rf "$K"
+
+  docker:
+    name: Docker image (repository-root context)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The context is filtered by services/calling/Dockerfile.dockerignore to
+      # packages/service-auth, packages/object-storage and services/calling only.
+      - name: docker build
+        working-directory: .
+        run: docker build -f services/calling/Dockerfile -t cfmeet-calling:ci .
+      - name: image contains only the Calling binaries and no key material
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint /bin/ls cfmeet-calling:ci /app | tr '\n' ' ')" = "calling calling-migration platform_admin "
+          if docker run --rm --entrypoint /bin/sh cfmeet-calling:ci -c 'grep -rlI --exclude-dir=proc --exclude-dir=sys -- "PRIVATE KEY-----" / 2>/dev/null'; then
+            echo "::error::private key material in the image"; exit 1
+          fi

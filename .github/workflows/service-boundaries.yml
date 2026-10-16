@@ -1,0 +1,92 @@
+name: Service boundaries
+
+# Repository-wide data-ownership guard (docs/architecture/service-data-ownership.md):
+# no service depends on, includes or reads the source, database or tables of another
+# service; shared packages never depend on services. Python standard library only.
+
+# No path filter: the guard and the secret scan are cheap and cover the whole repository
+# (root docker-compose.yml, apps/, docs/, .github/ and scripts/ included), so every push
+# and pull request is checked.
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: service-boundaries-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: service boundary guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Synthetic violations for every rule, and single-violation copies of this
+      # repository, must all be rejected.
+      - name: guard mutation tests
+        run: python3 -m unittest discover -s scripts/service-boundaries -v
+
+      - name: guard
+        run: python3 scripts/service-boundaries/check_service_boundaries.py
+
+      # Part I §82: every durable worker responsibility has one owning service, an entry
+      # point that exists and tests that prove it.
+      - name: operations registry
+        run: python3 scripts/service-boundaries/check_operations_registry.py
+
+      - name: no phase-03 path
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -i 'phase-03'; then
+            echo "::error::a phase-03 path exists in the repository"; exit 1
+          fi
+
+  secret-scan:
+    name: repository secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Every rule fires on its own synthetic material; published / placeholder fixtures
+      # stay clean; the real tree is clean.
+      - name: scanner mutation tests
+        run: python3 -m unittest discover -s scripts/secret-scan -v
+
+      - name: scan tracked files
+        run: python3 scripts/secret-scan/scan_secrets.py
+
+
+  database-isolation:
+    name: per-service database roles
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      # Provisions throwaway Calling / Privacy Relay / Telephony databases with
+      # infra/deployment/postgres/provision-service-database.sh and proves least privilege:
+      # runtime roles have no DDL, and no role can connect to another service's database.
+      # (Each service workflow also applies its REAL migrations through these roles.)
+      - name: verify service database isolation
+        run: |
+          infra/deployment/postgres/verify-service-isolation.sh \
+            --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres

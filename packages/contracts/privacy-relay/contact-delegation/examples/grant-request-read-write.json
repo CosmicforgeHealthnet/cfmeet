@@ -1,0 +1,6 @@
+{
+  "scopes": [
+    "privacy.contacts.read",
+    "privacy.contacts.write"
+  ]
+}

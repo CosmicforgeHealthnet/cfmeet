@@ -1,0 +1,61 @@
+{
+  "data": [
+    {
+      "id": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e607",
+      "callId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e602",
+      "usageType": "PARTICIPANT_CONNECTED_TIME",
+      "resourceClass": "APP_MEDIA",
+      "quantity": 60000,
+      "unit": "MILLISECONDS",
+      "participantId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e608",
+      "usageStartedAt": "2031-03-01T10:00:00.000Z",
+      "usageEndedAt": "2031-03-01T10:01:00.000Z",
+      "recordedAt": "2031-03-01T10:01:00.000Z"
+    },
+    {
+      "id": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e601",
+      "callId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e602",
+      "usageType": "LEG_CONNECTED_TIME",
+      "resourceClass": "PUBLIC_NETWORK",
+      "quantity": 61000,
+      "unit": "MILLISECONDS",
+      "legId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e603",
+      "routeClass": "APP_TO_PSTN",
+      "destinationCountry": "NG",
+      "billableSeconds": 61,
+      "cost": {
+        "status": "KNOWN",
+        "amountMinor": 1234,
+        "currency": "NGN"
+      },
+      "recordedAt": "2031-03-01T10:05:00.000Z"
+    },
+    {
+      "id": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e604",
+      "callId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e602",
+      "usageType": "LEG_CONNECTED_TIME",
+      "resourceClass": "PUBLIC_NETWORK",
+      "quantity": 61000,
+      "unit": "MILLISECONDS",
+      "legId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e605",
+      "routeClass": "APP_TO_PSTN",
+      "destinationCountry": "NG",
+      "billableSeconds": 61,
+      "cost": {
+        "status": "UNKNOWN"
+      },
+      "recordedAt": "2031-03-01T10:05:00.000Z"
+    },
+    {
+      "id": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e606",
+      "callId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e602",
+      "usageType": "RECORDING_ARTIFACT",
+      "resourceClass": "STORAGE",
+      "quantity": 1500,
+      "unit": "MILLISECONDS",
+      "sizeBytes": 24044,
+      "recordedAt": "2031-03-01T10:06:00.000Z"
+    }
+  ],
+  "nextCursor": "MjAzMS0wMy0wMVQxMDowNjowMC4wMDBafDdmMWMyYjNh"
+}

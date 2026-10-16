@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "ROUTE_UNAVAILABLE",
+    "message": "SIP/2.0 503 Service Unavailable",
+    "requestId": "req_464a227ba42bf5e71581795c8c10ac45",
+    "sipResponse": "503"
+  }
+}

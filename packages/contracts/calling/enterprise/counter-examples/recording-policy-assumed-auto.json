@@ -1,0 +1,9 @@
+{
+  "name": "Everything",
+  "mode": "ALWAYS",
+  "noticeRequired": false,
+  "consentParticipants": "NONE",
+  "jurisdictionRef": "NG",
+  "retentionDays": 30,
+  "maxRecordingSeconds": 600
+}

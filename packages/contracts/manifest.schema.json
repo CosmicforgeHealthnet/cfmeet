@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/contracts-manifest.schema.json",
+  "title": "CF Meet contract manifest",
+  "description": "Structure of packages/contracts/manifest.json. Semantic rules (unique ids and paths, existing owners, versioned paths, fixtures, ...) are enforced by the contracts validator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifest_version", "contracts"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "manifest_version": { "const": 1 },
+    "contracts": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/Contract" }
+    }
+  },
+  "$defs": {
+    "Contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "kind", "path", "owner", "visibility", "lifecycle", "authority", "description"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^cfmeet\\.[a-z][a-z0-9-]*\\.[a-z][a-z0-9-]*$" },
+        "version": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" },
+        "kind": { "enum": ["json-schema", "openapi"] },
+        "path": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._/-]*\\.json$" },
+        "owner": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "visibility": { "enum": ["public", "internal"] },
+        "lifecycle": { "enum": ["experimental", "beta", "stable", "deprecated"] },
+        "authority": {
+          "description": "contract-first: the file in this package is hand-maintained and implementations must conform to it. generated: the file is exported from the owning service's code and checked by that service's CI.",
+          "enum": ["contract-first", "generated"]
+        },
+        "generated_by": { "type": "string" },
+        "description": { "type": "string", "minLength": 1 }
+      },
+      "if": { "properties": { "authority": { "const": "generated" } } },
+      "then": { "required": ["generated_by"] },
+      "else": { "not": { "required": ["generated_by"] } }
+    }
+  }
+}

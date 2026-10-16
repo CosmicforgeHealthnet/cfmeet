@@ -1,0 +1,17 @@
+{
+  "data": [
+    {
+      "id": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e607",
+      "callId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e602",
+      "usageType": "SMS_SENT",
+      "resourceClass": "APP_MEDIA",
+      "quantity": 60000,
+      "unit": "MILLISECONDS",
+      "participantId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e608",
+      "usageStartedAt": "2031-03-01T10:00:00.000Z",
+      "usageEndedAt": "2031-03-01T10:01:00.000Z",
+      "recordedAt": "2031-03-01T10:01:00.000Z"
+    }
+  ],
+  "nextCursor": null
+}

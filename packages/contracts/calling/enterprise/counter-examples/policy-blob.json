@@ -1,0 +1,27 @@
+{
+  "name": "x",
+  "rules": {
+    "internalCallingEnabled": true,
+    "externalPublicCallingAllowed": false,
+    "publicDestinationCountries": [],
+    "forwardingAllowed": true,
+    "publicForwardingAllowed": false,
+    "spendPolicy": "APPLICATION_TELECOM_LIMITS",
+    "voicemailAllowed": true,
+    "transferAllowed": true,
+    "maxRingGroupFanout": 10,
+    "maxQueueCapacity": 50,
+    "maxQueueWaitSeconds": 600,
+    "maxRoutingHops": 8,
+    "extensionFormat": "NUMERIC",
+    "extensionMinLength": 3,
+    "extensionMaxLength": 6,
+    "adminCapabilities": [
+      "MANAGE_ROUTING",
+      "MANAGE_VOICEMAIL"
+    ],
+    "anything": {
+      "recordAll": true
+    }
+  }
+}

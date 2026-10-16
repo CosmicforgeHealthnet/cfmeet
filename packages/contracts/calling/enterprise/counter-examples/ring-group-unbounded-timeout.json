@@ -1,0 +1,6 @@
+{
+  "name": "Sales",
+  "strategy": "SIMULTANEOUS",
+  "memberRingSeconds": 15,
+  "groupTimeoutSeconds": 86400
+}

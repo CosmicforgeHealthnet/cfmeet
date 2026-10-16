@@ -1,0 +1,9 @@
+{
+  "owner": {
+    "type": "PHONE",
+    "number": "+2348012345678"
+  },
+  "displayLabel": "Mobile",
+  "maxMessageSeconds": 120,
+  "retentionDays": 30
+}

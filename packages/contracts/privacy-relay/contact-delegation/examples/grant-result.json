@@ -1,0 +1,13 @@
+{
+  "grant": {
+    "grantId": "0123456789abcdef0123456789abcdef",
+    "accessToken": "eyJhbGciOiJFZERTQSJ9.eyJ2ZXIiOjF9.c2lnbmF0dXJl",
+    "tokenType": "Bearer",
+    "authorizationHeader": "X-CF-Contact-Authorization",
+    "audience": "cfmeet.privacy-relay",
+    "scopes": [
+      "privacy.contacts.write"
+    ],
+    "expiresAt": "2031-03-01T10:02:00Z"
+  }
+}

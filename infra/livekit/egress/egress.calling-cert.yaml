@@ -1,0 +1,26 @@
+# LiveKit Egress worker configuration for the Calling RTC CAPTURE CERTIFICATION ONLY.
+#
+# * Joins the loopback certification LiveKit (`livekit.calling-egress-cert.yaml`) over
+#   the shared Redis bus; started with `--network host`.
+# * Uploads finished captures to the PRIVATE capture staging prefix of the local
+#   S3-compatible test store. The access key pair is the test store's dummy pair
+#   (a moto / MinIO test server), not a secret.
+# * Production: the whole body is injected as EGRESS_CONFIG_BODY from the secret
+#   manager (API key / secret and the bucket credentials are never committed and never
+#   sent by Calling in a request).
+log_level: info
+api_key: calling-cert
+api_secret: calling-cert-only-key-not-a-secret-0123456789
+ws_url: ws://127.0.0.1:7880
+insecure: true
+health_port: 9091
+redis:
+  address: 127.0.0.1:6379
+storage:
+  s3:
+    access_key: calling-cert-test-store
+    secret: calling-cert-test-store-not-a-secret
+    region: us-east-1
+    endpoint: http://127.0.0.1:9100
+    bucket: calling-cert-artifacts
+    force_path_style: true

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/platform/service-auth/trust-bundle/v1.schema.json",
+  "title": "CF Meet service trust bundle v1",
+  "description": "Receiver-controlled trust policy of one service in one runtime environment: which issuers it accepts, with which Ed25519 public keys, and which internal permissions it grants each of them. Permissions are target-service authoritative; tokens never carry them. Services additionally refuse to start when: receiver or runtime_environment differ from their own configuration; an issuer appears twice or equals the receiver; a kid appears twice; a public key is not a valid, non-weak Ed25519 point; a permission is not received by this service or may not be granted to that issuer (e.g. protected-contact.resolve-for-execution is grantable only to cfmeet.telephony by cfmeet.privacy-relay).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["bundle_version", "receiver", "runtime_environment", "trusted_issuers"],
+  "properties": {
+    "bundle_version": { "const": 1 },
+    "receiver": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ServiceId" },
+    "runtime_environment": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RuntimeEnvironment" },
+    "trusted_issuers": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/TrustedIssuer" }
+    }
+  },
+  "$defs": {
+    "TrustedIssuer": {
+      "description": "Grant for (issuer, audience, runtime_environment). audience and runtime_environment must equal the bundle's receiver and runtime_environment.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issuer", "audience", "runtime_environment", "keys", "permissions"],
+      "properties": {
+        "issuer": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ServiceId" },
+        "audience": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ServiceId" },
+        "runtime_environment": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RuntimeEnvironment" },
+        "keys": {
+          "description": "Accepted public keys. Two keys are present only during a key rotation overlap.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/PublicKey" }
+        },
+        "permissions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/InternalPermission" }
+        }
+      }
+    },
+    "PublicKey": {
+      "description": "Ed25519 public key as an OKP JSON Web Key (RFC 8037).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kid", "kty", "crv", "x"],
+      "properties": {
+        "kid": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/KeyId" },
+        "kty": { "const": "OKP" },
+        "crv": { "const": "Ed25519" },
+        "x": { "description": "base64url (no padding) 32-byte public key.", "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" }
+      }
+    }
+  }
+}

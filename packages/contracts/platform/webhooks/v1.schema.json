@@ -1,0 +1,476 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/platform/webhooks/v1.schema.json",
+  "title": "CF Meet customer webhooks v1",
+  "description": "Customer webhooks (Part G §68): application-scoped subscriptions, their safe view (never the signing secret after creation / rotation), delivery records, and the normalized event body POSTed to a subscriber. Scope (tenant, application, environment) comes only from the authenticated credential and is never a body field. Events are the public catalog (WebhookEventType) projected from committed domain events — never a provider, carrier or internal envelope payload; `data` carries only allow-listed keys whose values are opaque UUIDs, bounded upper-case codes or integers. Every delivery carries CF-Webhook-Id (delivery id), CF-Webhook-Event-Id (stable across retries and replays: dedupe key), CF-Webhook-Timestamp (unix seconds) and CF-Webhook-Signature: v1=hex(HMAC-SHA256(secret, \"v1:\" + timestamp + \":\" + delivery id + \":\" + raw body)). Receivers compare in constant time, refuse timestamps outside ±300 s and dedupe on the event id. Retries: timeouts, connection errors, 408, 429, 5xx with bounded jittered exponential backoff; other answers and exhausted retries end FAILED (dead letter), visible in the delivery history and replayable as a NEW delivery.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/CreateWebhookRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdateWebhookRequest"
+    },
+    {
+      "$ref": "#/$defs/RotateWebhookSecretRequest"
+    },
+    {
+      "$ref": "#/$defs/Webhook"
+    },
+    {
+      "$ref": "#/$defs/WebhookWithSecret"
+    },
+    {
+      "$ref": "#/$defs/WebhookList"
+    },
+    {
+      "$ref": "#/$defs/WebhookDelivery"
+    },
+    {
+      "$ref": "#/$defs/WebhookDeliveryList"
+    },
+    {
+      "$ref": "#/$defs/WebhookEvent"
+    }
+  ],
+  "$defs": {
+    "WebhookEventType": {
+      "type": "string",
+      "enum": [
+        "call.requested",
+        "call.incoming",
+        "call.ringing",
+        "call.ring_cancelled",
+        "call.accepted",
+        "call.declined",
+        "call.cancelled",
+        "call.answered",
+        "call.connected",
+        "call.route_changed",
+        "call.held",
+        "call.resumed",
+        "call.transfer_started",
+        "call.transferred",
+        "call.transfer_failed",
+        "call.ended",
+        "call.failed",
+        "call.no_answer",
+        "call.busy",
+        "call.answered_elsewhere",
+        "call.invitation_expired",
+        "voicemail.received",
+        "voicemail.ready",
+        "voicemail.deleted",
+        "recording.ready",
+        "recording.deleted",
+        "relay.created",
+        "relay.updated",
+        "relay.revoked",
+        "relay.expired",
+        "relay.participant_changed",
+        "usage.recorded",
+        "limit.warning",
+        "limit.exceeded"
+      ]
+    },
+    "CreateWebhookRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url",
+        "eventTypes"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^https://[^\\s/@?#]+(/[^\\s#]*)?$",
+          "not": {
+            "pattern": "^https://(localhost|[^/]*\\.localhost|[^/]*\\.internal|127\\.|10\\.|0\\.|169\\.254\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|\\[)"
+          },
+          "description": "Public https endpoint. Server-side validation additionally refuses every loopback / private / link-local / CGNAT / metadata address and re-checks the resolved address at connection time (DNS rebinding); redirects are never followed."
+        },
+        "eventTypes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/WebhookEventType"
+          }
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 200
+        }
+      }
+    },
+    "UpdateWebhookRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "minProperties": 2,
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^https://[^\\s/@?#]+(/[^\\s#]*)?$",
+          "not": {
+            "pattern": "^https://(localhost|[^/]*\\.localhost|[^/]*\\.internal|127\\.|10\\.|0\\.|169\\.254\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|\\[)"
+          },
+          "description": "Public https endpoint. Server-side validation additionally refuses every loopback / private / link-local / CGNAT / metadata address and re-checks the resolved address at connection time (DNS rebinding); redirects are never followed."
+        },
+        "eventTypes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/WebhookEventType"
+          }
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 200
+        },
+        "status": {
+          "enum": [
+            "ACTIVE",
+            "DISABLED"
+          ]
+        }
+      }
+    },
+    "RotateWebhookSecretRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "maxProperties": 1,
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "Webhook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "webhookId",
+        "url",
+        "eventTypes",
+        "description",
+        "status",
+        "secretVersion",
+        "version",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "webhookId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "eventTypes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WebhookEventType"
+          }
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "ACTIVE",
+            "DISABLED",
+            "DELETED"
+          ]
+        },
+        "secretVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "WebhookWithSecret": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "webhook",
+        "signingSecret"
+      ],
+      "properties": {
+        "webhook": {
+          "$ref": "#/$defs/Webhook"
+        },
+        "signingSecret": {
+          "type": "string",
+          "pattern": "^whsec_[A-Za-z0-9_-]{43}$",
+          "description": "Returned ONLY by create and rotate-secret; never readable again."
+        }
+      }
+    },
+    "WebhookList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "nextCursor"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Webhook"
+          }
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "WebhookDelivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deliveryId",
+        "webhookId",
+        "eventId",
+        "eventType",
+        "replayOf",
+        "status",
+        "attemptCount",
+        "nextAttemptAt",
+        "lastHttpStatus",
+        "failureCategory",
+        "createdAt",
+        "completedAt"
+      ],
+      "properties": {
+        "deliveryId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "webhookId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "eventId": {
+          "type": "string",
+          "pattern": "^whe_[0-9a-f]{32}$"
+        },
+        "eventType": {
+          "$ref": "#/$defs/WebhookEventType"
+        },
+        "replayOf": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "PENDING",
+            "DELIVERING",
+            "RETRY_SCHEDULED",
+            "SUCCEEDED",
+            "FAILED",
+            "CANCELLED"
+          ]
+        },
+        "attemptCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nextAttemptAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "lastHttpStatus": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 100,
+          "maximum": 599
+        },
+        "failureCategory": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "WebhookDeliveryList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "nextCursor"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WebhookDelivery"
+          }
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "WebhookEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "apiVersion",
+        "occurredAt",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^whe_[0-9a-f]{32}$"
+        },
+        "type": {
+          "$ref": "#/$defs/WebhookEventType"
+        },
+        "apiVersion": {
+          "const": "v1"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "correlationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$"
+        },
+        "data": {
+          "type": "object",
+          "propertyNames": {
+            "enum": [
+              "callId",
+              "callVersion",
+              "participantId",
+              "invitationId",
+              "endpointId",
+              "transferId",
+              "routeId",
+              "routeState",
+              "failureCategory",
+              "failureReason",
+              "reason",
+              "state",
+              "messageId",
+              "mailboxId",
+              "recordingId",
+              "durationMs",
+              "usageRecordId",
+              "usageType",
+              "quantity",
+              "unit",
+              "contextId",
+              "contextVersion",
+              "contextStatus",
+              "sessionId",
+              "sessionVersion",
+              "sessionStatus",
+              "resource",
+              "limit",
+              "scope",
+              "window",
+              "threshold",
+              "current",
+              "ceiling"
+            ]
+          },
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              {
+                "type": "integer",
+                "minimum": 0
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

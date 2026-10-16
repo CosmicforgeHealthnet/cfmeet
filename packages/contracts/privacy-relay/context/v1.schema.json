@@ -1,0 +1,638 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/privacy-relay/context/v1.schema.json",
+  "title": "CF Meet Communication Context bodies v1",
+  "description": "Request and response bodies of the Communication Context API (Part D sections 27-29). The root accepts exactly one of the bodies (fixtures); the HTTP contracts reference the $defs.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/CreateContextRequest"
+    },
+    {
+      "$ref": "#/$defs/UpdateContextRequest"
+    },
+    {
+      "$ref": "#/$defs/LifecycleCommandRequest"
+    },
+    {
+      "$ref": "#/$defs/CommunicationContext"
+    },
+    {
+      "$ref": "#/$defs/ContextMutationResult"
+    },
+    {
+      "$ref": "#/$defs/ContextList"
+    },
+    {
+      "$ref": "#/$defs/ContextEvidence"
+    }
+  ],
+  "$defs": {
+    "CreateContextRequest": {
+      "description": "Create a Communication Context (Idempotency-Key required). Scope comes only from the authenticated credential; status, version, authorization results, telephone numbers, providers and relay numbers are not inputs.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "externalContextReference",
+        "participants",
+        "allowedChannels",
+        "directionPolicy",
+        "expiresAt"
+      ],
+      "properties": {
+        "externalContextReference": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ExternalContextReference"
+        },
+        "participants": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 64,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/SubjectReference"
+          }
+        },
+        "allowedChannels": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/CommunicationChannel"
+          }
+        },
+        "directionPolicy": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/DirectionPolicy"
+        },
+        "directions": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/DirectionRequest"
+          },
+          "description": "Required (non-empty) with EXPLICIT; refused with BIDIRECTIONAL."
+        },
+        "startsAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "expiresAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "graceExpiresAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "policy": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContextPolicy"
+        },
+        "allowedRelayStrategies": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/RelayStrategy"
+          },
+          "description": "Default [APP_ONLY]."
+        }
+      }
+    },
+    "UpdateContextRequest": {
+      "description": "Typed, versioned configuration update (never a status patch or arbitrary merge patch). Absent members are unchanged; participants and directions replace the whole set (participant reassignment keeps the same context). At least one change is required.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "minProperties": 2,
+      "properties": {
+        "expectedVersion": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+        },
+        "participants": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/SubjectReference"
+          }
+        },
+        "allowedChannels": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/CommunicationChannel"
+          }
+        },
+        "directionPolicy": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/DirectionPolicy"
+        },
+        "directions": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/DirectionRequest"
+          }
+        },
+        "startsAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "expiresAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "graceExpiresAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "policy": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContextPolicy"
+        },
+        "allowedRelayStrategies": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/RelayStrategy"
+          }
+        }
+      }
+    },
+    "LifecycleCommandRequest": {
+      "description": "Body of an explicit lifecycle command (suspend, resume, complete, revoke). Idempotency-Key required.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+        }
+      }
+    },
+    "CommunicationContext": {
+      "description": "Safe representation of a Communication Context. Never a telephone number, provider id, carrier, Contact Vault material, service token or customer credential.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contextId",
+        "externalContextReference",
+        "version",
+        "status",
+        "effectiveStatus",
+        "directionPolicy",
+        "participants",
+        "allowedChannels",
+        "directions",
+        "allowedRelayStrategies",
+        "startsAt",
+        "expiresAt",
+        "policyVersion",
+        "policy",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "contextId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "externalContextReference": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ExternalContextReference"
+        },
+        "version": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/CommunicationContextStatus"
+        },
+        "effectiveStatus": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/CommunicationContextStatus",
+          "description": "Status at read time: EXPIRED once the final validity has passed, even before the expiry worker materializes it."
+        },
+        "directionPolicy": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/DirectionPolicy"
+        },
+        "participants": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "participantId",
+              "subjectKind",
+              "addedInVersion",
+              "addedAt"
+            ],
+            "properties": {
+              "participantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "subjectKind": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ParticipantSubjectKind"
+              },
+              "principalId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "contactReferenceId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "addedInVersion": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+              },
+              "addedAt": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+              }
+            }
+          },
+          "description": "Active participants (history: evidence)."
+        },
+        "allowedChannels": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/CommunicationChannel"
+          }
+        },
+        "directions": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "directionId",
+              "fromParticipantId",
+              "toParticipantId",
+              "addedInVersion"
+            ],
+            "properties": {
+              "directionId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "fromParticipantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "toParticipantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "channel": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/CommunicationChannel"
+              },
+              "addedInVersion": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+              }
+            }
+          }
+        },
+        "allowedRelayStrategies": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/RelayStrategy"
+          }
+        },
+        "startsAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "expiresAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "graceExpiresAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "policyVersion": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,31}$"
+        },
+        "policy": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContextPolicy"
+        },
+        "createdAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "updatedAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "suspendedAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "completedAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "revokedAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "expiredAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        }
+      }
+    },
+    "ContextMutationResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "context",
+        "enforcement"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/CommunicationContext"
+        },
+        "enforcement": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Enforcement"
+        }
+      }
+    },
+    "ContextList": {
+      "description": "Keyset-paginated contexts (newest first).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/CommunicationContext"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 512,
+              "pattern": "^[0-9a-f]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ContextEvidence": {
+      "description": "Privacy-safe support evidence: lifecycle, versions, participant and direction history, sessions, recent decisions, audit events and enforcement status. No contact values.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "context",
+        "participantHistory",
+        "directionHistory",
+        "sessions",
+        "decisions",
+        "auditEvents",
+        "enforcement"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/CommunicationContext"
+        },
+        "participantHistory": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "participantId",
+              "subjectKind",
+              "addedInVersion",
+              "addedAt"
+            ],
+            "properties": {
+              "participantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "subjectKind": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ParticipantSubjectKind"
+              },
+              "principalId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "contactReferenceId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "addedInVersion": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+              },
+              "addedAt": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+              },
+              "removedInVersion": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+              },
+              "removedAt": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+              }
+            }
+          }
+        },
+        "directionHistory": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "directionId",
+              "fromParticipantId",
+              "toParticipantId",
+              "addedInVersion"
+            ],
+            "properties": {
+              "directionId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "fromParticipantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "toParticipantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "channel": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/CommunicationChannel"
+              },
+              "addedInVersion": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+              },
+              "removedInVersion": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+              }
+            }
+          }
+        },
+        "sessions": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/privacy-relay/session/v1.schema.json#/$defs/PrivacyRelaySession"
+          }
+        },
+        "decisions": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "decisionId",
+              "relaySessionId",
+              "contextVersion",
+              "relaySessionVersion",
+              "channel",
+              "route",
+              "purpose",
+              "decision",
+              "reason",
+              "strategy",
+              "decidedAt"
+            ],
+            "properties": {
+              "decisionId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "relaySessionId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "contextVersion": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+              },
+              "relaySessionVersion": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+              },
+              "channel": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/CommunicationChannel"
+              },
+              "route": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/CommunicationRoute"
+              },
+              "purpose": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/AuthorizationPurpose"
+              },
+              "decision": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/AuthorizationDecision"
+              },
+              "reason": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/AuthorizationReason"
+              },
+              "strategy": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/RelayStrategy"
+              },
+              "decidedAt": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+              }
+            }
+          }
+        },
+        "auditEvents": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sequence",
+              "eventType",
+              "contextVersion",
+              "actorKind",
+              "data",
+              "occurredAt"
+            ],
+            "properties": {
+              "sequence": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "eventType": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/AuditEventType"
+              },
+              "contextVersion": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+              },
+              "relaySessionId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "relaySessionVersion": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+              },
+              "actorKind": {
+                "enum": [
+                  "APPLICATION",
+                  "SYSTEM"
+                ]
+              },
+              "data": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/events/v1.schema.json#/$defs/EventData"
+              },
+              "occurredAt": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+              }
+            }
+          }
+        },
+        "enforcement": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "enforcementEventId",
+              "reason",
+              "status",
+              "contextVersion",
+              "terminateActiveCalls",
+              "affectedPrincipalCount",
+              "attemptCount",
+              "createdAt"
+            ],
+            "properties": {
+              "enforcementEventId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "reason": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/EnforcementReason"
+              },
+              "status": {
+                "enum": [
+                  "PENDING",
+                  "APPLIED"
+                ]
+              },
+              "contextVersion": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Version"
+              },
+              "relaySessionId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "terminateActiveCalls": {
+                "type": "boolean"
+              },
+              "affectedPrincipalCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "attemptCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "lastErrorCategory": {
+                "enum": [
+                  "TIMEOUT",
+                  "UNAVAILABLE",
+                  "REJECTED",
+                  "INVALID_RESPONSE",
+                  "NOT_CONFIGURED"
+                ]
+              },
+              "createdAt": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+              },
+              "completedAt": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

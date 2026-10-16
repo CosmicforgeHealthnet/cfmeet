@@ -1,0 +1,9 @@
+{
+  "kind": "VOICE",
+  "callbackRequested": true,
+  "initiatorPrincipalId": "9f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5",
+  "initiatorContactReference": "3c1e9a42-7d5b-4e8f-9a0b-1c2d3e4f5a6b",
+  "targetContactReference": "5a7c2e10-3b4d-4f6e-8a9b-0c1d2e3f4a5b",
+  "privacyRelaySessionId": "5a9d2c7e-3b41-4f08-a6e2-91c4d7b03e58",
+  "initiatorEndpointId": "8e0b1c2d-3e4f-4a5b-9c6d-7e8f9a0b1c2d"
+}

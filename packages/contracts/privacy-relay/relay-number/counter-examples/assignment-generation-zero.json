@@ -1,0 +1,16 @@
+{
+  "assignment": {
+    "assignmentId": "4b6f0c1e-2d3a-4e5f-8a9b-0c1d2e3f4a5b",
+    "relaySessionId": "7c1e5f20-8a3d-4b96-b2e7-4d0a6c9f1e23",
+    "contextId": "0e3c7a52-6f1b-4a7e-9d5c-2b8f4e1a9c30",
+    "status": "ACTIVE",
+    "assignmentGeneration": 0,
+    "country": "GB",
+    "capabilities": [
+      "VOICE_INBOUND",
+      "VOICE_OUTBOUND"
+    ],
+    "assignedAt": "2031-03-01T10:00:00.000000Z",
+    "expiresAt": "2031-03-01T11:00:00.000000Z"
+  }
+}

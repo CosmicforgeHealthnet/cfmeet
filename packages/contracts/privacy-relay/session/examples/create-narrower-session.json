@@ -1,0 +1,26 @@
+{
+  "relayStrategy": "APP_PREFERRED",
+  "participants": [
+    {
+      "principalId": "11111111-2222-4333-8444-555555555555"
+    },
+    {
+      "principalId": "66666666-7777-4888-9999-aaaaaaaaaaaa"
+    }
+  ],
+  "allowedChannels": [
+    "VOICE"
+  ],
+  "directions": [
+    {
+      "from": {
+        "principalId": "11111111-2222-4333-8444-555555555555"
+      },
+      "to": {
+        "principalId": "66666666-7777-4888-9999-aaaaaaaaaaaa"
+      }
+    }
+  ],
+  "startsAt": "2031-03-01T10:05:00Z",
+  "expiresAt": "2031-03-01T10:45:00Z"
+}

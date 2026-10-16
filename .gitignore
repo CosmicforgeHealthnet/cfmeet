@@ -10,6 +10,10 @@ debug/
 *.pdb
 **/mutants.out*/
 
+# ---- Python (repository scripts) --------------------------------------------
+__pycache__/
+*.py[cod]
+
 # ---- Node / Next.js ---------------------------------------------------------
 node_modules/
 .next/

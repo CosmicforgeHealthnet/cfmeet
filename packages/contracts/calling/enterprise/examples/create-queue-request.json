@@ -1,0 +1,10 @@
+{
+  "name": "Support",
+  "maxWaitSeconds": 600,
+  "offerTimeoutSeconds": 20,
+  "capacity": 50,
+  "overflow": {
+    "type": "RING_GROUP",
+    "id": "8b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b"
+  }
+}

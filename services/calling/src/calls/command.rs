@@ -1,0 +1,270 @@
+//! Trusted inputs of call-domain operations: ownership scope, actor and request context.
+//!
+//! None of these types can be built from request data. A [`CallScope`] comes from an
+//! authenticated [`PlatformAuthContext`] or from the delegated context signed into an
+//! internal service token; a [`CallCommandContext`] additionally carries the actor the
+//! mutation is attributed to and the server-controlled request / correlation ids. Actor
+//! identity is never fabricated: it is exactly the authenticated customer credential and
+//! service account, or the authenticated internal service acting for the delegated
+//! service account. No raw Authorization header, credential or service token is kept.
+//!
+//! These are explicit, reviewed crossings; there are no `From` conversions between the
+//! authentication context types.
+
+use cf_service_auth::{
+    CorrelationId, DelegatedPlatformContext, InternalServiceContext, RequestId, ServiceId,
+};
+
+use super::{errors::CallError, kinds::ActorKind};
+use crate::{
+    domain::{ApplicationId, CredentialId, EnvironmentId, PrincipalId, ServiceAccountId, TenantId},
+    endpoints::CallEndpointId,
+    internal_auth::calling_service_id,
+    platform::{context::PlatformAuthContext, principals::ResolvedPrincipal},
+    signaling::SignalingIdentity,
+};
+
+/// Tenant / application / environment every call-domain query and mutation is confined to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CallScope {
+    tenant_id: TenantId,
+    application_id: ApplicationId,
+    environment_id: EnvironmentId,
+}
+
+impl CallScope {
+    /// The scope of an authenticated customer request.
+    pub fn of_platform(ctx: &PlatformAuthContext) -> Self {
+        Self {
+            tenant_id: ctx.tenant_id(),
+            application_id: ctx.application_id(),
+            environment_id: ctx.environment_id(),
+        }
+    }
+
+    /// The scope asserted by an authenticated internal service in its signed token.
+    pub fn of_delegated(ctx: &DelegatedPlatformContext) -> Self {
+        Self {
+            tenant_id: TenantId::from_uuid(ctx.tenant_id()),
+            application_id: ApplicationId::from_uuid(ctx.application_id()),
+            environment_id: EnvironmentId::from_uuid(ctx.application_environment_id()),
+        }
+    }
+
+    /// The scope a resolved principal was resolved in.
+    pub fn of_principal(principal: &ResolvedPrincipal) -> Self {
+        Self {
+            tenant_id: principal.tenant_id(),
+            application_id: principal.application_id(),
+            environment_id: principal.environment_id(),
+        }
+    }
+
+    /// The scope of an environment (operator tooling).
+    pub fn of_environment(env: &crate::platform::environments::EnvironmentView) -> Self {
+        Self {
+            tenant_id: env.tenant_id,
+            application_id: env.application_id,
+            environment_id: env.id,
+        }
+    }
+
+    pub(crate) fn from_parts(
+        tenant_id: TenantId,
+        application_id: ApplicationId,
+        environment_id: EnvironmentId,
+    ) -> Self {
+        Self {
+            tenant_id,
+            application_id,
+            environment_id,
+        }
+    }
+
+    pub fn tenant_id(&self) -> TenantId {
+        self.tenant_id
+    }
+
+    pub fn application_id(&self) -> ApplicationId {
+        self.application_id
+    }
+
+    pub fn environment_id(&self) -> EnvironmentId {
+        self.environment_id
+    }
+}
+
+/// Who a call mutation is attributed to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallActor {
+    /// A customer application, authenticated by its API credential.
+    CustomerApplication {
+        service_account_id: ServiceAccountId,
+        credential_id: CredentialId,
+    },
+    /// An application endpoint (device) authenticated by a short-lived signaling
+    /// credential. The credential was minted by `credential_id` of `service_account_id`
+    /// for exactly this endpoint and principal; both are recorded.
+    ApplicationEndpoint {
+        service_account_id: ServiceAccountId,
+        credential_id: CredentialId,
+        endpoint_id: CallEndpointId,
+        principal_id: PrincipalId,
+    },
+    /// An authenticated CF Meet backend service acting for the delegated service account.
+    InternalService {
+        service: ServiceId,
+        on_behalf_of: ServiceAccountId,
+    },
+}
+
+impl CallActor {
+    pub fn kind(&self) -> ActorKind {
+        match self {
+            CallActor::CustomerApplication { .. } => ActorKind::CustomerApplication,
+            CallActor::ApplicationEndpoint { .. } => ActorKind::ApplicationEndpoint,
+            CallActor::InternalService { .. } => ActorKind::InternalService,
+        }
+    }
+
+    pub fn service_account_id(&self) -> ServiceAccountId {
+        match self {
+            CallActor::CustomerApplication {
+                service_account_id, ..
+            }
+            | CallActor::ApplicationEndpoint {
+                service_account_id, ..
+            } => *service_account_id,
+            CallActor::InternalService { on_behalf_of, .. } => *on_behalf_of,
+        }
+    }
+
+    pub fn credential_id(&self) -> Option<CredentialId> {
+        match self {
+            CallActor::CustomerApplication { credential_id, .. }
+            | CallActor::ApplicationEndpoint { credential_id, .. } => Some(*credential_id),
+            CallActor::InternalService { .. } => None,
+        }
+    }
+
+    pub fn service(&self) -> Option<&ServiceId> {
+        match self {
+            CallActor::CustomerApplication { .. } | CallActor::ApplicationEndpoint { .. } => None,
+            CallActor::InternalService { service, .. } => Some(service),
+        }
+    }
+
+    /// The endpoint an endpoint actor acts from.
+    pub fn endpoint_id(&self) -> Option<CallEndpointId> {
+        match self {
+            CallActor::ApplicationEndpoint { endpoint_id, .. } => Some(*endpoint_id),
+            _ => None,
+        }
+    }
+}
+
+/// Scope + actor + request context of one call-domain command.
+#[derive(Debug, Clone)]
+pub struct CallCommandContext {
+    scope: CallScope,
+    actor: CallActor,
+    request_id: RequestId,
+    correlation_id: CorrelationId,
+}
+
+impl CallCommandContext {
+    /// A command issued by an authenticated customer request.
+    pub fn customer(ctx: &PlatformAuthContext) -> Self {
+        Self {
+            scope: CallScope::of_platform(ctx),
+            actor: CallActor::CustomerApplication {
+                service_account_id: ctx.service_account_id(),
+                credential_id: ctx.credential_id(),
+            },
+            request_id: ctx.request_id().clone(),
+            correlation_id: ctx.correlation_id().clone(),
+        }
+    }
+
+    /// A command issued by an authenticated internal service. The scope is the delegated
+    /// platform context signed into its token; without one there is no scope to act in.
+    pub fn internal(caller: &InternalServiceContext) -> Result<Self, CallError> {
+        let delegated = caller
+            .delegated_platform_context()
+            .ok_or(CallError::NotFound)?;
+        Ok(Self {
+            scope: CallScope::of_delegated(delegated),
+            actor: CallActor::InternalService {
+                service: caller.authenticated_service().clone(),
+                on_behalf_of: ServiceAccountId::from_uuid(
+                    delegated.initiating_service_account_id(),
+                ),
+            },
+            request_id: caller.request_id().clone(),
+            correlation_id: caller.correlation_id().clone(),
+        })
+    }
+
+    /// A command issued by an application endpoint through its verified signaling
+    /// credential (scope, principal and endpoint come only from the credential).
+    pub fn endpoint(identity: &SignalingIdentity) -> Self {
+        Self {
+            scope: identity.scope(),
+            actor: CallActor::ApplicationEndpoint {
+                service_account_id: identity.minted_by_service_account_id(),
+                credential_id: identity.minted_by_credential_id(),
+                endpoint_id: identity.endpoint_id(),
+                principal_id: identity.principal_id(),
+            },
+            request_id: identity.request_id().clone(),
+            correlation_id: identity.correlation_id().clone(),
+        }
+    }
+
+    /// A command the Calling service issues itself (workers, verified provider callbacks,
+    /// reconciliation) for a Call of `scope`, on behalf of the service account that
+    /// created the Call. Fresh request / correlation ids identify the run.
+    pub(crate) fn system(scope: CallScope, on_behalf_of: ServiceAccountId) -> Self {
+        Self {
+            scope,
+            actor: CallActor::InternalService {
+                service: calling_service_id(),
+                on_behalf_of,
+            },
+            request_id: RequestId::generate(),
+            correlation_id: CorrelationId::generate(),
+        }
+    }
+
+    /// [`system`](Self::system) continuing the correlation of the request that created
+    /// the Call (`calls.correlation_id`): a fresh request id identifies this run, the
+    /// correlation id links it to the Call's origin. A Call without one (created before it
+    /// was recorded) gets a fresh correlation id.
+    pub(crate) fn system_correlated(
+        scope: CallScope,
+        on_behalf_of: ServiceAccountId,
+        correlation: Option<&str>,
+    ) -> Self {
+        let mut cmd = Self::system(scope, on_behalf_of);
+        if let Some(correlation) = correlation.and_then(|c| CorrelationId::parse(c).ok()) {
+            cmd.correlation_id = correlation;
+        }
+        cmd
+    }
+
+    pub fn scope(&self) -> CallScope {
+        self.scope
+    }
+
+    pub fn actor(&self) -> &CallActor {
+        &self.actor
+    }
+
+    pub fn request_id(&self) -> &RequestId {
+        &self.request_id
+    }
+
+    pub fn correlation_id(&self) -> &CorrelationId {
+        &self.correlation_id
+    }
+}

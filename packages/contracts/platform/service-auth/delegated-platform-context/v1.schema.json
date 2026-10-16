@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/platform/service-auth/delegated-platform-context/v1.schema.json",
+  "title": "CF Meet delegated platform context v1",
+  "description": "Safe customer/application/actor identifiers an authenticated backend service asserts on behalf of the request it is serving. Carried only inside a signed service token. Contains identifiers only: never credentials, verifiers, Authorization headers, telephone numbers, protected contact data, passwords, session cookies, provider secrets or consumer business payloads. Receivers treat it as an assertion by the authenticated issuer, not as customer authentication.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "tenant_id",
+    "application_id",
+    "application_environment_id",
+    "application_environment_kind",
+    "initiating_service_account_id"
+  ],
+  "properties": {
+    "tenant_id": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+    "application_id": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+    "application_environment_id": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+    "application_environment_kind": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ApplicationEnvironmentKind" },
+    "initiating_service_account_id": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+    "initiating_principal_id": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+    "initiating_principal_kind": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/PrincipalKind" }
+  },
+  "dependentRequired": {
+    "initiating_principal_id": ["initiating_principal_kind"],
+    "initiating_principal_kind": ["initiating_principal_id"]
+  }
+}

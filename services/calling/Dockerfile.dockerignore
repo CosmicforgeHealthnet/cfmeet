@@ -1,0 +1,18 @@
+# Build-context filter for services/calling/Dockerfile (context: repository root).
+# Everything is excluded except the directories the image is built from.
+*
+!packages/service-auth
+!packages/object-storage
+!packages/webhooks
+!services/calling
+
+# Never send build output, local configuration or key material.
+**/target
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.log
+**/*.rs.bk
+services/calling/Dockerfile
+services/calling/Dockerfile.dockerignore

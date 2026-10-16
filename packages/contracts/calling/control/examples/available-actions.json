@@ -1,0 +1,15 @@
+{
+  "callId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e6f7",
+  "callState": "CONNECTED",
+  "callVersion": 9,
+  "actions": [
+    { "action": "ACCEPT", "available": false, "reason": "STATE" },
+    { "action": "DECLINE", "available": false, "reason": "STATE" },
+    { "action": "CANCEL", "available": false, "reason": "STATE" },
+    { "action": "END", "available": true },
+    { "action": "HOLD", "available": true },
+    { "action": "RESUME", "available": false, "reason": "STATE" },
+    { "action": "TRANSFER", "available": true },
+    { "action": "ISSUE_MEDIA_CREDENTIAL", "available": true }
+  ]
+}

@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!-- Simulated carrier (UAS): ringing, answer with G.711 + RFC 4733, real RTP audio, an
+     inbound DTMF digit, a remote hold / unhold (re-INVITE sendonly / sendrecv), then
+     waits for the edge's BYE. Certification only. -->
+<scenario name="carrier answers">
+  <recv request="INVITE" rrs="true">
+    <action>
+      <ereg regexp=".*" search_in="hdr" header="From:" check_it="true" assign_to="remote_from" />
+      <ereg regexp=".*" search_in="hdr" header="To:" check_it="true" assign_to="local_to" />
+    </action>
+  </recv>
+  <send><![CDATA[
+SIP/2.0 180 Ringing
+[last_Via:]
+[last_From:]
+[last_To:];tag=[pid]SIPpTag01[call_number]
+[last_Call-ID:]
+[last_CSeq:]
+Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+Content-Length: 0
+
+]]></send>
+  <pause milliseconds="700" />
+  <send retrans="500"><![CDATA[
+SIP/2.0 200 OK
+[last_Via:]
+[last_From:]
+[last_To:];tag=[pid]SIPpTag01[call_number]
+[last_Call-ID:]
+[last_CSeq:]
+Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+Content-Type: application/sdp
+Content-Length: [len]
+
+v=0
+o=carrier 53655765 2353687637 IN IP[local_ip_type] [local_ip]
+s=-
+c=IN IP[media_ip_type] [media_ip]
+t=0 0
+m=audio [media_port] RTP/AVP 8 101
+a=rtpmap:8 PCMA/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-15
+a=sendrecv
+
+]]></send>
+  <recv request="ACK" rtd="true" crlf="true" />
+  <nop><action><exec play_pcap_audio="/usr/share/sip-tester/g711a.pcap" /></action></nop>
+  <pause milliseconds="1500" />
+  <nop><action><exec play_pcap_audio="/usr/share/sip-tester/dtmf_2833_5.pcap" /></action></nop>
+  <pause milliseconds="1500" />
+  <send retrans="500"><![CDATA[
+INVITE [next_url] SIP/2.0
+Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+From: [$local_to];tag=[pid]SIPpTag01[call_number]
+To: [$remote_from]
+Call-ID: [call_id]
+CSeq: 1 INVITE
+Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+Max-Forwards: 70
+Content-Type: application/sdp
+Content-Length: [len]
+
+v=0
+o=carrier 53655765 2353687638 IN IP[local_ip_type] [local_ip]
+s=-
+c=IN IP[media_ip_type] [media_ip]
+t=0 0
+m=audio [media_port] RTP/AVP 8 101
+a=rtpmap:8 PCMA/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-15
+a=sendonly
+
+]]></send>
+  <recv response="100" optional="true" />
+  <recv response="200" />
+  <send><![CDATA[
+ACK [next_url] SIP/2.0
+Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+From: [$local_to];tag=[pid]SIPpTag01[call_number]
+To: [$remote_from]
+Call-ID: [call_id]
+CSeq: 1 ACK
+Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+Max-Forwards: 70
+Content-Length: 0
+
+]]></send>
+  <pause milliseconds="1000" />
+  <send retrans="500"><![CDATA[
+INVITE [next_url] SIP/2.0
+Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+From: [$local_to];tag=[pid]SIPpTag01[call_number]
+To: [$remote_from]
+Call-ID: [call_id]
+CSeq: 2 INVITE
+Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+Max-Forwards: 70
+Content-Type: application/sdp
+Content-Length: [len]
+
+v=0
+o=carrier 53655765 2353687639 IN IP[local_ip_type] [local_ip]
+s=-
+c=IN IP[media_ip_type] [media_ip]
+t=0 0
+m=audio [media_port] RTP/AVP 8 101
+a=rtpmap:8 PCMA/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-15
+a=sendrecv
+
+]]></send>
+  <recv response="100" optional="true" />
+  <recv response="200" />
+  <send><![CDATA[
+ACK [next_url] SIP/2.0
+Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+From: [$local_to];tag=[pid]SIPpTag01[call_number]
+To: [$remote_from]
+Call-ID: [call_id]
+CSeq: 2 ACK
+Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+Max-Forwards: 70
+Content-Length: 0
+
+]]></send>
+  <nop><action><exec play_pcap_audio="/usr/share/sip-tester/g711a.pcap" /></action></nop>
+  <recv request="BYE" timeout="60000" />
+  <send><![CDATA[
+SIP/2.0 200 OK
+[last_Via:]
+[last_From:]
+[last_To:]
+[last_Call-ID:]
+[last_CSeq:]
+Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+Content-Length: 0
+
+]]></send>
+  <timewait milliseconds="500" />
+</scenario>

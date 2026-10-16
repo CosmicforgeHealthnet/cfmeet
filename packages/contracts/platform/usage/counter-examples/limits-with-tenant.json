@@ -1,0 +1,93 @@
+{
+  "generatedAt": "2031-03-01T10:06:30.000Z",
+  "limits": [
+    {
+      "limit": "REQUEST_RATE",
+      "window": "MINUTE",
+      "resetsAt": "2031-03-01T10:07:00.000Z",
+      "scope": "CREDENTIAL",
+      "ceiling": 600,
+      "current": 12,
+      "remaining": 588,
+      "levels": [
+        {
+          "scope": "TENANT",
+          "ceiling": 1000,
+          "current": 40,
+          "remaining": 960
+        },
+        {
+          "scope": "CREDENTIAL",
+          "ceiling": 600,
+          "current": 12,
+          "remaining": 588
+        }
+      ]
+    },
+    {
+      "limit": "CONCURRENT_CALLS",
+      "window": "NONE",
+      "scope": "TENANT",
+      "ceiling": 3,
+      "current": 2,
+      "remaining": 1,
+      "levels": [
+        {
+          "scope": "TENANT",
+          "ceiling": 3,
+          "current": 2,
+          "remaining": 1
+        },
+        {
+          "scope": "CREDENTIAL",
+          "ceiling": 3,
+          "current": 0,
+          "remaining": 3
+        }
+      ]
+    },
+    {
+      "limit": "TELECOM_SPEND_DAILY",
+      "window": "DAY",
+      "resetsAt": "2031-03-02T00:00:00.000Z",
+      "currency": "NGN",
+      "scope": "ENVIRONMENT",
+      "ceiling": 100000,
+      "current": 99000,
+      "remaining": 1000,
+      "levels": [
+        {
+          "scope": "ENVIRONMENT",
+          "ceiling": 100000,
+          "current": 99000,
+          "remaining": 1000
+        },
+        {
+          "scope": "TENANT",
+          "ceiling": 500000,
+          "current": 99000,
+          "remaining": 401000
+        }
+      ]
+    },
+    {
+      "limit": "TELECOM_SPEND_MONTHLY",
+      "window": "MONTH",
+      "resetsAt": "2031-04-01T00:00:00.000Z",
+      "currency": "NGN",
+      "scope": "ENVIRONMENT",
+      "ceiling": 1000000,
+      "current": 99000,
+      "remaining": 901000,
+      "levels": [
+        {
+          "scope": "ENVIRONMENT",
+          "ceiling": 1000000,
+          "current": 99000,
+          "remaining": 901000
+        }
+      ]
+    }
+  ],
+  "tenantId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e609"
+}

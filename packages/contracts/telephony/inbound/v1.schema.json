@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/telephony/inbound/v1.schema.json",
+  "title": "CF Meet Telephony inbound offer v1",
+  "description": "Phone-to-app (Part E §45): Telephony offers an inbound public call to a relay number to Calling (POST /internal/v1/telephony/inbound-calls, permission telephony-inbound.offer) after validating the SIP peer, resolving the relay mapping with Privacy Relay and protecting the caller. References only — never the called relay number, the caller's number, a provider id or SIP data. Calling answers with the canonical Call / CallLeg it created (or refuses; Telephony then rejects the dialog, revealing nothing).",
+  "oneOf": [
+    { "$ref": "#/$defs/InboundOffer" },
+    { "$ref": "#/$defs/InboundAnswer" }
+  ],
+  "$defs": {
+    "InboundOffer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "telephonyLegId", "correlationId", "scope", "inboundResolution", "callerContactReference", "allowedTargets", "maxDurationSeconds"],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "telephonyLegId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "correlationId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/CorrelationId" },
+        "scope": {
+          "description": "The owner scope of the called relay number's session, from Privacy Relay's RESOLVED mapping.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tenantId", "applicationId", "environmentId"],
+          "properties": {
+            "tenantId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+            "applicationId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+            "environmentId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" }
+          }
+        },
+        "inboundResolution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["decisionId", "contextId", "contextVersion", "relaySessionId", "relaySessionVersion", "assignmentId", "assignmentGeneration", "validUntil"],
+          "properties": {
+            "decisionId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+            "contextId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+            "contextVersion": { "type": "integer", "minimum": 1 },
+            "relaySessionId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+            "relaySessionVersion": { "type": "integer", "minimum": 1 },
+            "assignmentId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+            "assignmentGeneration": { "type": "integer", "minimum": 1 },
+            "validUntil": { "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/Timestamp" }
+          }
+        },
+        "callerContactReference": {
+          "description": "The protected caller (opaque ContactReference issued by Privacy Relay's Contact Vault).",
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContactReference"
+        },
+        "allowedTargets": {
+          "description": "Whom Privacy Relay currently lets this caller reach (subject references). Calling re-checks current authority before creating the Call.",
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object", "additionalProperties": false, "required": ["principalId"],
+                "properties": { "principalId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" } }
+              },
+              {
+                "type": "object", "additionalProperties": false, "required": ["contactReferenceId"],
+                "properties": { "contactReferenceId": { "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContactReference" } }
+              }
+            ]
+          }
+        },
+        "maxDurationSeconds": { "type": "integer", "minimum": 30, "maximum": 86400 }
+      }
+    },
+    "InboundAnswer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["callId", "callLegId", "routeClass"],
+      "properties": {
+        "callId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "callLegId": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
+        "routeClass": { "enum": ["PSTN_TO_APP", "PSTN_RELAY"] }
+      }
+    }
+  }
+}

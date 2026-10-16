@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1",
+  "telephonyLegId": "5b0f7a3e-9a1c-4c6e-8e43-2f1f3b9c0a11",
+  "correlationId": "corr_0123456789abcdef0123456789abcdef",
+  "scope": {
+    "tenantId": "11111111-2222-4333-8444-555555555555",
+    "applicationId": "21111111-2222-4333-8444-555555555555",
+    "environmentId": "31111111-2222-4333-8444-555555555555"
+  },
+  "deviceRef": "dev-front-desk-01",
+  "extension": "+2348012345678",
+  "maxDurationSeconds": 14400
+}

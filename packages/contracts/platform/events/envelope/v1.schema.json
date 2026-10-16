@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json",
+  "title": "CF Meet cross-service durable event envelope v1",
+  "description": "Infrastructure envelope for durable cross-service events. Producers persist events transactionally (outbox) with the state change they describe. The payload is described by its own registered contract identified by event_type and schema_version (Calling: cfmeet.calling.call-lifecycle-event for every calling.* event type). The envelope never carries secrets, service tokens, customer credentials, provider credentials, telephone numbers or protected contact plaintext.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "occurred_at",
+    "producer_service",
+    "runtime_environment",
+    "correlation_id",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "pattern": "^evt_[0-9a-f]{32}$"
+    },
+    "event_type": {
+      "description": "Dot-separated event type, prefixed by the producing domain.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+$"
+    },
+    "schema_version": {
+      "description": "Major version of the payload contract.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "producer_service": {
+      "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ServiceId"
+    },
+    "runtime_environment": {
+      "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RuntimeEnvironment"
+    },
+    "correlation_id": {
+      "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/CorrelationId"
+    },
+    "causation_id": {
+      "description": "event_id of the event that caused this one, if any.",
+      "type": "string",
+      "pattern": "^evt_[0-9a-f]{32}$"
+    },
+    "ownership": {
+      "description": "Owning customer scope of the event subject, when the subject belongs to a tenant.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenant_id",
+        "application_id"
+      ],
+      "properties": {
+        "tenant_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "application_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "application_environment_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "payload": {
+      "description": "Event payload (validated against its own contract). Top-level keys are snake_case; keys that name secrets or contact data are refused.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*$",
+        "not": {
+          "pattern": "(password|secret|token|credential|api_?key|phone|msisdn|e164|contact_plaintext)"
+        }
+      }
+    }
+  }
+}

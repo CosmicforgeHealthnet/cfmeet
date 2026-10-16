@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/telephony/capture/v1.schema.json",
+  "title": "CF Meet Telephony media capture delivery v1",
+  "description": "Part F (section 60): Calling commands CAPTURE on an internal enterprise SIP leg (provider-neutral; the edge records the caller into a TRANSIENT spool). When the capture finishes Telephony delivers it to Calling (POST /internal/v1/telephony/captures, permission telephony-capture.deliver): the audio base64-encoded with its size, duration and SHA-256, or a bounded failure. Calling verifies integrity, stores the audio in protected object storage and answers STORED / ALREADY_STORED / ACKNOWLEDGED; only then does Telephony delete its spool copy. 503 ARTIFACT_STORAGE_UNAVAILABLE: retry with backoff (dead-letter after the bound, spool removed). Never an object key, bucket, URL, file path, channel id or provider identifier.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/CaptureReport"
+    },
+    {
+      "$ref": "#/$defs/CaptureReportAck"
+    },
+    {
+      "$ref": "#/$defs/CaptureRequest"
+    }
+  ],
+  "$defs": {
+    "CaptureRequest": {
+      "description": "Part F, CAPTURE only: capture the leg's caller audio into the edge's TRANSIENT spool for delivery to Calling (captureId is Calling's message / recording id). Never an object-storage key, a bucket, a URL or a file path: Telephony names its own spool file.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captureId",
+        "purpose",
+        "maxDurationSeconds",
+        "beep"
+      ],
+      "properties": {
+        "captureId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "purpose": {
+          "enum": [
+            "VOICEMAIL",
+            "RECORDING"
+          ]
+        },
+        "maxDurationSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440,
+          "description": "VOICEMAIL at most 600, RECORDING at most 1440."
+        },
+        "beep": {
+          "type": "boolean"
+        }
+      }
+    },
+    "CaptureReport": {
+      "description": "A finished (COMPLETED + media) or failed (FAILED + failureCode, no media) capture.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "captureId",
+        "telephonyLegId",
+        "callId",
+        "callLegId",
+        "outcome"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "1"
+        },
+        "captureId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "telephonyLegId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callLegId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "outcome": {
+          "enum": [
+            "COMPLETED",
+            "FAILED"
+          ]
+        },
+        "failureCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,63}$"
+        },
+        "media": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "contentType",
+            "durationMs",
+            "sizeBytes",
+            "sha256",
+            "base64"
+          ],
+          "properties": {
+            "contentType": {
+              "const": "audio/wav"
+            },
+            "durationMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 3600000
+            },
+            "sizeBytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 25165824
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$",
+              "description": "Lower-case hex SHA-256 of the audio bytes."
+            },
+            "base64": {
+              "type": "string",
+              "minLength": 4,
+              "maxLength": 33554432,
+              "contentEncoding": "base64",
+              "contentMediaType": "audio/wav"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "COMPLETED"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "media"
+            ],
+            "not": {
+              "required": [
+                "failureCode"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "FAILED"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "failureCode"
+            ],
+            "not": {
+              "required": [
+                "media"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "CaptureReportAck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captureId",
+        "status"
+      ],
+      "properties": {
+        "captureId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "enum": [
+            "STORED",
+            "ALREADY_STORED",
+            "ACKNOWLEDGED"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "event_id": "evt_9c4f5e2b6d7a4f8b9ca3445566778899",
+  "event_type": "CALL_SESSION_RECONNECTED",
+  "call_id": "0b8f6d2e-6c1a-4f5e-9a3b-2d7c8e9f0a11",
+  "tenant_id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+  "application_id": "2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a",
+  "application_environment_id": "3e4f5a6b-7c8d-4e9f-8a1b-2c3d4e5f6a7b",
+  "sequence": 20,
+  "call_version": 8,
+  "from_state": null,
+  "to_state": null,
+  "occurred_at": "2031-03-01T10:03:10.000001Z",
+  "correlation_id": "corr_fedcba9876543210fedcba9876543210",
+  "data": {
+    "session_id": "5a6b7c8d-9e0f-4a1b-8c3d-4e5f6a7b8c9d",
+    "participant_id": "4f5a6b7c-8d9e-4f0a-9b2c-3d4e5f6a7b8c",
+    "interval_number": 2
+  }
+}

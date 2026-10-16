@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/platform/common/v1.schema.json",
+  "title": "CF Meet platform common definitions v1",
+  "description": "Shared vocabulary for cross-service CF Meet contracts. Definitions only: the root schema places no constraints; contracts reference the $defs below.",
+  "$defs": {
+    "ServiceId": {
+      "description": "Stable, product-independent identity of a deployable CF Meet backend service, e.g. cfmeet.calling, cfmeet.privacy-relay, cfmeet.telephony. Never a wildcard.",
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^cfmeet\\.[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "RuntimeEnvironment": {
+      "description": "Deployment/runtime environment of a service identity. Not the same dimension as a customer's application environment (SANDBOX / TEST / PRODUCTION).",
+      "type": "string",
+      "enum": [
+        "local",
+        "test",
+        "staging",
+        "production"
+      ]
+    },
+    "RequestId": {
+      "description": "Server-generated identifier of one request / one service hop.",
+      "type": "string",
+      "pattern": "^req_[0-9a-f]{32}$"
+    },
+    "CorrelationId": {
+      "description": "Server-generated identifier that stays stable across every hop of one causal operation.",
+      "type": "string",
+      "pattern": "^corr_[0-9a-f]{32}$"
+    },
+    "Uuid": {
+      "description": "Lower-case hyphenated UUID.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "ApplicationEnvironmentKind": {
+      "description": "Kind of a customer application environment (Part B section 7).",
+      "type": "string",
+      "enum": [
+        "SANDBOX",
+        "TEST",
+        "PRODUCTION"
+      ]
+    },
+    "PrincipalKind": {
+      "description": "Category of communication principal (Part B section 10).",
+      "type": "string",
+      "enum": [
+        "NATIVE_CF_USER",
+        "EXTERNAL_APPLICATION_PRINCIPAL",
+        "ENTERPRISE_MEMBER",
+        "SERVICE_ACCOUNT",
+        "TELEPHONE_ENDPOINT",
+        "TEMPORARY_EXTERNAL_PARTICIPANT",
+        "BOT_OR_SERVICE"
+      ]
+    },
+    "KeyId": {
+      "description": "Identifier of a service signing key (JWS kid).",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "UnixTime": {
+      "description": "Seconds since the Unix epoch (UTC).",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "InternalPermission": {
+      "description": "Internal service permission, granted only by the receiving service's trust policy. The receiver and permitted issuers of each permission are fixed by the platform permission registry (packages/service-auth).",
+      "type": "string",
+      "enum": [
+        "communication.authorize",
+        "communication-context.read",
+        "protected-contact.resolve-for-execution",
+        "telephony-leg.originate",
+        "telephony-leg.terminate",
+        "telephony-leg.hold",
+        "telephony-leg.resume",
+        "telephony-bridge.manage",
+        "telephony-status.read",
+        "operational-callback.deliver",
+        "communication-context.write",
+        "relay-session.read",
+        "relay-session.write",
+        "communication-authority.enforce",
+        "protected-contact.grant-for-execution",
+        "relay-number.assign",
+        "relay-number.resolve-inbound",
+        "protected-contact.protect-inbound",
+        "telephony-event.apply",
+        "telephony-reconciliation.apply",
+        "telephony-inbound.offer",
+        "telephony-leg.media",
+        "telephony-enterprise.offer",
+        "telephony-capture.deliver",
+        "platform-event.publish"
+      ]
+    }
+  }
+}

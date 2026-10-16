@@ -1,0 +1,595 @@
+//! Application RTC calling (Part C §20–§25): the orchestration that turns the canonical
+//! Call aggregate into a working app-to-app voice / video / group call.
+//!
+//! ```text
+//! POST /v1/calls ─▶ REQUESTED ─▶ AUTHORIZED (APP_DIRECT_V1) ─▶ RESOLVING (endpoints)
+//!   ─▶ ROUTING (APPLICATION route, RTC leg, attempt 1, media binding) ─▶ provider ensure
+//!   ─▶ DIALING ─▶ RINGING (one invitation per endpoint) ─▶ single-winner accept
+//!   ─▶ ANSWERED ─▶ credentials ─▶ verified joins ─▶ CONNECTED ─▶ END ─▶ ENDING ─▶ cleanup
+//!   ─▶ ENDED
+//! ```
+//!
+//! Every step is a [`CallService`] transaction (state, evidence, events, outbox commit
+//! together); provider calls happen between transactions, never while a Call row is
+//! locked; realtime signals are published only after the transaction that produced them
+//! has committed. Business code here depends on the provider-neutral
+//! [`CallMediaProvider`] only.
+
+pub mod abuse_reports;
+pub mod blocks;
+mod control;
+mod create;
+pub mod enterprise;
+pub mod history;
+pub mod http;
+pub mod incidents;
+pub mod media;
+mod privacy;
+pub mod public;
+mod ringing;
+mod transfer;
+mod workers;
+
+use std::sync::Arc;
+
+use chrono::Duration;
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseConnection, DbBackend, EntityTrait, QueryFilter,
+    Statement,
+};
+use serde_json::{Map, Value};
+use uuid::Uuid;
+
+pub use blocks::AbuseControls;
+pub use control::{ActionAvailability, AvailableActions};
+pub use create::{CreateAppCall, CreatedAppCall};
+pub use ringing::{InvitationActor, RecoveredInvitation};
+pub use transfer::TransferRequest;
+pub use workers::WorkerReport;
+
+use super::{
+    command::{CallCommandContext, CallScope},
+    errors::{CallError, CallResult},
+    kinds::ParticipantRole,
+    read_model::CallSummaryView,
+    service::CallService,
+};
+use crate::{
+    config::ConfigError,
+    domain::{ApplicationId, EnvironmentId, ServiceAccountId, TenantId},
+    endpoints::EndpointService,
+    media::{CallMediaProvider, MediaCredentialPolicy},
+    models::{call_endpoints, call_invitations, call_participants, call_sessions, calls},
+    platform::principals::PrincipalResolver,
+    privacy_relay::{PrivacyRelayAuthority, UnconfiguredPrivacyRelay},
+    signaling::{
+        bus::{RealtimeSignalBus, SignalEnvelope},
+        push::{NoPushTransport, PushDispatcher},
+        signals::{self, SignalType},
+    },
+};
+
+/// Tunables of application calling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppCallingConfig {
+    /// Server-time ring window of an invitation.
+    pub invitation_ttl: Duration,
+    /// Maximum logical participants of one Call (initiator included).
+    pub max_group_participants: usize,
+    /// Maximum endpoints rung per participant.
+    pub max_endpoints_per_participant: usize,
+    /// How long an empty media resource survives at the provider.
+    pub media_empty_timeout: Duration,
+    /// Regular reconciliation interval of an active media binding.
+    pub reconcile_interval: Duration,
+    /// How long a Call may wait for its media resource before it fails (MEDIA).
+    pub media_ensure_deadline: Duration,
+    /// How long an accepted transfer target may take to join before the transfer fails.
+    pub transfer_join_deadline: Duration,
+    /// Failed storage deletes of one voicemail / recording artifact after which an
+    /// incident is raised (once; the deletion keeps being retried).
+    pub artifact_delete_incident_attempts: i32,
+    /// Attempts of one durable Telephony command before it is DEAD (an incident is
+    /// raised; it is never retried again).
+    pub telephony_command_max_attempts: i32,
+    /// Generic setup deadline: a Call still pre-connect (REQUESTED … RINGING) with no
+    /// Call event for this long ends FAILED (TIMEOUT). Above every legitimate wait without
+    /// events (ring windows ≤ 300 s, one queue wait ≤ 3600 s, IVR inputs ≤ 60 s each).
+    pub setup_deadline: Duration,
+    /// Age of the oldest pending outbox event / Telephony command above which a
+    /// WORKER_BACKLOG incident is raised.
+    pub worker_backlog_incident_age: Duration,
+    /// `CALLING_NEW_CALLS_ENABLED` (default ON): the master switch for NEW calls of every
+    /// kind. Off refuses new calls only — ending, leaving, declining, reconciliation,
+    /// cleanup and artifact deletion keep working.
+    pub new_calls_enabled: bool,
+    /// `CALLING_APP_CALLING_ENABLED` (default ON): new application (app-to-app RTC) calls.
+    pub app_calling_enabled: bool,
+}
+
+impl Default for AppCallingConfig {
+    fn default() -> Self {
+        Self {
+            invitation_ttl: Duration::seconds(45),
+            max_group_participants: 16,
+            max_endpoints_per_participant: 10,
+            media_empty_timeout: Duration::minutes(5),
+            reconcile_interval: Duration::seconds(15),
+            media_ensure_deadline: Duration::seconds(60),
+            transfer_join_deadline: Duration::seconds(60),
+            artifact_delete_incident_attempts: 5,
+            telephony_command_max_attempts: 40,
+            setup_deadline: Duration::seconds(7200),
+            worker_backlog_incident_age: Duration::seconds(600),
+            new_calls_enabled: true,
+            app_calling_enabled: true,
+        }
+    }
+}
+
+impl AppCallingConfig {
+    /// `CALLING_INVITATION_TTL_SECONDS` (10–300, default 45),
+    /// `CALLING_MAX_GROUP_PARTICIPANTS` (2–64, default 16),
+    /// `CALLING_MAX_ENDPOINTS_PER_PARTICIPANT` (1–50, default 10),
+    /// `CALLING_MEDIA_RECONCILE_INTERVAL_SECONDS` (2–300, default 15),
+    /// `CALLING_ARTIFACT_DELETE_INCIDENT_ATTEMPTS` (1–100, default 5),
+    /// `CALLING_TELEPHONY_COMMAND_MAX_ATTEMPTS` (3–1000, default 40),
+    /// `CALLING_CALL_SETUP_DEADLINE_SECONDS` (3900–86400, default 7200),
+    /// `CALLING_WORKER_BACKLOG_INCIDENT_SECONDS` (60–86400, default 600),
+    /// `CALLING_NEW_CALLS_ENABLED` / `CALLING_APP_CALLING_ENABLED` (true / false, default
+    /// true).
+    pub fn from_lookup(get: &impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
+        let switch = |var: &'static str| -> Result<bool, ConfigError> {
+            match get(var).map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+                None | Some("") | Some("true") | Some("1") => Ok(true),
+                Some("false") | Some("0") => Ok(false),
+                Some(_) => Err(ConfigError::invalid(var, "must be true or false".into())),
+            }
+        };
+        let number =
+            |var: &'static str, default: i64, min: i64, max: i64| -> Result<i64, ConfigError> {
+                match get(var) {
+                    None => Ok(default),
+                    Some(v) => v
+                        .trim()
+                        .parse::<i64>()
+                        .ok()
+                        .filter(|n| (min..=max).contains(n))
+                        .ok_or_else(|| {
+                            ConfigError::invalid(
+                                var,
+                                format!("must be an integer between {min} and {max}"),
+                            )
+                        }),
+                }
+            };
+        let defaults = Self::default();
+        Ok(Self {
+            invitation_ttl: Duration::seconds(number(
+                "CALLING_INVITATION_TTL_SECONDS",
+                45,
+                10,
+                300,
+            )?),
+            max_group_participants: number("CALLING_MAX_GROUP_PARTICIPANTS", 16, 2, 64)? as usize,
+            max_endpoints_per_participant: number(
+                "CALLING_MAX_ENDPOINTS_PER_PARTICIPANT",
+                10,
+                1,
+                50,
+            )? as usize,
+            reconcile_interval: Duration::seconds(number(
+                "CALLING_MEDIA_RECONCILE_INTERVAL_SECONDS",
+                15,
+                2,
+                300,
+            )?),
+            artifact_delete_incident_attempts: number(
+                "CALLING_ARTIFACT_DELETE_INCIDENT_ATTEMPTS",
+                5,
+                1,
+                100,
+            )? as i32,
+            telephony_command_max_attempts: number(
+                "CALLING_TELEPHONY_COMMAND_MAX_ATTEMPTS",
+                40,
+                3,
+                1000,
+            )? as i32,
+            // Never below one maximum queue wait (3600 s) plus margin.
+            setup_deadline: Duration::seconds(number(
+                "CALLING_CALL_SETUP_DEADLINE_SECONDS",
+                7200,
+                3900,
+                86_400,
+            )?),
+            worker_backlog_incident_age: Duration::seconds(number(
+                "CALLING_WORKER_BACKLOG_INCIDENT_SECONDS",
+                600,
+                60,
+                86_400,
+            )?),
+            new_calls_enabled: switch("CALLING_NEW_CALLS_ENABLED")?,
+            app_calling_enabled: switch("CALLING_APP_CALLING_ENABLED")?,
+            ..defaults
+        })
+    }
+}
+
+/// The application-calling orchestration.
+#[derive(Clone)]
+pub struct AppCallService {
+    calls: Arc<CallService>,
+    endpoints: Arc<EndpointService>,
+    principals: Arc<PrincipalResolver>,
+    media: Option<Arc<dyn CallMediaProvider>>,
+    credentials: MediaCredentialPolicy,
+    bus: Arc<dyn RealtimeSignalBus>,
+    push: Arc<dyn PushDispatcher>,
+    privacy: Arc<dyn PrivacyRelayAuthority>,
+    public: public::PublicNetwork,
+    config: AppCallingConfig,
+    /// Enterprise kill switches (Part F).
+    pub(crate) enterprise_flags: crate::enterprise::EnterpriseFlags,
+    /// Protected artifact storage (Part F voicemail / recordings).
+    pub(crate) artifacts: Arc<dyn cf_object_storage::ObjectStore>,
+    /// Media capture of application (RTC) callers (Part F; default: unavailable).
+    pub(crate) capture: Arc<dyn enterprise::CallMediaCapture>,
+    /// Abuse-control thresholds (Part H §69, §83).
+    pub(crate) abuse_controls: AbuseControls,
+    /// Platform compliance overlay (Part H §78): countries whose paid routes always
+    /// require compliance eligibility, whatever the customer policy says.
+    pub(crate) compliance_overlay: crate::routing::compliance::ComplianceOverlay,
+}
+
+impl AppCallService {
+    pub fn new(
+        calls: Arc<CallService>,
+        endpoints: Arc<EndpointService>,
+        principals: Arc<PrincipalResolver>,
+        media: Option<Arc<dyn CallMediaProvider>>,
+        credentials: MediaCredentialPolicy,
+        bus: Arc<dyn RealtimeSignalBus>,
+        config: AppCallingConfig,
+    ) -> Self {
+        Self {
+            calls,
+            endpoints,
+            principals,
+            media,
+            credentials,
+            bus,
+            push: Arc::new(NoPushTransport),
+            privacy: Arc::new(UnconfiguredPrivacyRelay),
+            public: public::PublicNetwork::default(),
+            config,
+            enterprise_flags: crate::enterprise::EnterpriseFlags::default(),
+            artifacts: Arc::new(cf_object_storage::UnconfiguredStore),
+            capture: Arc::new(enterprise::UnavailableCapture),
+            abuse_controls: AbuseControls::default(),
+            compliance_overlay: Default::default(),
+        }
+    }
+
+    /// Uses `controls` as the abuse-control thresholds (default: documented defaults).
+    pub fn with_abuse_controls(mut self, controls: AbuseControls) -> Self {
+        self.abuse_controls = controls;
+        self
+    }
+
+    /// Uses `overlay` as the platform compliance overlay (default: empty).
+    pub fn with_compliance_overlay(
+        mut self,
+        overlay: crate::routing::compliance::ComplianceOverlay,
+    ) -> Self {
+        self.compliance_overlay = overlay;
+        self
+    }
+
+    /// Uses `artifacts` as the protected artifact store (default: unconfigured).
+    pub fn with_artifacts(mut self, artifacts: Arc<dyn cf_object_storage::ObjectStore>) -> Self {
+        self.artifacts = artifacts;
+        self
+    }
+
+    /// Uses `capture` for application (RTC) media capture (default: unavailable).
+    pub fn with_capture(mut self, capture: Arc<dyn enterprise::CallMediaCapture>) -> Self {
+        self.capture = capture;
+        self
+    }
+
+    /// Uses `flags` as the enterprise kill switches (default: all off).
+    pub fn with_enterprise_flags(mut self, flags: crate::enterprise::EnterpriseFlags) -> Self {
+        self.enterprise_flags = flags;
+        self
+    }
+
+    /// Uses `privacy` as the Privacy Relay authority of protected calls (default:
+    /// unconfigured — protected calls fail closed; ordinary calls are unaffected).
+    pub fn with_privacy_relay(mut self, privacy: Arc<dyn PrivacyRelayAuthority>) -> Self {
+        self.privacy = privacy;
+        self
+    }
+
+    /// Uses `push` for push-ready ring offers (default: no push transport).
+    pub fn with_push(mut self, push: Arc<dyn PushDispatcher>) -> Self {
+        self.push = push;
+        self
+    }
+
+    /// The server-side Calling switches for NEW calls (§95): the master switch refuses
+    /// every new call; `application` also requires the app-calling switch. Existing
+    /// Calls are never touched — ending, leaving, declining, reconciliation, cleanup and
+    /// artifact deletion do not consult them.
+    pub(crate) fn require_new_calls(&self, application: bool) -> CallResult<()> {
+        if !self.config.new_calls_enabled {
+            crate::metrics::inc(
+                "calling_new_calls_refused_total",
+                &[("reason", "CALLING_DISABLED")],
+            );
+            return Err(CallError::CapabilityUnavailable("new calls are disabled"));
+        }
+        if application && !self.config.app_calling_enabled {
+            crate::metrics::inc(
+                "calling_new_calls_refused_total",
+                &[("reason", "APP_CALLING_DISABLED")],
+            );
+            return Err(CallError::CapabilityUnavailable(
+                "application calling is disabled",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn config(&self) -> &AppCallingConfig {
+        &self.config
+    }
+
+    pub fn bus(&self) -> &Arc<dyn RealtimeSignalBus> {
+        &self.bus
+    }
+
+    pub fn calls(&self) -> &Arc<CallService> {
+        &self.calls
+    }
+
+    fn db(&self) -> &DatabaseConnection {
+        self.calls.db()
+    }
+
+    /// The media provider, or CAPABILITY_UNAVAILABLE when application media is disabled.
+    fn provider(&self) -> CallResult<&Arc<dyn CallMediaProvider>> {
+        self.media.as_ref().ok_or(CallError::CapabilityUnavailable(
+            "application media is not configured",
+        ))
+    }
+
+    /// Generic capability flags of the configured provider (none when disabled).
+    pub fn capabilities(&self) -> Option<crate::media::MediaProviderCapabilities> {
+        self.media.as_ref().map(|m| m.capabilities())
+    }
+}
+
+/// Scope of a persisted Call row.
+pub(crate) fn scope_of(call: &calls::Model) -> CallScope {
+    CallScope::from_parts(
+        TenantId::from_uuid(call.tenant_id),
+        ApplicationId::from_uuid(call.application_id),
+        EnvironmentId::from_uuid(call.environment_id),
+    )
+}
+
+/// A command Calling issues itself for `call` (workers, callbacks, reconciliation).
+pub(crate) fn system_cmd(call: &calls::Model) -> CallCommandContext {
+    CallCommandContext::system_correlated(
+        scope_of(call),
+        ServiceAccountId::from_uuid(call.created_by_service_account_id),
+        call.correlation_id.as_deref(),
+    )
+}
+
+/// The correlation id of the request that created `call` (fresh for a Call created
+/// before it was recorded): every command Calling sends for the Call carries it.
+pub(crate) fn call_correlation(call: &calls::Model) -> cf_service_auth::CorrelationId {
+    call.correlation_id
+        .as_deref()
+        .and_then(|c| cf_service_auth::CorrelationId::parse(c).ok())
+        .unwrap_or_else(cf_service_auth::CorrelationId::generate)
+}
+
+/// Safe public summary of a Call row.
+pub(crate) fn summary(call: &calls::Model) -> Value {
+    serde_json::to_value(CallSummaryView::from(&super::aggregate::Call::from(
+        call.clone(),
+    )))
+    .unwrap_or(Value::Null)
+}
+
+/// Result of an idempotent command: the response body every replay receives.
+#[derive(Debug, Clone)]
+pub struct CommandOutcome {
+    pub body: Value,
+    pub replayed: bool,
+}
+
+/// Signals (and push-ready offers) produced by one committed transaction, published
+/// after commit.
+#[derive(Default)]
+pub(crate) struct PendingSignals {
+    signals: Vec<SignalEnvelope>,
+    pushes: Vec<(Uuid, Value)>,
+}
+
+impl PendingSignals {
+    pub fn push(&mut self, endpoint_ids: Vec<Uuid>, signal: Value) {
+        if !endpoint_ids.is_empty() {
+            self.signals.push(SignalEnvelope {
+                endpoint_ids,
+                signal,
+            });
+        }
+    }
+}
+
+impl AppCallService {
+    /// Publishes committed signals. A failed publish never affects the authoritative
+    /// state: endpoints recover through the API.
+    pub(crate) async fn publish(&self, signals: PendingSignals) {
+        for envelope in signals.signals {
+            if let Err(error) = self.bus.publish(envelope).await {
+                tracing::warn!(%error, "realtime signal not published (recoverable via API)");
+            }
+        }
+        for (target, payload) in signals.pushes {
+            self.push.dispatch(target, payload).await;
+        }
+    }
+
+    /// The Call's latest event sequence (for signal ordering).
+    pub(crate) async fn sequence<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        call_id: Uuid,
+    ) -> CallResult<i64> {
+        let row = db
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT COALESCE(MAX(sequence), 0)::bigint FROM call_events WHERE call_id = $1",
+                vec![call_id.into()],
+            ))
+            .await?
+            .ok_or(CallError::NotFound)?;
+        Ok(row.try_get_by_index::<i64>(0)?)
+    }
+
+    /// Every endpoint involved in a Call: sessions' endpoints and invited endpoints.
+    pub(crate) async fn call_endpoints<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        call_id: Uuid,
+    ) -> CallResult<Vec<Uuid>> {
+        let mut ids: Vec<Uuid> = call_sessions::Entity::find()
+            .filter(call_sessions::Column::CallId.eq(call_id))
+            .all(db)
+            .await?
+            .into_iter()
+            .filter_map(|s| s.endpoint_id)
+            .collect();
+        ids.extend(
+            call_invitations::Entity::find()
+                .filter(call_invitations::Column::CallId.eq(call_id))
+                .all(db)
+                .await?
+                .into_iter()
+                .map(|i| i.endpoint_id),
+        );
+        ids.sort();
+        ids.dedup();
+        Ok(ids)
+    }
+
+    /// Builds a call-level signal for every endpoint of the Call.
+    pub(crate) async fn call_signal<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        pending: &mut PendingSignals,
+        kind: SignalType,
+        call: &calls::Model,
+        correlation_id: &str,
+        data: Map<String, Value>,
+    ) -> CallResult<()> {
+        let sequence = self.sequence(db, call.id).await?;
+        let endpoints = self.call_endpoints(db, call.id).await?;
+        pending.push(
+            endpoints,
+            signals::build(
+                kind,
+                call,
+                sequence,
+                correlation_id,
+                None,
+                data,
+                self.calls.now(),
+            ),
+        );
+        Ok(())
+    }
+
+    /// Builds an invitation signal for the invitation's own endpoint.
+    pub(crate) async fn invitation_signal<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        pending: &mut PendingSignals,
+        kind: SignalType,
+        call: &calls::Model,
+        invitation: &call_invitations::Model,
+        correlation_id: &str,
+    ) -> CallResult<()> {
+        let sequence = self.sequence(db, call.id).await?;
+        if kind == SignalType::Incoming {
+            self.push_offer(db, pending, call, invitation).await?;
+        }
+        pending.push(
+            vec![invitation.endpoint_id],
+            signals::build(
+                kind,
+                call,
+                sequence,
+                correlation_id,
+                Some(invitation),
+                Map::new(),
+                self.calls.now(),
+            ),
+        );
+        Ok(())
+    }
+}
+
+impl AppCallService {
+    /// Queues the push-ready payload of a new offer when its endpoint has a push target.
+    async fn push_offer<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        pending: &mut PendingSignals,
+        call: &calls::Model,
+        invitation: &call_invitations::Model,
+    ) -> CallResult<()> {
+        let Some(target) = call_endpoints::Entity::find_by_id(invitation.endpoint_id)
+            .one(db)
+            .await?
+            .and_then(|e| e.push_target_ref)
+        else {
+            return Ok(());
+        };
+        let caller = call_participants::Entity::find()
+            .filter(call_participants::Column::CallId.eq(call.id))
+            .filter(call_participants::Column::Role.eq(ParticipantRole::Initiator))
+            .one(db)
+            .await?
+            .and_then(|p| p.display_name);
+        pending.pushes.push((
+            target,
+            signals::push_payload(call, invitation, caller.as_deref()),
+        ));
+        Ok(())
+    }
+}
+
+/// Signal kind announcing a Call that reached `state` (terminal / ending / connected …).
+pub(crate) fn state_signal(state: super::state::CallState) -> Option<SignalType> {
+    use super::state::CallState::*;
+    Some(match state {
+        Ringing => SignalType::Ringing,
+        Answered => SignalType::Answered,
+        Connected => SignalType::Connected,
+        Held => SignalType::Held,
+        Transferring => SignalType::TransferStarted,
+        Ending | Ended => SignalType::Ended,
+        Declined => SignalType::Declined,
+        Busy => SignalType::Busy,
+        NoAnswer => SignalType::NoAnswer,
+        Failed => SignalType::Failed,
+        Cancelled => SignalType::Cancelled,
+        _ => return None,
+    })
+}

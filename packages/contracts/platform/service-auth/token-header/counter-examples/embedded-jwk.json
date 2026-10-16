@@ -1,0 +1,10 @@
+{
+  "alg": "EdDSA",
+  "typ": "cf-service+jwt",
+  "kid": "x",
+  "jwk": {
+    "kty": "OKP",
+    "crv": "Ed25519",
+    "x": "AAAA"
+  }
+}

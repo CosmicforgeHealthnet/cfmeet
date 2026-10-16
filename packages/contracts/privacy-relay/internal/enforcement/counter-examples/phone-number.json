@@ -1,0 +1,10 @@
+{
+  "enforcementEventId": "4a2b3c4d-5e6f-4071-8283-94a5b6c7d8e9",
+  "contextId": "0e3c7a52-6f1b-4a7e-9d5c-2b8f4e1a9c30",
+  "contextVersion": 3,
+  "relaySessionIds": [],
+  "reason": "CONTEXT_REVOKED",
+  "affectedPrincipalIds": [],
+  "terminateActiveCalls": true,
+  "phoneNumber": "+2348012345678"
+}

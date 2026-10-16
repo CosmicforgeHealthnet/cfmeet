@@ -1,0 +1,57 @@
+{
+  "graph": {
+    "startNode": "hello",
+    "nodes": [
+      {
+        "id": "hello",
+        "kind": "PROMPT",
+        "prompt": {
+          "builtin": "WELCOME"
+        },
+        "next": "main"
+      },
+      {
+        "id": "main",
+        "kind": "MENU",
+        "prompt": {
+          "builtin": "MENU"
+        },
+        "inputTimeoutSeconds": 6,
+        "maxRetries": 2,
+        "options": [
+          {
+            "digit": "1",
+            "next": "sales"
+          },
+          {
+            "digit": "2",
+            "next": "support"
+          },
+          {
+            "digit": "0",
+            "next": "bye"
+          }
+        ],
+        "onInvalid": "bye",
+        "onTimeout": "bye"
+      },
+      {
+        "id": "sales",
+        "kind": "ROUTE_EXTENSION",
+        "extensionId": "8b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b"
+      },
+      {
+        "id": "support",
+        "kind": "ROUTE_QUEUE",
+        "queueId": "9b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b"
+      },
+      {
+        "id": "bye",
+        "kind": "HANGUP",
+        "prompt": {
+          "builtin": "GOODBYE"
+        }
+      }
+    ]
+  }
+}

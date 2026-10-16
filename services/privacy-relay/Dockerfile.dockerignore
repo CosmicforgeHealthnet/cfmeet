@@ -1,0 +1,16 @@
+# Build-context filter for services/privacy-relay/Dockerfile (context: repository root).
+# Everything is excluded except the two directories the image is built from.
+*
+!packages/service-auth
+!services/privacy-relay
+
+# Never send build output, local configuration or key material.
+**/target
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.log
+**/*.rs.bk
+services/privacy-relay/Dockerfile
+services/privacy-relay/Dockerfile.dockerignore

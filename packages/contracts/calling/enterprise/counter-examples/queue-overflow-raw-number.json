@@ -1,0 +1,10 @@
+{
+  "name": "Support",
+  "maxWaitSeconds": 600,
+  "offerTimeoutSeconds": 20,
+  "capacity": 10,
+  "overflow": {
+    "type": "PHONE",
+    "number": "+2348012345678"
+  }
+}

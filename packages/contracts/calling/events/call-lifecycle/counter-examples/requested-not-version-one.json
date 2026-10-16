@@ -1,0 +1,21 @@
+{
+  "event_id": "evt_6f1c2b9e3a4d4c5e8f70112233445566",
+  "event_type": "CALL_REQUESTED",
+  "call_id": "0b8f6d2e-6c1a-4f5e-9a3b-2d7c8e9f0a11",
+  "tenant_id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+  "application_id": "2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a",
+  "application_environment_id": "3e4f5a6b-7c8d-4e9f-8a1b-2c3d4e5f6a7b",
+  "sequence": 1,
+  "call_version": 2,
+  "from_state": null,
+  "to_state": "REQUESTED",
+  "occurred_at": "2031-03-01T10:00:30.000000Z",
+  "correlation_id": "corr_0123456789abcdef0123456789abcdef",
+  "data": {
+    "call_kind": "VOICE",
+    "initiator_participant_id": "4f5a6b7c-8d9e-4f0a-9b2c-3d4e5f6a7b8c",
+    "initiator_principal_kind": "EXTERNAL_APPLICATION_PRINCIPAL",
+    "has_communication_context": false,
+    "has_privacy_relay_ref": false
+  }
+}

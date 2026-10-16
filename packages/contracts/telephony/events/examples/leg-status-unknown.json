@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1",
+  "eventId": "1c4f7a2b-3d5e-4f60-9b1c-2d3e4f5a6b7c",
+  "eventType": "LEG_STATUS_UNKNOWN",
+  "occurredAt": "2031-03-01T10:00:05Z",
+  "telephonyLegId": "7a8b9c0d-1e2f-4a3b-9c4d-5e6f7a8b9c0d",
+  "callId": "11111111-2222-4333-8444-555555555555",
+  "callLegId": "22222222-3333-4444-8555-666666666666",
+  "sequence": 3,
+  "direction": "OUTBOUND",
+  "routeClass": "APP_TO_PSTN",
+  "legStatus": "UNKNOWN",
+  "definite": false
+}

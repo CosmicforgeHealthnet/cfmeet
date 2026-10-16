@@ -1,0 +1,5 @@
+{
+  "alg": "none",
+  "typ": "cf-service+jwt",
+  "kid": "calling-staging-2026-10"
+}

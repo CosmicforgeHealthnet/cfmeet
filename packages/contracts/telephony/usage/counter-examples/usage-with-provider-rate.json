@@ -1,0 +1,17 @@
+{
+  "telephonyLegId": "6a96714c-7e1e-4681-92ad-ed036023bbe8",
+  "callId": "b73ecb2e-4de8-4415-9faf-41165fc82474",
+  "callLegId": "14f8f793-46c7-4276-b3ec-e02001abc447",
+  "routeRef": "ng-a",
+  "destinationCountry": "NG",
+  "connectedDurationMs": 61200,
+  "billableSeconds": 62,
+  "providerCostMinor": null,
+  "estimatedCostMinor": 100,
+  "currency": "NGN",
+  "costKnown": false,
+  "finalizationStatus": "FINAL",
+  "idempotencyKey": "usage-6a96714c-7e1e-4681-92ad-ed036023bbe8",
+  "finalizedAt": "2026-10-08T22:16:12Z",
+  "providerRatePerMinute": 12
+}

@@ -1,0 +1,403 @@
+name: Telephony service
+
+# services/telephony — public-network EXECUTION (Part E §39–§51): Telephony legs, durable
+# commands with a transmit fence, the provider-neutral interconnect contract (SIP trunk on
+# the CF Meet edge; a deterministic adapter for tests only), normalized provider events,
+# unknown outcomes and reconciliation, failover, bridges, usage, abuse signals and bounded
+# metrics. It owns its own PostgreSQL database and depends only on packages/service-auth
+# and the contracts. It never decides whether a business user may call (Calling / Privacy
+# Relay do) and never touches another service's database.
+#
+# Real SIP signalling against the edge runs in telephony-sip-certification.yml. Real
+# carrier certification needs protected staging secrets and is NOT part of generic CI
+# (tests/real_interconnect_certification.rs prints NOT RUN without them).
+#
+# CI builds carry no debug info and no incremental state; debug assertions stay on.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/telephony/**"
+      # The cross-service e2e builds Calling and Privacy Relay from source.
+      - "services/calling/**"
+      - "services/privacy-relay/**"
+      - "packages/service-auth/**"
+      - "packages/object-storage/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
+      - "infra/telephony/**"
+      - ".github/workflows/telephony.yml"
+  pull_request:
+    paths:
+      - "services/telephony/**"
+      # The cross-service e2e builds Calling and Privacy Relay from source.
+      - "services/calling/**"
+      - "services/privacy-relay/**"
+      - "packages/service-auth/**"
+      - "packages/object-storage/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
+      - "infra/telephony/**"
+      - ".github/workflows/telephony.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: telephony-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: services/telephony
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  lint:
+    name: fmt / check / clippy / boundaries / secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/telephony -> target
+          key: lint
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo check
+        run: cargo check --workspace --locked
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Architecture tests (no other service, provider / SIP specifics confined, no number logging)
+        run: cargo test --locked --test architecture
+
+      - name: Repository guards
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -i 'phase-03'; then
+            echo "::error::a phase-03 path exists in the repository"; exit 1
+          fi
+          if grep -n -E 'services/calling|services/privacy-relay|services/meeting-service|calling-migration|privacy-relay-migration' \
+               services/telephony/Cargo.toml services/telephony/migration/Cargo.toml; then
+            echo "::error::services/telephony depends on another service"; exit 1
+          fi
+          # Telephony is configured with its OWN database only.
+          if grep -rn -E 'CALLING_DATABASE_URL|PRIVACY_RELAY_DATABASE_URL|MEETING_DATABASE_URL' services/telephony/src; then
+            echo "::error::another service's database URL referenced by Telephony"; exit 1
+          fi
+
+      - name: Secret scan (no key, trunk credential or provider token committed)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          # Private keys anywhere in Telephony / its infrastructure.
+          if git grep -n -I -E -- '-----BEGIN [A-Z ]*PRIVATE KEY-----' -- services/telephony infra/telephony; then
+            echo "::error::private key material committed"; exit 1
+          fi
+          # SIP / ARI passwords and provider tokens: only the loopback certification
+          # placeholders (infra/telephony/certification, test code) and *.example files.
+          if git grep -n -I -i -E '(password|secret|token|api[_-]?key)[[:space:]]*[=:][[:space:]]*["'"'"']?[A-Za-z0-9/+_.-]{12,}' \
+               -- infra/telephony services/telephony/src \
+               ':!infra/telephony/certification/**' ':!*.example*' ':!services/telephony/src/**/tests.rs' \
+             | grep -v -E 'secret_ref|credential_ref|SECRET_REF|_FILE|env\(|from_env|Zeroizing|#\[|//'; then
+            echo "::error::a credential-shaped value is committed"; exit 1
+          fi
+          # Trunk credentials are never stored in database rows: only references.
+          if grep -n -i -E '\b(password|secret)\b[[:space:]]+(TEXT|VARCHAR|BYTEA)' services/telephony/migration/src/*.rs \
+               | grep -v -E 'secret_ref|grant_secret'; then
+            echo "::error::a secret column in Telephony's schema"; exit 1
+          fi
+
+  test:
+    name: test (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/telephony -> target
+          key: test
+
+      # Named Part E gates first (each a separate step so a failure names the gate), then
+      # the whole workspace.
+      - name: Unit tests (vocabulary, ARI history window, metrics, HMAC)
+        run: cargo test --locked --lib
+      - name: Migrations (apply / roll back / re-apply; no Calling / Privacy Relay authority)
+        run: cargo test --locked --test migrations
+      - name: Telephony core (service auth, authorization proof, durability, duplicates, flags)
+        run: cargo test --locked --test telephony_core
+      - name: Provider contract (deterministic + SIP-trunk adapters, same suite)
+        run: cargo test --locked --test provider_contract
+      - name: Provider event security (auth before parse, body limit, dedupe, order, quarantine)
+        run: cargo test --locked --test provider_events
+      - name: Unknown provider outcome (fence, crash recovery, read-back, late success)
+        run: cargo test --locked --test unknown_outcome
+      - name: Reconciliation (drift cases, unresolved terminations, two reconcilers)
+        run: cargo test --locked --test reconciliation
+      - name: Failover (definite vs unknown, late primary success, circuits, capacity)
+        run: cargo test --locked --test failover
+      - name: Paid-action safety (duration limit, operator disable, abuse signals, metrics)
+        run: cargo test --locked --test paid_safety
+      - name: Outbox to Calling (dead letter, capped backoff, lease recovery, correlation continuity)
+        run: cargo test --locked --test outbox_delivery
+      - name: Operator actions (telephony-admin disable / incident resolve audited exactly once)
+        run: cargo test --locked --test operator_admin
+      - name: SIP / media edge outage (deterministic; no paid effect, incident, metric)
+        run: cargo test --locked --test sip_edge_outage
+      - name: Migration upgrade (previous head with data -> head -> down one -> head)
+        run: cargo test --locked --test migration_upgrade
+      - name: Disaster recovery (backup / restore, resumed workers, worker backlog)
+        env:
+          DISASTER_RECOVERY_CERT_REQUIRED: "1"
+        run: cargo test --locked --test disaster_recovery
+      - name: Load (LOAD lines; SIP signalling scenario SKIPPED without asterisk / sipp)
+        env:
+          LOAD_ENV: ci
+        run: cargo test --locked --test load -- --nocapture
+      - name: Contracts (internal OpenAPI = routes; real bodies validate)
+        run: cargo test --locked --test http_contract
+      - name: Real interconnect certification (NOT RUN without protected credentials)
+        run: cargo test --locked --test real_interconnect_certification -- --nocapture
+      - name: cargo test (whole workspace)
+        run: cargo test --workspace --no-fail-fast --locked
+
+  build:
+    name: build / migration smoke / startup
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/telephony -> target
+          key: build
+
+      - name: cargo build
+        run: cargo build --workspace --locked
+
+      - name: Migration smoke (up / reset / up)
+        env:
+          PGPASSWORD: postgres
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/telephony_migration_smoke
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE telephony_migration_smoke"
+          ./target/debug/telephony-migration up
+          ./target/debug/telephony-migration status
+          ./target/debug/telephony-migration reset
+          ./target/debug/telephony-migration up
+          q() { psql -h 127.0.0.1 -U postgres -d telephony_migration_smoke -tAc "$1"; }
+          # Applied = registered migrations (derived from the migrator, never hand-counted).
+          test "$(q "SELECT count(*) FROM telephony_seaql_migrations")" = "$(grep -c 'Box::new(m20' migration/src/lib.rs)"
+          # 17 Part E / F tables + Part H operator audit, destination classes, retention
+          # holds and retention audit.
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'telephony_seaql_migrations'")" = "21"
+          # No Calling / Privacy Relay authority tables.
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename IN \
+            ('calls', 'call_participants', 'call_sessions', 'call_legs', 'communication_contexts', \
+             'privacy_relay_sessions', 'protected_contacts')")" = "0"
+          # The only number column is CF Meet's OWN relay identity binding; no private
+          # destination, caller id, SIP Call-ID or dialog column exists.
+          test "$(q "SELECT string_agg(table_name || '.' || column_name, ',') FROM information_schema.columns \
+            WHERE table_schema = 'public' AND column_name ~* '(phone|e164|msisdn|telephone|caller_id|sip_call|dialog_id|password)'")" \
+            = "telecom_number_bindings.public_e164"
+
+      # Part K §120: the REAL Telephony migrations apply as the least-privilege migrator role,
+      # the DML-only runtime role reads every table they create, and no role of one service
+      # can connect to another service's database (infra/deployment/postgres).
+      - name: Per-service database roles with the real migrations
+        env:
+          TELEPHONY_MIGRATION_BIN: ${{ github.workspace }}/services/telephony/target/debug/telephony-migration
+        run: |
+          set -euo pipefail
+          test -x "$TELEPHONY_MIGRATION_BIN"
+          "$GITHUB_WORKSPACE/infra/deployment/postgres/verify-service-isolation.sh" \
+            --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres
+
+      - name: Service refuses unsafe configuration and serves only authenticated internal routes
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/telephony_migration_smoke
+          TELEPHONY_BIND_ADDRESS: 127.0.0.1:8092
+          TELEPHONY_METRICS_ADDRESS: 127.0.0.1:9464
+        run: |
+          set -euo pipefail
+          K="$RUNNER_TEMP/service-auth"
+          mkdir -p "$K"
+          cargo run -q --locked --manifest-path ../../packages/service-auth/Cargo.toml --bin cf-service-keygen -- \
+            generate --kid telephony-ci-1 --out "$K/telephony-ci-1.pem" > "$K/telephony-ci-1.jwk.json"
+          test "$(stat -c %a "$K/telephony-ci-1.pem")" = "600"
+          echo '{"bundle_version":1,"receiver":"cfmeet.telephony","runtime_environment":"local","trusted_issuers":[]}' > "$K/bundle.json"
+          echo '{"bundle_version":1,"receiver":"cfmeet.telephony","runtime_environment":"staging","trusted_issuers":[]}' > "$K/staging-bundle.json"
+          echo '{"bundle_version":1,"receiver":"cfmeet.calling","runtime_environment":"local","trusted_issuers":[]}' > "$K/calling-bundle.json"
+          export CF_RUNTIME_ENVIRONMENT=local CF_SERVICE_AUTH_KEY_ID=telephony-ci-1
+          export CF_SERVICE_AUTH_PRIVATE_KEY_FILE="$K/telephony-ci-1.pem" CF_SERVICE_TRUST_BUNDLE_FILE="$K/bundle.json"
+
+          refuses() { # refuses <description> <env assignments...>: must exit 2 (config error)
+            local what="$1"; shift
+            set +e; env "$@" timeout 30 ./target/debug/telephony > "$K/out.log" 2>&1; local rc=$?; set -e
+            if [ "$rc" != "2" ]; then
+              echo "::error::service did not refuse to start ($what): exit $rc"; cat "$K/out.log"; exit 1
+            fi
+            if grep -q -- "PRIVATE KEY" "$K/out.log"; then echo "::error::key material in startup output"; exit 1; fi
+            echo "refused as expected: $what"
+          }
+          refuses "missing database URL" DATABASE_URL=
+          refuses "missing signing key" CF_SERVICE_AUTH_PRIVATE_KEY_FILE=
+          refuses "inline private key" CF_SERVICE_AUTH_PRIVATE_KEY=inline
+          refuses "missing trust bundle" CF_SERVICE_TRUST_BUNDLE_FILE=
+          refuses "bundle for another runtime environment" CF_SERVICE_TRUST_BUNDLE_FILE="$K/staging-bundle.json"
+          refuses "bundle of another receiver" CF_SERVICE_TRUST_BUNDLE_FILE="$K/calling-bundle.json"
+          refuses "wrong service identity" CF_SERVICE_ID=cfmeet.calling
+          refuses "invalid kill switch" TELEPHONY_ENABLED=maybe
+          refuses "invalid metrics address" TELEPHONY_METRICS_ADDRESS=nowhere
+
+          ./target/debug/telephony > "$K/run.log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8092/health; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8092/health | grep -q '"status":"ok"'
+          # Every internal route requires a service token; a customer credential is refused.
+          for path in /internal/v1/legs/originate /internal/v1/bridges /internal/v1/anything; do
+            code=$(curl -s -o "$K/a.json" -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{}' "http://127.0.0.1:8092$path")
+            test "$code" = "401" && grep -q '"code":"INTERNAL_AUTHENTICATION_FAILED"' "$K/a.json"
+            code=$(curl -s -o "$K/b.json" -w '%{http_code}' -X POST -H 'Authorization: Bearer cfmk_live_x_y' \
+              -H 'content-type: application/json' -d '{}' "http://127.0.0.1:8092$path")
+            test "$code" = "401" && grep -q '"code":"INTERNAL_AUTHENTICATION_FAILED"' "$K/b.json"
+          done
+          # Provider callbacks are refused for unknown providers and oversized bodies.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -d '{}' http://127.0.0.1:8092/provider-callbacks/unknown)
+          test "$code" = "401"
+          head -c 20000 /dev/zero | tr '\0' ' ' > "$K/big.json"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST --data-binary @"$K/big.json" http://127.0.0.1:8092/provider-callbacks/unknown)
+          test "$code" = "413"
+          # Metrics on their own listener only; no identifiers in them.
+          curl -fsS http://127.0.0.1:9464/metrics > "$K/metrics.txt"
+          grep -q "telephony_outbox_backlog" "$K/metrics.txt"
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8092/metrics)
+          test "$code" = "404"
+          if grep -q -- "PRIVATE KEY" "$K/run.log"; then echo "::error::key material in logs"; exit 1; fi
+          rm -rf "$K"
+
+  calling-e2e:
+    name: Calling ↔ Telephony ↔ Privacy Relay e2e (real binaries)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            services/telephony -> target
+            services/privacy-relay -> target
+            services/calling -> target
+          key: e2e
+
+      - name: Build telephony binaries (service, migration, admin)
+        run: cargo build --workspace --bins --locked
+
+      - name: Build privacy-relay binaries (service, migration, admin)
+        working-directory: services/privacy-relay
+        run: cargo build --workspace --bins --locked
+
+      # App-to-phone across the three services (Privacy Relay authority + real Contact
+      # Vault resolution with a single-use grant, Telephony execution on the
+      # deterministic interconnect, signed provider callbacks, normalized events to
+      # Calling), Calling outage and catch-up, SIP-edge-down safe failure, one usage fact
+      # settled once, a privacy scan of all three databases, cancel → TERMINATE, and a
+      # Context revocation racing an origination. The tests fail (rather than skip) here
+      # because the binaries are provided.
+      - name: Calling e2e against the real binaries
+        working-directory: services/calling
+        run: |
+          set -euo pipefail
+          export PRIVACY_RELAY_BIN="$GITHUB_WORKSPACE/services/privacy-relay/target/debug/privacy-relay"
+          export PRIVACY_RELAY_MIGRATION_BIN="$GITHUB_WORKSPACE/services/privacy-relay/target/debug/privacy-relay-migration"
+          export TELEPHONY_BIN="$GITHUB_WORKSPACE/services/telephony/target/debug/telephony"
+          export TELEPHONY_MIGRATION_BIN="$GITHUB_WORKSPACE/services/telephony/target/debug/telephony-migration"
+          for b in "$PRIVACY_RELAY_BIN" "$PRIVACY_RELAY_MIGRATION_BIN" "$TELEPHONY_BIN" "$TELEPHONY_MIGRATION_BIN"; do test -x "$b"; done
+          test -x "$(dirname "$PRIVACY_RELAY_BIN")/privacy-relay-admin"
+          test -x "$(dirname "$TELEPHONY_BIN")/telephony-admin"
+          cargo test --locked --test telephony_e2e -- --nocapture 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+          grep -q "test result: ok. 2 passed" "$RUNNER_TEMP/e2e.log"
+
+  docker:
+    name: Docker image (repository-root context)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The context is filtered by services/telephony/Dockerfile.dockerignore to
+      # packages/service-auth and services/telephony only.
+      - name: docker build
+        working-directory: .
+        run: docker build -f services/telephony/Dockerfile -t cfmeet-telephony:ci .
+      - name: image contains only the Telephony binaries and no secret material
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint /bin/ls cfmeet-telephony:ci /app | tr '\n' ' ')" = "telephony telephony-admin telephony-migration "
+          if docker run --rm --entrypoint /bin/sh cfmeet-telephony:ci -c 'grep -rlI --exclude-dir=proc --exclude-dir=sys -- "PRIVATE KEY-----" / 2>/dev/null'; then
+            echo "::error::private key material in the image"; exit 1
+          fi
+          # No Asterisk / trunk configuration, certification password or test number.
+          # (bracketed patterns so the scan never matches its own command line)
+          if docker run --rm --entrypoint /bin/sh cfmeet-telephony:ci -c \
+               'grep -rlIE --exclude-dir=proc --exclude-dir=sys -- "certification-only-ari-passwor[d]|\[cfmeet-trun[k]|234803123456[7]" / 2>/dev/null'; then
+            echo "::error::edge / trunk configuration or test material in the image"; exit 1
+          fi

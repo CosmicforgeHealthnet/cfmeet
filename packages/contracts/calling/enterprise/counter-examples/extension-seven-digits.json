@@ -1,0 +1,8 @@
+{
+  "extensionNumber": "8012345",
+  "displayLabel": "x",
+  "destination": {
+    "type": "PRINCIPAL",
+    "id": "11111111-2222-4333-8444-555555555555"
+  }
+}

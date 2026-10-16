@@ -1,0 +1,29 @@
+[package]
+name = "cf-webhooks"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "CF Meet provider-neutral customer webhook primitives: HMAC-SHA256 signing / verification with timestamp replay protection, an SSRF-safe endpoint policy enforced again at connection time (DNS-rebinding safe, no redirects, no proxy), retry classification with bounded jittered backoff, and AEAD protection of signing secrets at rest"
+
+# Stand-alone workspace: consumed by deployable services as a path dependency. It never
+# depends on any deployable service and carries no business vocabulary.
+[workspace]
+
+[lib]
+name = "cf_webhooks"
+path = "src/lib.rs"
+
+[dependencies]
+base64 = "0.22"
+hex = "0.4"
+hmac = "0.12"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+ring = "0.17"
+sha2 = "0.10"
+thiserror = "2.0"
+tokio = { version = "1.42", features = ["net"] }
+url = "2"
+
+[dev-dependencies]
+tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "net", "io-util"] }

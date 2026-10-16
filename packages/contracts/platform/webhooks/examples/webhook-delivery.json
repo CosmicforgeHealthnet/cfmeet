@@ -1,0 +1,14 @@
+{
+  "deliveryId": "9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+  "webhookId": "3c9e2b1a-5d4f-4a60-9b71-8c2d3e4f5a6b",
+  "eventId": "whe_00000000000000000000000000000001",
+  "eventType": "call.ended",
+  "replayOf": null,
+  "status": "FAILED",
+  "attemptCount": 8,
+  "nextAttemptAt": null,
+  "lastHttpStatus": 503,
+  "failureCategory": "HTTP_5XX",
+  "createdAt": "2031-03-01T10:00:00.000Z",
+  "completedAt": "2031-03-01T16:00:00.000Z"
+}

@@ -1,0 +1,16 @@
+{
+  "commandId": "ed006c42-2f99-4cf9-afea-345dcd123fec",
+  "leg": {
+    "attemptId": "d6cb434f-e678-44f6-bc5f-f4aa7252a13d",
+    "callId": "b73ecb2e-4de8-4415-9faf-41165fc82474",
+    "callLegId": "14f8f793-46c7-4276-b3ec-e02001abc447",
+    "commandStatus": "PENDING",
+    "createdAt": "2026-10-08T22:15:10.103565Z",
+    "direction": "OUTBOUND",
+    "generation": 1,
+    "routeClass": "APP_TO_PSTN",
+    "status": "PLANNED",
+    "telephonyLegId": "6a96714c-7e1e-4681-92ad-ed036023bbe8",
+    "version": 1
+  }
+}

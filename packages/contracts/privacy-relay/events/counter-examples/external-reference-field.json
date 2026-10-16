@@ -1,0 +1,16 @@
+{
+  "audit_event_id": "d1e2f3a4-b5c6-4d7e-8f90-a1b2c3d4e5f6",
+  "event_type": "CONTEXT_REVOKED",
+  "sequence": 7,
+  "context_id": "0e3c7a52-6f1b-4a7e-9d5c-2b8f4e1a9c30",
+  "context_version": 3,
+  "context_status": "REVOKED",
+  "occurred_at": "2031-03-01T10:20:00.000000Z",
+  "correlation_id": "corr_0123456789abcdef0123456789abcdef",
+  "actor_kind": "APPLICATION",
+  "data": {
+    "previous_status": "ACTIVE",
+    "previous_version": 2
+  },
+  "external_context_reference": "delivery-8812"
+}

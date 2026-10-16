@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/platform/service-auth/token-claims/v1.schema.json",
+  "title": "CF Meet service token claims v1",
+  "description": "Claims of an internal service token. The token proves which service sent a request; it never carries permissions: the receiving service grants permissions from its own trust policy. Receivers additionally enforce: aud equals the receiver's own identity; runtime_environment equals the receiver's own runtime environment; iss is bound to the signing key (kid); iat <= nbf < exp; exp - iat <= 300 seconds; 30 seconds maximum clock skew; request_id and correlation_id equal the X-CF-Request-Id and X-CF-Correlation-Id headers. The claim set is closed: unknown claims are rejected.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ver",
+    "iss",
+    "aud",
+    "runtime_environment",
+    "iat",
+    "nbf",
+    "exp",
+    "jti",
+    "request_id",
+    "correlation_id"
+  ],
+  "properties": {
+    "ver": { "description": "Claims contract major version.", "const": 1 },
+    "iss": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ServiceId" },
+    "aud": {
+      "description": "Exactly one receiving service identity. Arrays and wildcards are not permitted.",
+      "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ServiceId"
+    },
+    "runtime_environment": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RuntimeEnvironment" },
+    "iat": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/UnixTime" },
+    "nbf": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/UnixTime" },
+    "exp": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/UnixTime" },
+    "jti": { "description": "Unique token identifier.", "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "request_id": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RequestId" },
+    "correlation_id": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/CorrelationId" },
+    "delegated_context": {
+      "description": "Optional safe customer/application/actor context asserted by the issuing service.",
+      "$ref": "https://schemas.cfmeet.com/platform/service-auth/delegated-platform-context/v1.schema.json"
+    }
+  }
+}

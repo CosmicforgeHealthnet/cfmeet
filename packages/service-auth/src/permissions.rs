@@ -1,0 +1,560 @@
+//! Internal permission registry.
+//!
+//! Permissions are least-privilege, `<resource>.<action>` and TARGET-SERVICE
+//! AUTHORITATIVE: only the receiving service's trust bundle grants them, never the
+//! caller's token. Each permission names the single service that receives (enforces) it
+//! and the issuers it may ever be granted to; a trust bundle that grants it elsewhere is
+//! refused at startup.
+//!
+//! Privacy invariant: `protected-contact.resolve-for-execution` (resolving a protected
+//! contact reference for execution of an authorized call leg) is received only by Privacy
+//! Relay and grantable only to Telephony. Calling can never be granted plaintext-contact
+//! resolution.
+//!
+//! Communication authority: Calling (the authenticated platform ingress) may be granted
+//! the communication-context / relay-session proxy permissions and `communication.authorize`
+//! by Privacy Relay; Privacy Relay may be granted `communication-authority.enforce` by
+//! Calling, which can only ever terminate protected calls, never grant authority.
+//!
+//! There are no wildcard, `admin`, `all` or `root` permissions.
+
+use std::{collections::BTreeSet, fmt};
+
+use serde::{Deserialize, Serialize};
+
+use crate::identity::services;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum InternalPermission {
+    /// Privacy Relay: authorize a communication.
+    #[serde(rename = "communication.authorize")]
+    CommunicationAuthorize,
+    /// Privacy Relay: read the permitted communication context.
+    #[serde(rename = "communication-context.read")]
+    CommunicationContextRead,
+    /// Privacy Relay: resolve a protected contact reference for execution of a specific,
+    /// authorized call leg. Telephony only.
+    #[serde(rename = "protected-contact.resolve-for-execution")]
+    ProtectedContactResolveForExecution,
+    /// Telephony: originate one authorized, paid public-network call leg (Part E).
+    #[serde(rename = "telephony-leg.originate")]
+    TelephonyLegOriginate,
+    /// Telephony: terminate a public-network call leg.
+    #[serde(rename = "telephony-leg.terminate")]
+    TelephonyLegTerminate,
+    /// Telephony: hold a public-network call leg.
+    #[serde(rename = "telephony-leg.hold")]
+    TelephonyLegHold,
+    /// Telephony: resume a held public-network call leg.
+    #[serde(rename = "telephony-leg.resume")]
+    TelephonyLegResume,
+    /// Telephony: create and end bridges between legs / application media.
+    #[serde(rename = "telephony-bridge.manage")]
+    TelephonyBridgeManage,
+    /// Telephony: read normalized leg status and route availability.
+    #[serde(rename = "telephony-status.read")]
+    TelephonyStatusRead,
+    /// Calling: receive tightly scoped operational callbacks.
+    #[serde(rename = "operational-callback.deliver")]
+    OperationalCallbackDeliver,
+    /// Privacy Relay: create, update and change the lifecycle of communication contexts
+    /// on behalf of the delegated application (authenticated platform ingress).
+    #[serde(rename = "communication-context.write")]
+    CommunicationContextWrite,
+    /// Privacy Relay: read privacy relay sessions of the delegated application.
+    #[serde(rename = "relay-session.read")]
+    RelaySessionRead,
+    /// Privacy Relay: create privacy relay sessions and change their lifecycle on behalf
+    /// of the delegated application.
+    #[serde(rename = "relay-session.write")]
+    RelaySessionWrite,
+    /// Calling: enforce a restrictive communication-authority change (revocation,
+    /// participant removal, suspension, expiry) on protected calls. Restrictive only.
+    #[serde(rename = "communication-authority.enforce")]
+    CommunicationAuthorityEnforce,
+    /// Privacy Relay: issue a short-lived Contact Resolution Grant for one specific,
+    /// authorized protected call leg (Part D §33). Reveals no contact value.
+    #[serde(rename = "protected-contact.grant-for-execution")]
+    ProtectedContactGrantForExecution,
+    /// Calling: request, read and release the temporary relay-number assignment of a
+    /// Privacy Relay Session (Part D §34). Reveals no number and no provider binding.
+    #[serde(rename = "relay-number.assign")]
+    RelayNumberAssign,
+    /// Telephony: resolve the called relay number of an inbound public-network call to
+    /// its current safe relay mapping (Part D §35). Telephony only.
+    #[serde(rename = "relay-number.resolve-inbound")]
+    RelayNumberResolveInbound,
+    /// Telephony: protect an inbound caller's presented number in the scope of a
+    /// resolved relay mapping and get its ContactReference (Part D §35). Telephony only.
+    #[serde(rename = "protected-contact.protect-inbound")]
+    ProtectedContactProtectInbound,
+    /// Calling: apply a normalized Telephony execution event to the canonical Call (Part E).
+    #[serde(rename = "telephony-event.apply")]
+    CallsTelephonyEventApply,
+    /// Calling: apply a normalized Telephony reconciliation result (Part E §50).
+    #[serde(rename = "telephony-reconciliation.apply")]
+    CallsTelephonyReconciliationApply,
+    /// Calling: offer an authenticated inbound public-network call with its resolved
+    /// relay mapping and protected caller reference (Part E §45).
+    #[serde(rename = "telephony-inbound.offer")]
+    CallsTelephonyInboundOffer,
+    /// Telephony: answer an internal enterprise SIP leg, play BUILT-IN prompts on it and
+    /// capture its media (Part F §57, §60, §61). Never a public-network leg.
+    #[serde(rename = "telephony-leg.media")]
+    TelephonyLegMedia,
+    /// Calling: offer an internal enterprise SIP dialog (opaque device reference and the
+    /// dialled extension) and deliver its keypad input for an IVR (Part F §54, §57).
+    #[serde(rename = "telephony-enterprise.offer")]
+    CallsTelephonyEnterpriseOffer,
+    /// Telephony -> Calling: deliver (or report the failure of) an edge media capture —
+    /// the captured audio of a voicemail / recording, with its integrity metadata
+    /// (Part F §105–§110).
+    #[serde(rename = "telephony-capture.deliver")]
+    CallsTelephonyCaptureDeliver,
+    /// Privacy Relay -> Calling: publish a committed Privacy Relay domain event (the
+    /// platform envelope from its transactional outbox) for normalized customer webhooks
+    /// (Part G §67 / §68). Calling projects it; nothing is forwarded verbatim.
+    #[serde(rename = "platform-event.publish")]
+    PlatformEventPublish,
+}
+
+/// Registry entry: which service receives the permission and who may be granted it.
+#[derive(Debug, Clone, Copy)]
+pub struct PermissionDefinition {
+    pub permission: InternalPermission,
+    pub name: &'static str,
+    pub receiver: &'static str,
+    pub grantable_to: &'static [&'static str],
+    /// Grants access to protected (privacy-sensitive) data.
+    pub sensitive: bool,
+    pub description: &'static str,
+}
+
+pub const REGISTRY: &[PermissionDefinition] = &[
+    PermissionDefinition {
+        permission: InternalPermission::CommunicationAuthorize,
+        name: "communication.authorize",
+        receiver: services::PRIVACY_RELAY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Authorize a communication within a communication context",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CommunicationContextRead,
+        name: "communication-context.read",
+        receiver: services::PRIVACY_RELAY,
+        grantable_to: &[services::CALLING, services::TELEPHONY],
+        sensitive: false,
+        description: "Read the permitted communication context (opaque references only)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::ProtectedContactResolveForExecution,
+        name: "protected-contact.resolve-for-execution",
+        receiver: services::PRIVACY_RELAY,
+        grantable_to: &[services::TELEPHONY],
+        sensitive: true,
+        description:
+            "Resolve a protected contact reference for execution of a specific authorized call leg",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::TelephonyLegOriginate,
+        name: "telephony-leg.originate",
+        receiver: services::TELEPHONY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Originate one authorized, paid public-network call leg (with authorization, grant and spend proof)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::TelephonyLegTerminate,
+        name: "telephony-leg.terminate",
+        receiver: services::TELEPHONY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Terminate a public-network call leg",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::TelephonyLegHold,
+        name: "telephony-leg.hold",
+        receiver: services::TELEPHONY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Hold a public-network call leg",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::TelephonyLegResume,
+        name: "telephony-leg.resume",
+        receiver: services::TELEPHONY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Resume a held public-network call leg",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::TelephonyBridgeManage,
+        name: "telephony-bridge.manage",
+        receiver: services::TELEPHONY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Create and end bridges between public legs and application media",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::TelephonyStatusRead,
+        name: "telephony-status.read",
+        receiver: services::TELEPHONY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Read normalized leg status and route availability (no provider data)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::OperationalCallbackDeliver,
+        name: "operational-callback.deliver",
+        receiver: services::CALLING,
+        grantable_to: &[services::PRIVACY_RELAY, services::TELEPHONY],
+        sensitive: false,
+        description: "Deliver tightly scoped operational callbacks to Calling",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CommunicationContextWrite,
+        name: "communication-context.write",
+        receiver: services::PRIVACY_RELAY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Create, update and change the lifecycle of communication contexts for the delegated application",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::RelaySessionRead,
+        name: "relay-session.read",
+        receiver: services::PRIVACY_RELAY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Read privacy relay sessions of the delegated application (opaque references only)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::RelaySessionWrite,
+        name: "relay-session.write",
+        receiver: services::PRIVACY_RELAY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Create privacy relay sessions and change their lifecycle for the delegated application",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CommunicationAuthorityEnforce,
+        name: "communication-authority.enforce",
+        receiver: services::CALLING,
+        grantable_to: &[services::PRIVACY_RELAY],
+        sensitive: false,
+        description: "Enforce a restrictive communication-authority change on protected calls (terminate only)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::ProtectedContactGrantForExecution,
+        name: "protected-contact.grant-for-execution",
+        receiver: services::PRIVACY_RELAY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Issue a short-lived Contact Resolution Grant for one authorized protected call leg (no contact value)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::RelayNumberAssign,
+        name: "relay-number.assign",
+        receiver: services::PRIVACY_RELAY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Request, read and release the temporary relay-number assignment of a Privacy Relay Session (no number, no provider binding)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::RelayNumberResolveInbound,
+        name: "relay-number.resolve-inbound",
+        receiver: services::PRIVACY_RELAY,
+        grantable_to: &[services::TELEPHONY],
+        sensitive: true,
+        description: "Resolve the called relay number of an inbound call to its current safe relay mapping (context / session / assignment references only)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::ProtectedContactProtectInbound,
+        name: "protected-contact.protect-inbound",
+        receiver: services::PRIVACY_RELAY,
+        grantable_to: &[services::TELEPHONY],
+        sensitive: true,
+        description: "Protect an inbound caller's presented number in the scope of a resolved relay mapping (returns a ContactReference only)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CallsTelephonyEventApply,
+        name: "telephony-event.apply",
+        receiver: services::CALLING,
+        grantable_to: &[services::TELEPHONY],
+        sensitive: false,
+        description: "Apply a normalized Telephony execution event to the canonical Call (Calling validates it)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CallsTelephonyReconciliationApply,
+        name: "telephony-reconciliation.apply",
+        receiver: services::CALLING,
+        grantable_to: &[services::TELEPHONY],
+        sensitive: false,
+        description: "Apply a normalized Telephony reconciliation result (Calling validates it)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CallsTelephonyInboundOffer,
+        name: "telephony-inbound.offer",
+        receiver: services::CALLING,
+        grantable_to: &[services::TELEPHONY],
+        sensitive: false,
+        description: "Offer an authenticated inbound public-network call (resolved relay mapping and protected caller reference only)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::TelephonyLegMedia,
+        name: "telephony-leg.media",
+        receiver: services::TELEPHONY,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Answer an internal enterprise SIP leg, play built-in prompts on it and capture its media",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CallsTelephonyEnterpriseOffer,
+        name: "telephony-enterprise.offer",
+        receiver: services::CALLING,
+        grantable_to: &[services::TELEPHONY],
+        sensitive: false,
+        description: "Offer an internal enterprise SIP dialog (opaque device reference, dialled extension) and deliver its keypad input",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CallsTelephonyCaptureDeliver,
+        name: "telephony-capture.deliver",
+        receiver: services::CALLING,
+        grantable_to: &[services::TELEPHONY],
+        sensitive: true,
+        description: "Deliver an edge media capture (voicemail / recording audio with integrity metadata) or report its failure",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformEventPublish,
+        name: "platform-event.publish",
+        receiver: services::CALLING,
+        grantable_to: &[services::PRIVACY_RELAY],
+        sensitive: false,
+        description: "Publish a committed Privacy Relay domain event (platform envelope) for normalized customer webhooks",
+    },
+];
+
+/// Values that must never be used as an ordinary permission.
+const WILDCARD_LIKE: &[&str] = &["*", "admin", "all", "root", "any", "superuser"];
+
+impl InternalPermission {
+    pub const ALL: &'static [InternalPermission] = &[
+        InternalPermission::CommunicationAuthorize,
+        InternalPermission::CommunicationContextRead,
+        InternalPermission::ProtectedContactResolveForExecution,
+        InternalPermission::TelephonyLegOriginate,
+        InternalPermission::TelephonyLegTerminate,
+        InternalPermission::TelephonyLegHold,
+        InternalPermission::TelephonyLegResume,
+        InternalPermission::TelephonyBridgeManage,
+        InternalPermission::TelephonyStatusRead,
+        InternalPermission::OperationalCallbackDeliver,
+        InternalPermission::CommunicationContextWrite,
+        InternalPermission::RelaySessionRead,
+        InternalPermission::RelaySessionWrite,
+        InternalPermission::CommunicationAuthorityEnforce,
+        InternalPermission::ProtectedContactGrantForExecution,
+        InternalPermission::RelayNumberAssign,
+        InternalPermission::RelayNumberResolveInbound,
+        InternalPermission::ProtectedContactProtectInbound,
+        InternalPermission::CallsTelephonyEventApply,
+        InternalPermission::CallsTelephonyReconciliationApply,
+        InternalPermission::CallsTelephonyInboundOffer,
+        InternalPermission::TelephonyLegMedia,
+        InternalPermission::CallsTelephonyEnterpriseOffer,
+        InternalPermission::CallsTelephonyCaptureDeliver,
+        InternalPermission::PlatformEventPublish,
+    ];
+
+    pub fn definition(&self) -> &'static PermissionDefinition {
+        REGISTRY
+            .iter()
+            .find(|d| d.permission == *self)
+            .expect("every permission has a registry entry")
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        self.definition().name
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        REGISTRY
+            .iter()
+            .find(|d| d.name == value)
+            .map(|d| d.permission)
+    }
+
+    /// Whether `value` looks like a wildcard / super-permission.
+    pub fn is_wildcard_like(value: &str) -> bool {
+        let lower = value.trim().to_ascii_lowercase();
+        value.contains('*')
+            || WILDCARD_LIKE.contains(&lower.as_str())
+            || lower
+                .split(['.', ':', '-'])
+                .any(|part| WILDCARD_LIKE.contains(&part))
+    }
+}
+
+impl fmt::Display for InternalPermission {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Permissions granted to an authenticated caller by the receiver's policy.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PermissionSet(BTreeSet<InternalPermission>);
+
+impl PermissionSet {
+    pub(crate) fn new(permissions: BTreeSet<InternalPermission>) -> Self {
+        Self(permissions)
+    }
+
+    pub fn contains(&self, permission: InternalPermission) -> bool {
+        self.0.contains(&permission)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &InternalPermission> {
+        self.0.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn names(&self) -> Vec<&'static str> {
+        self.0.iter().map(InternalPermission::as_str).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registry_is_complete_and_consistent() {
+        assert_eq!(REGISTRY.len(), InternalPermission::ALL.len());
+        for p in InternalPermission::ALL {
+            let d = p.definition();
+            assert_eq!(InternalPermission::parse(d.name), Some(*p));
+            assert_eq!(serde_json::to_value(p).unwrap(), d.name);
+            assert!(
+                !d.grantable_to.contains(&d.receiver),
+                "{} grantable to its own receiver",
+                d.name
+            );
+            assert!(!InternalPermission::is_wildcard_like(d.name));
+            let (resource, action) = d.name.split_once('.').unwrap();
+            for part in [resource, action] {
+                assert!(part
+                    .split('-')
+                    .all(|w| !w.is_empty() && w.bytes().all(|b| b.is_ascii_lowercase())));
+            }
+        }
+    }
+
+    #[test]
+    fn protected_contact_resolution_is_telephony_only() {
+        let d = InternalPermission::ProtectedContactResolveForExecution.definition();
+        assert_eq!(d.receiver, services::PRIVACY_RELAY);
+        assert_eq!(d.grantable_to, &[services::TELEPHONY]);
+        assert!(d.sensitive);
+        // No sensitive permission is ever grantable to Calling.
+        for d in REGISTRY.iter().filter(|d| d.sensitive) {
+            assert!(!d.grantable_to.contains(&services::CALLING), "{}", d.name);
+        }
+    }
+
+    #[test]
+    fn communication_authority_flows_are_least_privilege() {
+        use InternalPermission::*;
+        // Calling -> Privacy Relay: the platform ingress proxy and call authorization.
+        for p in [
+            CommunicationAuthorize,
+            CommunicationContextWrite,
+            RelaySessionRead,
+            RelaySessionWrite,
+        ] {
+            let d = p.definition();
+            assert_eq!(d.receiver, services::PRIVACY_RELAY, "{}", d.name);
+            assert_eq!(d.grantable_to, &[services::CALLING], "{}", d.name);
+        }
+        // Inbound relay resolution and inbound caller protection: Telephony only.
+        for p in [RelayNumberResolveInbound, ProtectedContactProtectInbound] {
+            let d = p.definition();
+            assert_eq!(
+                (d.receiver, d.grantable_to, d.sensitive),
+                (services::PRIVACY_RELAY, &[services::TELEPHONY][..], true)
+            );
+        }
+        // Calling may REQUEST a Contact Resolution Grant but never resolve plaintext.
+        let d = ProtectedContactGrantForExecution.definition();
+        assert_eq!(
+            (d.receiver, d.grantable_to),
+            (services::PRIVACY_RELAY, &[services::CALLING][..])
+        );
+        assert!(!d.sensitive);
+        // Privacy Relay -> Calling: restrictive enforcement only.
+        let d = CommunicationAuthorityEnforce.definition();
+        assert_eq!(d.receiver, services::CALLING);
+        assert_eq!(d.grantable_to, &[services::PRIVACY_RELAY]);
+        assert!(!d.sensitive);
+    }
+
+    #[test]
+    fn telephony_flows_are_least_privilege() {
+        use InternalPermission::*;
+        // Calling -> Telephony: commands and status, Calling only.
+        for p in [
+            TelephonyLegOriginate,
+            TelephonyLegTerminate,
+            TelephonyLegHold,
+            TelephonyLegResume,
+            TelephonyBridgeManage,
+            TelephonyStatusRead,
+        ] {
+            let d = p.definition();
+            assert_eq!(
+                (d.receiver, d.grantable_to),
+                (services::TELEPHONY, &[services::CALLING][..]),
+                "{}",
+                d.name
+            );
+        }
+        // Telephony -> Calling: normalized facts only, Telephony only.
+        for p in [
+            CallsTelephonyEventApply,
+            CallsTelephonyReconciliationApply,
+            CallsTelephonyInboundOffer,
+        ] {
+            let d = p.definition();
+            assert_eq!(
+                (d.receiver, d.grantable_to),
+                (services::CALLING, &[services::TELEPHONY][..]),
+                "{}",
+                d.name
+            );
+        }
+    }
+
+    #[test]
+    fn wildcard_like_values_are_detected() {
+        for bad in [
+            "*",
+            "admin",
+            "ALL",
+            "root",
+            "calls.*",
+            "admin.all",
+            "*.read",
+            "superuser",
+        ] {
+            assert!(InternalPermission::is_wildcard_like(bad), "{bad}");
+            assert!(InternalPermission::parse(bad).is_none());
+        }
+    }
+}

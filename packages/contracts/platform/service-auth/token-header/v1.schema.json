@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/platform/service-auth/token-header/v1.schema.json",
+  "title": "CF Meet service token JOSE header v1",
+  "description": "Protected header of an internal service token (JWS compact serialization, RFC 7515). The algorithm is pinned to EdDSA (Ed25519); no other header parameters (jku, jwk, x5u, x5c, crit, ...) are permitted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["alg", "typ", "kid"],
+  "properties": {
+    "alg": { "const": "EdDSA" },
+    "typ": { "const": "cf-service+jwt" },
+    "kid": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/KeyId" }
+  }
+}

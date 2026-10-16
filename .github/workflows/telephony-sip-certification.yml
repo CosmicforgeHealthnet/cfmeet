@@ -1,0 +1,124 @@
+name: Telephony SIP certification
+
+# REAL SIP / media edge certification (Part E §41, §187, §220): boots the selected edge
+# (Asterisk 20 with ARI, configuration in infra/telephony/certification/) on loopback,
+# PostgreSQL and Telephony's real ARI and SIP-trunk adapters, and drives them with SIPp
+# acting as carriers and as the application-media side: outbound INVITE / 180 / 200 /
+# ACK, RTP media evidence, the application-media bridge, DTMF both ways, hold / resume,
+# hangup, busy, no answer, inbound INVITE, phone-to-phone bridge, the redirect
+# (transfer) primitive, unknown-peer refusal and edge-down safety.
+#
+# The SIP peers are SIPp SIMULATORS: this certifies the edge and the SIP signalling,
+# never a real carrier. Real lawful interconnect certification needs protected staging
+# credentials (tests/real_interconnect_certification.rs; ADR 0016).
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/telephony/**"
+      - "infra/telephony/**"
+      - "packages/service-auth/**"
+      - "packages/contracts/telephony/**"
+      - "packages/contracts/platform/**"
+      - "packages/contracts/manifest.json"
+      - ".github/workflows/telephony-sip-certification.yml"
+  pull_request:
+    paths:
+      - "services/telephony/**"
+      - "infra/telephony/**"
+      - "packages/service-auth/**"
+      - "packages/contracts/telephony/**"
+      - "packages/contracts/platform/**"
+      - "packages/contracts/manifest.json"
+      - ".github/workflows/telephony-sip-certification.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: telephony-sip-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: services/telephony
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  sip:
+    name: SIP edge (Asterisk + SIPp) certification
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      # A missing edge FAILS here (it only skips on a developer machine without it).
+      TELEPHONY_SIP_CERT_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the SIP / media edge and the SIP simulator
+        working-directory: .
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends asterisk sip-tester
+          # The packaged daemon is not used: the test boots its own loopback instance.
+          sudo systemctl stop asterisk 2>/dev/null || true
+          sudo systemctl disable asterisk 2>/dev/null || true
+          sudo pkill -x asterisk || true
+          # SIPp plays the RTP / RFC 4733 pcaps through a raw socket and the runner user is
+          # not root: grant only that capability to the simulator binary.
+          sudo setcap cap_net_raw+ep "$(command -v sipp)"
+          getcap "$(command -v sipp)" | grep -q cap_net_raw
+          asterisk -V
+          sipp -v | head -n 3 || true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/telephony -> target
+          key: sip
+
+      - name: SIP / media edge certification
+        run: |
+          set -euo pipefail
+          cargo test --locked --test sip_certification -- --nocapture 2>&1 | tee "$RUNNER_TEMP/sip.log"
+          grep -q "test result: ok. 1 passed" "$RUNNER_TEMP/sip.log"
+          if grep -q "SKIPPED" "$RUNNER_TEMP/sip.log"; then
+            echo "::error::the SIP certification was skipped"; exit 1
+          fi
+
+      # Part K §108: concurrent SIP signalling (setup + teardown) against the same real edge.
+      - name: SIP signalling load
+        run: |
+          set -euo pipefail
+          cargo test --locked --test load sip_signalling -- --nocapture 2>&1 | tee "$RUNNER_TEMP/sip-load.log"
+          grep -q "test result: ok. 1 passed" "$RUNNER_TEMP/sip-load.log"
+          if grep -q "SKIPPED" "$RUNNER_TEMP/sip-load.log"; then
+            echo "::error::the SIP signalling load scenario was skipped"; exit 1
+          fi
+          grep "^LOAD " "$RUNNER_TEMP/sip-load.log"
+
+      - name: SIP-trunk adapter against the same provider contract suite
+        run: cargo test --locked --test provider_contract
+
+      - name: Edge logs (on failure)
+        if: failure()
+        working-directory: .
+        run: |
+          for f in /tmp/cfmeet-sip-cert-*/log/* /tmp/cfmeet-sip-cert-*/*.log /tmp/cfmeet-sipp-*/*.log; do
+            [ -f "$f" ] && { echo "== $f"; tail -n 200 "$f"; }
+          done || true

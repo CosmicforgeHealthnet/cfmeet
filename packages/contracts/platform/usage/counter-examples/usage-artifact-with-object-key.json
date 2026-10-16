@@ -1,0 +1,16 @@
+{
+  "data": [
+    {
+      "id": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e606",
+      "callId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e602",
+      "usageType": "RECORDING_ARTIFACT",
+      "resourceClass": "STORAGE",
+      "quantity": 1500,
+      "unit": "MILLISECONDS",
+      "sizeBytes": 24044,
+      "recordedAt": "2031-03-01T10:06:00.000Z",
+      "objectKey": "recordings/2031/x.wav"
+    }
+  ],
+  "nextCursor": null
+}

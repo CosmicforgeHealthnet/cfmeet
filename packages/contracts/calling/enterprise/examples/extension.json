@@ -1,0 +1,15 @@
+{
+  "extensionId": "8b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b",
+  "extensionNumber": "sales",
+  "displayLabel": "Sales",
+  "destination": {
+    "type": "PRINCIPAL",
+    "id": "11111111-2222-4333-8444-555555555555"
+  },
+  "policyId": null,
+  "status": "ACTIVE",
+  "version": 1,
+  "createdAt": "2031-03-01T10:00:30.000Z",
+  "updatedAt": "2031-03-01T10:00:30.000Z",
+  "disabledAt": null
+}

@@ -1,0 +1,17 @@
+{
+  "data": [
+    {
+      "endpointId": "f6f6f6f6-0707-4818-9929-3a3a3a3a3a3a",
+      "principalId": "66666666-7777-4888-9999-aaaaaaaaaaaa",
+      "endpointKey": "bob-phone-01",
+      "endpointKind": "MOBILE",
+      "capabilities": { "audio": true, "video": true },
+      "status": "ACTIVE",
+      "presence": "ONLINE",
+      "lastSeenAt": "2026-10-07T08:59:30.000000Z",
+      "pushTargetRef": null,
+      "createdAt": "2026-10-01T12:00:00.000000Z",
+      "revokedAt": null
+    }
+  ]
+}

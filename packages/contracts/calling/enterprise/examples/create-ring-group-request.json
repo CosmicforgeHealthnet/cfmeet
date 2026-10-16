@@ -1,0 +1,10 @@
+{
+  "name": "Sales",
+  "strategy": "ORDERED",
+  "memberRingSeconds": 15,
+  "groupTimeoutSeconds": 60,
+  "fallback": {
+    "type": "EXTENSION",
+    "id": "8b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b"
+  }
+}

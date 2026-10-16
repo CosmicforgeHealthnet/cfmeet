@@ -1,0 +1,9 @@
+{
+  "id": "whe_00000000000000000000000000000003",
+  "type": "call.ended",
+  "apiVersion": "v1",
+  "occurredAt": "2031-03-01T10:05:00.000Z",
+  "data": {
+    "providerCallId": "CA0123456789abcdef"
+  }
+}

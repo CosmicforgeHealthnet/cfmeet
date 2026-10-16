@@ -1,0 +1,461 @@
+//! Calling service entrypoint (composition root).
+
+use std::{sync::Arc, time::Duration};
+
+use anyhow::anyhow;
+use calling::{
+    calls::{app::AppCallingConfig, CallServiceConfig},
+    config::CallingConfig,
+    domain::{SharedClock, SystemClock},
+    internal_auth::config::ServiceAuthSettings,
+    media::MediaSettings,
+    platform::{error::summarize_db_error, scopes::ScopeRegistry},
+    privacy_relay::{HttpPrivacyRelay, PrivacyRelayAuthority, UnconfiguredPrivacyRelay},
+    routes,
+    signaling::{NoPushTransport, PgNotifySignalBus, RealtimeSignalBus, SignalingKeys},
+    state::{AppState, CallingRuntime},
+    telemetry,
+};
+use calling_migration::MigratorTrait;
+use sea_orm::{ConnectOptions, Database};
+
+/// Rate windows older than this are pruned (windows are one minute long).
+const RATE_WINDOW_RETENTION: chrono::Duration = chrono::Duration::minutes(5);
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    dotenvy::dotenv().ok();
+    let config = match CallingConfig::from_env() {
+        Ok(config) => config,
+        Err(err) => {
+            eprintln!("calling: configuration error: {err}");
+            std::process::exit(2);
+        }
+    };
+    let service_auth_settings = match ServiceAuthSettings::from_env() {
+        Ok(settings) => settings,
+        Err(err) => {
+            eprintln!("calling: service authentication configuration error: {err}");
+            std::process::exit(2);
+        }
+    };
+    telemetry::init(config.log_format);
+    // Fail closed on a missing / malformed key or trust bundle before touching the network.
+    let service_auth = match service_auth_settings.load(Arc::new(cf_service_auth::SystemClock)) {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            tracing::error!(error = %err, "service authentication configuration error");
+            std::process::exit(2);
+        }
+    };
+    tracing::info!(
+        service = %service_auth.signer().issuer(),
+        runtime_environment = %service_auth.signer().runtime_environment(),
+        kid = %service_auth.signer().key_id(),
+        trusted_issuers = service_auth.verifier().policy().grants().count(),
+        "internal service authentication ready"
+    );
+
+    let mut options = ConnectOptions::new(config.database_url().to_string());
+    options
+        .max_connections(config.database_max_connections)
+        .min_connections(1)
+        .connect_timeout(Duration::from_secs(10))
+        .acquire_timeout(Duration::from_secs(10))
+        .idle_timeout(Duration::from_secs(300))
+        .max_lifetime(Duration::from_secs(1800))
+        .sqlx_logging(false);
+    let db = Database::connect(options).await.map_err(|e| {
+        anyhow!(
+            "cannot connect to the Calling database ({})",
+            summarize_db_error(&e)
+        )
+    })?;
+
+    let pending = calling_migration::Migrator::get_pending_migrations(&db)
+        .await
+        .map_err(|e| anyhow!("cannot read migration state ({})", summarize_db_error(&e)))?;
+    if !pending.is_empty() {
+        return Err(anyhow!(
+            "{} Calling migration(s) pending; run `cargo run -p calling-migration -- up` first",
+            pending.len()
+        ));
+    }
+
+    // Application calling (Part C §20–§25): no fallback signaling key or provider
+    // credential exists; an invalid configuration stops the service before it serves.
+    let lookup = |key: &str| std::env::var(key).ok();
+    let signaling_keys = match SignalingKeys::from_lookup(&lookup) {
+        Ok(keys) => Arc::new(keys),
+        Err(err) => {
+            tracing::error!(error = %err, "signaling configuration error");
+            std::process::exit(2);
+        }
+    };
+    let media_settings = match MediaSettings::from_lookup(&lookup) {
+        Ok(settings) => settings,
+        Err(err) => {
+            tracing::error!(error = %err, "media provider configuration error");
+            std::process::exit(2);
+        }
+    };
+    let media = match media_settings.build() {
+        Ok(media) => media,
+        Err(err) => {
+            tracing::error!(error = %err, "media provider configuration error");
+            std::process::exit(2);
+        }
+    };
+    let app_config = match AppCallingConfig::from_lookup(&lookup) {
+        Ok(config) => config,
+        Err(err) => {
+            tracing::error!(error = %err, "application calling configuration error");
+            std::process::exit(2);
+        }
+    };
+    tracing::info!(
+        application_media = media.provider.is_some(),
+        new_calls_enabled = app_config.new_calls_enabled,
+        app_calling_enabled = app_config.app_calling_enabled,
+        telephony_command_max_attempts = app_config.telephony_command_max_attempts,
+        setup_deadline_secs = app_config.setup_deadline.num_seconds(),
+        "application calling configured"
+    );
+    // Cross-instance realtime fanout over PostgreSQL LISTEN / NOTIFY.
+    let bus: Arc<dyn RealtimeSignalBus> = Arc::new(
+        PgNotifySignalBus::start(db.clone())
+            .await
+            .map_err(|e| anyhow!("cannot start the realtime signal listener ({e})"))?,
+    );
+
+    // Privacy Relay (Part D): protected calls and the public ingress need it; ordinary
+    // application calling never does. Without CF_PRIVACY_RELAY_BASE_URL both fail closed.
+    let privacy_relay_configured = service_auth_settings
+        .targets
+        .iter()
+        .any(|(service, _)| service.as_str() == cf_service_auth::services::PRIVACY_RELAY);
+    let privacy_relay: Arc<dyn PrivacyRelayAuthority> = if privacy_relay_configured {
+        Arc::new(HttpPrivacyRelay::new(service_auth.clone()))
+    } else {
+        Arc::new(UnconfiguredPrivacyRelay)
+    };
+    tracing::info!(
+        privacy_relay_configured,
+        "privacy relay authority configured"
+    );
+
+    // Contact Vault delegated access (§31): a dedicated key, never the service-auth key.
+    let contact_delegation =
+        match calling::privacy_relay::contacts::ContactDelegationSettings::from_lookup(&lookup)
+            .and_then(|s| {
+                s.load(
+                    service_auth.signer().runtime_environment(),
+                    &service_auth.signer().public_jwk(),
+                    Arc::new(cf_service_auth::SystemClock),
+                )
+            }) {
+            Ok(signer) => signer.map(Arc::new),
+            Err(err) => {
+                tracing::error!(error = %err, "contact delegation configuration error");
+                std::process::exit(2);
+            }
+        };
+    tracing::info!(
+        contact_delegation_configured = contact_delegation.is_some(),
+        "contact vault delegated access configured"
+    );
+
+    // Telephony (Part E): public-network execution. Without CF_TELEPHONY_BASE_URL no
+    // public route exists; every telecom switch defaults OFF; app RTC never depends on it.
+    let telephony_configured = service_auth_settings
+        .targets
+        .iter()
+        .any(|(service, _)| service.as_str() == cf_service_auth::services::TELEPHONY);
+    let telecom_flags = match calling::calls::app::public::telecom_flags_from_lookup(&lookup) {
+        Ok(flags) => flags,
+        Err(err) => {
+            tracing::error!(error = %err, "telecom configuration error");
+            std::process::exit(2);
+        }
+    };
+    let public_network = calling::calls::app::public::PublicNetwork {
+        telephony: if telephony_configured {
+            Arc::new(calling::telephony::HttpTelephony::new(service_auth.clone()))
+        } else {
+            Arc::new(calling::telephony::UnconfiguredTelephony)
+        },
+        media: media.public_bridge.clone(),
+        flags: telecom_flags,
+    };
+    tracing::info!(
+        telephony_configured,
+        public_outbound_enabled = telecom_flags.public_outbound,
+        public_inbound_enabled = telecom_flags.public_inbound,
+        callback_relay_enabled = telecom_flags.callback_relay,
+        public_media_bridge = media.public_bridge.is_some(),
+        "public-network calling configured"
+    );
+
+    // Enterprise calling (Part F): kill switches, all OFF unless explicitly enabled. Each
+    // stops NEW effects only; termination and cleanup are never blocked.
+    let enterprise_flags = match calling::enterprise::EnterpriseFlags::from_lookup(&lookup) {
+        Ok(flags) => flags,
+        Err(err) => {
+            tracing::error!(error = %err, "enterprise configuration error");
+            std::process::exit(2);
+        }
+    };
+    tracing::info!(
+        enterprise_calling_enabled = enterprise_flags.enterprise_calling,
+        voicemail_enabled = enterprise_flags.voicemail,
+        call_recording_enabled = enterprise_flags.call_recording,
+        "enterprise calling configured"
+    );
+
+    // Protected artifact storage (Part F voicemail): a private S3-compatible bucket. Without
+    // CALLING_ARTIFACT_STORAGE_ENDPOINT there is none and voicemail capture fails closed.
+    let artifacts: Arc<dyn cf_object_storage::ObjectStore> =
+        match cf_object_storage::S3Config::from_lookup("CALLING_ARTIFACT_STORAGE_", &lookup)
+            .and_then(|config| {
+                config
+                    .map(cf_object_storage::S3ObjectStore::new)
+                    .transpose()
+            }) {
+            Ok(Some(store)) => Arc::new(store),
+            Ok(None) => Arc::new(cf_object_storage::UnconfiguredStore),
+            Err(err) => {
+                tracing::error!(error = %err, "artifact storage configuration error");
+                std::process::exit(2);
+            }
+        };
+    tracing::info!(
+        artifact_storage_backend = artifacts.backend(),
+        "protected artifact storage configured"
+    );
+
+    // Application (RTC) call-audio capture (Part F §60 / §61): LiveKit Egress when
+    // selected, otherwise none (SIP captures still work; RTC voicemail / recording are
+    // refused with CAPTURE_UNAVAILABLE).
+    let capture = match calling::media::CaptureSettings::from_lookup(&lookup)
+        .and_then(|settings| media.capture(&settings, artifacts.clone()))
+    {
+        Ok(capture) => capture,
+        Err(err) => {
+            tracing::error!(error = %err, "application capture configuration error");
+            std::process::exit(2);
+        }
+    };
+    tracing::info!(
+        application_capture_available = capture.available(),
+        "application call-audio capture configured"
+    );
+
+    // Customer webhooks (Part G §68): the signing-secret sealing key comes from the secret
+    // manager; without it the webhook API answers CAPABILITY_UNAVAILABLE (fail closed).
+    let webhook_settings = match calling::webhooks::WebhookSettings::from_lookup(
+        &lookup,
+        service_auth.signer().runtime_environment().as_str() == "local",
+    ) {
+        Ok(settings) => settings,
+        Err(err) => {
+            tracing::error!(error = %err, "webhook configuration error");
+            std::process::exit(2);
+        }
+    };
+    // Key rotation (Part H §74.12): every stored seal must name a configured key
+    // (current or previous) — otherwise those subscriptions could never be signed.
+    if let Some(secret_box) = webhook_settings.secret_box.as_deref() {
+        let unknown = calling::webhooks::keys::unknown_key_ids(&db, secret_box)
+            .await
+            .map_err(|e| {
+                anyhow!(
+                    "cannot verify webhook key coverage ({})",
+                    summarize_db_error(&e)
+                )
+            })?;
+        if !unknown.is_empty() {
+            tracing::error!(
+                unknown_key_ids = ?unknown,
+                current_key_id = secret_box.current_kid(),
+                "webhook signing secrets are sealed under keys that are not configured; \
+                 configure them as current or previous (CALLING_WEBHOOK_SECRET_KEY_PREVIOUS)"
+            );
+            std::process::exit(2);
+        }
+    }
+    tracing::info!(
+        webhooks_available = webhook_settings.secret_box.is_some(),
+        webhook_key_id = webhook_settings
+            .secret_box
+            .as_deref()
+            .map(|b| b.current_kid()),
+        "customer webhooks configured"
+    );
+
+    // Part H: the platform compliance overlay and the abuse incident thresholds. Invalid
+    // values refuse startup (never a silent default).
+    let compliance_overlay =
+        match calling::routing::compliance::ComplianceOverlay::from_lookup(&lookup) {
+            Ok(overlay) => overlay,
+            Err(err) => {
+                tracing::error!(error = %err, "compliance overlay configuration error");
+                std::process::exit(2);
+            }
+        };
+    let abuse_controls = match calling::calls::app::AbuseControls::from_lookup(&lookup) {
+        Ok(controls) => controls,
+        Err(err) => {
+            tracing::error!(error = %err, "abuse control configuration error");
+            std::process::exit(2);
+        }
+    };
+    tracing::info!(
+        compliance_required_countries = compliance_overlay.countries.len(),
+        compliance_required_everywhere = compliance_overlay.all,
+        blocked_attempts_incident_threshold = abuse_controls.blocked_attempts_incident_threshold,
+        abuse_reports_incident_threshold = abuse_controls.abuse_reports_incident_threshold,
+        auth_failure_threshold = abuse_controls.auth_failure_threshold,
+        auth_failure_window_seconds = abuse_controls.auth_failure_window_seconds,
+        "abuse and compliance controls configured"
+    );
+
+    // Part H §80: retention / minimization bounds (ADR 0030). Invalid values — or a bound
+    // for the retained call events — refuse startup.
+    let retention = match calling::retention::RetentionSettings::from_lookup(&lookup) {
+        Ok(settings) => settings,
+        Err(err) => {
+            tracing::error!(error = %err, "retention configuration error");
+            std::process::exit(2);
+        }
+    };
+    tracing::info!(
+        call_display_days = retention.call_display.as_secs() / 86_400,
+        webhook_history_days = retention.webhook_history.as_secs() / 86_400,
+        incidents_days = retention.incidents.as_secs() / 86_400,
+        media_provider_events_days = retention.media_provider_events.as_secs() / 86_400,
+        operator_audit_days = retention.operator_audit.as_secs() / 86_400,
+        interval_secs = retention.interval.as_secs(),
+        "retention configured"
+    );
+
+    let clock: SharedClock = Arc::new(SystemClock);
+    let state = AppState::new(
+        db,
+        clock.clone(),
+        Arc::new(config.keyring),
+        Arc::new(ScopeRegistry::standard()),
+        config.limit_defaults,
+        service_auth,
+        CallingRuntime {
+            signaling_keys,
+            media: media.provider,
+            media_gateway: media.gateway,
+            credential_policy: media_settings.credential_policy,
+            bus,
+            push: Arc::new(NoPushTransport),
+            app_config,
+            call_config: CallServiceConfig::default(),
+            privacy_relay,
+            contact_delegation,
+            public_network,
+            enterprise_flags,
+            artifacts,
+            capture,
+            webhooks: webhook_settings,
+            compliance_overlay,
+            abuse_controls,
+        },
+    );
+
+    // Durable invitation expiry and media reconciliation on every instance (row locks /
+    // SKIP LOCKED leases make the sweeps multi-instance safe).
+    let workers = (*state.app).clone();
+    tokio::spawn(workers.run_workers(Duration::from_secs(1), Duration::from_secs(2)));
+    // Retention / minimization (bounded batches, SKIP LOCKED; every instance).
+    tokio::spawn((*state.app).clone().run_retention(retention));
+
+    // Durable event publication and customer webhook delivery (SKIP LOCKED + leases:
+    // multi-instance safe; never blocked by a kill switch).
+    let webhooks = (*state.webhooks).clone();
+    tokio::spawn(async move {
+        let transport = calling::webhooks::worker::LocalWebhookTransport::new(webhooks.clone());
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            interval.tick().await;
+            if let Err(error) = webhooks.publish_outbox_once(&transport, 200).await {
+                tracing::warn!(%error, "outbox publication pass failed; retried");
+            }
+            if let Err(error) = webhooks.deliver_due_once(50).await {
+                tracing::warn!(%error, "webhook delivery pass failed; retried");
+            }
+        }
+    });
+
+    let pruner = state.rate_limiter.clone();
+    let auth_windows = state.authenticator.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            if let Err(err) = pruner.prune(clock.now() - RATE_WINDOW_RETENTION).await {
+                tracing::warn!(summary = %summarize_db_error(&err), "rate window pruning failed");
+            }
+            // Failed-authentication windows (§109) are at most one hour long.
+            if let Err(err) = auth_windows
+                .prune_failure_windows(clock.now() - chrono::Duration::hours(2))
+                .await
+            {
+                tracing::warn!(summary = %summarize_db_error(&err), "auth failure window pruning failed");
+            }
+        }
+    });
+
+    // Public customer API (call reads, creation, control, endpoints, signaling credentials,
+    // the Privacy Relay ingress) and the internal API (Privacy Relay enforcement), which
+    // like every /internal/v1/* path requires service authentication.
+    let app = routes::app(state, routes::public_api(), routes::internal_api());
+    // Optional separate metrics listener (never the customer API).
+    if let Some(address) = std::env::var("CALLING_METRICS_ADDRESS")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+    {
+        let address: std::net::SocketAddr = address
+            .parse()
+            .map_err(|_| anyhow::anyhow!("CALLING_METRICS_ADDRESS must be host:port"))?;
+        let listener = tokio::net::TcpListener::bind(address).await?;
+        tracing::info!(%address, "calling metrics listening");
+        tokio::spawn(async move {
+            if let Err(e) = axum::serve(listener, calling::metrics::router()).await {
+                tracing::warn!(error = %e, "metrics listener stopped");
+            }
+        });
+    }
+    let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
+    tracing::info!(address = %config.bind_address, "calling service listening");
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+    Ok(())
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+    tracing::info!("shutdown signal received");
+}

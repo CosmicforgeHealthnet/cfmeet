@@ -1,0 +1,84 @@
+{
+  "relaySessionId": "7c1e5f20-8a3d-4b96-b2e7-4d0a6c9f1e23",
+  "contextId": "0e3c7a52-6f1b-4a7e-9d5c-2b8f4e1a9c30",
+  "calls": [
+    {
+      "callId": "11111111-2222-4333-8444-555555555555",
+      "contextId": "0e3c7a52-6f1b-4a7e-9d5c-2b8f4e1a9c30",
+      "relaySessionId": "7c1e5f20-8a3d-4b96-b2e7-4d0a6c9f1e23",
+      "kind": "VOICE",
+      "state": "NO_ANSWER",
+      "terminalReason": "NO_ANSWER",
+      "failureCategory": null,
+      "requestedAt": "2031-03-01T10:00:00.000000Z",
+      "firstAttemptAt": null,
+      "ringingAt": "2031-03-01T10:00:00.000000Z",
+      "answeredAt": null,
+      "connectedAt": null,
+      "endedAt": "2031-03-01T10:01:36.000000Z",
+      "connectedDurationMs": null,
+      "durationsAsOf": "2031-03-01T10:01:36.000000Z",
+      "routeClass": "APPLICATION",
+      "attemptCount": 0,
+      "attempts": [],
+      "participants": [],
+      "privacyDecisions": [
+        {
+          "decisionId": "9e3071a2-ac5f-4db8-94a9-6f2c8e1b3045",
+          "purpose": "CALL_CREATE",
+          "contextVersion": 1,
+          "relaySessionVersion": 1,
+          "decidedAt": "2031-03-01T10:00:00.000000Z"
+        }
+      ]
+    },
+    {
+      "callId": "11111111-2222-4333-8444-555555555555",
+      "contextId": "0e3c7a52-6f1b-4a7e-9d5c-2b8f4e1a9c30",
+      "relaySessionId": "7c1e5f20-8a3d-4b96-b2e7-4d0a6c9f1e23",
+      "kind": "VOICE",
+      "state": "ENDED",
+      "terminalReason": "PARTICIPATION_ENDED",
+      "failureCategory": null,
+      "requestedAt": "2031-03-01T10:00:00.000000Z",
+      "firstAttemptAt": "2031-03-01T10:00:00.000000Z",
+      "ringingAt": "2031-03-01T10:00:00.000000Z",
+      "answeredAt": "2031-03-01T10:00:04.000000Z",
+      "connectedAt": "2031-03-01T10:00:06.000000Z",
+      "endedAt": "2031-03-01T10:01:36.000000Z",
+      "connectedDurationMs": 90000,
+      "durationsAsOf": "2031-03-01T10:01:36.000000Z",
+      "routeClass": "APPLICATION",
+      "attemptCount": 1,
+      "attempts": [
+        {
+          "attemptNumber": 1,
+          "startedAt": "2031-03-01T10:00:00.000000Z",
+          "finishedAt": "2031-03-01T10:00:06.000000Z",
+          "outcome": "SUCCEEDED",
+          "unknownOutcome": false,
+          "failureCategory": null
+        }
+      ],
+      "participants": [
+        {
+          "participantId": "22222222-3333-4444-8555-666666666666",
+          "principalId": "3f2a1b0c-9d8e-4f7a-8b6c-5d4e3f2a1b0c",
+          "role": "INITIATOR",
+          "connectedDurationMs": 90000
+        }
+      ],
+      "privacyDecisions": [
+        {
+          "decisionId": "9e3071a2-ac5f-4db8-94a9-6f2c8e1b3045",
+          "purpose": "CALL_CREATE",
+          "contextVersion": 1,
+          "relaySessionVersion": 1,
+          "decidedAt": "2031-03-01T10:00:00.000000Z"
+        }
+      ]
+    }
+  ],
+  "nextCursor": null,
+  "offset": 100
+}

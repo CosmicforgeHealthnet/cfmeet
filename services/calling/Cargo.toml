@@ -1,0 +1,71 @@
+[workspace]
+members = [".", "migration"]
+
+[package]
+name = "calling"
+version = "0.1.0"
+edition = "2021"
+publish = false
+default-run = "calling"
+description = "CF Meet Calling service: platform consumer, credential and principal trust foundation"
+
+[lib]
+name = "calling"
+path = "src/lib.rs"
+
+[[bin]]
+name = "calling"
+path = "src/main.rs"
+
+[[bin]]
+name = "platform_admin"
+path = "src/bin/platform_admin.rs"
+
+[dependencies]
+calling-migration = { path = "migration" }
+# Shared internal service authentication protocol (packages/, never another service).
+cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
+cf-object-storage = { path = "../../packages/object-storage" }
+cf-webhooks = { path = "../../packages/webhooks" }
+tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync"] }
+sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono", "with-json", "postgres-array"] }
+axum = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio", "query", "ws", "matched-path"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+# IANA time zones for business hours (Part F §58): never hand-written DST arithmetic.
+chrono-tz = { version = "0.10", default-features = false, features = ["std"] }
+thiserror = "2.0"
+anyhow = "1.0"
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+# Credential security: CSPRNG secrets, keyed HMAC-SHA-256 verifier, redacted/zeroized secret containers.
+rand = "0.8"
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+secrecy = "0.10"
+zeroize = "1.8"
+# Media provider boundary and signaling credentials: HS256 JWS (RustCrypto backend, same
+# audited implementation the service-auth package uses), provider HTTPS API (rustls, no
+# redirects), async provider trait.
+jsonwebtoken = { version = "11", default-features = false, features = ["rust_crypto"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+base64 = "0.22"
+async-trait = "0.1"
+# Media connection gateway (provider edge): admitted signaling connections are relayed to
+# the media server over a WebSocket client (rustls, webpki roots; wss outside loopback).
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+
+[dev-dependencies]
+jsonschema = { version = "0.58", default-features = false }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+# RTC certification drives real WebRTC client processes.
+tokio = { version = "1.42", features = ["process", "io-util", "net"] }
+# WebSocket client for the signaling integration tests (default features: plain ws).
+tokio-tungstenite = "0.24"

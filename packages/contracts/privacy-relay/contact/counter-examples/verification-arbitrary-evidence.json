@@ -1,0 +1,8 @@
+{
+  "expectedVersion": 1,
+  "targetState": "VERIFIED",
+  "trustSource": "OTP_PROVIDER",
+  "evidence": {
+    "code": "123456"
+  }
+}

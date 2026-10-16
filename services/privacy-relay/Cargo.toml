@@ -1,0 +1,54 @@
+[workspace]
+members = [".", "migration"]
+
+[package]
+name = "privacy-relay"
+version = "0.1.0"
+edition = "2021"
+publish = false
+default-run = "privacy-relay"
+description = "CF Meet Privacy Relay service: Communication Contexts, Privacy Relay Sessions, communication authorization and active-call enforcement"
+
+[lib]
+name = "privacy_relay"
+path = "src/lib.rs"
+
+[[bin]]
+name = "privacy-relay"
+path = "src/main.rs"
+
+[dependencies]
+privacy-relay-migration = { path = "migration" }
+# Shared internal service authentication protocol (packages/, never another service).
+cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
+tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync"] }
+sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono", "with-json", "postgres-array"] }
+axum = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio", "query"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+thiserror = "2.0"
+anyhow = "1.0"
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+sha2 = "0.10"
+hex = "0.4"
+async-trait = "0.1"
+# Contact Vault (§31–§33): authenticated encryption, keyed fingerprints, E.164.
+aes-gcm = "0.10"
+hmac = "0.12"
+zeroize = { version = "1.8", features = ["zeroize_derive"] }
+base64 = "0.22"
+# Mature libphonenumber port: international number parsing is never hand-written.
+phonenumber = "0.3"
+
+[dev-dependencies]
+jsonschema = { version = "0.58", default-features = false }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+# Forging tokens with self-declared claims (negative tests only).
+jsonwebtoken = { version = "11", default-features = false, features = ["rust_crypto"] }
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }

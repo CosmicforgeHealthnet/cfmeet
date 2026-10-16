@@ -1,0 +1,3 @@
+# Real WebRTC client of the Calling RTC certification suite (tests/rtc/rtc_client.py).
+# Test-only; pinned for reproducible certification runs.
+livekit==1.1.20

@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/privacy-relay/contact-resolution/v1.schema.json",
+  "title": "CF Meet Contact Resolution v1",
+  "description": "Contact Resolution Grants and Telephony-only execution resolution (Part D section 33). Internal service API only; the e164 member exists ONLY in ExecutionResolution. The root accepts exactly one of the bodies (fixtures).",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ResolutionGrantRequest"
+    },
+    {
+      "$ref": "#/$defs/ResolutionGrant"
+    },
+    {
+      "$ref": "#/$defs/ResolutionGrantResult"
+    },
+    {
+      "$ref": "#/$defs/ResolveForExecutionRequest"
+    },
+    {
+      "$ref": "#/$defs/ExecutionResolution"
+    },
+    {
+      "$ref": "#/$defs/ExecutionResolutionResult"
+    }
+  ],
+  "$defs": {
+    "ResolutionGrantRequest": {
+      "description": "Calling (protected-contact.grant-for-execution): a grant for ONE call leg. The decision must be a current AUTHORIZED public-network relay decision of this session involving the contact, made for Calling, at the current context / session versions; the contact must be enabled and effectively VERIFIED.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relaySessionId",
+        "decisionId",
+        "callId",
+        "callLegId",
+        "purpose"
+      ],
+      "properties": {
+        "relaySessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "decisionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callLegId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "purpose": {
+          "const": "PUBLIC_NETWORK_CALL_LEG"
+        }
+      }
+    },
+    "ResolutionGrant": {
+      "description": "A Contact Resolution Grant (at most 120 s, never past the decision validity; a re-request for the same leg revokes the previous one). It carries no contact value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grantId",
+        "grantSecret",
+        "contactReference",
+        "contextId",
+        "relaySessionId",
+        "decisionId",
+        "callId",
+        "callLegId",
+        "purpose",
+        "issuedAt",
+        "expiresAt"
+      ],
+      "properties": {
+        "grantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "grantSecret": {
+          "description": "Random grant secret (base64url); only its SHA-256 is stored. Handed from Calling to Telephony for one execution.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        },
+        "contactReference": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContactReference"
+        },
+        "contextId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "relaySessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "decisionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callLegId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "purpose": {
+          "const": "PUBLIC_NETWORK_CALL_LEG"
+        },
+        "issuedAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "expiresAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        }
+      }
+    },
+    "ResolutionGrantResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grant"
+      ],
+      "properties": {
+        "grant": {
+          "$ref": "#/$defs/ResolutionGrant"
+        }
+      }
+    },
+    "ResolveForExecutionRequest": {
+      "description": "Telephony only (protected-contact.resolve-for-execution).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grantId",
+        "grantSecret",
+        "callId",
+        "callLegId",
+        "executionAttemptId"
+      ],
+      "properties": {
+        "grantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "grantSecret": {
+          "description": "Random grant secret (base64url); only its SHA-256 is stored. Handed from Calling to Telephony for one execution.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callLegId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "executionAttemptId": {
+          "description": "Idempotency identity of the execution attempt: only the same service with the same attempt may retry a consumed grant.",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "ExecutionResolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contactReference",
+        "e164",
+        "country",
+        "callId",
+        "callLegId",
+        "grantId",
+        "expiresAt"
+      ],
+      "properties": {
+        "contactReference": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContactReference"
+        },
+        "e164": {
+          "description": "The canonical E.164 number. Present ONLY in the Telephony execution-resolution response; never logged, persisted outside the vault, evented or returned anywhere else.",
+          "type": "string",
+          "pattern": "^\\+[1-9][0-9]{1,14}$"
+        },
+        "country": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z]{2}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callLegId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "grantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "expiresAt": {
+          "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "callerIdentity": {
+          "description": "The caller identity the leg presents: the relay number lent to the grant's relay session (its active, outbound-capable relay identity binding), selected by Privacy Relay — never by a client. Absent when the session has none; Telephony then refuses to originate. Present ONLY in this Telephony response.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "assignmentId",
+            "e164"
+          ],
+          "properties": {
+            "assignmentId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "e164": {
+              "type": "string",
+              "pattern": "^\\+[1-9][0-9]{1,14}$"
+            }
+          }
+        }
+      }
+    },
+    "ExecutionResolutionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resolution"
+      ],
+      "properties": {
+        "resolution": {
+          "$ref": "#/$defs/ExecutionResolution"
+        }
+      }
+    }
+  }
+}

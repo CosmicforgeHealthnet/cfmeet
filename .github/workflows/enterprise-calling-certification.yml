@@ -1,0 +1,197 @@
+name: Enterprise calling certification
+
+# Part F (sections 52-62) certification across REAL components: Calling (served on a real
+# port by its test harness), the real Telephony binary (own database, signed internal
+# HTTP), a real Asterisk edge (ARI; infra/telephony/certification/) and SIPp acting as an
+# enterprise desk phone (RTP + RFC 4733 keypad input) on loopback. It certifies internal
+# enterprise SIP (IVR prompts / keys / timeouts / routes, voicemail capture, recording
+# capture as they land) — never a carrier: real PSTN certification remains the Part E
+# external blocker (ADR 0016).
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/calling/**"
+      - "services/telephony/**"
+      - "infra/telephony/**"
+      - "packages/service-auth/**"
+      - "packages/object-storage/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
+      - ".github/workflows/enterprise-calling-certification.yml"
+  pull_request:
+    paths:
+      - "services/calling/**"
+      - "services/telephony/**"
+      - "infra/telephony/**"
+      - "packages/service-auth/**"
+      - "packages/object-storage/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
+      - ".github/workflows/enterprise-calling-certification.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: enterprise-calling-cert-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  enterprise-sip:
+    name: Enterprise SIP (Calling + Telephony + Asterisk + SIPp)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      # Anything missing FAILS here (it only skips on a developer machine without it).
+      ENTERPRISE_SIP_CERT_REQUIRED: "1"
+      # Voicemail: a real S3-compatible private bucket (MinIO, certification only).
+      ENTERPRISE_CERT_S3_ENDPOINT: http://127.0.0.1:9000
+      ENTERPRISE_CERT_S3_ACCESS_KEY: cfmeet-cert
+      ENTERPRISE_CERT_S3_SECRET_KEY: cfmeet-cert-only-not-a-secret
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the SIP / media edge, its built-in prompts and the SIP simulator
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends asterisk asterisk-core-sounds-en-gsm sip-tester
+          sudo systemctl stop asterisk 2>/dev/null || true
+          sudo systemctl disable asterisk 2>/dev/null || true
+          sudo pkill -x asterisk || true
+          sudo setcap cap_net_raw+ep "$(command -v sipp)"
+          getcap "$(command -v sipp)" | grep -q cap_net_raw
+          asterisk -V
+          ls /usr/share/asterisk/sounds/en/dir-pls-enter.gsm /usr/share/asterisk/sounds/en/pm-invalid-option.gsm
+
+      - name: S3-compatible private bucket (MinIO, certification only)
+        run: |
+          set -euo pipefail
+          docker run -d --name minio -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER="$ENTERPRISE_CERT_S3_ACCESS_KEY" \
+            -e MINIO_ROOT_PASSWORD="$ENTERPRISE_CERT_S3_SECRET_KEY" \
+            pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372 server /data
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:9000/minio/health/live && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:9000/minio/health/live
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            services/telephony -> target
+            services/calling -> target
+          key: enterprise-sip
+
+      - name: Build telephony binaries (service, migration, admin)
+        working-directory: services/telephony
+        run: cargo build --workspace --bins --locked
+
+      - name: Enterprise SIP certification
+        working-directory: services/calling
+        run: |
+          set -euo pipefail
+          export TELEPHONY_BIN="$GITHUB_WORKSPACE/services/telephony/target/debug/telephony"
+          export TELEPHONY_MIGRATION_BIN="$GITHUB_WORKSPACE/services/telephony/target/debug/telephony-migration"
+          test -x "$TELEPHONY_BIN"; test -x "$TELEPHONY_MIGRATION_BIN"
+          test -x "$(dirname "$TELEPHONY_BIN")/telephony-admin"
+          cargo test --locked --test enterprise_sip_certification -- --nocapture 2>&1 | tee "$RUNNER_TEMP/ent.log"
+          grep -q "test result: ok. 1 passed" "$RUNNER_TEMP/ent.log"
+          if grep -q "SKIPPED" "$RUNNER_TEMP/ent.log"; then
+            echo "::error::the enterprise SIP certification was skipped"; exit 1
+          fi
+          for scenario in \
+            "prompt + valid key -> extension" \
+            "invalid key + retry, valid key -> queue" \
+            "timeout + retry -> hangup by the platform" \
+            "hangup branch"; do
+            grep -q "^enterprise SIP IVR certified: $scenario" "$RUNNER_TEMP/ent.log" \
+              || { echo "::error::IVR scenario not certified: $scenario"; exit 1; }
+          done
+          grep -q "^enterprise SIP voicemail certified: IVR -> mailbox, real edge capture" "$RUNNER_TEMP/ent.log" \
+            || { echo "::error::voicemail was not certified"; exit 1; }
+          grep -q "^enterprise SIP recording certified: denied without consent" "$RUNNER_TEMP/ent.log" \
+            || { echo "::error::call recording was not certified"; exit 1; }
+
+      - name: Edge logs (on failure)
+        if: failure()
+        run: |
+          for f in /tmp/cfmeet-ent-cert-*/console.log /tmp/cfmeet-ent-sipp-*/*.log /tmp/cf-ent-cert-*/telephony.log; do
+            [ -f "$f" ] && { echo "== $f"; tail -n 200 "$f"; }
+          done || true
+
+  enterprise-races:
+    # §224: the high-risk Part F races and recovery paths, five repetitions each, plus the
+    # load suite's burst invariants. A single failure fails the job (no flaky acceptance).
+    name: Enterprise races and burst invariants (5 repetitions)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    defaults:
+      run:
+        working-directory: services/calling
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/calling -> target
+          key: enterprise-races
+
+      - name: Build the test binaries
+        run: cargo test --locked --no-run --test enterprise_ring_groups --test enterprise_queues --test enterprise_transfer --test enterprise_voicemail --test enterprise_recording --test enterprise_hours_forwarding --test call_history --test enterprise_load
+
+      - name: Five repetitions of the high-risk tests
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            echo "::group::repetition $i"
+            cargo test --locked --test enterprise_ring_groups concurrent_member_answers_have_exactly_one_winner
+            cargo test --locked --test enterprise_queues concurrent_dispatchers_never_double_offer
+            cargo test --locked --test enterprise_queues abandon_and_answer_race_is_consistent
+            cargo test --locked --test enterprise_transfer transfer_races_leave_one_owner
+            cargo test --locked --test enterprise_voicemail concurrent_finalization_stores_once
+            cargo test --locked --test enterprise_voicemail delete_racing_retention_deletes_once
+            cargo test --locked --test enterprise_recording concurrent_starts_record_once
+            cargo test --locked --test enterprise_recording stop_racing_the_call_end_stops_once
+            cargo test --locked --test enterprise_hours_forwarding schedule_changes_during_route_selection_are_consistent
+            cargo test --locked --test call_history a_missed_call_survives_push_and_realtime_outage
+            cargo test --locked --test call_history one_answered_device_answers_for_the_logical_participant
+            echo "::endgroup::"
+          done
+
+      - name: Burst invariants and measured throughput
+        run: |
+          set -euo pipefail
+          cargo test --locked --test enterprise_load -- --nocapture --test-threads=1 2>&1 | tee "$RUNNER_TEMP/load.log"
+          grep -q "test result: ok. 4 passed" "$RUNNER_TEMP/load.log"
+          grep -o "LOAD .*" "$RUNNER_TEMP/load.log"

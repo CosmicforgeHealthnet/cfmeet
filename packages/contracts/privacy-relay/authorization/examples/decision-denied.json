@@ -1,0 +1,15 @@
+{
+  "decisionId": "a1b2c3d4-e5f6-4071-8283-94a5b6c7d8e9",
+  "decision": "DENIED",
+  "reason": "PARTICIPANT_NOT_AUTHORIZED",
+  "contextId": "0e3c7a52-6f1b-4a7e-9d5c-2b8f4e1a9c30",
+  "contextVersion": 2,
+  "relaySessionId": "5a9d2c7e-3b41-4f08-a6e2-91c4d7b03e58",
+  "relaySessionVersion": 2,
+  "strategy": "APP_ONLY",
+  "policyVersion": "CONTEXT_POLICY_V1",
+  "channel": "VOICE",
+  "route": "APPLICATION",
+  "purpose": "CALL_CREATE",
+  "decidedAt": "2031-03-01T10:06:00.000000Z"
+}

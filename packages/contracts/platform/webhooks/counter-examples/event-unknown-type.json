@@ -1,0 +1,7 @@
+{
+  "id": "whe_00000000000000000000000000000003",
+  "type": "telephony.leg-answered",
+  "apiVersion": "v1",
+  "occurredAt": "2031-03-01T10:05:00.000Z",
+  "data": {}
+}
