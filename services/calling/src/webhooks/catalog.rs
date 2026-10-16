@@ -61,6 +61,12 @@ catalog! {
     "limit.warning" => names::USAGE_READ,
     "limit.exceeded" => names::USAGE_READ,
     "sms.received" => names::SMS_READ,
+    "sms.requested" => names::SMS_READ,
+    "sms.submitted" => names::SMS_READ,
+    "sms.delivered" => names::SMS_READ,
+    "sms.failed" => names::SMS_READ,
+    "sms.unknown" => names::SMS_READ,
+    "sms.blocked" => names::SMS_READ,
 }
 
 pub fn definition(name: &str) -> Option<&'static EventTypeDef> {
@@ -248,6 +254,12 @@ pub fn project_sms_gateway(envelope: &Value) -> Option<PublicEvent> {
     let payload = envelope.get("payload")?.as_object()?;
     let event_type = match internal {
         "sms-gateway.message.received" => "sms.received",
+        "sms-gateway.message.requested" => "sms.requested",
+        "sms-gateway.message.submitted" => "sms.submitted",
+        "sms-gateway.message.delivered" => "sms.delivered",
+        "sms-gateway.message.failed" => "sms.failed",
+        "sms-gateway.message.unknown" => "sms.unknown",
+        "sms-gateway.message.blocked" => "sms.blocked",
         _ => return None,
     };
     let mut data = Map::new();
@@ -285,6 +297,19 @@ mod tests {
                     "numberResourceId": "22222222-2222-4222-8222-222222222222",
                     "targetKind": "PRINCIPAL", "targetRef": "33333333-3333-4333-8333-333333333333" })
         );
+        for (internal, public) in [
+            ("requested", "sms.requested"),
+            ("submitted", "sms.submitted"),
+            ("delivered", "sms.delivered"),
+            ("failed", "sms.failed"),
+            ("unknown", "sms.unknown"),
+            ("blocked", "sms.blocked"),
+        ] {
+            let mut e = env.clone();
+            e["event_type"] = json!(format!("sms-gateway.message.{internal}"));
+            assert_eq!(project_sms_gateway(&e).unwrap().event_type, public);
+            assert!(definition(public).is_some());
+        }
         let mut other = env.clone();
         other["event_type"] = json!("sms-gateway.message.internal-fact");
         assert!(project_sms_gateway(&other).is_none());

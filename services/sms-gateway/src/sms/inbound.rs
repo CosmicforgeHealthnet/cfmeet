@@ -286,6 +286,7 @@ pub async fn receive(
                     expires_at: None,
                     received_at: Some(now),
                     correlation_id: ctx.correlation_id.as_str(),
+                    environment_kind: None,
                 },
                 now,
             )

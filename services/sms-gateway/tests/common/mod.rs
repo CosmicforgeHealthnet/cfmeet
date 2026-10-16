@@ -40,8 +40,8 @@ use sms_gateway::{
         PrincipalDirectory, PrincipalStatus, TrustedContext,
     },
     numbering::{
-        NumberingError, NumberingPort, ReleasedSender, Scope, SmsDestination, SmsRoute,
-        VerifiedRouting,
+        NumberingError, NumberingPort, ReleasedSender, Scope, SenderState, SmsDestination,
+        SmsRoute, VerifiedRouting,
     },
     providers::deterministic::DeterministicSmsProvider,
     sms::protection::Protection,
@@ -320,6 +320,9 @@ pub struct FakeNumbering {
     /// Inbound grants issued: token -> (grant id, the number as resolved).
     pub inbound_grants: StdMutex<HashMap<String, (Uuid, FakeNumber)>>,
     pub verifications: StdMutex<usize>,
+    pub sender_checks: StdMutex<usize>,
+    /// Numbering refuses the next sender grants with this reason (expired, revoked, …).
+    pub refuse_sender: StdMutex<Option<String>>,
     /// Numbering unreachable for grant verification only.
     pub verify_down: StdMutex<bool>,
     /// Runs once, right after the next resolution (a routing change racing delivery).
@@ -457,6 +460,9 @@ impl NumberingPort for FakeNumbering {
         if n.unavailable.is_some() || !n.outbound_sms {
             return Err(NumberingError::Refused("PRECONDITION_FAILED".into()));
         }
+        if let Some(reason) = self.refuse_sender.lock().unwrap().clone() {
+            return Err(NumberingError::Refused(reason));
+        }
         if let Some(p) = n.sender_principal {
             if delegated.initiating_principal().map(|i| i.principal_id) != Some(p) {
                 return Err(NumberingError::Refused("PRECONDITION_FAILED".into()));
@@ -474,6 +480,32 @@ impl NumberingPort for FakeNumbering {
             routing_revision: n.routing_revision,
             grant_id: Uuid::new_v4(),
             scope: n.scope,
+        })
+    }
+
+    async fn sender_current(
+        &self,
+        delegated: &DelegatedPlatformContext,
+        _: &CorrelationId,
+        number_resource_id: Uuid,
+    ) -> Result<SenderState, NumberingError> {
+        if *self.down.lock().unwrap() || *self.verify_down.lock().unwrap() {
+            return Err(NumberingError::Unavailable);
+        }
+        *self.sender_checks.lock().unwrap() += 1;
+        let numbers = self.numbers.lock().unwrap();
+        let n = numbers
+            .iter()
+            .find(|n| {
+                n.id == number_resource_id
+                    && n.scope.tenant_id == delegated.tenant_id()
+                    && n.scope.application_id == delegated.application_id()
+                    && n.scope.environment_id == delegated.application_environment_id()
+            })
+            .ok_or(NumberingError::Refused("NOT_FOUND".into()))?;
+        Ok(SenderState {
+            assignment_id: n.assignment_id,
+            active: n.unavailable.is_none() && n.outbound_sms,
         })
     }
 
@@ -777,6 +809,40 @@ impl Harness {
             b = b.header(k, v);
         }
         self.raw(b.body(Body::from(body)).unwrap()).await
+    }
+
+    /// `POST /v1/sms/messages` with `key`.
+    pub async fn send(&self, c: &Customer, body: Value, key: &str) -> Response {
+        self.post(Some(&c.token), "/v1/sms/messages", body, Some(key))
+            .await
+    }
+
+    /// One dispatcher pass.
+    pub async fn dispatch(&self) -> sms_gateway::sms::dispatch::DispatchReport {
+        sms_gateway::sms::dispatch::run_once(&self.state)
+            .await
+            .unwrap()
+    }
+
+    /// Posts a signed delivery receipt.
+    pub async fn receipt(&self, signed: &(HeaderMap, Vec<u8>)) -> Response {
+        self.callback(
+            "/provider-callbacks/v1/sms/deterministic/delivery-receipts",
+            signed.0.clone(),
+            signed.1.clone(),
+        )
+        .await
+    }
+
+    /// A signed receipt for `reference` at the gateway's now.
+    pub fn receipt_callback(
+        &self,
+        reference: &str,
+        status: sms_gateway::providers::ReceiptStatus,
+        error: Option<&str>,
+    ) -> (HeaderMap, Vec<u8>) {
+        self.provider
+            .receipt_callback(reference, status, error, self.now())
     }
 
     /// A signed inbound-message callback of the deterministic provider at the gateway's now.

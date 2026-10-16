@@ -1,33 +1,44 @@
-//! The customer API (`/v1/sms/**`, Platform Access authentication). Workstream N: message
-//! and thread reads (`sms.read`). Sending (`sms.send`) is Workstream O.
+//! The customer API (`/v1/sms/**`, Platform Access authentication): message and thread
+//! reads (`sms.read`, Workstream N); sending and opt-outs (`sms.send`, Workstream O).
 //!
 //! Every read is scoped to the credential's TRUSTED environment: another environment's
 //! message or thread is NOT_FOUND. Content is returned to its owner only; the remote
 //! party is masked; no provider identifier appears.
 
 use axum::{
-    extract::{Path, Query, State},
-    routing::get,
+    extract::{rejection::JsonRejection, Path, Query, State},
+    http::{HeaderMap, StatusCode},
+    routing::{get, post},
     Json, Router,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use super::{error::ApiError, middleware::CustomerCaller};
+use super::{
+    error::{ApiError, ErrorCode},
+    middleware::CustomerCaller,
+};
 use crate::{
+    domain::{current_context, RequestContext},
     sms::{
+        controls, e164,
+        events::EventScope,
+        protection::mask,
         reads::{self, Cursor, MessageFilter},
+        send::{self, SendOutcome, SendRequest},
         store, threads, Direction, SmsError,
     },
     state::AppState,
 };
 
 pub const SMS_READ: &str = "sms.read";
+pub const SMS_SEND: &str = "sms.send";
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/messages", get(list_messages))
+        .route("/messages", get(list_messages).post(send_message))
+        .route("/opt-outs", post(create_opt_out))
         .route("/messages/:message_id", get(get_message))
         .route("/threads", get(list_threads))
         .route("/threads/:thread_id/messages", get(list_thread_messages))
@@ -161,4 +172,104 @@ async fn list_thread_messages(
     )
     .await?;
     Ok(Json(message_page(&state, &rows, next)))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FromBody {
+    number_resource_id: Uuid,
+}
+
+/// `SendMessageRequest`: the sender is a Number Resource only — a sender id or a raw
+/// number cannot even be expressed.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SendBody {
+    from: FromBody,
+    to: Option<String>,
+    thread_id: Option<Uuid>,
+    text: String,
+    principal_id: Option<Uuid>,
+    validity_seconds: Option<i64>,
+}
+
+fn idempotency_key(headers: &HeaderMap) -> Result<String, ApiError> {
+    let mut values = headers.get_all("idempotency-key").iter();
+    match (values.next(), values.next()) {
+        (Some(v), None) => v
+            .to_str()
+            .map(|s| s.trim().to_string())
+            .map_err(|_| SmsError::Validation("Idempotency-Key is invalid.").into()),
+        _ => Err(ApiError::Code(ErrorCode::IdempotencyKeyRequired)),
+    }
+}
+
+async fn send_message(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    body: Result<Json<SendBody>, JsonRejection>,
+) -> Result<(StatusCode, Json<store::MessageView>), ApiError> {
+    let ctx = caller.require_scope(SMS_SEND)?;
+    let key = idempotency_key(&headers)?;
+    let Json(body) = body.map_err(|_| SmsError::Validation("The request body is invalid."))?;
+    let rc = current_context().unwrap_or_else(RequestContext::generate);
+    let request = SendRequest {
+        from_number: body.from.number_resource_id,
+        to: body.to,
+        thread_id: body.thread_id,
+        text: body.text,
+        principal_id: body.principal_id,
+        validity_seconds: body.validity_seconds,
+    };
+    match send::send(&state, ctx, &key, request, &rc).await? {
+        SendOutcome::Accepted(row) => Ok((
+            StatusCode::ACCEPTED,
+            Json(store::view(&row, &state.protection)),
+        )),
+        SendOutcome::Replayed(row) => {
+            Ok((StatusCode::OK, Json(store::view(&row, &state.protection))))
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct OptOutBody {
+    to: String,
+    number_resource_id: Option<Uuid>,
+}
+
+/// Blocks a recipient for one number (or every number) of the environment. Idempotent.
+async fn create_opt_out(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    body: Result<Json<OptOutBody>, JsonRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let ctx = caller.require_scope(SMS_SEND)?;
+    let Json(body) = body.map_err(|_| SmsError::Validation("The request body is invalid."))?;
+    let to =
+        e164::normalize(&body.to).ok_or(SmsError::Validation("to must be an E.164 number."))?;
+    let now = state.now();
+    let scope = EventScope {
+        tenant_id: ctx.tenant_id,
+        application_id: ctx.application_id,
+        environment_id: ctx.environment_id,
+    };
+    controls::block(
+        &state.db,
+        scope,
+        body.number_resource_id,
+        &state.protection.number_fingerprint(&to),
+        "CUSTOMER_REQUEST",
+        None,
+        now,
+    )
+    .await?;
+    Ok(Json(json!({
+        "remote": { "masked": mask(&to) },
+        "numberResourceId": body.number_resource_id,
+        "reason": "CUSTOMER_REQUEST",
+        "createdAt": threads::ts(now),
+    })))
 }

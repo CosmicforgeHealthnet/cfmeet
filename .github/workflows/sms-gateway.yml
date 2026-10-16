@@ -112,6 +112,8 @@ jobs:
         run: cargo test --locked --test foundation --test startup --test architecture
       - name: Inbound SMS (N) — authenticated callbacks, Numbering resolution, quarantine, threads, reads, retention
         run: cargo test --locked --test inbound
+      - name: Outbound SMS (O) — authorization, idempotency, durable submission, unknown outcomes, receipts, controls
+        run: cargo test --locked --test outbound
       - name: cargo test (whole workspace)
         run: cargo test --workspace --no-fail-fast --locked
 

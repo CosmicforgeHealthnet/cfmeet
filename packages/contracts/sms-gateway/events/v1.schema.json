@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/sms-gateway/events/v1.schema.json",
   "title": "CF Meet SMS Gateway events v1",
-  "description": "SMS Gateway domain events in the platform envelope (transactional outbox, at least once, per-message order): sms-gateway.message.received. Published to the platform's customer webhook delivery as sms.received.",
+  "description": "SMS Gateway domain events in the platform envelope (transactional outbox, at least once, per-message order): sms-gateway.message.received, sms-gateway.message.requested, sms-gateway.message.submitted, sms-gateway.message.delivered, sms-gateway.message.failed, sms-gateway.message.unknown, sms-gateway.message.blocked. Published to the platform's customer webhook delivery as sms.received/sms.requested/sms.submitted/sms.delivered/sms.failed/sms.unknown/sms.blocked.",
   "$ref": "#/$defs/MessageEvent",
   "$defs": {
     "MessagePayload": {
@@ -146,7 +146,13 @@
         "event_type": {
           "type": "string",
           "enum": [
-            "sms-gateway.message.received"
+            "sms-gateway.message.received",
+            "sms-gateway.message.requested",
+            "sms-gateway.message.submitted",
+            "sms-gateway.message.delivered",
+            "sms-gateway.message.failed",
+            "sms-gateway.message.unknown",
+            "sms-gateway.message.blocked"
           ]
         },
         "payload": {

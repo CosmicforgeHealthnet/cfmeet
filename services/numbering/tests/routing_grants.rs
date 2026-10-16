@@ -453,16 +453,19 @@ async fn an_inbound_call_resolves_from_canonical_state_with_a_grant_for_calling(
         (StatusCode::FORBIDDEN, "INTERNAL_PERMISSION_DENIED")
     );
     // The voice resolver never serves SMS, even for its own caller.
-    let r = t
-        .h
-        .internal_json(
+    let r =
+        t.h.internal_json(
             &t.h.peers.telephony,
             Method::POST,
             RESOLVE,
             json!({ "family": "SMS", "e164": e164 }),
         )
         .await;
-    assert_eq!(r.body["error"]["reason"], "FAMILY_NOT_SUPPORTED", "{:?}", r.body);
+    assert_eq!(
+        r.body["error"]["reason"], "FAMILY_NOT_SUPPORTED",
+        "{:?}",
+        r.body
+    );
     let r = t.resolve(&t.h.peers.calling, "VOICE", &e164).await;
     assert_eq!(
         (r.status, r.code()),
@@ -809,6 +812,45 @@ async fn calling_reads_the_scopes_current_assignment_and_voice_target_only() {
     assert_eq!(r.status, StatusCode::FORBIDDEN, "{:?}", r.body);
     let r =
         t.h.internal_get_delegated(&t.h.peers.telephony, &path, delegated(&s, Some(bob)))
+            .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{:?}", r.body);
+}
+
+/// Part IV O: the SMS Gateway re-checks a sender right before submission with its own
+/// sender permission (number-sms-sender.authorize) — the delegated scope's view only.
+#[tokio::test]
+async fn the_sms_gateway_reads_the_scopes_current_sender_assignment_only() {
+    let Some(t) = setup().await else {
+        return;
+    };
+    let s = sandbox();
+    let (id, a) = t
+        .active(
+            &s,
+            "syn-voice-sms-mobile",
+            NumberType::Mobile,
+            &[C::SmsInbound, C::SmsOutbound],
+            O::SharedTeam,
+            None,
+            targets((V::None, None), (Sms::SharedTeam, Some(Uuid::new_v4()))),
+        )
+        .await;
+    let path = format!("/internal/v1/routing/number-assignments/{id}");
+    let r =
+        t.h.internal_get_delegated(&t.h.peers.sms_gateway, &path, delegated(&s, None))
+            .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["assignmentId"], json!(a.id));
+    assert_eq!(r.body["assignmentStatus"], "ACTIVE");
+    assert_eq!(r.body["outbound"]["sms"], true);
+    conforms(&format!("{GRANT}CurrentAssignment"), &r.body);
+    let other = scope(EnvironmentKind::Test);
+    let r =
+        t.h.internal_get_delegated(&t.h.peers.sms_gateway, &path, delegated(&other, None))
+            .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{:?}", r.body);
+    let r =
+        t.h.internal(&t.h.peers.sms_gateway, Method::GET, &path)
             .await;
     assert_eq!(r.status, StatusCode::FORBIDDEN, "{:?}", r.body);
 }

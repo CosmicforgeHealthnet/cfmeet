@@ -70,7 +70,13 @@
         "usage.recorded",
         "limit.warning",
         "limit.exceeded",
-        "sms.received"
+        "sms.received",
+        "sms.requested",
+        "sms.submitted",
+        "sms.delivered",
+        "sms.failed",
+        "sms.unknown",
+        "sms.blocked"
       ]
     },
     "CreateWebhookRequest": {

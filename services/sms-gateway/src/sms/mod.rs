@@ -17,12 +17,15 @@
 //! evidence (a delivery receipt or a status query) resolves it.
 
 pub mod controls;
+pub mod dispatch;
 pub mod e164;
 pub mod events;
 pub mod inbound;
 pub mod protection;
 pub mod reads;
+pub mod receipts;
 pub mod segments;
+pub mod send;
 pub mod store;
 pub mod threads;
 pub mod workers;
@@ -158,6 +161,7 @@ pub struct TransportRow {
     pub received_at: Option<DateTime<Utc>>,
     pub failed_at: Option<DateTime<Utc>>,
     pub correlation_id: String,
+    pub environment_kind: Option<String>,
     pub version: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -169,11 +173,19 @@ pub const TRANSPORT_COLUMNS: &str = "id, tenant_id, application_id, environment_
     char_count, segment_count, thread_id, service_account_id, idempotency_key, request_digest, sender_grant_id, \
     provider_id, estimated_cost_minor, confirmed_cost_minor, cost_currency, failure_code, blocked_reason, \
     attempt_count, max_attempts, next_attempt_at, expires_at, submitted_at, delivered_at, received_at, failed_at, \
-    correlation_id, version, created_at, updated_at";
+    correlation_id, environment_kind, version, created_at, updated_at";
 
 impl TransportRow {
     pub fn status(&self) -> Status {
         Status::parse(&self.status).unwrap_or(Status::Unknown)
+    }
+
+    /// The trusted environment kind recorded at authorization (outbound).
+    pub fn environment_kind(&self) -> crate::identity::EnvironmentKind {
+        self.environment_kind
+            .as_deref()
+            .and_then(crate::identity::EnvironmentKind::parse)
+            .unwrap_or(crate::identity::EnvironmentKind::Production)
     }
 
     pub fn scope(&self) -> events::EventScope {

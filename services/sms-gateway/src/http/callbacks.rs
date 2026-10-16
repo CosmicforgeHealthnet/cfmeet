@@ -1,7 +1,7 @@
 //! Provider callbacks (`/provider-callbacks/v1/sms/{provider_id}`): authenticated by the
 //! provider adapter's signature over the RAW body (timestamp window) BEFORE anything is
 //! parsed — never by a customer credential or a service token. Duplicates are answered
-//! with the original disposition. Delivery receipts are Workstream O.
+//! with the original disposition. Inbound messages (N) and delivery receipts (O).
 
 use axum::{
     body::Bytes,
@@ -17,7 +17,7 @@ use crate::{
     providers::{Callback, CallbackError, SharedProvider},
     sms::{
         inbound::{self, CallbackAck},
-        SmsError,
+        receipts, SmsError,
     },
     state::AppState,
 };
@@ -25,7 +25,9 @@ use crate::{
 const MALFORMED: &str = "The callback is malformed.";
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/:provider_id/inbound", post(inbound_message))
+    Router::new()
+        .route("/:provider_id/inbound", post(inbound_message))
+        .route("/:provider_id/delivery-receipts", post(delivery_receipt))
 }
 
 /// The configured provider named by the path (an unknown id is NOT_FOUND).
@@ -85,6 +87,30 @@ async fn inbound_message(
         &state,
         provider.id(),
         message,
+        &inbound::body_digest(&body),
+        &ctx,
+    )
+    .await
+    .map(Json)
+    .map_err(ApiError::from)
+}
+
+async fn delivery_receipt(
+    State(state): State<AppState>,
+    Path(provider_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<CallbackAck>, ApiError> {
+    let provider = provider(&state, &provider_id)?;
+    let callback = authenticated(&state, &provider, "receipt", &headers, &body)?;
+    let Callback::Receipt(receipt) = callback else {
+        return Err(ApiError::Sms(SmsError::Validation(MALFORMED)));
+    };
+    let ctx = current_context().unwrap_or_else(crate::domain::RequestContext::generate);
+    receipts::receive(
+        &state,
+        provider.id(),
+        receipt,
         &inbound::body_digest(&body),
         &ctx,
     )

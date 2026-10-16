@@ -12,6 +12,9 @@
 //!   sender grant for exactly that message and releases the sender number; re-verifies an
 //!   INBOUND_SMS grant against CURRENT state at the final delivery boundary (a routing
 //!   change, reassignment, suspension or release since the resolution refuses it).
+//! * `GET /internal/v1/routing/number-assignments/{id}` (`number-sms-sender.authorize`,
+//!   signed delegated context) — the scope's CURRENT assignment of a sender, re-checked
+//!   right before each submission (revocation between authorization and dispatch).
 //! * `GET /internal/v1/number-resources/{id}/routes` + `POST …/route-readiness`
 //!   (`number-resource.read`, `number-route.acknowledge`) — SMS route readiness.
 //!
@@ -105,6 +108,14 @@ pub struct VerifiedRouting {
     pub target: Option<(String, Uuid)>,
 }
 
+/// The delegated scope's current hold of a sender number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SenderState {
+    pub assignment_id: Uuid,
+    /// ACTIVE assignment, active number and SMS_OUTBOUND usable.
+    pub active: bool,
+}
+
 /// Numbering's current SMS route configuration of a number.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SmsRoute {
@@ -136,6 +147,15 @@ pub trait NumberingPort: Send + Sync {
         number_resource_id: Uuid,
         operation_ref: &str,
     ) -> Result<ReleasedSender, NumberingError>;
+
+    /// The delegated scope's current assignment of `number_resource_id` (another scope's
+    /// number is Refused).
+    async fn sender_current(
+        &self,
+        delegated: &DelegatedPlatformContext,
+        correlation: &CorrelationId,
+        number_resource_id: Uuid,
+    ) -> Result<SenderState, NumberingError>;
 
     async fn sms_route(&self, number_resource_id: Uuid)
         -> Result<Option<SmsRoute>, NumberingError>;
@@ -175,6 +195,15 @@ impl NumberingPort for UnconfiguredNumbering {
         _: Uuid,
         _: &str,
     ) -> Result<ReleasedSender, NumberingError> {
+        Err(NumberingError::Unavailable)
+    }
+
+    async fn sender_current(
+        &self,
+        _: &DelegatedPlatformContext,
+        _: &CorrelationId,
+        _: Uuid,
+    ) -> Result<SenderState, NumberingError> {
         Err(NumberingError::Unavailable)
     }
 
@@ -390,6 +419,32 @@ impl NumberingPort for HttpNumbering {
             return Err(NumberingError::Refused("GRANT_INVALID".into()));
         }
         Ok(released)
+    }
+
+    async fn sender_current(
+        &self,
+        delegated: &DelegatedPlatformContext,
+        correlation: &CorrelationId,
+        number_resource_id: Uuid,
+    ) -> Result<SenderState, NumberingError> {
+        let outbound = OutboundServiceRequest::continuing(ServiceId::numbering(), correlation)
+            .with_delegated_context(delegated.clone());
+        let v: Value = self
+            .client
+            .get(
+                &outbound,
+                &format!("/internal/v1/routing/number-assignments/{number_resource_id}"),
+            )
+            .await
+            .map_err(failed)?
+            .json()
+            .map_err(|_| NumberingError::Unavailable)?;
+        Ok(SenderState {
+            assignment_id: uuid_at(&v, "assignmentId")?,
+            active: v["assignmentStatus"] == "ACTIVE"
+                && v["numberActive"] == true
+                && v["outbound"]["sms"] == true,
+        })
     }
 
     async fn sms_route(

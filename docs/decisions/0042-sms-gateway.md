@@ -51,7 +51,11 @@ Platform Access.
      SMS_SENDER grant for the delegated scope (and principal) and the gateway consumes it
      with the message's operation reference before the message becomes AUTHORIZED, storing
      the released sender sealed. An arbitrary sender id or raw number cannot be expressed
-     (contract counter-examples). Numbering unreachable: 503, nothing recorded.
+     (contract counter-examples). Numbering unreachable: 503, nothing recorded. Right
+     before each submission the dispatcher re-reads the scope's current assignment of the
+     sender (`number-assignments`, delegated context): a revocation, release or
+     reassignment since authorization fails the message `SENDER_REVOKED` before any
+     provider call.
    * *Inbound:* the destination is resolved by a dedicated SMS resolver
      (`POST /internal/v1/routing/sms-destination-resolutions`, `number-sms-route.resolve`,
      SMS Gateway only). `inbound-resolutions` is voice-only (`FAMILY_NOT_SUPPORTED`).
@@ -80,7 +84,15 @@ Platform Access.
    and per-recipient rate windows (429, not recorded), opt-outs (STOP / START keywords
    inbound, customer blocks), estimated daily spend, identical-content fan-out (abuse);
    a refused message other than a rate limit is recorded FAILED with its reason and an
-   `sms.blocked` event. The complete fraud / investigation engine stays in Workstream T.
+   `sms.blocked` event. Premium / high-risk ranges are refused whatever the allow-list
+   says; rate windows also cover the tenant, the sender number and the principal; two
+   circuits stop sending on a provider-confirmed cost spike and on a provider anomaly
+   (too many rejected / unknown attempts). Spend is counted conservatively (an
+   unconfirmed or UNKNOWN message counts its estimate; only a definitely-unsent one is
+   voided). Rate windows are pre-checked before Numbering is asked and counted in the
+   transaction that records the message, after its idempotency key won, so concurrent
+   duplicates replay instead of consuming budget. The complete fraud / investigation
+   engine stays in Workstream T.
 
 ## Consequences
 

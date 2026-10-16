@@ -115,6 +115,13 @@
                "tests/inbound.rs::content_and_quarantine_are_purged_after_their_retention"]},
     {"id": "sms-gateway-inbound-callbacks", "owner": "sms-gateway", "source": "src/sms/inbound.rs", "entry": "receive",
      "tests": ["tests/inbound.rs::duplicate_and_concurrent_duplicate_callbacks_store_the_message_once",
-               "tests/inbound.rs::a_numbering_outage_fails_closed_and_the_providers_retry_is_applied_once"]}
+               "tests/inbound.rs::a_numbering_outage_fails_closed_and_the_providers_retry_is_applied_once"]},
+    {"id": "sms-gateway-outbound-dispatch", "owner": "sms-gateway", "source": "src/sms/dispatch.rs", "entry": "run_once",
+     "tests": ["tests/outbound.rs::restarts_recover_safely_and_concurrent_dispatchers_submit_each_message_once",
+               "tests/outbound.rs::a_sender_revoked_after_authorization_is_stopped_before_the_provider"]},
+    {"id": "sms-gateway-unknown-reconciliation", "owner": "sms-gateway", "source": "src/sms/dispatch.rs", "entry": "reconcile_one",
+     "tests": ["tests/outbound.rs::ambiguous_timeouts_are_unknown_never_resubmitted_and_resolved_by_read_back"]},
+    {"id": "sms-gateway-delivery-receipts", "owner": "sms-gateway", "source": "src/sms/receipts.rs", "entry": "receive",
+     "tests": ["tests/outbound.rs::receipts_are_deduplicated_order_safe_and_never_regress_a_final_state"]}
   ]
 }

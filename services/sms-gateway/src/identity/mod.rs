@@ -26,6 +26,14 @@ pub enum EnvironmentKind {
 }
 
 impl EnvironmentKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EnvironmentKind::Sandbox => "SANDBOX",
+            EnvironmentKind::Test => "TEST",
+            EnvironmentKind::Production => "PRODUCTION",
+        }
+    }
+
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "SANDBOX" => Some(EnvironmentKind::Sandbox),

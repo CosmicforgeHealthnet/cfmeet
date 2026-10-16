@@ -1,0 +1,21 @@
+{
+  "event_type": "sms-gateway.message.delivered",
+  "payload": {
+    "message_id": "0b2c8f5e-7a41-4d3e-9b6c-1f2e3d4c5b6a",
+    "direction": "OUTBOUND",
+    "status": "DELIVERED",
+    "number_resource_id": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+    "thread_id": "6d7e8f90-1a2b-4c3d-9e4f-5a6b7c8d9e0f",
+    "segment_count": 1,
+    "encoding": "GSM7",
+    "remote_masked": "+***0123",
+    "principal_id": null,
+    "target_kind": null,
+    "target_ref": null,
+    "failure_code": null,
+    "blocked_reason": null,
+    "estimated_cost_minor": 5,
+    "confirmed_cost_minor": 4,
+    "currency": "USD"
+  }
+}

@@ -117,6 +117,8 @@ pub struct NewTransport<'a> {
     pub expires_at: Option<DateTime<Utc>>,
     pub received_at: Option<DateTime<Utc>>,
     pub correlation_id: &'a str,
+    /// Outbound: the trusted environment kind (inbound: None).
+    pub environment_kind: Option<crate::identity::EnvironmentKind>,
 }
 
 pub async fn insert<C: ConnectionTrait>(
@@ -132,9 +134,9 @@ pub async fn insert<C: ConnectionTrait>(
                remote_sealed, remote_fingerprint, remote_masked, content_sealed, content_fingerprint, \
                content_encoding, char_count, segment_count, thread_id, service_account_id, credential_id, \
                idempotency_key, request_digest, inbound_grant_id, provider_id, max_attempts, expires_at, \
-               received_at, correlation_id, created_at, updated_at) \
+               received_at, correlation_id, created_at, updated_at, environment_kind) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, \
-               $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $32) \
+               $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $32, $33) \
              RETURNING {TRANSPORT_COLUMNS}"
         ),
         vec![
@@ -170,6 +172,7 @@ pub async fn insert<C: ConnectionTrait>(
             t.received_at.into(),
             t.correlation_id.into(),
             now.into(),
+            t.environment_kind.map(|k| k.as_str().to_string()).into(),
         ],
     )
     .await?

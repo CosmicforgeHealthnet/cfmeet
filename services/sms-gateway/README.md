@@ -51,8 +51,11 @@ Served at `GET /openapi.json` — exactly the checked-in contract
 | `POST /provider-callbacks/v1/sms/{providerId}/inbound` | provider signature (raw body, 300 s window) | an inbound message: authenticated BEFORE parsing, de-duplicated by the provider event id, resolved by Numbering (`sms-destination-resolutions`) and its grant re-verified against current state right before storage; ROUTED → stored for the environment Numbering named (`sms.received`), a routing change in between → quarantined `ROUTING_CHANGED`; otherwise QUARANTINED; 503 while Numbering is unreachable (nothing stored, the provider retries) (N) |
 | `GET /v1/sms/messages[/{messageId}]` | customer, `sms.read` | the environment's messages (filters `numberResourceId`, `direction`; cursor pages) — content to its owner only, remote party masked (N) |
 | `GET /v1/sms/threads`, `GET /v1/sms/threads/{threadId}/messages` | customer, `sms.read` | transport threads and their messages (N) |
+| `POST /v1/sms/messages` | customer, `sms.send`, `Idempotency-Key` | send ONE message from a Number Resource of the environment (`to` or a `threadId` reply); 202 AUTHORIZED, the same key replays (200) (O) |
+| `POST /v1/sms/opt-outs` | customer, `sms.send` | block a recipient for one number or the environment (O) |
+| `POST /provider-callbacks/v1/sms/{providerId}/delivery-receipts` | provider signature | delivery receipts: de-duplicated, order-safe, cost confirmed once (O) |
 
-Another environment's message or thread is NOT_FOUND. Sending is Workstream O.
+Another environment's message or thread is NOT_FOUND.
 
 ## Inbound messages (Workstream N)
 
@@ -65,6 +68,30 @@ Another environment's message or thread is NOT_FOUND. Sending is Workstream O.
   message stays, with `contentPurged: true`).
 * `sms-gateway.message.received` is published to Calling's platform event ingestion and
   delivered as the `sms.received` customer webhook (references, status and codes only).
+
+## Outbound messages (Workstream O)
+
+1. **Authorization** (request path): content classified GSM-7 / UCS-2 and segmented (≤ 10);
+   recipient by `to` or the thread's party; principal ACTIVE (Platform Access); send-time
+   controls in the gateway itself (premium ranges, allowed prefixes, opt-outs, provider
+   anomaly and cost-spike circuits, environment / tenant daily spend — conservative:
+   estimates count until confirmed — identical-content fan-out and repeats, rate windows
+   per tenant / environment / number / principal / recipient). A control refusal is
+   recorded FAILED with its reason (`sms.blocked`, 422 `SMS_BLOCKED`); a rate window is a
+   429 and not recorded. Numbering then issues a single-use SMS_SENDER grant bound to
+   `sms:<message id>`, consumed at once (ownership, ACTIVE assignment, SMS_OUTBOUND,
+   current revision); the released sender is stored sealed. AUTHORIZED, `sms.requested`.
+2. **Dispatch** (workers): an attempt is CLAIMED under a lease; Numbering re-confirms the
+   sender is still the scope's ACTIVE assignment (else FAILED `SENDER_REVOKED`, nothing
+   sent); the provider is called with the message's stable key under a bounded timeout.
+   ACCEPTED → SUBMITTED; REJECTED → FAILED; NOT_SENT → retried with backoff; a timeout
+   or an ambiguous answer → UNKNOWN (`sms.unknown`). An expired lease is UNKNOWN too.
+3. **Unknown outcomes** are never resubmitted (one live attempt per message, enforced by
+   the database): provider read-back resolves them (found → its state; confirmed never
+   received after a grace → FAILED `NOT_TRANSMITTED`; no answer → asked again later).
+4. **Receipts** apply by the state machine only (no regression: a receipt after a final
+   state is STALE), confirm the provider cost once, and announce `sms.delivered` /
+   `sms.failed`. An unknown reference is UNMATCHED evidence.
 
 ## Provider adapters
 
@@ -94,5 +121,6 @@ Each test gets its own database cloned from a migrated template. Suites:
 provider contract), `startup` (the real binary: fail-closed configuration, the
 deterministic provider refused in protected runtimes, pending migrations),
 `inbound` (callbacks, quarantine, ownership changes, keywords, reads, retention),
+`outbound` (authorization, idempotency, unknown outcomes, receipts, segments, controls),
 `architecture` (no other service's source / tables, no Numbering authority replicated,
 no numbers or content in logs).

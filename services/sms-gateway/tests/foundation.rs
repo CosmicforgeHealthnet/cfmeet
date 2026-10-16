@@ -87,6 +87,7 @@ async fn seed(h: &Harness, direction: Direction) -> TransportRow {
             expires_at: None,
             received_at: inbound.then(|| h.now()),
             correlation_id: "corr_0123456789abcdef",
+            environment_kind: (!inbound).then_some(sms_gateway::identity::EnvironmentKind::Sandbox),
         },
         h.now(),
     )

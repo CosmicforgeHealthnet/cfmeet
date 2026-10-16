@@ -170,14 +170,14 @@
     },
     {
       "id": "cfmeet.platform.webhooks",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "platform/webhooks/v1.schema.json",
       "owner": "platform",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Customer webhooks (Part G §68): application-scoped subscriptions (create / list / get / update / delete / rotate-secret), the safe subscription view (the signing secret is returned only on create / rotation), delivery records with dead-letter visibility and manual replay, and the normalized, signed event body (public catalog projected from committed domain events; never a provider or internal payload). Served by Calling's platform ingress. Part IV: 1.1.0 sms.received (N) from the SMS Gateway (references, status and codes only; never content or a number)."
+      "description": "Customer webhooks (Part G §68): application-scoped subscriptions (create / list / get / update / delete / rotate-secret), the safe subscription view (the signing secret is returned only on create / rotation), delivery records with dead-letter visibility and manual replay, and the normalized, signed event body (public catalog projected from committed domain events; never a provider or internal payload). Served by Calling's platform ingress. Part IV: 1.1.0 sms.received (N); 1.2.0 sms.requested / submitted / delivered / failed / unknown / blocked (O) from the SMS Gateway (references, status and codes only; never content or a number)."
     },
     {
       "id": "cfmeet.platform.usage",
@@ -236,14 +236,14 @@
     },
     {
       "id": "cfmeet.numbering.internal-api",
-      "version": "1.9.0",
+      "version": "1.10.0",
       "kind": "openapi",
       "path": "numbering/internal/v1.openapi.json",
       "owner": "numbering",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface of services/numbering: GET /health, /ready, /openapi.json (the served contract); customer reads of the caller's own DCN assignments / history / reservations, the catalog, KYC / eligibility (F); 1.4.0 provider-neutral inventory search, countries and number types, reservations (create with Idempotency-Key, list, cancel) (H); 1.5.0 acquisitions (provisioning with eligibility re-evaluation and hold read-back) and provider route configuration (I); provider callbacks (G); and the service-authenticated internal Number Resource view (/internal/v1, number-resource.read). 1.5.0 internal route view and consumer route readiness (number-route.acknowledge). 1.6.0 ownership and assignment: assignment creation / activation on proven readiness, routing revisions, employee offboarding, same-owner transfers, organizational pools and the operator assignment history (J). 1.7.0 routing grants: inbound resolution (number-route.resolve), caller-identity / SMS-sender grants (delegated scope) and authoritative verification (number-grant.verify) (K). 1.8.0 delegated current-assignment view for Calling's caller-identity policy (L). 1.9.0 dedicated SMS destination resolver (number-sms-route.resolve); inbound-resolutions is voice only (M)."
+      "description": "HTTP surface of services/numbering: GET /health, /ready, /openapi.json (the served contract); customer reads of the caller's own DCN assignments / history / reservations, the catalog, KYC / eligibility (F); 1.4.0 provider-neutral inventory search, countries and number types, reservations (create with Idempotency-Key, list, cancel) (H); 1.5.0 acquisitions (provisioning with eligibility re-evaluation and hold read-back) and provider route configuration (I); provider callbacks (G); and the service-authenticated internal Number Resource view (/internal/v1, number-resource.read). 1.5.0 internal route view and consumer route readiness (number-route.acknowledge). 1.6.0 ownership and assignment: assignment creation / activation on proven readiness, routing revisions, employee offboarding, same-owner transfers, organizational pools and the operator assignment history (J). 1.7.0 routing grants: inbound resolution (number-route.resolve), caller-identity / SMS-sender grants (delegated scope) and authoritative verification (number-grant.verify) (K). 1.8.0 delegated current-assignment view for Calling's caller-identity policy (L). 1.9.0 dedicated SMS destination resolver (number-sms-route.resolve); inbound-resolutions is voice only (M); 1.10.0 the SMS Gateway's sender re-check on number-assignments (Part IV O)."
     },
     {
       "id": "cfmeet.numbering.routing-grant",
@@ -511,36 +511,36 @@
     },
     {
       "id": "cfmeet.sms-gateway.common",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "sms-gateway/common/v1.schema.json",
       "owner": "sms-gateway",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "SMS Gateway vocabulary and messages (Part IV M–O): transport status, direction, encoding, control reasons, the error envelope; 1.1.0 messages, threads, provider callback acknowledgements (N). Remote parties are masked; no provider identifier."
+      "description": "SMS Gateway vocabulary and messages (Part IV M–O): transport status, direction, encoding, control reasons, the error envelope; 1.1.0 messages, threads, provider callback acknowledgements (N); 1.2.0 send and opt-out requests (O). Remote parties are masked; no provider identifier."
     },
     {
       "id": "cfmeet.sms-gateway.http-api",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "openapi",
       "path": "sms-gateway/http/v1.openapi.json",
       "owner": "sms-gateway",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface of services/sms-gateway, served at /openapi.json: health, readiness; 1.1.0 message / thread reads (sms.read) and the inbound provider callback (N)."
+      "description": "HTTP surface of services/sms-gateway, served at /openapi.json: health, readiness; 1.1.0 message / thread reads (sms.read) and the inbound provider callback (N); 1.2.0 sending (sms.send, Idempotency-Key), opt-outs and delivery receipts (O)."
     },
     {
       "id": "cfmeet.sms-gateway.event",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "sms-gateway/events/v1.schema.json",
       "owner": "sms-gateway",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "SMS Gateway message events in the platform envelope (transactional outbox, at least once): received (N). Published to the platform customer webhook delivery as sms.*. Never content, a number or a provider identifier."
+      "description": "SMS Gateway message events in the platform envelope (transactional outbox, at least once): received (N); requested, submitted, delivered, failed, unknown, blocked (O). Published to the platform customer webhook delivery as sms.*. Never content, a number or a provider identifier."
     }
   ]
 }

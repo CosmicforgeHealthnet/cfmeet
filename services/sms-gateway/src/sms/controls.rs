@@ -10,6 +10,15 @@
 //! | `SPEND_LIMIT_EXCEEDED` | the environment's daily estimated spend would be exceeded |
 //! | `ABUSE_SUSPECTED` | identical content to too many distinct recipients within an hour |
 //! | `SENDER_NOT_AUTHORIZED` | Numbering refused the sender (not owned, not usable, principal) |
+//! | `PREMIUM_DESTINATION_BLOCKED` | a premium-rate / high-risk destination range |
+//! | `TENANT_RATE_LIMITED` / `NUMBER_RATE_LIMITED` / `PRINCIPAL_RATE_LIMITED` | the tenant's / sender number's / principal's per-minute rate (429, not recorded) |
+//! | `TENANT_SPEND_LIMIT_EXCEEDED` | the tenant's daily estimated spend would be exceeded |
+//! | `REPEATED_DESTINATION` | identical content to the same recipient too often within an hour |
+//! | `COST_SPIKE_CIRCUIT_OPEN` | the provider's confirmed cost per segment spiked above the estimate |
+//! | `PROVIDER_ANOMALY` | too many recent attempts of the provider were rejected or unknown |
+//!
+//! Spend is counted conservatively: a message without a confirmed cost counts its
+//! estimate, an UNKNOWN one included; only a definitely-unsent message is voided.
 //!
 //! The full allocation-fraud / investigation engine is a later workstream; these are the
 //! transport's own guards.
@@ -19,7 +28,7 @@ use sea_orm::{ConnectionTrait, DbErr};
 use uuid::Uuid;
 
 use super::events::EventScope;
-use crate::db;
+use crate::{config::ControlSettings, db};
 
 pub const RATE_LIMITED: &str = "RATE_LIMITED";
 pub const DESTINATION_RATE_LIMITED: &str = "DESTINATION_RATE_LIMITED";
@@ -28,6 +37,43 @@ pub const RECIPIENT_OPTED_OUT: &str = "RECIPIENT_OPTED_OUT";
 pub const SPEND_LIMIT_EXCEEDED: &str = "SPEND_LIMIT_EXCEEDED";
 pub const ABUSE_SUSPECTED: &str = "ABUSE_SUSPECTED";
 pub const SENDER_NOT_AUTHORIZED: &str = "SENDER_NOT_AUTHORIZED";
+pub const PREMIUM_DESTINATION_BLOCKED: &str = "PREMIUM_DESTINATION_BLOCKED";
+pub const TENANT_RATE_LIMITED: &str = "TENANT_RATE_LIMITED";
+pub const NUMBER_RATE_LIMITED: &str = "NUMBER_RATE_LIMITED";
+pub const PRINCIPAL_RATE_LIMITED: &str = "PRINCIPAL_RATE_LIMITED";
+pub const TENANT_SPEND_LIMIT_EXCEEDED: &str = "TENANT_SPEND_LIMIT_EXCEEDED";
+pub const REPEATED_DESTINATION: &str = "REPEATED_DESTINATION";
+pub const COST_SPIKE_CIRCUIT_OPEN: &str = "COST_SPIKE_CIRCUIT_OPEN";
+pub const PROVIDER_ANOMALY: &str = "PROVIDER_ANOMALY";
+
+/// Every reason code a refusal may carry.
+pub const REASONS: &[&str] = &[
+    RATE_LIMITED,
+    DESTINATION_RATE_LIMITED,
+    DESTINATION_NOT_ALLOWED,
+    RECIPIENT_OPTED_OUT,
+    SPEND_LIMIT_EXCEEDED,
+    ABUSE_SUSPECTED,
+    SENDER_NOT_AUTHORIZED,
+    PREMIUM_DESTINATION_BLOCKED,
+    TENANT_RATE_LIMITED,
+    NUMBER_RATE_LIMITED,
+    PRINCIPAL_RATE_LIMITED,
+    TENANT_SPEND_LIMIT_EXCEEDED,
+    REPEATED_DESTINATION,
+    COST_SPIKE_CIRCUIT_OPEN,
+    PROVIDER_ANOMALY,
+];
+
+/// The static reason code of a stored refusal (unknown codes fall back to ABUSE_SUSPECTED,
+/// never echoing stored text).
+pub fn reason_code(stored: &str) -> &'static str {
+    REASONS
+        .iter()
+        .copied()
+        .find(|r| *r == stored)
+        .unwrap_or(ABUSE_SUSPECTED)
+}
 
 /// A keyword the recipient sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +117,24 @@ pub async fn hit<C: ConnectionTrait>(
     )
     .await?;
     Ok(hits <= limit)
+}
+
+/// The current count of `subject`'s fixed window (read-only pre-check).
+pub async fn window_count<C: ConnectionTrait>(
+    db: &C,
+    kind: &str,
+    subject: &str,
+    width: Duration,
+    now: DateTime<Utc>,
+) -> Result<i64, DbErr> {
+    let window = now.duration_trunc(width).unwrap_or(now);
+    db::scalar_i64(
+        db,
+        "SELECT COALESCE(max(hits), 0)::bigint FROM sms_rate_windows \
+          WHERE subject_kind = $1 AND subject_key = $2 AND window_start = $3",
+        vec![kind.into(), subject.into(), window.into()],
+    )
+    .await
 }
 
 /// Whether the recipient is blocked for this number (or for every number of the
@@ -186,6 +250,118 @@ pub async fn identical_recipients<C: ConnectionTrait>(
         ],
     )
     .await
+}
+
+/// Whether a canonical number is a premium / high-risk destination (blocked whatever the
+/// allowed prefixes say).
+pub fn premium(e164: &str, blocked_prefixes: &[String]) -> bool {
+    blocked_prefixes
+        .iter()
+        .any(|p| e164.starts_with(p.as_str()))
+}
+
+/// The environment's (or tenant's) estimated + confirmed outbound spend today
+/// (conservative: an unconfirmed message counts its estimate, an UNKNOWN one too).
+pub async fn spent_today_by<C: ConnectionTrait>(
+    db: &C,
+    column: &'static str,
+    id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<i64, DbErr> {
+    debug_assert!(matches!(column, "environment_id" | "tenant_id"));
+    let day = now.duration_trunc(Duration::days(1)).unwrap_or(now);
+    db::scalar_i64(
+        db,
+        &format!(
+            "SELECT COALESCE(sum(COALESCE(confirmed_cost_minor, estimated_cost_minor)), 0)::bigint \
+               FROM sms_usage_records \
+              WHERE {column} = $1 AND direction = 'OUTBOUND' AND status <> 'VOIDED' AND created_at >= $2"
+        ),
+        vec![id.into(), day.into()],
+    )
+    .await
+}
+
+/// Identical content already sent (or being sent) to the same recipient within the hour.
+pub async fn repeated_to_recipient<C: ConnectionTrait>(
+    db: &C,
+    environment_id: Uuid,
+    content_fingerprint: &str,
+    remote_fingerprint: &str,
+    now: DateTime<Utc>,
+) -> Result<i64, DbErr> {
+    db::scalar_i64(
+        db,
+        "SELECT count(*) FROM sms_transports WHERE environment_id = $1 AND direction = 'OUTBOUND' \
+           AND content_fingerprint = $2 AND remote_fingerprint = $3 AND created_at >= $4 \
+           AND blocked_reason IS NULL",
+        vec![
+            environment_id.into(),
+            content_fingerprint.into(),
+            remote_fingerprint.into(),
+            (now - Duration::hours(1)).into(),
+        ],
+    )
+    .await
+}
+
+/// Cost-spike circuit breaker: the environment's provider-CONFIRMED cost per segment over
+/// the last hour exceeds `factor` × the configured estimate (with enough samples).
+pub async fn cost_spike<C: ConnectionTrait>(
+    db: &C,
+    environment_id: Uuid,
+    settings: &ControlSettings,
+    now: DateTime<Utc>,
+) -> Result<bool, DbErr> {
+    #[derive(sea_orm::FromQueryResult)]
+    struct Row {
+        samples: i64,
+        cost: i64,
+        segments: i64,
+    }
+    let r = db::one::<Row, _>(
+        db,
+        "SELECT count(*)::bigint AS samples, COALESCE(sum(confirmed_cost_minor), 0)::bigint AS cost, \
+                COALESCE(sum(segments), 0)::bigint AS segments \
+           FROM sms_usage_records \
+          WHERE environment_id = $1 AND direction = 'OUTBOUND' AND status = 'CONFIRMED' AND updated_at >= $2",
+        vec![environment_id.into(), (now - Duration::hours(1)).into()],
+    )
+    .await?;
+    Ok(r.is_some_and(|r| {
+        r.samples >= settings.cost_spike_min_samples
+            && r.cost
+                > r.segments
+                    .saturating_mul(settings.segment_cost_minor)
+                    .saturating_mul(settings.cost_spike_factor)
+    }))
+}
+
+/// Provider anomaly signal: among the provider's recent finished attempts, too many were
+/// rejected or ended UNKNOWN.
+pub async fn provider_anomaly<C: ConnectionTrait>(
+    db: &C,
+    provider_id: &str,
+    settings: &ControlSettings,
+    now: DateTime<Utc>,
+) -> Result<bool, DbErr> {
+    #[derive(sea_orm::FromQueryResult)]
+    struct Row {
+        total: i64,
+        bad: i64,
+    }
+    let r = db::one::<Row, _>(
+        db,
+        "SELECT count(*)::bigint AS total, \
+                count(*) FILTER (WHERE status IN ('REJECTED', 'UNKNOWN'))::bigint AS bad \
+           FROM sms_attempts WHERE provider_id = $1 AND status <> 'CLAIMED' AND started_at >= $2",
+        vec![provider_id.into(), (now - Duration::minutes(15)).into()],
+    )
+    .await?;
+    Ok(r.is_some_and(|r| {
+        r.total >= settings.anomaly_min_attempts
+            && r.bad * 100 >= r.total * settings.anomaly_percent
+    }))
 }
 
 #[cfg(test)]

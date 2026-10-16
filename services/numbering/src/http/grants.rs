@@ -35,7 +35,10 @@ use crate::{
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/routing/inbound-resolutions", post(resolve_inbound))
-        .route("/routing/sms-destination-resolutions", post(resolve_sms_destination))
+        .route(
+            "/routing/sms-destination-resolutions",
+            post(resolve_sms_destination),
+        )
         .route("/routing/caller-identity-grants", post(caller_identity))
         .route("/routing/sms-sender-grants", post(sms_sender))
         .route("/routing/grant-verifications", post(verify))
@@ -45,16 +48,24 @@ pub fn routes() -> Router<AppState> {
         )
 }
 
-/// `GET /routing/number-assignments/{numberResourceId}` (`number-caller-identity.authorize`,
-/// signed delegated context): the delegated scope's current assignment and routed targets,
-/// so Calling can apply its enterprise membership policy BEFORE requesting a
-/// caller-identity grant. Another scope's number is NOT_FOUND.
+/// `GET /routing/number-assignments/{numberResourceId}` (`number-caller-identity.authorize`
+/// for Calling, `number-sms-sender.authorize` for the SMS Gateway; signed delegated
+/// context): the delegated scope's current assignment and routed targets, so Calling can
+/// apply its enterprise membership policy BEFORE requesting a caller-identity grant and the
+/// SMS Gateway can re-check a sender right before submission. Another scope's number is
+/// NOT_FOUND.
 async fn current_assignment(
     State(s): State<AppState>,
     caller: InternalCaller,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
 ) -> Result<Json<Value>, ApiError> {
-    caller.require_permission(InternalPermission::NumberCallerIdentityAuthorize)?;
+    // Calling (caller-identity policy) or the SMS Gateway (sender re-check before each
+    // submission): both act for the delegated scope only.
+    if caller.service() != cf_service_auth::services::SMS_GATEWAY {
+        caller.require_permission(InternalPermission::NumberCallerIdentityAuthorize)?;
+    } else {
+        caller.require_permission(InternalPermission::NumberSmsSenderAuthorize)?;
+    }
     let g = grants(&s)?;
     let delegated = caller
         .context()
@@ -156,7 +167,12 @@ async fn resolve_sms_destination(
     caller.require_permission(InternalPermission::NumberSmsRouteResolve)?;
     let g = grants(&s)?;
     let out = g
-        .resolve_inbound(&ctx(), &caller_id(&caller), RouteFamily::Sms, &body.destination)
+        .resolve_inbound(
+            &ctx(),
+            &caller_id(&caller),
+            RouteFamily::Sms,
+            &body.destination,
+        )
         .await?;
     Ok(Json(resolution_view(RouteFamily::Sms, out)))
 }

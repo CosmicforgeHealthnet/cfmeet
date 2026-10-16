@@ -56,12 +56,16 @@ pub async fn sweep(state: &AppState) -> SmsResult<SweepReport> {
     })
 }
 
-/// Runs [`sweep`] every worker interval until the process stops.
+/// Runs [`sweep`] and the dispatcher ([`super::dispatch::run_once`]) every worker
+/// interval until the process stops.
 pub async fn run(state: AppState) {
     let interval: Duration = state.workers.interval;
     loop {
         if let Err(e) = sweep(&state).await {
             tracing::warn!(error = %e, "sms worker pass failed");
+        }
+        if let Err(e) = super::dispatch::run_once(&state).await {
+            tracing::warn!(error = %e, "sms dispatch pass failed");
         }
         tokio::time::sleep(interval).await;
     }

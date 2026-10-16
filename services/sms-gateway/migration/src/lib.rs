@@ -12,6 +12,7 @@
 pub use sea_orm_migration::prelude::*;
 
 mod m20261025_000001_sms_foundation;
+mod m20261027_000002_sms_outbound;
 
 /// Name of the table recording which SMS Gateway migrations have been applied.
 pub const MIGRATION_TABLE: &str = "sms_gateway_seaql_migrations";
@@ -21,7 +22,10 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(m20261025_000001_sms_foundation::Migration)]
+        vec![
+            Box::new(m20261025_000001_sms_foundation::Migration),
+            Box::new(m20261027_000002_sms_outbound::Migration),
+        ]
     }
 
     fn migration_table_name() -> DynIden {

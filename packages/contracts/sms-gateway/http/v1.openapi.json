@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet SMS Gateway API",
-    "version": "1.1.0",
-    "description": "HTTP surface of services/sms-gateway: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/sms (credential verified by Platform Access on every request; scopes sms.read; 503 when Platform Access is unreachable — fail closed); provider callbacks under /provider-callbacks/v1/sms (adapter signature). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 32 KiB."
+    "version": "1.2.0",
+    "description": "HTTP surface of services/sms-gateway: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/sms (credential verified by Platform Access on every request; scopes sms.read/ sms.send; 503 when Platform Access is unreachable — fail closed); provider callbacks under /provider-callbacks/v1/sms (adapter signature). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 32 KiB."
   },
   "paths": {
     "/health": {
@@ -194,6 +194,79 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      },
+      "post": {
+        "operationId": "sendMessage",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Sends ONE message (scope sms.send, Idempotency-Key required). Validation, segmentation (CONTENT_TOO_LONG above 10 segments), the safety controls (SMS_BLOCKED with a reason, recorded; 429 RATE_LIMITED for rate windows, not recorded), Numbering's single-use SMS_SENDER grant (an arbitrary sender id is impossible; refusal = SMS_BLOCKED SENDER_NOT_AUTHORIZED; Numbering unreachable = 503 NUMBERING_UNAVAILABLE, nothing recorded), then a durable AUTHORIZED transport submitted by the dispatcher. 202 with the message; the same key replays it (200).",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/SendMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted (AUTHORIZED; submission is asynchronous).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/Message"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Replayed (same Idempotency-Key and request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/Message"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/v1/sms/threads": {
@@ -342,6 +415,103 @@
           }
         ],
         "description": "A provider's inbound message. Authenticated by the adapter (signature over the raw body, timestamp window) BEFORE parsing; de-duplicated by the provider event id. The destination is resolved by Numbering (sms-destination-resolutions): ROUTED → stored sealed for the owning environment (sms.received); not routable → QUARANTINED (never delivered to a customer). 503 while Numbering is unreachable (the provider retries; nothing is stored).",
+        "parameters": [
+          {
+            "name": "providerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/CallbackAck"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sms/opt-outs": {
+      "post": {
+        "operationId": "createOptOut",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Blocks a recipient for one number or the whole environment (scope sms.send). Idempotent.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/OptOutRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Blocked (already or newly).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/OptOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/provider-callbacks/v1/sms/{providerId}/delivery-receipts": {
+      "post": {
+        "operationId": "providerDeliveryReceiptCallback",
+        "security": [
+          {
+            "providerSignature": []
+          }
+        ],
+        "description": "A provider's delivery receipt. Authenticated before parsing, de-duplicated by event id; applied by the state machine (SUBMITTED / UNKNOWN → DELIVERED / FAILED; a receipt after a final state is STALE; an unknown reference UNMATCHED). Confirms the cost.",
         "parameters": [
           {
             "name": "providerId",

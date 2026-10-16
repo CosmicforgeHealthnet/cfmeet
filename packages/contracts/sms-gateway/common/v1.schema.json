@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json",
   "title": "CF Meet SMS Gateway common v1",
-  "description": "SMS Gateway vocabulary and messages (Part IV M–O): transport status / direction / encoding, control reasons, the error envelope, messages, threads, callback acknowledgements. Never a full telephone number in a response, never a provider identifier.",
+  "description": "SMS Gateway vocabulary and messages (Part IV M–O): transport status / direction / encoding, control reasons, the error envelope, messages, threads, callback acknowledgements, send and opt-out requests. Never a full telephone number in a response, never a provider identifier.",
   "oneOf": [
     {
       "$ref": "#/$defs/Error"
@@ -21,6 +21,15 @@
     },
     {
       "$ref": "#/$defs/CallbackAck"
+    },
+    {
+      "$ref": "#/$defs/SendMessageRequest"
+    },
+    {
+      "$ref": "#/$defs/OptOutRequest"
+    },
+    {
+      "$ref": "#/$defs/OptOut"
     }
   ],
   "$defs": {
@@ -66,7 +75,17 @@
         "ABUSE_SUSPECTED",
         "SENDER_NOT_AUTHORIZED",
         "INVALID_TRANSITION",
-        "VERSION_CONFLICT"
+        "VERSION_CONFLICT",
+        "PREMIUM_DESTINATION_BLOCKED",
+        "TENANT_RATE_LIMITED",
+        "NUMBER_RATE_LIMITED",
+        "PRINCIPAL_RATE_LIMITED",
+        "TENANT_SPEND_LIMIT_EXCEEDED",
+        "REPEATED_DESTINATION",
+        "COST_SPIKE_CIRCUIT_OPEN",
+        "PROVIDER_ANOMALY",
+        "IDEMPOTENCY_RACE",
+        "THREAD_UNAVAILABLE"
       ]
     },
     "Error": {
@@ -513,6 +532,128 @@
             "QUARANTINED",
             "REFUSED"
           ]
+        }
+      }
+    },
+    "SendMessageRequest": {
+      "description": "POST /v1/sms/messages (scope sms.send, Idempotency-Key required): send ONE message from a Number Resource the environment actively owns (Numbering issues and the gateway consumes a single-use SMS_SENDER grant — an arbitrary sender id is impossible). The recipient is either `to` (E.164) or the remote party of `threadId`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "text"
+      ],
+      "properties": {
+        "from": {
+          "description": "The sender.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "numberResourceId"
+          ],
+          "properties": {
+            "numberResourceId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^\\+[1-9][0-9]{6,14}$"
+        },
+        "threadId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1600
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "The principal the message is sent for (required for personal / professional numbers; must be ACTIVE in the environment)."
+        },
+        "validitySeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "to"
+          ],
+          "not": {
+            "required": [
+              "threadId"
+            ]
+          }
+        },
+        {
+          "required": [
+            "threadId"
+          ],
+          "not": {
+            "required": [
+              "to"
+            ]
+          }
+        }
+      ]
+    },
+    "OptOutRequest": {
+      "description": "POST /v1/sms/opt-outs (scope sms.send): the customer blocks a recipient for one number (or every number of the environment).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "to"
+      ],
+      "properties": {
+        "to": {
+          "type": "string",
+          "pattern": "^\\+[1-9][0-9]{6,14}$"
+        },
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "OptOut": {
+      "description": "A recipient block (masked).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "remote",
+        "numberResourceId",
+        "reason",
+        "createdAt"
+      ],
+      "properties": {
+        "remote": {
+          "$ref": "#/$defs/RemoteParty"
+        },
+        "numberResourceId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "STOP_KEYWORD",
+            "CUSTOMER_REQUEST",
+            "ABUSE"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
         }
       }
     }

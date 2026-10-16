@@ -21,11 +21,18 @@
 //! | `SMS_GATEWAY_MAX_SUBMIT_ATTEMPTS` | no | definitely-unsent attempts before FAILED (1–10, default 3) |
 //! | `SMS_GATEWAY_VALIDITY_SECONDS` | no | default message validity (60–86400, default 3600) |
 //! | `SMS_GATEWAY_ALLOWED_DESTINATION_PREFIXES` | no | comma-separated E.164 prefixes (`+1,+44`); empty: no destination allowed |
+//! | `SMS_GATEWAY_BLOCKED_DESTINATION_PREFIXES` | no | premium / high-risk prefixes always refused (default: +1900, +1976, +449, +4487, +4470, +882, +883) |
 //! | `SMS_GATEWAY_RATE_PER_MINUTE` | no | outbound messages per environment per minute (1–100000, default 60) |
+//! | `SMS_GATEWAY_TENANT_RATE_PER_MINUTE` / `SMS_GATEWAY_NUMBER_RATE_PER_MINUTE` / `SMS_GATEWAY_PRINCIPAL_RATE_PER_MINUTE` | no | per tenant / sender number / principal per minute (defaults 600 / 60 / 30) |
 //! | `SMS_GATEWAY_DESTINATION_RATE_PER_HOUR` | no | per recipient per hour (1–10000, default 10) |
 //! | `SMS_GATEWAY_SEGMENT_COST_MINOR` / `SMS_GATEWAY_COST_CURRENCY` | no | estimate per segment (default 5 USD minor units) |
 //! | `SMS_GATEWAY_DAILY_SPEND_LIMIT_MINOR` | no | estimated spend per environment per day (default 10000) |
 //! | `SMS_GATEWAY_ABUSE_IDENTICAL_RECIPIENTS` | no | distinct recipients of identical content per hour (2–100000, default 20) |
+//! | `SMS_GATEWAY_TENANT_DAILY_SPEND_LIMIT_MINOR` | no | estimated spend per tenant per day (default 100000) |
+//! | `SMS_GATEWAY_REPEATED_DESTINATION_LIMIT` | no | identical content to one recipient per hour (default 3) |
+//! | `SMS_GATEWAY_MAX_SEGMENTS` | no | segments per message (1–10, default 10) |
+//! | `SMS_GATEWAY_COST_SPIKE_FACTOR` / `SMS_GATEWAY_COST_SPIKE_MIN_SAMPLES` | no | cost-spike circuit (confirmed cost per segment > factor × estimate over the last hour; defaults 3 / 5) |
+//! | `SMS_GATEWAY_PROVIDER_ANOMALY_PERCENT` / `SMS_GATEWAY_PROVIDER_ANOMALY_MIN_ATTEMPTS` | no | provider anomaly circuit (rejected / unknown share of the last 15 minutes' attempts; defaults 50 / 10) |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
 //! Service authentication (`CF_*`) is read by [`service_auth`]. Keys are read from FILES
@@ -105,24 +112,59 @@ pub enum ProviderChoice {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ControlSettings {
     pub allowed_prefixes: Vec<String>,
+    /// Premium / high-risk destinations, blocked whatever `allowed_prefixes` says.
+    pub blocked_prefixes: Vec<String>,
+    /// Messages per application environment per minute.
     pub rate_per_minute: i64,
+    pub tenant_rate_per_minute: i64,
+    pub number_rate_per_minute: i64,
+    pub principal_rate_per_minute: i64,
     pub destination_rate_per_hour: i64,
     pub segment_cost_minor: i64,
     pub currency: String,
     pub daily_spend_limit_minor: i64,
+    pub tenant_daily_spend_limit_minor: i64,
     pub abuse_identical_recipients: i64,
+    /// Identical content to the same recipient within an hour.
+    pub repeated_destination_limit: i64,
+    pub max_segments: usize,
+    /// Cost-spike circuit: confirmed cost per segment above `factor` × the estimate.
+    pub cost_spike_factor: i64,
+    pub cost_spike_min_samples: i64,
+    /// Provider anomaly circuit: rejected / unknown share of recent attempts.
+    pub anomaly_percent: i64,
+    pub anomaly_min_attempts: i64,
 }
+
+/// Premium-rate and high-risk number ranges blocked by default (NANP 900 / 976, UK
+/// premium 09 / 087 / personal 070, international networks +882 / +883).
+pub const DEFAULT_BLOCKED_PREFIXES: &[&str] =
+    &["+1900", "+1976", "+449", "+4487", "+4470", "+882", "+883"];
 
 impl Default for ControlSettings {
     fn default() -> Self {
         Self {
             allowed_prefixes: Vec::new(),
+            blocked_prefixes: DEFAULT_BLOCKED_PREFIXES
+                .iter()
+                .map(|p| p.to_string())
+                .collect(),
             rate_per_minute: 60,
+            tenant_rate_per_minute: 600,
+            number_rate_per_minute: 60,
+            principal_rate_per_minute: 30,
             destination_rate_per_hour: 10,
             segment_cost_minor: 5,
             currency: "USD".into(),
             daily_spend_limit_minor: 10_000,
+            tenant_daily_spend_limit_minor: 100_000,
             abuse_identical_recipients: 20,
+            repeated_destination_limit: 3,
+            max_segments: crate::sms::segments::MAX_SEGMENTS,
+            cost_spike_factor: 3,
+            cost_spike_min_samples: 5,
+            anomaly_percent: 50,
+            anomaly_min_attempts: 10,
         }
     }
 }
@@ -391,6 +433,23 @@ impl SmsGatewayConfig {
                 "must be comma-separated E.164 prefixes such as +1,+44",
             ));
         }
+        let blocked_prefixes: Vec<String> = match get("SMS_GATEWAY_BLOCKED_DESTINATION_PREFIXES") {
+            None => DEFAULT_BLOCKED_PREFIXES
+                .iter()
+                .map(|p| p.to_string())
+                .collect(),
+            Some(v) => v
+                .split(',')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .collect(),
+        };
+        if blocked_prefixes.iter().any(|p| !prefix(p)) || blocked_prefixes.len() > 200 {
+            return Err(ConfigError::invalid(
+                "SMS_GATEWAY_BLOCKED_DESTINATION_PREFIXES",
+                "must be comma-separated E.164 prefixes such as +1900,+449",
+            ));
+        }
         let currency = get("SMS_GATEWAY_COST_CURRENCY").unwrap_or_else(|| "USD".into());
         if currency.len() != 3 || !currency.bytes().all(|b| b.is_ascii_uppercase()) {
             return Err(ConfigError::invalid(
@@ -400,7 +459,29 @@ impl SmsGatewayConfig {
         }
         let controls = ControlSettings {
             allowed_prefixes,
+            blocked_prefixes,
             rate_per_minute: bounded(&get, "SMS_GATEWAY_RATE_PER_MINUTE", 60, 1, 100_000)?,
+            tenant_rate_per_minute: bounded(
+                &get,
+                "SMS_GATEWAY_TENANT_RATE_PER_MINUTE",
+                600,
+                1,
+                1_000_000,
+            )?,
+            number_rate_per_minute: bounded(
+                &get,
+                "SMS_GATEWAY_NUMBER_RATE_PER_MINUTE",
+                60,
+                1,
+                100_000,
+            )?,
+            principal_rate_per_minute: bounded(
+                &get,
+                "SMS_GATEWAY_PRINCIPAL_RATE_PER_MINUTE",
+                30,
+                1,
+                100_000,
+            )?,
             destination_rate_per_hour: bounded(
                 &get,
                 "SMS_GATEWAY_DESTINATION_RATE_PER_HOUR",
@@ -422,6 +503,37 @@ impl SmsGatewayConfig {
                 "SMS_GATEWAY_ABUSE_IDENTICAL_RECIPIENTS",
                 20,
                 2,
+                100_000,
+            )?,
+            tenant_daily_spend_limit_minor: bounded(
+                &get,
+                "SMS_GATEWAY_TENANT_DAILY_SPEND_LIMIT_MINOR",
+                100_000,
+                0,
+                i64::MAX / 4,
+            )?,
+            repeated_destination_limit: bounded(
+                &get,
+                "SMS_GATEWAY_REPEATED_DESTINATION_LIMIT",
+                3,
+                1,
+                1_000,
+            )?,
+            max_segments: bounded(&get, "SMS_GATEWAY_MAX_SEGMENTS", 10, 1, 10)? as usize,
+            cost_spike_factor: bounded(&get, "SMS_GATEWAY_COST_SPIKE_FACTOR", 3, 1, 1_000)?,
+            cost_spike_min_samples: bounded(
+                &get,
+                "SMS_GATEWAY_COST_SPIKE_MIN_SAMPLES",
+                5,
+                1,
+                100_000,
+            )?,
+            anomaly_percent: bounded(&get, "SMS_GATEWAY_PROVIDER_ANOMALY_PERCENT", 50, 1, 100)?,
+            anomaly_min_attempts: bounded(
+                &get,
+                "SMS_GATEWAY_PROVIDER_ANOMALY_MIN_ATTEMPTS",
+                10,
+                1,
                 100_000,
             )?,
         };
