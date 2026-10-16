@@ -10,6 +10,7 @@
 //! | `CF_SERVICE_TOKEN_TTL_SECONDS` | no | 10–300, default 120 |
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | 100–30000, default 5000 |
 //! | `CF_PRIVACY_RELAY_BASE_URL`, `CF_TELEPHONY_BASE_URL` | no | authenticated API base URLs |
+//! | `CF_PLATFORM_ACCESS_BASE_URL` | yes (server) | Platform Access, the identity authority (ADR 0032) |
 //!
 //! There is no default key, no inline-key variable and no shared secret. A missing or
 //! malformed key or bundle stops the service. Error messages never contain key material.
@@ -34,6 +35,10 @@ const TARGETS: &[(&str, &str)] = &[
     (
         "CF_TELEPHONY_BASE_URL",
         cf_service_auth::services::TELEPHONY,
+    ),
+    (
+        "CF_PLATFORM_ACCESS_BASE_URL",
+        cf_service_auth::services::PLATFORM_ACCESS,
     ),
 ];
 

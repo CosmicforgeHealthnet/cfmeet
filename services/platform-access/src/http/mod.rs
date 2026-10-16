@@ -1,0 +1,87 @@
+//! HTTP surface (contract `cfmeet.platform-access.internal-api`).
+//!
+//! * `GET /health` — liveness: the process serves requests (no dependency checks).
+//! * `GET /ready` — readiness: database reachable and every migration applied.
+//! * Everything else is nested under `/internal/v1` and runs behind internal service
+//!   authentication BY CONSTRUCTION, including unknown paths.
+
+pub mod admin;
+pub mod error;
+pub mod internal;
+pub mod middleware;
+
+use axum::{
+    extract::{DefaultBodyLimit, State},
+    http::StatusCode,
+    middleware::{from_fn, from_fn_with_state},
+    response::IntoResponse,
+    routing::get,
+    Json, Router,
+};
+use platform_access_migration::MigratorTrait;
+use serde_json::json;
+
+use self::{
+    error::{AccessError, ErrorCode},
+    middleware::{request_id_middleware, require_internal_service},
+};
+use crate::state::AppState;
+
+pub const INTERNAL_PREFIX: &str = "/internal/v1";
+
+/// Request bodies above this are refused before parsing (identity bodies are small).
+pub const MAX_BODY_BYTES: usize = 64 * 1024;
+
+pub fn app(state: AppState) -> Router {
+    let public = Router::new()
+        .route("/health", get(health))
+        .route("/ready", get(ready))
+        .fallback(not_found)
+        .method_not_allowed_fallback(method_not_allowed)
+        .with_state(state.clone())
+        .layer(from_fn(request_id_middleware));
+    let internal = Router::new()
+        .nest(
+            INTERNAL_PREFIX,
+            internal::routes()
+                .merge(admin::routes())
+                .fallback(not_found)
+                .method_not_allowed_fallback(method_not_allowed),
+        )
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        .layer(from_fn_with_state(state.clone(), require_internal_service))
+        .with_state(state);
+    public.merge(internal)
+}
+
+async fn health() -> impl IntoResponse {
+    Json(json!({ "status": "ok", "service": "platform-access" }))
+}
+
+async fn ready(State(state): State<AppState>) -> impl IntoResponse {
+    let db = state.platform.db();
+    let pending = platform_access_migration::Migrator::get_pending_migrations(db).await;
+    let (status, database, migrations) = match pending {
+        Ok(p) if p.is_empty() => (StatusCode::OK, "ok", "current"),
+        Ok(_) => (StatusCode::SERVICE_UNAVAILABLE, "ok", "pending"),
+        Err(_) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable", "unknown"),
+    };
+    (
+        status,
+        Json(json!({
+            "status": if status == StatusCode::OK { "ready" } else { "not_ready" },
+            "service": "platform-access",
+            "database": database,
+            "migrations": migrations,
+            "verifierKeyVersion": state.platform.keyring().current_version(),
+        })),
+    )
+}
+
+async fn not_found() -> AccessError {
+    AccessError::Refused(ErrorCode::NotFound)
+}
+
+async fn method_not_allowed() -> AccessError {
+    AccessError::Refused(ErrorCode::MethodNotAllowed)
+}

@@ -93,14 +93,14 @@
     },
     {
       "id": "cfmeet.platform.common",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "kind": "json-schema",
       "path": "platform/common/v1.schema.json",
       "owner": "platform",
       "visibility": "internal",
       "lifecycle": "stable",
       "authority": "contract-first",
-      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata)."
+      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering)."
     },
     {
       "id": "cfmeet.platform.service-token-header",

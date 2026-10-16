@@ -1,39 +1,21 @@
-//! API credential lifecycle: issuance, rotation with overlap, revocation, safe views.
-//!
-//! * The raw credential is returned exactly once, inside [`IssuedCredential`], by
-//!   issuance and rotation. Only the HMAC verifier is persisted; every read path returns
-//!   [`CredentialView`], which has no secret or verifier field.
-//! * A credential is bound to one service account and therefore to one environment,
-//!   application and tenant (composite foreign key, immutable columns).
-//! * Granted scopes must be registry scopes allowed for the application.
-//! * Rotation creates an independent successor and limits the predecessor to
-//!   `min(original expiry, now + overlap)`; it never extends the predecessor.
-//! * Revocation is immediate and idempotent; authentication reads the database on every
-//!   request, so there is no cache to invalidate.
+//! API credentials as seen by Calling: a read-only projection of the Platform Access
+//! authority (ADR 0032). Issuance, rotation, revocation and verification happen in
+//! Platform Access; Calling reads the projected rows for its own policy (limits,
+//! inbound owners, audit) and never holds — or needs — verifier material for them.
 
 use std::collections::{BTreeSet, HashMap};
 
-use chrono::{DateTime, Duration, Utc};
-use sea_orm::{
-    sea_query::Expr, ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait,
-    DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
-};
+use chrono::{DateTime, Utc};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::Serialize;
 
-use super::{
-    credential_format, optional_text, scopes::allowed_scopes, verifier::VERIFIER_ALGORITHM,
-    PlatformError, PlatformResult, PlatformService,
-};
+use super::{PlatformError, PlatformResult, PlatformService};
 use crate::{
     domain::{
-        ApplicationId, ApplicationStatus, CredentialId, CredentialStatus, EnvironmentId,
-        EnvironmentKind, EnvironmentStatus, IssuedSecret, ServiceAccountId, ServiceAccountStatus,
-        TenantClassification, TenantId, TenantStatus,
+        ApplicationId, CredentialId, CredentialStatus, EnvironmentId, EnvironmentKind,
+        ServiceAccountId, TenantId,
     },
-    models::{
-        api_credential_scopes, api_credentials, applications, credential_limits, environments,
-        service_accounts, tenants,
-    },
+    models::{api_credential_scopes, api_credentials, environments},
 };
 
 /// Time-dependent state of a credential, derived from persisted fields. Authentication
@@ -103,41 +85,11 @@ pub struct CredentialView {
     pub superseded_by_credential_id: Option<CredentialId>,
     pub superseded_at: Option<DateTime<Utc>>,
     pub supersession_valid_until: Option<DateTime<Utc>>,
-    pub verifier_algorithm: String,
-    pub verifier_key_version: i32,
+    /// Only on Part III rows awaiting the hand-off completion (never the verifier).
+    pub verifier_algorithm: Option<String>,
+    pub verifier_key_version: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-}
-
-/// Result of issuance / rotation. The only value that ever carries the raw credential.
-/// Deliberately not `Serialize` / `Clone`; `Debug` redacts the secret.
-#[derive(Debug)]
-pub struct IssuedCredential {
-    pub credential: CredentialView,
-    pub secret: IssuedSecret,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct IssueCredential {
-    /// Requested scopes; each must be a registry scope allowed for the application.
-    pub scopes: Vec<String>,
-    pub label: Option<String>,
-    /// Defaults to now; may not be in the past.
-    pub not_before: Option<DateTime<Utc>>,
-    /// Defaults to `not_before + default lifetime`; capped by the maximum lifetime.
-    pub expires_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct RotateCredential {
-    /// How long the predecessor keeps working; defaults to the configured overlap.
-    pub overlap: Option<Duration>,
-    /// Replacement scope set; defaults to the predecessor's scopes (re-validated).
-    pub scopes: Option<Vec<String>>,
-    /// Defaults to the predecessor's label.
-    pub label: Option<String>,
-    /// Successor expiry; defaults to now + default lifetime.
-    pub expires_at: Option<DateTime<Utc>>,
 }
 
 /// Which credentials to list.
@@ -148,389 +100,7 @@ pub enum CredentialFilter {
     Application(ApplicationId),
 }
 
-/// The issuing chain of a service account, loaded inside the issuing transaction.
-struct IssuingChain {
-    service_account: service_accounts::Model,
-    environment_kind: EnvironmentKind,
-    classification: TenantClassification,
-}
-
 impl PlatformService {
-    async fn issuing_chain(
-        &self,
-        txn: &DatabaseTransaction,
-        service_account_id: ServiceAccountId,
-    ) -> PlatformResult<IssuingChain> {
-        let service_account = service_accounts::Entity::find_by_id(service_account_id.as_uuid())
-            .one(txn)
-            .await?
-            .ok_or(PlatformError::NotFound("service account"))?;
-        let environment = environments::Entity::find_by_id(service_account.environment_id)
-            .one(txn)
-            .await?
-            .ok_or(PlatformError::NotFound("environment"))?;
-        let application = applications::Entity::find_by_id(service_account.application_id)
-            .one(txn)
-            .await?
-            .ok_or(PlatformError::NotFound("application"))?;
-        let tenant = tenants::Entity::find_by_id(service_account.tenant_id)
-            .one(txn)
-            .await?
-            .ok_or(PlatformError::NotFound("tenant"))?;
-        let inactive = if service_account.status != ServiceAccountStatus::Active {
-            Some("service account")
-        } else if environment.status != EnvironmentStatus::Active {
-            Some("environment")
-        } else if application.status != ApplicationStatus::Active {
-            Some("application")
-        } else if tenant.status != TenantStatus::Active {
-            Some("tenant")
-        } else {
-            None
-        };
-        if let Some(what) = inactive {
-            return Err(PlatformError::InvalidState(format!(
-                "credentials cannot be issued while the {what} is not ACTIVE"
-            )));
-        }
-        Ok(IssuingChain {
-            service_account,
-            environment_kind: environment.kind,
-            classification: tenant.classification,
-        })
-    }
-
-    /// Registry + trust-classification + application-allowed-set validation.
-    async fn validated_scopes(
-        &self,
-        txn: &DatabaseTransaction,
-        application_id: ApplicationId,
-        classification: TenantClassification,
-        requested: &[String],
-    ) -> PlatformResult<BTreeSet<String>> {
-        let requested = self
-            .registry
-            .validate_requested(requested, classification)?;
-        let allowed = allowed_scopes(txn, application_id).await?;
-        let mut granted = BTreeSet::new();
-        for scope in requested {
-            if !allowed.contains(scope.as_str()) {
-                return Err(PlatformError::PolicyViolation(format!(
-                    "scope `{}` is not allowed for this application",
-                    scope.as_str()
-                )));
-            }
-            granted.insert(scope.as_str().to_string());
-        }
-        Ok(granted)
-    }
-
-    fn validity_window(
-        &self,
-        now: DateTime<Utc>,
-        not_before: Option<DateTime<Utc>>,
-        expires_at: Option<DateTime<Utc>>,
-    ) -> PlatformResult<(DateTime<Utc>, DateTime<Utc>)> {
-        let not_before = not_before.unwrap_or(now);
-        if not_before < now {
-            return Err(PlatformError::Validation(
-                "not_before may not be in the past".to_string(),
-            ));
-        }
-        let expires_at = expires_at.unwrap_or(not_before + self.policy.default_lifetime);
-        if expires_at <= not_before {
-            return Err(PlatformError::Validation(
-                "expires_at must be after not_before".to_string(),
-            ));
-        }
-        if expires_at > now + self.policy.max_lifetime {
-            return Err(PlatformError::PolicyViolation(format!(
-                "credential lifetime may not exceed {} days",
-                self.policy.max_lifetime.num_days()
-            )));
-        }
-        Ok((not_before, expires_at))
-    }
-
-    /// Inserts a credential + its scopes inside `txn` and returns the raw secret.
-    #[allow(clippy::too_many_arguments)]
-    async fn insert_credential(
-        &self,
-        txn: &DatabaseTransaction,
-        chain: &IssuingChain,
-        scopes: &BTreeSet<String>,
-        label: Option<String>,
-        not_before: DateTime<Utc>,
-        expires_at: DateTime<Utc>,
-        rotated_from: Option<CredentialId>,
-        now: DateTime<Utc>,
-    ) -> PlatformResult<(api_credentials::Model, IssuedSecret)> {
-        let generated = credential_format::generate(chain.environment_kind);
-        let message = credential_format::verifier_message(
-            chain.environment_kind,
-            &generated.public_id,
-            &generated.secret,
-        );
-        let verifier = self.keyring.compute_current(&message);
-        let sa = &chain.service_account;
-        let model = api_credentials::ActiveModel {
-            id: Set(CredentialId::generate().as_uuid()),
-            public_id: Set(generated.public_id.clone()),
-            tenant_id: Set(sa.tenant_id),
-            application_id: Set(sa.application_id),
-            environment_id: Set(sa.environment_id),
-            service_account_id: Set(sa.id),
-            label: Set(label),
-            verifier: Set(api_credentials::Verifier(verifier.to_vec())),
-            verifier_algorithm: Set(VERIFIER_ALGORITHM.to_string()),
-            verifier_key_version: Set(self.keyring.current_version()),
-            last_four: Set(generated.last_four.clone()),
-            status: Set(CredentialStatus::Active),
-            not_before: Set(not_before),
-            expires_at: Set(expires_at),
-            revoked_at: Set(None),
-            rotated_from_credential_id: Set(rotated_from.map(|id| id.as_uuid())),
-            superseded_by_credential_id: Set(None),
-            superseded_at: Set(None),
-            supersession_valid_until: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
-        }
-        .insert(txn)
-        .await?;
-        if !scopes.is_empty() {
-            api_credential_scopes::Entity::insert_many(scopes.iter().map(|scope| {
-                api_credential_scopes::ActiveModel {
-                    credential_id: Set(model.id),
-                    scope: Set(scope.clone()),
-                    tenant_id: Set(model.tenant_id),
-                    application_id: Set(model.application_id),
-                    granted_at: Set(now),
-                }
-            }))
-            .exec_without_returning(txn)
-            .await?;
-        }
-        Ok((model, generated.token))
-    }
-
-    /// Issues a new credential for an ACTIVE service account. The raw credential is in
-    /// the result and nowhere else.
-    pub async fn issue_credential(
-        &self,
-        service_account_id: ServiceAccountId,
-        request: IssueCredential,
-    ) -> PlatformResult<IssuedCredential> {
-        self.issue_credential_in(&self.db, service_account_id, request)
-            .await
-    }
-
-    pub(crate) async fn issue_credential_in<C: ConnectionTrait + TransactionTrait>(
-        &self,
-        db: &C,
-        service_account_id: ServiceAccountId,
-        request: IssueCredential,
-    ) -> PlatformResult<IssuedCredential> {
-        let label = optional_text(request.label.as_deref(), "label", 100)?;
-        let now = self.clock.now();
-        let (not_before, expires_at) =
-            self.validity_window(now, request.not_before, request.expires_at)?;
-
-        let txn = db.begin().await?;
-        let chain = self.issuing_chain(&txn, service_account_id).await?;
-        let scopes = self
-            .validated_scopes(
-                &txn,
-                ApplicationId::from_uuid(chain.service_account.application_id),
-                chain.classification,
-                &request.scopes,
-            )
-            .await?;
-        let (model, secret) = self
-            .insert_credential(
-                &txn, &chain, &scopes, label, not_before, expires_at, None, now,
-            )
-            .await?;
-        txn.commit().await?;
-
-        tracing::info!(
-            credential_id = %model.id,
-            public_id = %model.public_id,
-            service_account_id = %model.service_account_id,
-            environment_id = %model.environment_id,
-            "API credential issued"
-        );
-        let credential = self
-            .credential_in(db, CredentialId::from_uuid(model.id))
-            .await?;
-        Ok(IssuedCredential { credential, secret })
-    }
-
-    /// Rotates an ACTIVE credential: issues an independent successor bound to the same
-    /// service account and limits the predecessor to `min(expiry, now + overlap)`.
-    pub async fn rotate_credential(
-        &self,
-        credential_id: CredentialId,
-        request: RotateCredential,
-    ) -> PlatformResult<IssuedCredential> {
-        self.rotate_credential_in(&self.db, credential_id, request)
-            .await
-    }
-
-    pub(crate) async fn rotate_credential_in<C: ConnectionTrait + TransactionTrait>(
-        &self,
-        db: &C,
-        credential_id: CredentialId,
-        request: RotateCredential,
-    ) -> PlatformResult<IssuedCredential> {
-        let overlap = request
-            .overlap
-            .unwrap_or(self.policy.default_rotation_overlap);
-        if overlap < Duration::zero() || overlap > self.policy.max_rotation_overlap {
-            return Err(PlatformError::PolicyViolation(format!(
-                "rotation overlap must be between 0 and {} minutes",
-                self.policy.max_rotation_overlap.num_minutes()
-            )));
-        }
-        let now = self.clock.now();
-        let (not_before, expires_at) = self.validity_window(now, None, request.expires_at)?;
-
-        let txn = db.begin().await?;
-        let old = api_credentials::Entity::find_by_id(credential_id.as_uuid())
-            .lock_exclusive()
-            .one(&txn)
-            .await?
-            .ok_or(PlatformError::NotFound("credential"))?;
-        if old.superseded_by_credential_id.is_some() {
-            return Err(PlatformError::InvalidState(
-                "credential has already been rotated; rotate its successor instead".to_string(),
-            ));
-        }
-        let state = CredentialEffectiveState::evaluate(
-            old.status,
-            old.not_before,
-            old.expires_at,
-            old.supersession_valid_until,
-            now,
-        );
-        if state != CredentialEffectiveState::Active {
-            return Err(PlatformError::InvalidState(format!(
-                "only an ACTIVE credential can be rotated (current state: {state:?})"
-            )));
-        }
-        let chain = self
-            .issuing_chain(&txn, ServiceAccountId::from_uuid(old.service_account_id))
-            .await?;
-        let requested_scopes = match request.scopes {
-            Some(scopes) => scopes,
-            None => api_credential_scopes::Entity::find()
-                .filter(api_credential_scopes::Column::CredentialId.eq(old.id))
-                .all(&txn)
-                .await?
-                .into_iter()
-                .map(|row| row.scope)
-                .collect(),
-        };
-        let scopes = self
-            .validated_scopes(
-                &txn,
-                ApplicationId::from_uuid(old.application_id),
-                chain.classification,
-                &requested_scopes,
-            )
-            .await?;
-        let label = match request.label {
-            Some(label) => optional_text(Some(&label), "label", 100)?,
-            None => old.label.clone(),
-        };
-        let (new, secret) = self
-            .insert_credential(
-                &txn,
-                &chain,
-                &scopes,
-                label,
-                not_before,
-                expires_at,
-                Some(credential_id),
-                now,
-            )
-            .await?;
-
-        // Preserve the predecessor's credential-level limit policy.
-        if let Some(limits) = credential_limits::Entity::find_by_id(old.id)
-            .one(&txn)
-            .await?
-        {
-            credential_limits::ActiveModel {
-                credential_id: Set(new.id),
-                tenant_id: Set(new.tenant_id),
-                application_id: Set(new.application_id),
-                requests_per_minute: Set(limits.requests_per_minute),
-                max_concurrent_communications: Set(limits.max_concurrent_communications),
-                telecom_spend_daily_limit_minor: Set(limits.telecom_spend_daily_limit_minor),
-                telecom_spend_monthly_limit_minor: Set(limits.telecom_spend_monthly_limit_minor),
-                created_at: Set(now),
-                updated_at: Set(now),
-            }
-            .insert(&txn)
-            .await?;
-        }
-
-        let valid_until = std::cmp::min(old.expires_at, now + overlap);
-        let mut predecessor: api_credentials::ActiveModel = old.into();
-        predecessor.superseded_by_credential_id = Set(Some(new.id));
-        predecessor.superseded_at = Set(Some(now));
-        predecessor.supersession_valid_until = Set(Some(valid_until));
-        predecessor.updated_at = Set(now);
-        predecessor.update(&txn).await?;
-        txn.commit().await?;
-
-        tracing::info!(
-            credential_id = %new.id,
-            public_id = %new.public_id,
-            rotated_from = %credential_id,
-            predecessor_valid_until = %valid_until,
-            "API credential rotated"
-        );
-        let credential = self
-            .credential_in(db, CredentialId::from_uuid(new.id))
-            .await?;
-        Ok(IssuedCredential { credential, secret })
-    }
-
-    /// Revokes a credential immediately. Idempotent: revoking a revoked credential
-    /// returns it unchanged.
-    pub async fn revoke_credential(
-        &self,
-        credential_id: CredentialId,
-    ) -> PlatformResult<CredentialView> {
-        self.revoke_credential_in(&self.db, credential_id).await
-    }
-
-    pub(crate) async fn revoke_credential_in<C: ConnectionTrait>(
-        &self,
-        db: &C,
-        credential_id: CredentialId,
-    ) -> PlatformResult<CredentialView> {
-        let now = self.clock.now();
-        let result = api_credentials::Entity::update_many()
-            .col_expr(
-                api_credentials::Column::Status,
-                Expr::value(CredentialStatus::Revoked.as_str()),
-            )
-            .col_expr(api_credentials::Column::RevokedAt, Expr::value(now))
-            .col_expr(api_credentials::Column::UpdatedAt, Expr::value(now))
-            .filter(api_credentials::Column::Id.eq(credential_id.as_uuid()))
-            .filter(api_credentials::Column::Status.eq(CredentialStatus::Active))
-            .exec(db)
-            .await?;
-        let view = self.credential_in(db, credential_id).await?;
-        if result.rows_affected > 0 {
-            tracing::info!(credential_id = %credential_id, public_id = %view.public_id, "API credential revoked");
-        }
-        Ok(view)
-    }
-
     pub async fn credential(&self, id: CredentialId) -> PlatformResult<CredentialView> {
         self.credential_in(&self.db, id).await
     }
@@ -617,7 +187,7 @@ impl PlatformService {
                     .ok_or(PlatformError::NotFound("environment"))?;
                 Ok(CredentialView {
                     id: CredentialId::from_uuid(m.id),
-                    masked: credential_format::masked(kind, &m.public_id, &m.last_four),
+                    masked: masked(kind, &m.public_id, &m.last_four),
                     public_id: m.public_id,
                     tenant_id: TenantId::from_uuid(m.tenant_id),
                     application_id: ApplicationId::from_uuid(m.application_id),
@@ -653,6 +223,12 @@ impl PlatformService {
             })
             .collect()
     }
+}
+
+/// Safe display form of a credential (`cfmk_<tag>_<public id>_<stars><last four>`): it
+/// identifies the credential without revealing anything of its secret.
+fn masked(kind: EnvironmentKind, public_id: &str, last_four: &str) -> String {
+    format!("cfmk_{}_{public_id}_{}{last_four}", kind.credential_tag(), "*".repeat(60))
 }
 
 async fn scopes_of<C: ConnectionTrait>(

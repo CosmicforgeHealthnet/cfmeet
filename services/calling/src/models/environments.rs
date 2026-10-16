@@ -12,6 +12,8 @@ pub struct Model {
     pub kind: EnvironmentKind,
     pub status: EnvironmentStatus,
     pub live_telecom_allowed: bool,
+    /// Platform Access revision last applied to this projected row (0 = Part III row).
+    pub pa_revision: i64,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

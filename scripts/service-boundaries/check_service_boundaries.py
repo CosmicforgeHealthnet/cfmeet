@@ -28,14 +28,21 @@ crosses another service's boundary:
   PLAINTEXT_CONTACT_FIELD         a plaintext telephone field in Calling's production code
   NUMBERING_IN_PRIVACY_RELAY      permanent Numbering concepts (porting, ownership,
                                   purchase, marketplace) inside Privacy Relay
-  FUTURE_SERVICE_IMPLEMENTED      services/numbering or services/contact-vault exists
-                                  before its phase (Telephony is a Part E service)
+  NUMBERING_DOMAIN_ELSEWHERE      another service's migrations create a Number Resource /
+                                  DCN table (`number_*`, `dcn_*`): Numbering (Part IV) is
+                                  the only number authority
+  IDENTITY_AUTHORITY_ELSEWHERE    credential verifier machinery (keyring, pepper, verifier
+                                  message) in production code outside Platform Access: it
+                                  is the only credential authority (Part IV Workstream B)
+  FUTURE_SERVICE_IMPLEMENTED      services/contact-vault exists before its phase
+                                  (Telephony is Part E; Platform Access and Numbering
+                                  are Part IV services)
   FOREIGN_SECRET_REFERENCE        production code or deployment config of S names a
                                   secret that belongs to T: Telephony provider / ARI
                                   credentials, Contact Vault keyrings, Calling's media,
-                                  signaling, webhook and credential-pepper secrets
-                                  (security blast radius: each secret is mounted into its
-                                  owner only)
+                                  signaling and webhook secrets, Platform Access's
+                                  credential pepper (security blast radius: each secret is
+                                  mounted into its owner only)
 
 Table ownership is derived from each service's own migrations (raw ``CREATE TABLE`` and
 SeaORM ``X::Table`` idents), so it cannot drift from the schema. Known service names are
@@ -214,7 +221,14 @@ NUMBERING_RE = re.compile(
     r"number_ownership|purchase_number|number_purchase)[a-z_]*\b",
     re.I,
 )
-FUTURE_SERVICES = {"numbering", "contact-vault"}
+FUTURE_SERVICES = {"contact-vault"}
+# Part IV: the only credential authority (ADR 0032) and the only number authority.
+IDENTITY_AUTHORITY_OWNER = "platform-access"
+IDENTITY_AUTHORITY_MARKER_RE = re.compile(
+    r"\b(?:VerifierKeyring|CredentialPepper|verifier_message|compute_current)\b"
+)
+NUMBERING_OWNER = "numbering"
+NUMBERING_TABLE_PREFIXES = ("number_", "dcn_")
 # Secret material each service alone may read (environment variable names, `_FILE`
 # variants included). Shared service-auth signing keys are per-service values of the same
 # variable and are not listed. Test code may start another service's binary with that
@@ -224,9 +238,11 @@ SECRET_OWNERS = {
     "privacy-relay": re.compile(r"\bCONTACT_[A-Z_]*KEYRING[A-Z_]*\b"),
     "calling": re.compile(
         r"\b(?:CALLING_LIVEKIT_API_SECRET|CALLING_MEDIA_EDGE_SIGNING_KEY|CALLING_SIGNALING_SIGNING_KEY|"
-        r"CALLING_WEBHOOK_SECRET_KEY(?:_PREVIOUS)?|API_CREDENTIAL_(?:PREVIOUS_)?PEPPER|"
+        r"CALLING_WEBHOOK_SECRET_KEY(?:_PREVIOUS)?|"
         r"CONTACT_DELEGATION_PRIVATE_KEY)(?:_FILE)?\b"
     ),
+    # Moved from Calling with the identity authority (Part IV Workstream B).
+    "platform-access": re.compile(r"\bAPI_CREDENTIAL_(?:PREVIOUS_)?PEPPER(?:_FILE|_VERSION)?\b"),
 }
 PRIVACY_RELAY_DOMAIN_PREFIXES = (
     "protected_contact", "contact_fingerprint", "contact_access", "contact_verification",
@@ -479,7 +495,10 @@ def check_rust(repo: Repository, path: Path, out: list[Violation]):
             out.append(Violation("PLAINTEXT_CONTACT_FIELD", rel, line_of(identifiers_only, m.start()), f"`{m.group(1)}`: {name} handles ContactReferences, never telephone numbers"))
     if name == CONTACT_VAULT_OWNER:
         for m in NUMBERING_RE.finditer(identifiers_only):
-            out.append(Violation("NUMBERING_IN_PRIVACY_RELAY", rel, line_of(identifiers_only, m.start()), f"`{m.group(0)}`: permanent public-number lifecycle belongs to the future Numbering service"))
+            out.append(Violation("NUMBERING_IN_PRIVACY_RELAY", rel, line_of(identifiers_only, m.start()), f"`{m.group(0)}`: permanent public-number lifecycle belongs to the Numbering service"))
+    if name != IDENTITY_AUTHORITY_OWNER:
+        for m in IDENTITY_AUTHORITY_MARKER_RE.finditer(identifiers_only):
+            out.append(Violation("IDENTITY_AUTHORITY_ELSEWHERE", rel, line_of(identifiers_only, m.start()), f"`{m.group(0)}`: credential verification exists only in services/{IDENTITY_AUTHORITY_OWNER}; consume its authenticated contract"))
 
 
 def is_config(path: Path) -> bool:
@@ -508,6 +527,11 @@ def check(root: Path) -> list[Violation]:
             continue
         for table in sorted(t for t in tables if t.startswith(PRIVACY_RELAY_DOMAIN_PREFIXES)):
             out.append(Violation("PRIVACY_RELAY_DOMAIN_ELSEWHERE", f"services/{service}", 1, f"table `{table}` belongs to services/{CONTACT_VAULT_OWNER} (Contact Vault / relay numbers); no other service stores it"))
+    for service, tables in sorted(repo.tables.items()):
+        if service == NUMBERING_OWNER:
+            continue
+        for table in sorted(t for t in tables if t.startswith(NUMBERING_TABLE_PREFIXES)):
+            out.append(Violation("NUMBERING_DOMAIN_ELSEWHERE", f"services/{service}", 1, f"table `{table}` belongs to services/{NUMBERING_OWNER} (Number Resources / DCN assignments); no other service stores it"))
     for top in ("services", "packages"):
         for path in repo.files(repo.root / top):
             if path.name == "Cargo.toml":

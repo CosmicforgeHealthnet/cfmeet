@@ -11,6 +11,13 @@ pub mod services {
     pub const PRIVACY_RELAY: &str = "cfmeet.privacy-relay";
     pub const TELEPHONY: &str = "cfmeet.telephony";
     pub const MEETING_SERVICE: &str = "cfmeet.meeting-service";
+    /// The shared platform identity authority (Part IV Workstream B).
+    pub const PLATFORM_ACCESS: &str = "cfmeet.platform-access";
+    /// Digital Communications Numbers (Part IV Workstreams C–D).
+    pub const NUMBERING: &str = "cfmeet.numbering";
+    /// Operator administration tooling. Not a deployable service: an issuer identity
+    /// that only Platform Access trusts, for identity administration.
+    pub const OPERATOR_CONSOLE: &str = "cfmeet.operator-console";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -69,6 +76,18 @@ impl ServiceId {
 
     pub fn telephony() -> Self {
         Self(services::TELEPHONY.to_string())
+    }
+
+    pub fn platform_access() -> Self {
+        Self(services::PLATFORM_ACCESS.to_string())
+    }
+
+    pub fn numbering() -> Self {
+        Self(services::NUMBERING.to_string())
+    }
+
+    pub fn operator_console() -> Self {
+        Self(services::OPERATOR_CONSOLE.to_string())
     }
 }
 

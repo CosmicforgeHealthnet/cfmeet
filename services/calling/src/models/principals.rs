@@ -14,6 +14,8 @@ pub struct Model {
     pub external_reference: String,
     pub linked_service_account_id: Option<Uuid>,
     pub status: PrincipalStatus,
+    /// Platform Access revision last applied to this projected row (0 = Part III row).
+    pub pa_revision: i64,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

@@ -196,6 +196,7 @@ impl AppCallService {
                 scope.tenant_id(),
                 scope.application_id(),
                 scope.environment_id(),
+                ctx.service_account_id(),
                 request.initiator_contact,
             )
             .await
@@ -206,6 +207,7 @@ impl AppCallService {
                 scope.tenant_id(),
                 scope.application_id(),
                 scope.environment_id(),
+                ctx.service_account_id(),
                 request.target_contact,
             )
             .await

@@ -113,12 +113,8 @@ pub struct AbuseControls {
     /// `CALLING_ABUSE_REPORTS_INCIDENT_THRESHOLD` (1–1000, default 3): reports against one
     /// principal within 24 h that raise an incident.
     pub abuse_reports_incident_threshold: i64,
-    /// `CALLING_AUTH_FAILURE_THRESHOLD` (1–1000, default 20): failed authentications of
-    /// one presented credential key id per window above which further failures get 429
-    /// and a CREDENTIAL_GUESSING incident is raised (§109).
-    pub auth_failure_threshold: i64,
-    /// `CALLING_AUTH_FAILURE_WINDOW_SECONDS` (60–3600, default 300).
-    pub auth_failure_window_seconds: i64,
+    // Failed-authentication throttling (§109) moved to Platform Access with credential
+    // verification (`PLATFORM_ACCESS_AUTH_FAILURE_*`, ADR 0032).
 }
 
 impl Default for AbuseControls {
@@ -126,8 +122,6 @@ impl Default for AbuseControls {
         Self {
             blocked_attempts_incident_threshold: 5,
             abuse_reports_incident_threshold: 3,
-            auth_failure_threshold: 20,
-            auth_failure_window_seconds: 300,
         }
     }
 }
@@ -146,10 +140,6 @@ impl AbuseControls {
                 "CALLING_ABUSE_REPORTS_INCIDENT_THRESHOLD",
                 &mut c.abuse_reports_incident_threshold,
             ),
-            (
-                "CALLING_AUTH_FAILURE_THRESHOLD",
-                &mut c.auth_failure_threshold,
-            ),
         ] {
             if let Some(v) = get(key) {
                 let parsed: Option<i64> = v.trim().parse().ok();
@@ -162,25 +152,15 @@ impl AbuseControls {
                 *slot = parsed;
             }
         }
-        if let Some(v) = get("CALLING_AUTH_FAILURE_WINDOW_SECONDS") {
-            let parsed: Option<i64> = v.trim().parse().ok();
-            let Some(parsed) = parsed.filter(|p| (60..=3600).contains(p)) else {
+        for moved in ["CALLING_AUTH_FAILURE_THRESHOLD", "CALLING_AUTH_FAILURE_WINDOW_SECONDS"] {
+            if get(moved).is_some() {
                 return Err(crate::config::ConfigError::invalid(
-                    "CALLING_AUTH_FAILURE_WINDOW_SECONDS",
-                    "must be an integer in 60..=3600".to_string(),
+                    moved,
+                    "failed-authentication throttling moved to Platform Access; set PLATFORM_ACCESS_AUTH_FAILURE_* there".to_string(),
                 ));
-            };
-            c.auth_failure_window_seconds = parsed;
+            }
         }
         Ok(c)
-    }
-
-    /// The failed-authentication window policy of these controls.
-    pub fn auth_failure_policy(&self) -> crate::platform::authentication::AuthFailurePolicy {
-        crate::platform::authentication::AuthFailurePolicy {
-            threshold: self.auth_failure_threshold,
-            window: Duration::seconds(self.auth_failure_window_seconds),
-        }
     }
 }
 

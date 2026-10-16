@@ -244,6 +244,7 @@ impl AppCallService {
                 scope.tenant_id(),
                 scope.application_id(),
                 scope.environment_id(),
+                ServiceAccountId::from_uuid(owner.service_account_id),
                 offer.caller_contact_reference,
             )
             .await
@@ -655,6 +656,7 @@ impl AppCallService {
                 scope.tenant_id(),
                 scope.application_id(),
                 scope.environment_id(),
+                ServiceAccountId::from_uuid(owner.service_account_id),
                 offer.caller_contact_reference,
             )
             .await
@@ -665,6 +667,7 @@ impl AppCallService {
                 scope.tenant_id(),
                 scope.application_id(),
                 scope.environment_id(),
+                ServiceAccountId::from_uuid(owner.service_account_id),
                 callee_contact,
             )
             .await

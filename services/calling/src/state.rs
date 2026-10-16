@@ -15,11 +15,11 @@ use crate::{
     internal_auth::ServiceAuthRuntime,
     media::{gateway::MediaConnectionGateway, CallMediaProvider, MediaCredentialPolicy},
     platform::{
+        access::IdentityAuthority,
         authentication::CredentialAuthenticator,
         limits::{LimitDefaults, LimitPolicyResolver, RequestRateLimiter},
         principals::PrincipalResolver,
-        scopes::ScopeRegistry,
-        verifier::VerifierKeyring,
+        projection::IdentityProjection,
     },
     privacy_relay::PrivacyRelayAuthority,
     signaling::{PushDispatcher, RealtimeSignalBus, SignalingAuthority, SignalingKeys},
@@ -65,7 +65,10 @@ pub struct CallingRuntime {
 pub struct AppState {
     pub db: DatabaseConnection,
     pub clock: SharedClock,
+    /// Customer credential authentication, delegated to Platform Access (ADR 0032).
     pub authenticator: Arc<CredentialAuthenticator>,
+    /// Calling's projection of the shared identity authority.
+    pub identity: Arc<IdentityProjection>,
     pub rate_limiter: Arc<RequestRateLimiter>,
     pub limits: Arc<LimitPolicyResolver>,
     pub principals: Arc<PrincipalResolver>,
@@ -95,13 +98,20 @@ impl AppState {
     pub fn new(
         db: DatabaseConnection,
         clock: SharedClock,
-        keyring: Arc<VerifierKeyring>,
-        registry: Arc<ScopeRegistry>,
+        authority: Arc<dyn IdentityAuthority>,
         limit_defaults: LimitDefaults,
         service_auth: ServiceAuthRuntime,
         runtime: CallingRuntime,
     ) -> Self {
-        let principals = Arc::new(PrincipalResolver::new(db.clone()));
+        let identity = Arc::new(IdentityProjection::new(
+            db.clone(),
+            authority.clone(),
+            clock.clone(),
+        ));
+        let principals = Arc::new(PrincipalResolver::with_projection(
+            db.clone(),
+            identity.clone(),
+        ));
         let calls = Arc::new(CallService::new(
             db.clone(),
             clock.clone(),
@@ -115,7 +125,6 @@ impl AppState {
             PresenceWindow::default(),
         ));
         let media_gateway = runtime.media_gateway.clone();
-        let auth_failures = runtime.abuse_controls.auth_failure_policy();
         let webhooks = Arc::new(crate::webhooks::WebhookService::new(
             db.clone(),
             clock.clone(),
@@ -145,10 +154,13 @@ impl AppState {
             .with_abuse_controls(runtime.abuse_controls),
         );
         Self {
-            authenticator: Arc::new(
-                CredentialAuthenticator::new(db.clone(), keyring, registry, clock.clone())
-                    .with_failure_policy(auth_failures),
-            ),
+            authenticator: Arc::new(CredentialAuthenticator::new(
+                db.clone(),
+                authority,
+                identity.clone(),
+                clock.clone(),
+            )),
+            identity,
             rate_limiter: Arc::new(RequestRateLimiter::new(
                 db.clone(),
                 limit_defaults,

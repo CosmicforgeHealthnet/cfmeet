@@ -116,6 +116,29 @@ pub enum InternalPermission {
     /// (Part G §67 / §68). Calling projects it; nothing is forwarded verbatim.
     #[serde(rename = "platform-event.publish")]
     PlatformEventPublish,
+    /// Platform Access: verify a presented customer API credential and return its trusted
+    /// authority chain and effective scopes (Part IV §B3). Never returns a verifier.
+    #[serde(rename = "platform-credential.authenticate")]
+    PlatformCredentialAuthenticate,
+    /// Platform Access: resolve communication principals inside the signed delegated
+    /// scope (never a request-supplied tenant).
+    #[serde(rename = "platform-principal.resolve")]
+    PlatformPrincipalResolve,
+    /// Platform Access: register the TELEPHONE_ENDPOINT principal of a protected public
+    /// party and tombstone principals on an operator retention decision.
+    #[serde(rename = "platform-principal.register")]
+    PlatformPrincipalRegister,
+    /// Platform Access: read the identity change feed, trusted context, effective scopes,
+    /// credential status and identity-import receipts (no verifier material).
+    #[serde(rename = "platform-identity.read")]
+    PlatformIdentityRead,
+    /// Platform Access: administer the identity hierarchy (operator tooling only).
+    #[serde(rename = "platform-identity.administer")]
+    PlatformIdentityAdminister,
+    /// Numbering: read canonical Number Resources and DCN assignments (CF Meet ids,
+    /// provider-independent; no provider binding identifiers).
+    #[serde(rename = "number-resource.read")]
+    NumberResourceRead,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -332,6 +355,54 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: false,
         description: "Publish a committed Privacy Relay domain event (platform envelope) for normalized customer webhooks",
     },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformCredentialAuthenticate,
+        name: "platform-credential.authenticate",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::CALLING, services::NUMBERING],
+        sensitive: false,
+        description: "Verify a presented customer API credential; returns the trusted authority chain and effective scopes (never verifier material)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformPrincipalResolve,
+        name: "platform-principal.resolve",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::CALLING, services::NUMBERING],
+        sensitive: false,
+        description: "Resolve communication principals inside the signed delegated scope",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformPrincipalRegister,
+        name: "platform-principal.register",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Register the TELEPHONE_ENDPOINT principal of a protected public party (opaque ContactReference only) and tombstone principals on an operator retention decision",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformIdentityRead,
+        name: "platform-identity.read",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::CALLING, services::NUMBERING],
+        sensitive: false,
+        description: "Read the identity change feed, trusted tenant / application / environment context, effective scopes, credential status and import receipts (no verifier material)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformIdentityAdminister,
+        name: "platform-identity.administer",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::OPERATOR_CONSOLE],
+        sensitive: true,
+        description: "Administer the platform identity hierarchy (tenants, applications, environments, service accounts, credentials, scopes, principals); operator tooling only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberResourceRead,
+        name: "number-resource.read",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::CALLING, services::TELEPHONY],
+        sensitive: false,
+        description: "Read canonical Number Resources and DCN assignments (CF Meet ids only, no provider binding identifiers)",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -364,6 +435,12 @@ impl InternalPermission {
         InternalPermission::CallsTelephonyEnterpriseOffer,
         InternalPermission::CallsTelephonyCaptureDeliver,
         InternalPermission::PlatformEventPublish,
+        InternalPermission::PlatformCredentialAuthenticate,
+        InternalPermission::PlatformPrincipalResolve,
+        InternalPermission::PlatformPrincipalRegister,
+        InternalPermission::PlatformIdentityRead,
+        InternalPermission::PlatformIdentityAdminister,
+        InternalPermission::NumberResourceRead,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -539,6 +616,33 @@ mod tests {
                 d.name
             );
         }
+    }
+
+    #[test]
+    fn platform_access_flows_are_least_privilege() {
+        use InternalPermission::*;
+        for p in [
+            PlatformCredentialAuthenticate,
+            PlatformPrincipalResolve,
+            PlatformPrincipalRegister,
+            PlatformIdentityRead,
+            PlatformIdentityAdminister,
+        ] {
+            assert_eq!(p.definition().receiver, services::PLATFORM_ACCESS);
+        }
+        // Identity administration is operator tooling only, never a service.
+        let d = PlatformIdentityAdminister.definition();
+        assert_eq!(d.grantable_to, &[services::OPERATOR_CONSOLE]);
+        assert!(d.sensitive);
+        // Principal registration (public parties, tombstones) is Calling's only.
+        assert_eq!(
+            PlatformPrincipalRegister.definition().grantable_to,
+            &[services::CALLING]
+        );
+        // Numbering reads; it never administers identity.
+        let d = NumberResourceRead.definition();
+        assert_eq!(d.receiver, services::NUMBERING);
+        assert!(!d.grantable_to.contains(&services::NUMBERING));
     }
 
     #[test]

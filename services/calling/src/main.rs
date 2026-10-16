@@ -9,7 +9,10 @@ use calling::{
     domain::{SharedClock, SystemClock},
     internal_auth::config::ServiceAuthSettings,
     media::MediaSettings,
-    platform::{error::summarize_db_error, scopes::ScopeRegistry},
+    platform::{
+        access::{HttpIdentityAuthority, IdentityAuthority},
+        error::summarize_db_error,
+    },
     privacy_relay::{HttpPrivacyRelay, PrivacyRelayAuthority, UnconfiguredPrivacyRelay},
     routes,
     signaling::{NoPushTransport, PgNotifySignalBus, RealtimeSignalBus, SignalingKeys},
@@ -314,8 +317,6 @@ async fn main() -> anyhow::Result<()> {
         compliance_required_everywhere = compliance_overlay.all,
         blocked_attempts_incident_threshold = abuse_controls.blocked_attempts_incident_threshold,
         abuse_reports_incident_threshold = abuse_controls.abuse_reports_incident_threshold,
-        auth_failure_threshold = abuse_controls.auth_failure_threshold,
-        auth_failure_window_seconds = abuse_controls.auth_failure_window_seconds,
         "abuse and compliance controls configured"
     );
 
@@ -338,12 +339,24 @@ async fn main() -> anyhow::Result<()> {
         "retention configured"
     );
 
+    // The identity authority (ADR 0032): customer credentials are verified by Platform
+    // Access; without it the customer API cannot authenticate anyone, so refuse to start.
+    if !service_auth_settings
+        .targets
+        .iter()
+        .any(|(s, _)| s.as_str() == cf_service_auth::services::PLATFORM_ACCESS)
+    {
+        tracing::error!("CF_PLATFORM_ACCESS_BASE_URL is required: Platform Access verifies every customer credential");
+        std::process::exit(2);
+    }
+    let authority: Arc<dyn IdentityAuthority> = Arc::new(HttpIdentityAuthority::new(
+        service_auth.client_arc(),
+    ));
     let clock: SharedClock = Arc::new(SystemClock);
     let state = AppState::new(
         db,
         clock.clone(),
-        Arc::new(config.keyring),
-        Arc::new(ScopeRegistry::standard()),
+        authority,
         config.limit_defaults,
         service_auth,
         CallingRuntime {
@@ -391,21 +404,17 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // The identity projection follows the Platform Access change feed (every instance;
+    // the cursor row lock serializes pages).
+    tokio::spawn(state.identity.clone().run(config.identity_sync_interval));
+
     let pruner = state.rate_limiter.clone();
-    let auth_windows = state.authenticator.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
             interval.tick().await;
             if let Err(err) = pruner.prune(clock.now() - RATE_WINDOW_RETENTION).await {
                 tracing::warn!(summary = %summarize_db_error(&err), "rate window pruning failed");
-            }
-            // Failed-authentication windows (§109) are at most one hour long.
-            if let Err(err) = auth_windows
-                .prune_failure_windows(clock.now() - chrono::Duration::hours(2))
-                .await
-            {
-                tracing::warn!(summary = %summarize_db_error(&err), "auth failure window pruning failed");
             }
         }
     });
