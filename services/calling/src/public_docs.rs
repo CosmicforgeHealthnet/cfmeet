@@ -214,13 +214,13 @@ fn rewrite_schema_refs(value: &mut Value) {
             }
         }
         Value::Object(object) => {
-            if let Some(reference) = object.get_mut("$ref").and_then(Value::as_str) {
-                if let Some(path) = reference.strip_prefix(SCHEMA_BASE) {
-                    object.insert(
-                        "$ref".to_string(),
-                        Value::String(format!("/api-docs/schemas/{path}")),
-                    );
-                }
+            let replacement = object
+                .get("$ref")
+                .and_then(Value::as_str)
+                .and_then(|reference| reference.strip_prefix(SCHEMA_BASE))
+                .map(|path| format!("/api-docs/schemas/{path}"));
+            if let Some(replacement) = replacement {
+                object.insert("$ref".to_string(), Value::String(replacement));
             }
             for value in object.values_mut() {
                 rewrite_schema_refs(value);
