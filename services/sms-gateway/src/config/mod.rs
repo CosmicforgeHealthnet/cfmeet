@@ -17,6 +17,7 @@
 //! | `SMS_GATEWAY_QUARANTINE_RETENTION_DAYS` | no | unattributable inbound kept (1–90, default 7) |
 //! | `SMS_GATEWAY_PROVIDER` | no | `deterministic` (local / test only); unset: no provider, sends are refused |
 //! | `SMS_GATEWAY_PROVIDER_CALLBACK_SECRET_FILE` | with a provider | HMAC secret of the provider's callbacks |
+//! | `SMS_GATEWAY_DETERMINISTIC_SCRIPT` | no | deterministic adapter only: scripted outcomes of the next submissions (fault injection for local / test journeys) |
 //! | `SMS_GATEWAY_SUBMIT_TIMEOUT_MS` | no | provider submission timeout (100–60000, default 10000) |
 //! | `SMS_GATEWAY_MAX_SUBMIT_ATTEMPTS` | no | definitely-unsent attempts before FAILED (1–10, default 3) |
 //! | `SMS_GATEWAY_VALIDITY_SECONDS` | no | default message validity (60–86400, default 3600) |
@@ -104,8 +105,12 @@ pub struct ProtectionFiles {
 pub enum ProviderChoice {
     /// No provider: sending is refused (PROVIDER_UNAVAILABLE); inbound callbacks 404.
     None,
-    /// The deterministic test provider (refused in staging / production).
-    Deterministic { callback_secret_file: PathBuf },
+    /// The deterministic test provider (refused in staging / production), with an
+    /// optional scripted sequence of submission outcomes (local / test fault injection).
+    Deterministic {
+        callback_secret_file: PathBuf,
+        script: Vec<crate::providers::deterministic::Script>,
+    },
 }
 
 /// Outbound safety controls (reason codes in [`crate::sms::controls`]).
@@ -380,6 +385,20 @@ impl SmsGatewayConfig {
                     .ok_or(ConfigError::Missing {
                         var: "SMS_GATEWAY_PROVIDER_CALLBACK_SECRET_FILE",
                     })?,
+                script: match get("SMS_GATEWAY_DETERMINISTIC_SCRIPT") {
+                    None => Vec::new(),
+                    Some(v) => v
+                        .split(',')
+                        .map(|s| crate::providers::deterministic::Script::parse(s.trim()))
+                        .collect::<Option<Vec<_>>>()
+                        .filter(|s| s.len() <= 1_000)
+                        .ok_or_else(|| {
+                            ConfigError::invalid(
+                                "SMS_GATEWAY_DETERMINISTIC_SCRIPT",
+                                "must be comma-separated ACCEPT, REJECT, NOT_SENT, TIMEOUT_AFTER_CREATE, TIMEOUT_BEFORE_CREATE or MALFORMED",
+                            )
+                        })?,
+                },
             },
             Some(_) => {
                 return Err(ConfigError::invalid(

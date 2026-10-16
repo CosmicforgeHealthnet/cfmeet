@@ -96,6 +96,13 @@ pub struct PlatformAccess {
 
 impl PlatformAccess {
     pub async fn start(admin_url: &str) -> Option<Self> {
+        Self::start_trusting(admin_url, Vec::new()).await
+    }
+
+    /// Also trusting `extra` issuers (bundle entries `{issuer, keys, permissions}`;
+    /// audience and runtime environment are filled in) — the other services of a
+    /// cross-service journey.
+    pub async fn start_trusting(admin_url: &str, extra: Vec<Value>) -> Option<Self> {
         let bins = binaries()?;
         let tmpl = template(admin_url, &bins).await;
         let db_name = format!("nb_t_{}_pa{}", std::process::id(), Uuid::new_v4().simple());
@@ -116,32 +123,40 @@ impl PlatformAccess {
         std::fs::write(dir.join("pa-key.pem"), pa_key.to_pkcs8_pem().as_bytes()).unwrap();
         // Platform Access's bundle: Numbering may authenticate credentials and resolve
         // identity; the operator console administers.
+        let issuers: Vec<Value> = vec![
+            json!({
+                "issuer": cf_service_auth::services::NUMBERING,
+                "audience": cf_service_auth::services::PLATFORM_ACCESS,
+                "runtime_environment": ENV,
+                "keys": [numbering_key.public_jwk()],
+                "permissions": [
+                    "platform-credential.authenticate",
+                    "platform-identity.read",
+                    "platform-principal.resolve",
+                ],
+            }),
+            json!({
+                "issuer": cf_service_auth::services::OPERATOR_CONSOLE,
+                "audience": cf_service_auth::services::PLATFORM_ACCESS,
+                "runtime_environment": ENV,
+                "keys": [operator_key.public_jwk()],
+                "permissions": ["platform-identity.administer"],
+            }),
+        ]
+        .into_iter()
+        .chain(extra.into_iter().map(|mut e| {
+            e["audience"] = json!(cf_service_auth::services::PLATFORM_ACCESS);
+            e["runtime_environment"] = json!(ENV);
+            e
+        }))
+        .collect();
         std::fs::write(
             dir.join("pa-trust.json"),
             json!({
                 "bundle_version": 1,
                 "receiver": cf_service_auth::services::PLATFORM_ACCESS,
                 "runtime_environment": ENV,
-                "trusted_issuers": [
-                    {
-                        "issuer": cf_service_auth::services::NUMBERING,
-                        "audience": cf_service_auth::services::PLATFORM_ACCESS,
-                        "runtime_environment": ENV,
-                        "keys": [numbering_key.public_jwk()],
-                        "permissions": [
-                            "platform-credential.authenticate",
-                            "platform-identity.read",
-                            "platform-principal.resolve",
-                        ],
-                    },
-                    {
-                        "issuer": cf_service_auth::services::OPERATOR_CONSOLE,
-                        "audience": cf_service_auth::services::PLATFORM_ACCESS,
-                        "runtime_environment": ENV,
-                        "keys": [operator_key.public_jwk()],
-                        "permissions": ["platform-identity.administer"],
-                    },
-                ],
+                "trusted_issuers": issuers,
             })
             .to_string(),
         )

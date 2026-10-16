@@ -51,6 +51,22 @@ pub enum Script {
     Malformed,
 }
 
+impl Script {
+    /// `ACCEPT`, `REJECT`, `NOT_SENT`, `TIMEOUT_AFTER_CREATE`, `TIMEOUT_BEFORE_CREATE`,
+    /// `MALFORMED` (configuration of the deterministic adapter).
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "ACCEPT" => Script::Accept,
+            "REJECT" => Script::Reject("REJECTED_BY_PROVIDER"),
+            "NOT_SENT" => Script::NotSent("THROTTLED"),
+            "TIMEOUT_AFTER_CREATE" => Script::TimeoutAfterCreate,
+            "TIMEOUT_BEFORE_CREATE" => Script::TimeoutBeforeCreate,
+            "MALFORMED" => Script::Malformed,
+            _ => return None,
+        })
+    }
+}
+
 /// One message the simulated provider holds.
 #[derive(Debug, Clone)]
 pub struct Held {

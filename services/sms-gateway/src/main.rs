@@ -68,6 +68,7 @@ async fn main() -> anyhow::Result<()> {
         }
         ProviderChoice::Deterministic {
             callback_secret_file,
+            script,
         } => {
             let secret = zeroize::Zeroizing::new(
                 read_key_file(
@@ -85,6 +86,7 @@ async fn main() -> anyhow::Result<()> {
             let provider = DeterministicSmsProvider::new("deterministic", &secret);
             guard_runtime(&provider, runtime)
                 .unwrap_or_else(|e| fatal("provider configuration error", e));
+            provider.script(script);
             tracing::warn!(
                 "the deterministic SMS provider is active (local / test only, never a carrier)"
             );

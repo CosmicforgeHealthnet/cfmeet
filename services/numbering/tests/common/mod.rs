@@ -243,6 +243,19 @@ fn key(kid: &str) -> ServiceSigningKey {
     ServiceSigningKey::generate(KeyId::parse(kid).unwrap())
 }
 
+/// Cross-service journeys (`communications_e2e`): the private keys (PKCS#8 PEM) of the
+/// peers that call Numbering, set BEFORE a harness is built, so the peer PROCESSES sign
+/// with the keys Numbering's trust bundle lists. Unset: fresh keys per harness.
+pub static PEER_KEY_PEMS: std::sync::OnceLock<std::collections::HashMap<String, String>> =
+    std::sync::OnceLock::new();
+
+fn peer_key(kid: &str) -> ServiceSigningKey {
+    match PEER_KEY_PEMS.get().and_then(|m| m.get(kid)) {
+        Some(pem) => ServiceSigningKey::from_pkcs8_pem(KeyId::parse(kid).unwrap(), pem).unwrap(),
+        None => key(kid),
+    }
+}
+
 pub fn trust_bundle_json(
     receiver: &str,
     grants: &[(&str, Vec<cf_service_auth::PublicJwk>, &[&str])],
@@ -280,9 +293,9 @@ pub fn service_auth(
     targets: &[(ServiceId, &str)],
 ) -> (ServiceAuthRuntime, Peers) {
     let clock: SharedClock = Arc::new(SystemClock);
-    let calling = key("calling-test-1");
-    let telephony = key("telephony-test-1");
-    let sms_gateway = key("sms-gateway-test-1");
+    let calling = peer_key("calling-test-1");
+    let telephony = peer_key("telephony-test-1");
+    let sms_gateway = peer_key("sms-gateway-test-1");
     let policy = TrustPolicy::from_json(
         &trust_bundle_json(
             cf_service_auth::services::NUMBERING,
@@ -523,19 +536,61 @@ impl Harness {
 
     /// The same harness with routing grants (a dedicated grant key) installed; the
     /// returned clock drives grant issuance and verification (starts at the domain clock).
-    pub fn with_grants(mut self) -> (Self, cf_service_auth::ManualClock) {
+    pub fn with_grants(self) -> (Self, cf_service_auth::ManualClock) {
+        let (h, clock, _) = self.with_grants_ttl(60);
+        (h, clock)
+    }
+
+    /// Grants with `ttl_seconds`; also returns the grant key's public JWK (for receivers'
+    /// grant trust bundles, e.g. Privacy Relay's).
+    pub fn with_grants_ttl(
+        mut self,
+        ttl_seconds: u64,
+    ) -> (
+        Self,
+        cf_service_auth::ManualClock,
+        cf_service_auth::PublicJwk,
+    ) {
         let clock = cf_service_auth::ManualClock::new(self.now().timestamp());
         let shared: SharedClock = Arc::new(clock.clone());
         let signer = numbering::config::grants::signer(
             key("numbering-grant-test-1"),
             ENV,
-            60,
+            ttl_seconds,
             shared.clone(),
         )
         .unwrap();
+        let jwk = signer.public_jwk();
         self.state = self.state.clone().with_grants(signer, shared);
         self.app = http::app(self.state.clone());
-        (self, clock)
+        (self, clock, jwk)
+    }
+
+    /// Serves Numbering's real router on a real port (cross-service journeys). Setting the
+    /// returned flag takes Numbering offline: every request (open connections included)
+    /// answers 503, as an unavailable Numbering behind a load balancer would.
+    pub async fn serve(&self) -> (String, Arc<std::sync::atomic::AtomicBool>) {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let offline = Arc::new(AtomicBool::new(false));
+        let flag = offline.clone();
+        let app = self.app.clone().layer(axum::middleware::from_fn(
+            move |request: axum::extract::Request, next: axum::middleware::Next| {
+                let down = flag.load(Ordering::SeqCst);
+                async move {
+                    if down {
+                        axum::response::IntoResponse::into_response(StatusCode::SERVICE_UNAVAILABLE)
+                    } else {
+                        next.run(request).await
+                    }
+                }
+            },
+        ));
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (url, offline)
     }
 
     /// A signed internal request from `signer`.
