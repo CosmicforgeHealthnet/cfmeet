@@ -24,7 +24,7 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 
 use axum::http::{Method, StatusCode};
-use calling::platform::{operator::OperatorContext, scopes::names};
+use calling::platform::scopes::names;
 use calling_migration::{MigratorTrait, MIGRATION_TABLE};
 use common::{
     deployment::{Deployment, Receiver},
@@ -239,6 +239,21 @@ async fn fingerprint(
     out
 }
 
+/// The donor rows of `table` as a JSON array. Credentials Platform Access issued carry no
+/// verifier in Calling (000044); a Part III row always had one, so the N-1 copy gets a
+/// stand-in verifier (never a real one: these credentials authenticate at Platform
+/// Access only).
+fn donor_rows(table: &str) -> String {
+    if table == "platform_api_credentials" {
+        return "SELECT COALESCE(json_agg(to_jsonb(t) || CASE WHEN t.verifier IS NULL THEN \
+                  jsonb_build_object('verifier', '\\x' || encode(sha256(t.id::text::bytea), 'hex'), \
+                    'verifier_algorithm', 'HMAC_SHA256', 'verifier_key_version', 1) \
+                  ELSE '{}'::jsonb END), '[]')::text FROM platform_api_credentials t"
+            .to_string();
+    }
+    format!("SELECT COALESCE(json_agg(t), '[]')::text FROM \"{table}\" t")
+}
+
 /// Copies every row of `donor` (head) into `target` (N-1) through each target table's own
 /// row type; foreign keys and guard triggers are suspended for the copy only (replica
 /// role), CHECK / NOT NULL / unique constraints of N-1 apply.
@@ -252,13 +267,7 @@ async fn copy_rows(donor: &DatabaseConnection, target: &DatabaseConnection) -> u
         if table == MIGRATION_TABLE {
             continue;
         }
-        let rows = strings(
-            donor,
-            &format!("SELECT COALESCE(json_agg(t), '[]')::text FROM \"{table}\" t"),
-        )
-        .await
-        .pop()
-        .unwrap();
+        let rows = strings(donor, &donor_rows(&table)).await.pop().unwrap();
         let result = txn
             .execute(Statement::from_sql_and_values(
                 DbBackend::Postgres,
@@ -299,12 +308,20 @@ async fn seed(d: &Deployment) {
     let a = d.a();
     let h = d.h();
     d.enable_artifacts().await;
-    // Operator-audited administration.
+    // Operator-audited administration: identity changes are audited by Platform Access
+    // (projected here); Calling audits its own (limits).
     h.platform
-        .operator_set_live_telecom_allowed(
-            &OperatorContext::new("ops.upgrade-cert").unwrap(),
-            a.w.consumer.env(a.w.kind).id,
-            true,
+        .set_live_telecom_allowed(a.w.consumer.env(a.w.kind).id, true)
+        .await
+        .unwrap();
+    h.platform
+        .operator_set_tenant_limits(
+            &calling::platform::operator::OperatorContext::new("ops.upgrade-cert").unwrap(),
+            a.w.consumer.tenant.id,
+            calling::platform::limits::LimitValues {
+                requests_per_minute: Some(1000),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();

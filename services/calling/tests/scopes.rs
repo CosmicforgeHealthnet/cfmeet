@@ -3,14 +3,12 @@
 
 mod common;
 
+use common::{IssueCredential, RotateCredential};
+
 use axum::http::{Method, StatusCode};
 use calling::{
     domain::{EnvironmentKind, TenantClassification},
-    platform::{
-        credentials::{IssueCredential, RotateCredential},
-        scopes::names,
-        PlatformError,
-    },
+    platform::{scopes::names, PlatformError},
 };
 use common::Harness;
 use serde_json::json;
@@ -65,7 +63,7 @@ async fn credentials_cannot_receive_scopes_outside_the_application_allowed_set()
     };
     let tenant = h
         .platform
-        .create_tenant(calling::platform::tenants::NewTenant {
+        .create_tenant(crate::common::NewTenant {
             slug: "acme".into(),
             display_name: "Acme".into(),
             classification: TenantClassification::External,
@@ -77,7 +75,7 @@ async fn credentials_cannot_receive_scopes_outside_the_application_allowed_set()
         .platform
         .create_application(
             tenant.id,
-            calling::platform::applications::NewApplication {
+            crate::common::NewApplication {
                 slug: "app".into(),
                 display_name: "App".into(),
             },
@@ -97,7 +95,7 @@ async fn credentials_cannot_receive_scopes_outside_the_application_allowed_set()
         .platform
         .create_service_account(
             env.id,
-            calling::platform::service_accounts::NewServiceAccount {
+            crate::common::NewServiceAccount {
                 name: "backend".into(),
                 description: None,
             },
@@ -268,4 +266,18 @@ async fn rotation_revalidates_scopes_against_the_application() {
         h.whoami(issued.secret.expose_once()).await.status,
         StatusCode::OK
     );
+}
+
+#[tokio::test]
+async fn calling_scopes_are_registered_by_platform_access() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let registered = h.platform.pa.registered_scopes().await;
+    for scope in names::ALL {
+        assert!(
+            registered.iter().any(|r| r == scope),
+            "{scope} is enforced by Calling but not registered by Platform Access"
+        );
+    }
 }

@@ -26,7 +26,10 @@ use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement};
 
 use super::{
-    access::{AuthenticationOutcome, AuthorityError, IdentityAuthority, WireAuthorityMode, WireSuspendedLink},
+    access::{
+        AuthenticationOutcome, AuthorityError, IdentityAuthority, WireAuthorityMode,
+        WireSuspendedLink,
+    },
     context::{AuthorityMode, PlatformAuthContext, SuspendedLink, TrustedAuthority},
     projection::IdentityProjection,
     scopes::ScopeSet,
@@ -181,15 +184,16 @@ impl CredentialAuthenticator {
         };
         // The rows every Calling foreign key references must exist (and carry current
         // statuses) before the request can act.
-        self.projection
-            .apply_chain(&chain)
-            .await
-            .map_err(|e| AuthenticationError::Unavailable {
+        self.projection.apply_chain(&chain).await.map_err(|e| {
+            AuthenticationError::Unavailable {
                 summary: e.to_string(),
-            })?;
+            }
+        })?;
         let authority_mode = match (chain.authority_mode, chain.suspended_link) {
             (WireAuthorityMode::Full, None) => AuthorityMode::Full,
-            (_, Some(WireSuspendedLink::Tenant)) => AuthorityMode::SafetyOnly(SuspendedLink::Tenant),
+            (_, Some(WireSuspendedLink::Tenant)) => {
+                AuthorityMode::SafetyOnly(SuspendedLink::Tenant)
+            }
             (_, Some(WireSuspendedLink::Application)) => {
                 AuthorityMode::SafetyOnly(SuspendedLink::Application)
             }

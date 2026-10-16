@@ -38,7 +38,7 @@ use super::{
     privacy::FakePrivacyRelay,
     public::{public_policy, spend_policy},
     telephony::{FakePublicMedia, FakeTelephony},
-    Harness, TestDb, TestResponse, TEST_PEPPER,
+    Harness, TestDb, TestResponse,
 };
 
 /// A deterministic, non-weak 32-byte test-only webhook key.
@@ -146,7 +146,6 @@ impl Externals {
     pub fn instance(&self, db: Arc<TestDb>, clock: ManualClock) -> Harness {
         Harness::with_runtime(
             db,
-            TEST_PEPPER,
             clock,
             self.media.clone(),
             self.bus.clone(),
@@ -242,10 +241,7 @@ impl Deployment {
     }
 
     /// A credential with `scopes` and generous limits.
-    pub async fn credential(
-        &self,
-        scopes: &[&str],
-    ) -> calling::platform::credentials::IssuedCredential {
+    pub async fn credential(&self, scopes: &[&str]) -> crate::common::IssuedCredential {
         super::enterprise::credential(self.h(), &self.e.a.w.consumer, self.e.a.w.kind, scopes).await
     }
 

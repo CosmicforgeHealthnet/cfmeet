@@ -20,7 +20,7 @@ Conventions used by every service:
 | Secret | Owner | Overlap? | Runbook |
 |---|---|---|---|
 | API credentials (`cfmk_…`) | Calling | **Yes** (`--overlap-minutes`) | §1 |
-| API credential pepper | Calling | **Yes** (one previous version) | §2 |
+| API credential pepper | Platform Access (moved from Calling, ADR 0032) | **Yes** (one previous version) | §2 |
 | Service-auth signing keys / trust bundles | all services | **Yes** (≤ 4 keys per issuer) | §3 |
 | Contact-delegation key | Calling → Privacy Relay | **Yes** (same mechanism as §3) | §3 |
 | Contact Vault encryption keyring | Privacy Relay | **Yes** (versioned; guarded retire) | §4 |
@@ -38,13 +38,17 @@ Conventions used by every service:
 ## 1. API credentials
 
 ```
-platform_admin --operator <you> credential rotate --credential <public id> --overlap-minutes 60
+platform-access-admin --operator <you> credential rotate --credential <public id> --overlap-minutes 60
 ```
 
 The old credential keeps verifying until the overlap ends (`supersession_valid_until`);
-`credential revoke` is immediate and idempotent. Tests: `services/calling/tests/rotation.rs`.
+`credential revoke` is immediate and idempotent. Tests: `services/platform-access/tests/authentication.rs`,
+`services/calling/tests/rotation.rs` (through Platform Access).
 
 ## 2. API credential pepper
+
+The pepper is mounted into **Platform Access only** (Calling refuses to start with any
+`API_CREDENTIAL_*` setting since Part IV).
 
 1. Deploy `API_CREDENTIAL_PREVIOUS_PEPPER[_VERSION]` = the current values and
    `API_CREDENTIAL_PEPPER[_VERSION]` = the new pepper with a **higher** version
@@ -54,8 +58,9 @@ The old credential keeps verifying until the overlap ends (`supersession_valid_u
 3. Rotate every credential (§1) so no verifier remains under the previous version, then
    remove the previous slot and restart.
 
-Not seamless: step 1 requires a restart (no hot reload). Tests:
-`platform/verifier.rs::previous_pepper_still_verifies_during_rotation`.
+Not seamless: step 1 requires a restart (no hot reload). Tests (Platform Access):
+`identity/verifier.rs::previous_pepper_still_verifies_during_rotation`,
+`tests/authentication.rs::previous_pepper_keeps_verifying_during_a_pepper_rotation`.
 
 ## 3. Service-auth signing keys, trust bundles, contact-delegation key
 

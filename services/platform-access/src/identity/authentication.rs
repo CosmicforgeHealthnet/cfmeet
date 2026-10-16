@@ -70,6 +70,21 @@ pub enum AuthFailureReason {
 }
 
 impl AuthFailureReason {
+    /// Every reason (the contract's `AuthFailureReason` enumeration).
+    pub const ALL: &'static [AuthFailureReason] = &[
+        Self::MalformedCredential,
+        Self::UnknownCredential,
+        Self::SecretMismatch,
+        Self::EnvironmentTagMismatch,
+        Self::UnsupportedVerifier,
+        Self::CredentialRevoked,
+        Self::CredentialNotYetValid,
+        Self::CredentialExpired,
+        Self::CredentialSuperseded,
+        Self::ServiceAccountInactive,
+        Self::CorruptAuthorityChain,
+    ];
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::MalformedCredential => "malformed_credential",
@@ -361,7 +376,10 @@ impl CredentialAuthenticator {
     }
 
     /// Authenticates a presented credential string (the bearer token).
-    pub async fn authenticate(&self, presented: &str) -> Result<AuthorityChain, AuthenticationError> {
+    pub async fn authenticate(
+        &self,
+        presented: &str,
+    ) -> Result<AuthorityChain, AuthenticationError> {
         let Some(presented) = credential_format::parse(presented) else {
             return Err(AuthenticationError::rejected(
                 AuthFailureReason::MalformedCredential,

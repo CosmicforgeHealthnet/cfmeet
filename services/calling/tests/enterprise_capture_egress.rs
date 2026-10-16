@@ -281,7 +281,7 @@ struct World {
     store: Arc<MemoryObjectStore>,
     stub: Stub,
     capture: Arc<LiveKitEgressCapture>,
-    manager: calling::platform::credentials::IssuedCredential,
+    manager: crate::common::IssuedCredential,
 }
 
 impl World {

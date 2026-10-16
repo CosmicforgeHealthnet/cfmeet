@@ -37,7 +37,9 @@ use super::middleware::InternalCaller;
 use crate::{
     domain::{EnvironmentKind, PrincipalId, PrincipalKind},
     identity::{
-        authentication::{AuthenticationError, AuthorityChain, AuthorityMode, SuspendedLink, Throttle},
+        authentication::{
+            AuthenticationError, AuthorityChain, AuthorityMode, SuspendedLink, Throttle,
+        },
         changes,
         credentials::CredentialEffectiveState,
         handoff,
@@ -61,8 +63,14 @@ pub fn routes() -> Router<AppState> {
         .route("/identity/imports/:bundle_digest", get(import_receipt))
         .route("/scopes", get(scope_registry))
         .route("/principals/resolve", post(resolve_principals))
-        .route("/principals/telephone-endpoints", post(ensure_telephone_endpoint))
-        .route("/principals/:principal_id/tombstone", post(tombstone_principal))
+        .route(
+            "/principals/telephone-endpoints",
+            post(ensure_telephone_endpoint),
+        )
+        .route(
+            "/principals/:principal_id/tombstone",
+            post(tombstone_principal),
+        )
 }
 
 fn internal(err: sea_orm::DbErr) -> AccessError {
@@ -86,7 +94,11 @@ fn zeroizing_string<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Zeroizing<
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase", tag = "outcome", rename_all_fields = "camelCase")]
+#[serde(
+    rename_all = "camelCase",
+    tag = "outcome",
+    rename_all_fields = "camelCase"
+)]
 enum AuthenticateResponse {
     #[serde(rename = "AUTHENTICATED")]
     Authenticated { authority: Box<AuthorityChain> },
@@ -116,7 +128,10 @@ async fn authenticate(
             throttle: None,
         }));
     }
-    let outcome = state.authenticator.authenticate(body.credential.trim()).await;
+    let outcome = state
+        .authenticator
+        .authenticate(body.credential.trim())
+        .await;
     drop(body);
     match outcome {
         Ok(chain) => {
@@ -219,7 +234,10 @@ fn delegated_kind(ctx: &DelegatedPlatformContext) -> EnvironmentKind {
 /// consistent (environment ∈ application ∈ tenant, environment kind as signed, initiating
 /// service account ∈ environment). Anything else is DELEGATED_CONTEXT_INVALID — a forged
 /// or stale tenant / application claim never becomes authority here.
-pub(crate) async fn trusted_scope(state: &AppState, caller: &InternalCaller) -> AccessResult<TrustedScope> {
+pub(crate) async fn trusted_scope(
+    state: &AppState,
+    caller: &InternalCaller,
+) -> AccessResult<TrustedScope> {
     let ctx = caller.delegated()?;
     let row = state
         .platform
@@ -245,11 +263,15 @@ pub(crate) async fn trusted_scope(state: &AppState, caller: &InternalCaller) -> 
         .map_err(internal)?;
     let invalid = || {
         crate::metrics::inc("platform_access_delegated_context_rejected_total", &[]);
-        tracing::warn!(caller = caller.service(), "delegated platform context rejected");
+        tracing::warn!(
+            caller = caller.service(),
+            "delegated platform context rejected"
+        );
         AccessError::Refused(ErrorCode::DelegatedContextInvalid)
     };
     let row = row.ok_or_else(invalid)?;
-    let get = |col: &str| -> AccessResult<Value> { row.try_get::<Value>("", col).map_err(internal) };
+    let get =
+        |col: &str| -> AccessResult<Value> { row.try_get::<Value>("", col).map_err(internal) };
     let corrupt = |_| AccessError::Refused(ErrorCode::InternalError);
     let scope = TrustedScope {
         tenant: from_row_json(get("tenant")?).map_err(corrupt)?,
@@ -329,10 +351,9 @@ async fn load_credential_in_scope(
         .map_err(internal)?
         // Another scope's credential is reported exactly like a missing one.
         .ok_or(AccessError::Refused(ErrorCode::NotFound))?;
-    let credential: CredentialSnapshot = from_row_json(
-        row.try_get::<Value>("", "credential").map_err(internal)?,
-    )
-    .map_err(|_| AccessError::Refused(ErrorCode::InternalError))?;
+    let credential: CredentialSnapshot =
+        from_row_json(row.try_get::<Value>("", "credential").map_err(internal)?)
+            .map_err(|_| AccessError::Refused(ErrorCode::InternalError))?;
     let effective_state = CredentialEffectiveState::evaluate(
         credential.status,
         credential.not_before,
@@ -356,7 +377,11 @@ async fn load_credential_in_scope(
     })
 }
 
-async fn effective_scopes(state: &AppState, scope: &TrustedScope, credential_id: Uuid) -> AccessResult<Vec<String>> {
+async fn effective_scopes(
+    state: &AppState,
+    scope: &TrustedScope,
+    credential_id: Uuid,
+) -> AccessResult<Vec<String>> {
     use crate::identity::scopes::{GrantBasis, PersistedGrant};
     let rows = state
         .platform
@@ -397,7 +422,9 @@ async fn credential_status(
 ) -> AccessResult<impl IntoResponse> {
     caller.require_permission(InternalPermission::PlatformIdentityRead)?;
     let scope = trusted_scope(&state, &caller).await?;
-    Ok(Json(load_credential_in_scope(&state, &scope, credential_id).await?))
+    Ok(Json(
+        load_credential_in_scope(&state, &scope, credential_id).await?,
+    ))
 }
 
 #[derive(Deserialize)]

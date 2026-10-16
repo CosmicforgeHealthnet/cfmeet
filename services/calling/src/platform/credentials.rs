@@ -228,7 +228,11 @@ impl PlatformService {
 /// Safe display form of a credential (`cfmk_<tag>_<public id>_<stars><last four>`): it
 /// identifies the credential without revealing anything of its secret.
 fn masked(kind: EnvironmentKind, public_id: &str, last_four: &str) -> String {
-    format!("cfmk_{}_{public_id}_{}{last_four}", kind.credential_tag(), "*".repeat(60))
+    format!(
+        "cfmk_{}_{public_id}_{}{last_four}",
+        kind.credential_tag(),
+        "*".repeat(60)
+    )
 }
 
 async fn scopes_of<C: ConnectionTrait>(
@@ -245,6 +249,7 @@ async fn scopes_of<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Duration;
 
     fn t(minutes: i64) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339("2030-01-01T00:00:00Z")

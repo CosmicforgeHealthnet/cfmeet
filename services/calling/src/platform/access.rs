@@ -267,7 +267,9 @@ impl From<InternalCallError> for AuthorityError {
         match err {
             InternalCallError::Status { status: 404, .. } => AuthorityError::NotFound,
             InternalCallError::Status {
-                status, code: Some(code), ..
+                status,
+                code: Some(code),
+                ..
             } if (400..500).contains(&status) => AuthorityError::Refused(code),
             other => AuthorityError::Unavailable(other.to_string()),
         }
@@ -304,8 +306,10 @@ pub trait IdentityAuthority: Send + Sync {
     async fn changes(&self, after: i64, limit: u64) -> Result<ChangePage, AuthorityError>;
 
     /// The receipt of an imported identity bundle, if any.
-    async fn import_receipt(&self, bundle_digest: &str)
-        -> Result<Option<ImportReceipt>, AuthorityError>;
+    async fn import_receipt(
+        &self,
+        bundle_digest: &str,
+    ) -> Result<Option<ImportReceipt>, AuthorityError>;
 }
 
 /// The authenticated HTTP transport (`CF_PLATFORM_ACCESS_BASE_URL`).
@@ -420,7 +424,10 @@ impl IdentityAuthority for HttpIdentityAuthority {
         let request = OutboundServiceRequest::new_operation(target());
         match self
             .client
-            .get(&request, &format!("/internal/v1/identity/imports/{bundle_digest}"))
+            .get(
+                &request,
+                &format!("/internal/v1/identity/imports/{bundle_digest}"),
+            )
             .await
         {
             Ok(response) => Ok(Some(response.json()?)),
@@ -440,7 +447,9 @@ impl IdentityAuthority for UnconfiguredIdentityAuthority {
         _: &str,
         _: &CorrelationId,
     ) -> Result<AuthenticationOutcome, AuthorityError> {
-        Err(AuthorityError::Unavailable("platform access is not configured".into()))
+        Err(AuthorityError::Unavailable(
+            "platform access is not configured".into(),
+        ))
     }
 
     async fn ensure_telephone_endpoint(
@@ -448,18 +457,30 @@ impl IdentityAuthority for UnconfiguredIdentityAuthority {
         _: &DelegatedPlatformContext,
         _: Uuid,
     ) -> Result<PrincipalSnapshot, AuthorityError> {
-        Err(AuthorityError::Unavailable("platform access is not configured".into()))
+        Err(AuthorityError::Unavailable(
+            "platform access is not configured".into(),
+        ))
     }
 
-    async fn tombstone_principal(&self, _: Uuid, _: &str) -> Result<TombstoneOutcome, AuthorityError> {
-        Err(AuthorityError::Unavailable("platform access is not configured".into()))
+    async fn tombstone_principal(
+        &self,
+        _: Uuid,
+        _: &str,
+    ) -> Result<TombstoneOutcome, AuthorityError> {
+        Err(AuthorityError::Unavailable(
+            "platform access is not configured".into(),
+        ))
     }
 
     async fn changes(&self, _: i64, _: u64) -> Result<ChangePage, AuthorityError> {
-        Err(AuthorityError::Unavailable("platform access is not configured".into()))
+        Err(AuthorityError::Unavailable(
+            "platform access is not configured".into(),
+        ))
     }
 
     async fn import_receipt(&self, _: &str) -> Result<Option<ImportReceipt>, AuthorityError> {
-        Err(AuthorityError::Unavailable("platform access is not configured".into()))
+        Err(AuthorityError::Unavailable(
+            "platform access is not configured".into(),
+        ))
     }
 }

@@ -368,12 +368,13 @@ fn every_mutable_operation_of_the_contract_is_classified() {
         assert!(documented.contains(*op), "{op}");
         assert!(!reason.is_empty());
     }
-    // The contract's scopes exist in the registry (a typo would make the 403 probe vacuous).
-    let registry = calling::platform::scopes::ScopeRegistry::standard();
+    // The contract's scopes are scopes Calling enforces (a typo would make the 403 probe
+    // vacuous); `scopes::calling_scopes_are_registered_by_platform_access` proves each is
+    // registered by Platform Access.
     for op in mutable_operations() {
         if op.auth == Auth::Platform {
             for scope in &op.requires {
-                assert!(registry.definition(scope).is_some(), "{}: {scope}", op.key);
+                assert!(names::ALL.contains(&scope.as_str()), "{}: {scope}", op.key);
                 assert!(
                     ALL_TEST_SCOPES.contains(&scope.as_str()),
                     "{}: {scope}",

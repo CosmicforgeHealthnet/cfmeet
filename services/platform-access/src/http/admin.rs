@@ -47,10 +47,19 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/tenants", post(create_tenant))
         .route("/admin/tenants/:tenant_id", get(get_tenant))
         .route("/admin/tenants/:tenant_id/status", post(set_tenant_status))
-        .route("/admin/tenants/:tenant_id/applications", post(create_application))
+        .route(
+            "/admin/tenants/:tenant_id/applications",
+            post(create_application),
+        )
         .route("/admin/applications/:application_id", get(get_application))
-        .route("/admin/applications/:application_id/status", post(set_application_status))
-        .route("/admin/applications/:application_id/environments", post(create_environment))
+        .route(
+            "/admin/applications/:application_id/status",
+            post(set_application_status),
+        )
+        .route(
+            "/admin/applications/:application_id/environments",
+            post(create_environment),
+        )
         .route(
             "/admin/applications/:application_id/scopes",
             post(grant_scope).get(list_scopes),
@@ -59,8 +68,14 @@ pub fn routes() -> Router<AppState> {
             "/admin/applications/:application_id/scopes/:scope",
             axum::routing::delete(revoke_scope),
         )
-        .route("/admin/environments/:environment_id/status", post(set_environment_status))
-        .route("/admin/environments/:environment_id/live-telecom", post(set_live_telecom))
+        .route(
+            "/admin/environments/:environment_id/status",
+            post(set_environment_status),
+        )
+        .route(
+            "/admin/environments/:environment_id/live-telecom",
+            post(set_live_telecom),
+        )
         .route(
             "/admin/environments/:environment_id/service-accounts",
             post(create_service_account),
@@ -69,20 +84,35 @@ pub fn routes() -> Router<AppState> {
             "/admin/environments/:environment_id/principals",
             post(register_principal).get(list_principals),
         )
-        .route("/admin/service-accounts/:service_account_id/status", post(set_service_account_status))
+        .route(
+            "/admin/service-accounts/:service_account_id/status",
+            post(set_service_account_status),
+        )
         .route(
             "/admin/service-accounts/:service_account_id/credentials",
             post(issue_credential).get(list_credentials),
         )
         .route("/admin/credentials/:credential_id", get(get_credential))
-        .route("/admin/credentials/:credential_id/rotate", post(rotate_credential))
-        .route("/admin/credentials/:credential_id/revoke", post(revoke_credential))
+        .route(
+            "/admin/credentials/:credential_id/rotate",
+            post(rotate_credential),
+        )
+        .route(
+            "/admin/credentials/:credential_id/revoke",
+            post(revoke_credential),
+        )
         .route(
             "/admin/credentials/:credential_id/principal-restriction",
             put(restrict_credential),
         )
-        .route("/admin/principals/:principal_id/status", post(set_principal_status))
-        .route("/admin/principals/:principal_id/tombstone", post(tombstone_principal))
+        .route(
+            "/admin/principals/:principal_id/status",
+            post(set_principal_status),
+        )
+        .route(
+            "/admin/principals/:principal_id/tombstone",
+            post(tombstone_principal),
+        )
 }
 
 /// Authorizes an administration request: permission + named operator.
@@ -154,7 +184,12 @@ async fn get_tenant(
     Path(id): Path<Uuid>,
 ) -> AccessResult<impl IntoResponse> {
     read_only(&caller)?;
-    Ok(Json(s.platform.tenant(TenantId::from_uuid(id)).await.map_err(op_err)?))
+    Ok(Json(
+        s.platform
+            .tenant(TenantId::from_uuid(id))
+            .await
+            .map_err(op_err)?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -541,7 +576,11 @@ async fn restrict_credential(
     Json(b): Json<RestrictionBody>,
 ) -> AccessResult<impl IntoResponse> {
     let op = operator(&caller, &headers)?;
-    let ids: Vec<PrincipalId> = b.principal_ids.into_iter().map(PrincipalId::from_uuid).collect();
+    let ids: Vec<PrincipalId> = b
+        .principal_ids
+        .into_iter()
+        .map(PrincipalId::from_uuid)
+        .collect();
     let restricted = s
         .platform
         .operator_restrict_credential_principals(&op, CredentialId::from_uuid(id), &ids)

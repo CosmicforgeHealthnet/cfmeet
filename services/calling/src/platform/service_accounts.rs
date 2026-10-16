@@ -8,9 +8,7 @@ use serde::Serialize;
 
 use super::{PlatformError, PlatformResult, PlatformService};
 use crate::{
-    domain::{
-        ApplicationId, EnvironmentId, ServiceAccountId, ServiceAccountStatus, TenantId,
-    },
+    domain::{ApplicationId, EnvironmentId, ServiceAccountId, ServiceAccountStatus, TenantId},
     models::service_accounts,
 };
 
@@ -84,5 +82,4 @@ impl PlatformService {
             .map(Into::into)
             .collect())
     }
-
 }

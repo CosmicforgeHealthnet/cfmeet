@@ -72,6 +72,12 @@
      "tests": ["tests/outbox_delivery.rs::an_expired_outbox_lease_is_reclaimed_and_delivered_exactly_once",
                "tests/outbox_delivery.rs::a_permanent_refusal_is_dead_lettered_once_and_never_retried"]},
     {"id": "telephony-retention", "owner": "telephony", "source": "src/retention/mod.rs", "entry": "purge_expired_provider_events",
-     "tests": ["tests/provider_events.rs::raw_payloads_are_never_forwarded_and_delivered_events_follow_the_contract"]}
+     "tests": ["tests/provider_events.rs::raw_payloads_are_never_forwarded_and_delivered_events_follow_the_contract"]},
+    {"id": "calling-identity-projection", "owner": "calling", "source": "src/platform/projection.rs", "entry": "sync",
+     "tests": ["tests/identity_projection.rs::concurrent_instances_apply_the_feed_once_in_commit_order",
+               "tests/identity_projection.rs::replaying_the_feed_never_regresses_a_newer_state",
+               "tests/identity_projection.rs::principal_changes_at_platform_access_reach_calling_through_the_feed"]},
+    {"id": "platform-access-failure-window-pruning", "owner": "platform-access", "source": "src/identity/authentication.rs", "entry": "prune_failure_windows",
+     "tests": ["tests/authentication.rs::failure_windows_are_bounded_reset_and_pruned"]}
   ]
 }

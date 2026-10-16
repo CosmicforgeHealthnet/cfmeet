@@ -11,7 +11,6 @@ use calling::{calls::CallState, domain::EnvironmentKind, signaling::RealtimeSign
 use common::{
     app::{AppWorld, Device},
     calls::CallWorld,
-    TEST_PEPPER,
 };
 use futures_util::future::join_all;
 use sea_orm::{ConnectionTrait, DbBackend, Statement};
@@ -435,20 +434,10 @@ async fn load_many_calls_across_applications_fanout_credentials_and_reconciliati
     };
     let others = [
         AppWorld {
-            w: CallWorld::in_harness(
-                a.h().sibling(TEST_PEPPER),
-                "load-b",
-                EnvironmentKind::Production,
-            )
-            .await,
+            w: CallWorld::in_harness(a.h().sibling(), "load-b", EnvironmentKind::Production).await,
         },
         AppWorld {
-            w: CallWorld::in_harness(
-                a.h().sibling(TEST_PEPPER),
-                "load-c",
-                EnvironmentKind::Production,
-            )
-            .await,
+            w: CallWorld::in_harness(a.h().sibling(), "load-c", EnvironmentKind::Production).await,
         },
     ];
     // Many concurrent Calls across three applications.

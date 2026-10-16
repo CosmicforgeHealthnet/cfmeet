@@ -3,6 +3,8 @@
 
 mod common;
 
+use common::RotateCredential;
+
 use std::{
     io::Write,
     sync::{Arc, Mutex},
@@ -12,7 +14,7 @@ use axum::http::{Method, StatusCode};
 use calling::{
     config::CallingConfig,
     domain::{EnvironmentKind, TenantClassification},
-    platform::{credentials::RotateCredential, scopes::names},
+    platform::scopes::names,
 };
 use common::{secret_part, Harness, TEST_PEPPER};
 use serde_json::json;
@@ -92,9 +94,10 @@ async fn structured_logs_never_contain_credentials_or_authorization_headers() {
     assert_eq!(h.whoami(&token).await.status, StatusCode::UNAUTHORIZED);
 
     let logs = capture.text();
-    // Logging actually happened, with operator context.
-    assert!(logs.contains("API credential issued"), "{logs}");
-    assert!(logs.contains("platform authentication rejected"));
+    // Logging actually happened, with operator context. (Issuance, rotation and revocation
+    // are logged by Platform Access, in its own process; Calling logs the projection
+    // and the authentication outcomes.)
+    assert!(logs.contains("platform authentication rejected"), "{logs}");
     assert!(logs.contains("secret_mismatch"));
     assert!(logs.contains(&issued.credential.public_id));
     assert!(logs.contains("req_"));
@@ -193,16 +196,19 @@ async fn debug_output_of_secret_bearing_types_is_redacted() {
     let ctx = h.ctx(&token).await;
     assert!(!format!("{ctx:?}").contains(secret_part(&token)));
 
-    // Configuration Debug never shows the pepper or database password.
+    // Configuration Debug never shows the database password; a pepper is refused outright
+    // (it is Platform Access's) without echoing it.
     let config = CallingConfig::from_lookup(|key| match key {
         "DATABASE_URL" => Some("postgres://calling:db-password-123@db/calling".into()),
-        "API_CREDENTIAL_PEPPER" => Some(TEST_PEPPER.into()),
         _ => None,
     })
     .unwrap();
     let rendered = format!("{config:?}");
-    assert!(!rendered.contains(TEST_PEPPER));
     assert!(!rendered.contains("db-password-123"));
+    // (The refusal sees variable names only, never values.)
+    let refused =
+        calling::config::refuse_moved_settings(["API_CREDENTIAL_PEPPER".to_string()]).unwrap_err();
+    assert!(!format!("{refused} {refused:?}").contains(TEST_PEPPER));
 }
 
 // ---------------------------------------------------------------------------

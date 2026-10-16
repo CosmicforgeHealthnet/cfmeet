@@ -29,9 +29,8 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use super::{
-    credentials::CredentialView, limits::LimitValues,
-    principals::PrincipalView, service_accounts::ServiceAccountView, PlatformError,
-    PlatformResult, PlatformService,
+    credentials::CredentialView, limits::LimitValues, principals::PrincipalView,
+    service_accounts::ServiceAccountView, PlatformError, PlatformResult, PlatformService,
 };
 use crate::domain::{ApplicationId, CredentialId, PrincipalId, ServiceAccountId, TenantId};
 
@@ -272,22 +271,6 @@ macro_rules! audited {
 }
 
 impl PlatformService {
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     pub async fn operator_set_tenant_limits(
         &self,
         op: &OperatorContext,
@@ -384,7 +367,6 @@ impl PlatformService {
         })
     }
 }
-
 
 fn service_account_entry(action: OperatorAction, sa: &ServiceAccountView) -> AuditEntry {
     AuditEntry::new(action, AuditTargetKind::ServiceAccount, sa.id.as_uuid()).scope(

@@ -423,7 +423,7 @@ async fn the_paid_public_network_guard_requires_authorization_and_live_telecom()
     // Another scope never sees the Call.
     let foreign = CallScope::of_platform(
         &CallWorld::in_harness(
-            Harness::on(w.h.db.clone(), common::TEST_PEPPER, w.h.clock.clone()),
+            Harness::on(w.h.db.clone(), w.h.clock.clone()),
             "other",
             EnvironmentKind::Production,
         )

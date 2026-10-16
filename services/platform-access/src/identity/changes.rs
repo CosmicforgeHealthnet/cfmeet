@@ -104,7 +104,11 @@ fn typed_snapshot(kind: EntityKind, row: Value) -> PlatformResult<Value> {
 }
 
 /// Reads at most `limit` changes with `sequence > after`.
-pub async fn read_page<C: ConnectionTrait>(db: &C, after: i64, limit: u64) -> PlatformResult<ChangePage> {
+pub async fn read_page<C: ConnectionTrait>(
+    db: &C,
+    after: i64,
+    limit: u64,
+) -> PlatformResult<ChangePage> {
     let limit = limit.clamp(1, MAX_PAGE);
     let rows = ChangeRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Postgres,

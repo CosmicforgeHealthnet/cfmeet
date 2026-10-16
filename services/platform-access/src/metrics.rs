@@ -80,7 +80,10 @@ pub async fn render(state: &AppState) -> String {
                     "REVOKED" => "REVOKED",
                     _ => "OTHER",
                 };
-                let _ = writeln!(out, "platform_access_credentials{{status=\"{status}\"}} {n}");
+                let _ = writeln!(
+                    out,
+                    "platform_access_credentials{{status=\"{status}\"}} {n}"
+                );
             }
         }
     }
@@ -108,5 +111,7 @@ async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
 
 /// The metrics listener's router.
 pub fn router(state: AppState) -> Router {
-    Router::new().route("/metrics", get(metrics)).with_state(state)
+    Router::new()
+        .route("/metrics", get(metrics))
+        .with_state(state)
 }

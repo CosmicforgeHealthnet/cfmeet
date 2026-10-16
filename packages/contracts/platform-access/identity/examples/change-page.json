@@ -1,0 +1,28 @@
+{
+  "changes": [
+    {
+      "sequence": 41,
+      "entityKind": "PRINCIPAL",
+      "operation": "UPDATE",
+      "entityKey": "5e6f7a8b-9c0d-4e5f-8a6b-7c8d9e0f1a2b",
+      "revision": 3,
+      "occurredAt": "2026-10-16T10:07:00Z",
+      "snapshot": {
+        "id": "5e6f7a8b-9c0d-4e5f-8a6b-7c8d9e0f1a2b",
+        "tenantId": "0f8b6f0e-6a1c-4f43-9b0e-1d2c3b4a5f60",
+        "applicationId": "1a2b3c4d-5e6f-4a1b-8c2d-3e4f5a6b7c8d",
+        "environmentId": "2b3c4d5e-6f7a-4b2c-9d3e-4f5a6b7c8d9e",
+        "kind": "NATIVE_CF_USER",
+        "externalReference": "tombstoned:5e6f7a8b-9c0d-4e5f-8a6b-7c8d9e0f1a2b",
+        "linkedServiceAccountId": null,
+        "status": "DEACTIVATED",
+        "tombstonedAt": "2026-10-16T10:07:00Z",
+        "revision": 3,
+        "createdAt": "2026-10-16T10:00:00Z",
+        "updatedAt": "2026-10-16T10:07:00Z"
+      }
+    }
+  ],
+  "nextAfter": 41,
+  "hasMore": false
+}

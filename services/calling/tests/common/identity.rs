@@ -8,12 +8,7 @@
 //! passes them), unless `CFMEET_SKIP_DB_TESTS=1`. Platform Access runs on the wall clock;
 //! Calling's manual clock never decides a credential's validity any more.
 
-use std::{
-    ops::Deref,
-    path::PathBuf,
-    sync::Arc,
-    time::Duration,
-};
+use std::{ops::Deref, path::PathBuf, sync::Arc, time::Duration};
 
 use calling::{
     domain::{
@@ -81,7 +76,11 @@ static TEMPLATE: OnceCell<String> = OnceCell::const_new();
 async fn template(admin: &str, bins: &Binaries) -> String {
     TEMPLATE
         .get_or_init(|| async {
-            let name = format!("clg_tmpl_{}_pa{}", std::process::id(), Uuid::new_v4().simple());
+            let name = format!(
+                "clg_tmpl_{}_pa{}",
+                std::process::id(),
+                Uuid::new_v4().simple()
+            );
             let conn = Database::connect(admin).await.expect("connect admin db");
             conn.execute_unprepared(&format!("CREATE DATABASE {name}"))
                 .await
@@ -150,6 +149,11 @@ pub struct PlatformAccess {
 
 impl PlatformAccess {
     pub async fn start(admin_url: &str) -> Option<Self> {
+        Self::start_with(admin_url, &[]).await
+    }
+
+    /// A Platform Access with extra environment (e.g. its failed-authentication policy).
+    pub async fn start_with(admin_url: &str, extra_env: &[(&str, &str)]) -> Option<Self> {
         let bins = binaries()?;
         let tmpl = template(admin_url, &bins).await;
         let db_name = format!("clg_t_{}_pa{}", std::process::id(), Uuid::new_v4().simple());
@@ -167,24 +171,49 @@ impl PlatformAccess {
         let calling_key = ServiceSigningKey::generate(KeyId::parse("calling-pa-test-1").unwrap());
         let operator_key = ServiceSigningKey::generate(KeyId::parse("operator-test-1").unwrap());
         std::fs::write(dir.join("pa-key.pem"), pa_key.to_pkcs8_pem().as_bytes()).unwrap();
-        std::fs::write(dir.join("pa-trust.json"), trust_bundle(&calling_key, &operator_key)).unwrap();
+        std::fs::write(
+            dir.join("pa-trust.json"),
+            trust_bundle(&calling_key, &operator_key),
+        )
+        .unwrap();
+        // Calling's side, for Calling processes (the `platform_admin` CLI) that reach this
+        // Platform Access: the same key, and a Calling trust bundle with no peers.
+        std::fs::write(
+            dir.join("calling-key.pem"),
+            calling_key.to_pkcs8_pem().as_bytes(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("calling-trust.json"),
+            super::trust_bundle_json(cf_service_auth::services::CALLING, ENV, &[]),
+        )
+        .unwrap();
         let http = reqwest::Client::builder().no_proxy().build().unwrap();
         let mut started = None;
         // A free port can be taken between probing and binding: retry on a new one.
         for _ in 0..5 {
             let port = free_port();
-            let mut child = tokio::process::Command::new(&bins.server)
-                .env_clear()
+            let mut command = tokio::process::Command::new(&bins.server);
+            command.env_clear();
+            for (k, v) in extra_env {
+                command.env(k, v);
+            }
+            let mut child = command
                 .env("PATH", std::env::var("PATH").unwrap_or_default())
                 .env("DATABASE_URL", super::with_db(admin_url, &db_name))
                 .env("PLATFORM_ACCESS_DATABASE_MAX_CONNECTIONS", "3")
                 .env("PLATFORM_ACCESS_BIND_ADDRESS", format!("127.0.0.1:{port}"))
                 .env("API_CREDENTIAL_PEPPER", TEST_PEPPER)
+                // Platform Access issues on the wall clock while Calling's tests run a manual
+                // clock in 2031: ten-year lifetimes keep credentials valid on both (Calling's
+                // signaling path checks the minting credential's projected validity window).
+                .env("CREDENTIAL_DEFAULT_LIFETIME_DAYS", "3650")
+                .env("CREDENTIAL_MAX_LIFETIME_DAYS", "3650")
                 .env("CF_RUNTIME_ENVIRONMENT", "test")
                 .env("CF_SERVICE_AUTH_KEY_ID", "platform-access-test-1")
                 .env("CF_SERVICE_AUTH_PRIVATE_KEY_FILE", dir.join("pa-key.pem"))
                 .env("CF_SERVICE_TRUST_BUNDLE_FILE", dir.join("pa-trust.json"))
-                .env("RUST_LOG", "platform_access=warn")
+                .env("RUST_LOG", "platform_access=error")
                 .kill_on_drop(true)
                 .spawn()
                 .expect("platform-access starts");
@@ -218,7 +247,9 @@ impl PlatformAccess {
             clock.clone(),
         ));
         let mut targets = InternalTargets::new(ENV);
-        targets.insert(ServiceId::platform_access(), &base_url).unwrap();
+        targets
+            .insert(ServiceId::platform_access(), &base_url)
+            .unwrap();
         let calling_client =
             Arc::new(InternalServiceClient::new(signer, targets, Duration::from_secs(10)).unwrap());
         let operator = Arc::new(ServiceTokenSigner::new(
@@ -240,22 +271,97 @@ impl PlatformAccess {
         })
     }
 
+    /// Environment for a Calling process (CLI) to reach this Platform Access as Calling.
+    pub fn calling_process_env(&self) -> Vec<(String, String)> {
+        vec![
+            ("CF_RUNTIME_ENVIRONMENT".into(), "test".into()),
+            ("CF_SERVICE_AUTH_KEY_ID".into(), "calling-pa-test-1".into()),
+            (
+                "CF_SERVICE_AUTH_PRIVATE_KEY_FILE".into(),
+                self.dir.join("calling-key.pem").display().to_string(),
+            ),
+            (
+                "CF_SERVICE_TRUST_BUNDLE_FILE".into(),
+                self.dir.join("calling-trust.json").display().to_string(),
+            ),
+            ("CF_PLATFORM_ACCESS_BASE_URL".into(), self.base_url.clone()),
+        ]
+    }
+
+    /// Platform Access's OWN database (for its operator CLI in hand-off tests).
+    pub fn database_url(&self) -> String {
+        super::with_db(&self.admin_url, &self.db_name)
+    }
+
+    /// The `platform-access-admin` operator CLI next to the server binary.
+    pub fn admin_bin() -> PathBuf {
+        let server = binaries().expect("platform access binaries").server;
+        server.with_file_name("platform-access-admin")
+    }
+
+    /// One integer from Platform Access's OWN database (assertions only).
+    pub async fn scalar_i64(&self, sql: &str) -> i64 {
+        let conn = Database::connect(super::with_db(&self.admin_url, &self.db_name))
+            .await
+            .unwrap();
+        let value = super::scalar_i64(&conn, sql).await;
+        conn.close().await.ok();
+        value
+    }
+
+    /// Stops the process (outage tests); the database stays.
+    pub async fn stop(&self) {
+        let child = self.child.lock().unwrap().take();
+        if let Some(mut child) = child {
+            let _ = child.kill().await;
+        }
+    }
+
     /// Calling's identity authority adapter for this Platform Access.
     pub fn authority(&self) -> Arc<dyn IdentityAuthority> {
         Arc::new(HttpIdentityAuthority::new(self.calling_client.clone()))
     }
 
+    /// The scope names registered by Platform Access (as Calling reads them).
+    pub async fn registered_scopes(&self) -> Vec<String> {
+        let response = self
+            .calling_client
+            .get(
+                &OutboundServiceRequest::new_operation(ServiceId::platform_access()),
+                "/internal/v1/scopes",
+            )
+            .await
+            .expect("platform access answers");
+        assert_eq!(response.status(), 200);
+        let body: Value = response.json().unwrap();
+        body["scopes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d["name"].as_str().unwrap().to_string())
+            .collect()
+    }
+
     /// A signed operator-console administration call.
-    pub async fn admin(&self, method: reqwest::Method, path: &str, body: Option<Value>) -> (u16, Value) {
+    pub async fn admin(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> (u16, Value) {
         let signed = self
             .operator
-            .sign(&OutboundServiceRequest::new_operation(ServiceId::platform_access()))
+            .sign(&OutboundServiceRequest::new_operation(
+                ServiceId::platform_access(),
+            ))
             .unwrap();
         let mut request = self
             .http
             .request(method, format!("{}{path}", self.base_url))
-            .headers(signed.headers())
             .header("x-cf-operator", TEST_OPERATOR);
+        for (name, value) in signed.headers().iter() {
+            request = request.header(name.as_str(), value.as_bytes());
+        }
         if let Some(body) = body {
             request = request.json(&body);
         }
@@ -401,11 +507,24 @@ impl Deref for TestPlatform {
 }
 
 impl TestPlatform {
-    pub fn new(pa: Arc<PlatformAccess>, local: PlatformService, identity: Arc<IdentityProjection>) -> Self {
-        Self { pa, local, identity }
+    pub fn new(
+        pa: Arc<PlatformAccess>,
+        local: PlatformService,
+        identity: Arc<IdentityProjection>,
+    ) -> Self {
+        Self {
+            pa,
+            local,
+            identity,
+        }
     }
 
-    async fn admin(&self, method: reqwest::Method, path: &str, body: Option<Value>) -> PlatformResult<Value> {
+    async fn admin(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> PlatformResult<Value> {
         let (status, body) = self.pa.admin(method, path, body).await;
         if !(200..300).contains(&status) {
             return Err(to_error(status, &body));
@@ -416,7 +535,10 @@ impl TestPlatform {
 
     /// Applies the identity change feed to Calling's projection now.
     pub async fn sync(&self) {
-        self.identity.sync().await.expect("identity projection syncs");
+        self.identity
+            .sync()
+            .await
+            .expect("identity projection syncs");
     }
 
     pub async fn create_tenant(&self, new: NewTenant) -> PlatformResult<TenantView> {
@@ -428,11 +550,23 @@ impl TestPlatform {
         if let Some(c) = new.billing_currency {
             body["billingCurrency"] = json!(c);
         }
-        let v = self.admin(reqwest::Method::POST, "/internal/v1/admin/tenants", Some(body)).await?;
-        self.local.tenant(TenantId::from_uuid(uuid_of(&v["id"]))).await
+        let v = self
+            .admin(
+                reqwest::Method::POST,
+                "/internal/v1/admin/tenants",
+                Some(body),
+            )
+            .await?;
+        self.local
+            .tenant(TenantId::from_uuid(uuid_of(&v["id"])))
+            .await
     }
 
-    pub async fn create_application(&self, tenant: TenantId, new: NewApplication) -> PlatformResult<ApplicationView> {
+    pub async fn create_application(
+        &self,
+        tenant: TenantId,
+        new: NewApplication,
+    ) -> PlatformResult<ApplicationView> {
         let v = self
             .admin(
                 reqwest::Method::POST,
@@ -440,10 +574,16 @@ impl TestPlatform {
                 Some(json!({ "slug": new.slug, "displayName": new.display_name })),
             )
             .await?;
-        self.local.application(ApplicationId::from_uuid(uuid_of(&v["id"]))).await
+        self.local
+            .application(ApplicationId::from_uuid(uuid_of(&v["id"])))
+            .await
     }
 
-    pub async fn grant_application_scope(&self, application: ApplicationId, scope: &str) -> PlatformResult<()> {
+    pub async fn grant_application_scope(
+        &self,
+        application: ApplicationId,
+        scope: &str,
+    ) -> PlatformResult<()> {
         self.admin(
             reqwest::Method::POST,
             &format!("/internal/v1/admin/applications/{application}/scopes"),
@@ -453,7 +593,11 @@ impl TestPlatform {
         .map(|_| ())
     }
 
-    pub async fn revoke_application_scope(&self, application: ApplicationId, scope: &str) -> PlatformResult<bool> {
+    pub async fn revoke_application_scope(
+        &self,
+        application: ApplicationId,
+        scope: &str,
+    ) -> PlatformResult<bool> {
         let v = self
             .admin(
                 reqwest::Method::DELETE,
@@ -464,7 +608,11 @@ impl TestPlatform {
         Ok(v["removed"].as_bool().unwrap_or(false))
     }
 
-    pub async fn create_environment(&self, application: ApplicationId, kind: EnvironmentKind) -> PlatformResult<EnvironmentView> {
+    pub async fn create_environment(
+        &self,
+        application: ApplicationId,
+        kind: EnvironmentKind,
+    ) -> PlatformResult<EnvironmentView> {
         let v = self
             .admin(
                 reqwest::Method::POST,
@@ -472,10 +620,16 @@ impl TestPlatform {
                 Some(json!({ "kind": kind.as_str() })),
             )
             .await?;
-        self.local.environment(EnvironmentId::from_uuid(uuid_of(&v["id"]))).await
+        self.local
+            .environment(EnvironmentId::from_uuid(uuid_of(&v["id"])))
+            .await
     }
 
-    pub async fn create_service_account(&self, environment: EnvironmentId, new: NewServiceAccount) -> PlatformResult<ServiceAccountView> {
+    pub async fn create_service_account(
+        &self,
+        environment: EnvironmentId,
+        new: NewServiceAccount,
+    ) -> PlatformResult<ServiceAccountView> {
         let v = self
             .admin(
                 reqwest::Method::POST,
@@ -483,7 +637,9 @@ impl TestPlatform {
                 Some(json!({ "name": new.name, "description": new.description })),
             )
             .await?;
-        self.local.service_account(ServiceAccountId::from_uuid(uuid_of(&v["id"]))).await
+        self.local
+            .service_account(ServiceAccountId::from_uuid(uuid_of(&v["id"])))
+            .await
     }
 
     async fn issued(&self, v: Value) -> PlatformResult<IssuedCredential> {
@@ -494,7 +650,11 @@ impl TestPlatform {
         })
     }
 
-    pub async fn issue_credential(&self, sa: ServiceAccountId, request: IssueCredential) -> PlatformResult<IssuedCredential> {
+    pub async fn issue_credential(
+        &self,
+        sa: ServiceAccountId,
+        request: IssueCredential,
+    ) -> PlatformResult<IssuedCredential> {
         let mut body = json!({ "scopes": request.scopes, "label": request.label });
         if let Some(t) = request.not_before {
             body["notBefore"] = json!(t);
@@ -512,7 +672,11 @@ impl TestPlatform {
         self.issued(v).await
     }
 
-    pub async fn rotate_credential(&self, id: CredentialId, request: RotateCredential) -> PlatformResult<IssuedCredential> {
+    pub async fn rotate_credential(
+        &self,
+        id: CredentialId,
+        request: RotateCredential,
+    ) -> PlatformResult<IssuedCredential> {
         let mut body = json!({ "scopes": request.scopes, "label": request.label });
         if let Some(o) = request.overlap {
             body["overlapMinutes"] = json!(o.num_minutes());
@@ -531,12 +695,20 @@ impl TestPlatform {
     }
 
     pub async fn revoke_credential(&self, id: CredentialId) -> PlatformResult<CredentialView> {
-        self.admin(reqwest::Method::POST, &format!("/internal/v1/admin/credentials/{id}/revoke"), None)
-            .await?;
+        self.admin(
+            reqwest::Method::POST,
+            &format!("/internal/v1/admin/credentials/{id}/revoke"),
+            None,
+        )
+        .await?;
         self.local.credential(id).await
     }
 
-    pub async fn register_principal(&self, environment: EnvironmentId, new: NewPrincipal) -> PlatformResult<(PrincipalView, bool)> {
+    pub async fn register_principal(
+        &self,
+        environment: EnvironmentId,
+        new: NewPrincipal,
+    ) -> PlatformResult<(PrincipalView, bool)> {
         let body = match new {
             NewPrincipal::External {
                 kind,
@@ -559,37 +731,85 @@ impl TestPlatform {
     }
 
     async fn status(&self, path: String, status: &str) -> PlatformResult<()> {
-        self.admin(reqwest::Method::POST, &path, Some(json!({ "status": status })))
-            .await
-            .map(|_| ())
+        self.admin(
+            reqwest::Method::POST,
+            &path,
+            Some(json!({ "status": status })),
+        )
+        .await
+        .map(|_| ())
     }
 
-    pub async fn set_tenant_status(&self, id: TenantId, status: TenantStatus) -> PlatformResult<TenantView> {
-        self.status(format!("/internal/v1/admin/tenants/{id}/status"), status.as_str()).await?;
+    pub async fn set_tenant_status(
+        &self,
+        id: TenantId,
+        status: TenantStatus,
+    ) -> PlatformResult<TenantView> {
+        self.status(
+            format!("/internal/v1/admin/tenants/{id}/status"),
+            status.as_str(),
+        )
+        .await?;
         self.local.tenant(id).await
     }
 
-    pub async fn set_application_status(&self, id: ApplicationId, status: ApplicationStatus) -> PlatformResult<ApplicationView> {
-        self.status(format!("/internal/v1/admin/applications/{id}/status"), status.as_str()).await?;
+    pub async fn set_application_status(
+        &self,
+        id: ApplicationId,
+        status: ApplicationStatus,
+    ) -> PlatformResult<ApplicationView> {
+        self.status(
+            format!("/internal/v1/admin/applications/{id}/status"),
+            status.as_str(),
+        )
+        .await?;
         self.local.application(id).await
     }
 
-    pub async fn set_environment_status(&self, id: EnvironmentId, status: EnvironmentStatus) -> PlatformResult<EnvironmentView> {
-        self.status(format!("/internal/v1/admin/environments/{id}/status"), status.as_str()).await?;
+    pub async fn set_environment_status(
+        &self,
+        id: EnvironmentId,
+        status: EnvironmentStatus,
+    ) -> PlatformResult<EnvironmentView> {
+        self.status(
+            format!("/internal/v1/admin/environments/{id}/status"),
+            status.as_str(),
+        )
+        .await?;
         self.local.environment(id).await
     }
 
-    pub async fn set_service_account_status(&self, id: ServiceAccountId, status: ServiceAccountStatus) -> PlatformResult<ServiceAccountView> {
-        self.status(format!("/internal/v1/admin/service-accounts/{id}/status"), status.as_str()).await?;
+    pub async fn set_service_account_status(
+        &self,
+        id: ServiceAccountId,
+        status: ServiceAccountStatus,
+    ) -> PlatformResult<ServiceAccountView> {
+        self.status(
+            format!("/internal/v1/admin/service-accounts/{id}/status"),
+            status.as_str(),
+        )
+        .await?;
         self.local.service_account(id).await
     }
 
-    pub async fn set_principal_status(&self, id: PrincipalId, status: PrincipalStatus) -> PlatformResult<PrincipalView> {
-        self.status(format!("/internal/v1/admin/principals/{id}/status"), status.as_str()).await?;
+    pub async fn set_principal_status(
+        &self,
+        id: PrincipalId,
+        status: PrincipalStatus,
+    ) -> PlatformResult<PrincipalView> {
+        self.status(
+            format!("/internal/v1/admin/principals/{id}/status"),
+            status.as_str(),
+        )
+        .await?;
         self.local.principal(id).await
     }
 
-    pub async fn set_live_telecom_allowed(&self, id: EnvironmentId, allowed: bool) -> PlatformResult<EnvironmentView> {
+    pub async fn set_live_telecom_allowed(
+        &self,
+        id: EnvironmentId,
+        allowed: bool,
+    ) -> PlatformResult<EnvironmentView> {
         self.admin(
             reqwest::Method::POST,
             &format!("/internal/v1/admin/environments/{id}/live-telecom"),

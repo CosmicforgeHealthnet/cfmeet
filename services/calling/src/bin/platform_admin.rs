@@ -572,7 +572,6 @@ enum ServiceAccountCmd {
     List(EnvironmentPath),
 }
 
-
 #[derive(Subcommand)]
 enum CredentialCmd {
     Show(CredentialRef),
@@ -774,7 +773,6 @@ impl Admin {
                 .to_string(),
         ))
     }
-
 }
 
 fn print<T: Serialize>(value: &T) -> Result<(), PlatformError> {

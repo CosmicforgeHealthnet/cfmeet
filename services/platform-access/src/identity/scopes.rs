@@ -531,7 +531,12 @@ impl AllowedScope {
 
 fn parse_kinds(raw: Option<Vec<String>>) -> Option<Vec<EnvironmentKind>> {
     // Unknown persisted values are dropped; the CHECK constraint keeps them out anyway.
-    raw.map(|kinds| kinds.iter().filter_map(|k| EnvironmentKind::parse(k)).collect())
+    raw.map(|kinds| {
+        kinds
+            .iter()
+            .filter_map(|k| EnvironmentKind::parse(k))
+            .collect()
+    })
 }
 
 fn view(row: application_scopes::Model) -> ApplicationScopeView {
@@ -824,7 +829,10 @@ mod tests {
             names::SMS_READ,
         ] {
             for classification in TenantClassification::ALL {
-                assert!(registry.grantable(scope, *classification).is_ok(), "{scope}");
+                assert!(
+                    registry.grantable(scope, *classification).is_ok(),
+                    "{scope}"
+                );
             }
         }
         assert!(registry.definition(names::NUMBERS_ADMIN).is_some());

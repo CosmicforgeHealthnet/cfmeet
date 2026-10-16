@@ -497,7 +497,7 @@ async fn other_service_account(x: &World, name: &str) -> (Uuid, Uuid) {
         .platform
         .create_service_account(
             env,
-            calling::platform::service_accounts::NewServiceAccount {
+            crate::common::NewServiceAccount {
                 name: name.into(),
                 description: None,
             },

@@ -60,8 +60,31 @@ impl fmt::Debug for CallingConfig {
 
 pub const DEFAULT_BIND_ADDRESS: &str = "127.0.0.1:8090";
 
+/// Prefix of the credential-verifier settings Calling held until Part IV: the whole
+/// family (the pepper, its file and version variants, the previous pepper) moved to
+/// Platform Access with the identity authority (ADR 0032).
+pub const MOVED_TO_PLATFORM_ACCESS_PREFIX: &str = "API_CREDENTIAL_";
+
+/// Refuses to start when any credential-verifier setting is present: a pepper left in
+/// Calling's environment is a verifier secret in the wrong service. The value is never
+/// read or echoed.
+pub fn refuse_moved_settings(names: impl IntoIterator<Item = String>) -> Result<(), ConfigError> {
+    if names
+        .into_iter()
+        .any(|name| name.starts_with(MOVED_TO_PLATFORM_ACCESS_PREFIX))
+    {
+        return Err(ConfigError::invalid(
+            "API_CREDENTIAL_*",
+            "credential verifier settings are owned by Platform Access; remove them from Calling's environment"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
 impl CallingConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
+        refuse_moved_settings(std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()))?;
         Self::from_lookup(|key| std::env::var(key).ok())
     }
 
@@ -207,8 +230,28 @@ mod tests {
             }
         ));
         // No verifier secret is needed (or read) by Calling any more.
-        let cfg = CallingConfig::from_lookup(lookup(&[("DATABASE_URL", "postgres://x/y")])).unwrap();
-        assert_eq!(cfg.identity_sync_interval, std::time::Duration::from_secs(1));
+        let cfg =
+            CallingConfig::from_lookup(lookup(&[("DATABASE_URL", "postgres://x/y")])).unwrap();
+        assert_eq!(
+            cfg.identity_sync_interval,
+            std::time::Duration::from_secs(1)
+        );
+    }
+
+    #[test]
+    fn a_leftover_credential_pepper_refuses_to_start() {
+        for var in [
+            "API_CREDENTIAL_PEPPER",
+            "API_CREDENTIAL_PEPPER_FILE",
+            "API_CREDENTIAL_PEPPER_VERSION",
+            "API_CREDENTIAL_PREVIOUS_PEPPER",
+            "API_CREDENTIAL_PREVIOUS_PEPPER_FILE",
+        ] {
+            let err =
+                refuse_moved_settings(["DATABASE_URL".to_string(), var.to_string()]).unwrap_err();
+            assert!(matches!(err, ConfigError::Invalid { .. }), "{var}");
+        }
+        assert!(refuse_moved_settings(["DATABASE_URL".to_string()]).is_ok());
     }
 
     #[test]
@@ -220,7 +263,10 @@ mod tests {
         .unwrap();
         assert_eq!(cfg.bind_address.to_string(), DEFAULT_BIND_ADDRESS);
         assert_eq!(cfg.log_format, LogFormat::Pretty);
-        assert_eq!(cfg.identity_sync_interval, std::time::Duration::from_millis(250));
+        assert_eq!(
+            cfg.identity_sync_interval,
+            std::time::Duration::from_millis(250)
+        );
         assert!(!format!("{cfg:?}").contains("dbpassword"));
         assert!(CallingConfig::from_lookup(lookup(&[
             ("DATABASE_URL", "postgres://x/y"),

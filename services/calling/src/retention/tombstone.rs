@@ -131,18 +131,22 @@ pub async fn operator_tombstone(
     let outcome = authority
         .tombstone_principal(principal_id, op.operator())
         .await
-        .map_err(|e| PlatformError::InvalidState(format!("platform access could not tombstone the principal: {e}")))?;
+        .map_err(|e| {
+            PlatformError::InvalidState(format!(
+                "platform access could not tombstone the principal: {e}"
+            ))
+        })?;
     let snapshot = outcome.principal;
     let at = snapshot.tombstoned_at.unwrap_or(now);
     let actor = op.operator().to_string();
     let view = operator::audited(db, op, now, move |txn| {
         Box::pin(async move {
-            let minimized = upsert_principal(txn, &snapshot, now)
-                .await
-                .map_err(|e| PlatformError::Database {
+            let minimized = upsert_principal(txn, &snapshot, now).await.map_err(|e| {
+                PlatformError::Database {
                     summary: e.to_string(),
                     connectivity: false,
-                })?;
+                }
+            })?;
             audit::record(
                 txn,
                 &RetentionAuditEntry {

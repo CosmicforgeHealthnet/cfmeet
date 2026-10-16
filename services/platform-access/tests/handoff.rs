@@ -96,15 +96,24 @@ fn legacy_estate(now: DateTime<Utc>) -> Legacy {
     let sa = Uuid::new_v4();
     let scope = (tenant, application, sandbox, sa);
     let (active, active_token) = part_iii_credential(scope, "sbx", t, now + Duration::days(300));
-    let (mut revoked, revoked_token) = part_iii_credential(scope, "sbx", t, now + Duration::days(300));
+    let (mut revoked, revoked_token) =
+        part_iii_credential(scope, "sbx", t, now + Duration::days(300));
     revoked.status = CredentialStatus::Revoked;
     revoked.revoked_at = Some(now - Duration::days(1));
-    let (expired, expired_token) =
-        part_iii_credential(scope, "sbx", t - Duration::days(400), now - Duration::days(1));
+    let (expired, expired_token) = part_iii_credential(
+        scope,
+        "sbx",
+        t - Duration::days(400),
+        now - Duration::days(1),
+    );
     let (mut predecessor, predecessor_token) =
         part_iii_credential(scope, "sbx", t, now + Duration::days(300));
-    let (mut successor, successor_token) =
-        part_iii_credential(scope, "sbx", t + Duration::hours(1), now + Duration::days(300));
+    let (mut successor, successor_token) = part_iii_credential(
+        scope,
+        "sbx",
+        t + Duration::hours(1),
+        now + Duration::days(300),
+    );
     successor.rotated_from_credential_id = Some(predecessor.id);
     predecessor.superseded_by_credential_id = Some(successor.id);
     predecessor.superseded_at = Some(now - Duration::minutes(10));
@@ -214,7 +223,10 @@ fn legacy_estate(now: DateTime<Utc>) -> Legacy {
 
 async fn count(h: &Harness, table: &str) -> i64 {
     h.conn()
-        .query_one(Statement::from_string(DbBackend::Postgres, format!("SELECT count(*) FROM {table}")))
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            format!("SELECT count(*) FROM {table}"),
+        ))
         .await
         .unwrap()
         .unwrap()
@@ -224,7 +236,9 @@ async fn count(h: &Harness, table: &str) -> i64 {
 
 #[tokio::test]
 async fn part_iii_credentials_keep_authenticating_with_the_same_identity_after_import() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     let now = {
         use platform_access::domain::Clock;
         h.clock.now()
@@ -233,7 +247,12 @@ async fn part_iii_credentials_keep_authenticating_with_the_same_identity_after_i
     let bytes = write_bundle("cfmeet.calling", now, &legacy.body).unwrap();
     let bundle = parse_bundle(&bytes).unwrap();
     let op = OperatorContext::new(OPERATOR).unwrap();
-    let receipt = h.state.platform.operator_import_bundle(&op, &bundle).await.unwrap();
+    let receipt = h
+        .state
+        .platform
+        .operator_import_bundle(&op, &bundle)
+        .await
+        .unwrap();
     assert!(!receipt.already_imported);
     assert_eq!(receipt.counts["credentials"], 5);
     assert_eq!(receipt.verifier_digest, legacy.body.verifier_digest());
@@ -249,13 +268,25 @@ async fn part_iii_credentials_keep_authenticating_with_the_same_identity_after_i
     assert_eq!(a["tenant"]["billingCurrency"], "NGN");
     assert_eq!(a["scopes"], json!(["calls.read"]));
     // Lifecycle state carried over exactly.
-    assert_eq!(h.authenticate(&legacy.revoked_token).await.body["reason"], "credential_revoked");
-    assert_eq!(h.authenticate(&legacy.expired_token).await.body["reason"], "credential_expired");
+    assert_eq!(
+        h.authenticate(&legacy.revoked_token).await.body["reason"],
+        "credential_revoked"
+    );
+    assert_eq!(
+        h.authenticate(&legacy.expired_token).await.body["reason"],
+        "credential_expired"
+    );
     let p = h.authenticate(&legacy.predecessor_token).await;
     assert_eq!(p.body["authority"]["effectiveState"], "ROTATION_OVERLAP");
-    assert_eq!(h.authenticate(&legacy.successor_token).await.body["outcome"], "AUTHENTICATED");
+    assert_eq!(
+        h.authenticate(&legacy.successor_token).await.body["outcome"],
+        "AUTHENTICATED"
+    );
     h.clock.advance(Duration::hours(1));
-    assert_eq!(h.authenticate(&legacy.predecessor_token).await.body["reason"], "credential_superseded");
+    assert_eq!(
+        h.authenticate(&legacy.predecessor_token).await.body["reason"],
+        "credential_superseded"
+    );
     // The tombstoned principal stays tombstoned.
     let status: String = h
         .conn()
@@ -271,7 +302,12 @@ async fn part_iii_credentials_keep_authenticating_with_the_same_identity_after_i
     assert_eq!(status, "DEACTIVATED");
     // The receipt is readable by the source through the internal contract.
     let r = h
-        .as_calling(Method::GET, &format!("/internal/v1/identity/imports/{}", receipt.bundle_digest), None, None)
+        .as_calling(
+            Method::GET,
+            &format!("/internal/v1/identity/imports/{}", receipt.bundle_digest),
+            None,
+            None,
+        )
         .await;
     assert_eq!(r.status, StatusCode::OK);
     assert_eq!(r.body["verifierDigest"], receipt.verifier_digest);
@@ -281,24 +317,40 @@ async fn part_iii_credentials_keep_authenticating_with_the_same_identity_after_i
 
 #[tokio::test]
 async fn reimport_is_idempotent_and_tampering_is_refused() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     let now = Utc::now();
     let legacy = legacy_estate(now);
     let bytes = write_bundle("cfmeet.calling", now, &legacy.body).unwrap();
     let op = OperatorContext::new(OPERATOR).unwrap();
-    let first = h.state.platform.operator_import_bundle(&op, &parse_bundle(&bytes).unwrap()).await.unwrap();
-    let second = h.state.platform.operator_import_bundle(&op, &parse_bundle(&bytes).unwrap()).await.unwrap();
+    let first = h
+        .state
+        .platform
+        .operator_import_bundle(&op, &parse_bundle(&bytes).unwrap())
+        .await
+        .unwrap();
+    let second = h
+        .state
+        .platform
+        .operator_import_bundle(&op, &parse_bundle(&bytes).unwrap())
+        .await
+        .unwrap();
     assert!(second.already_imported);
     assert_eq!(first.id, second.id);
     assert_eq!(count(&h, "platform_identity_imports").await, 1);
     // A modified body no longer matches its digest.
-    let tampered = String::from_utf8(bytes).unwrap().replace("\"legacy\"", "\"hijack\"");
+    let tampered = String::from_utf8(bytes)
+        .unwrap()
+        .replace("\"legacy\"", "\"hijack\"");
     assert!(parse_bundle(tampered.as_bytes()).is_err());
 }
 
 #[tokio::test]
 async fn a_conflicting_import_changes_nothing() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     // An existing tenant with the slug the bundle uses.
     h.consumer("legacy", "EXTERNAL", &[]).await;
     let tenants = count(&h, "platform_tenants").await;
@@ -325,19 +377,30 @@ async fn a_conflicting_import_changes_nothing() {
 
 #[tokio::test]
 async fn the_recovery_export_round_trips_into_a_fresh_authority() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     let c = h.consumer("acme", "EXTERNAL", &["calls.read"]).await;
     let (view, secret) = h.issue(c.sa("PRODUCTION"), &["calls.read"]).await;
     let body = h.state.platform.export_bundle_body().await.unwrap();
     assert_eq!(body.credentials.len(), 1);
     let bytes = write_bundle("cfmeet.platform-access", Utc::now(), &body).unwrap();
     // A fresh authority restored from the export authenticates the same credential.
-    let Some(fresh) = Harness::new().await else { return };
+    let Some(fresh) = Harness::new().await else {
+        return;
+    };
     let op = OperatorContext::new(OPERATOR).unwrap();
-    fresh.state.platform.operator_import_bundle(&op, &parse_bundle(&bytes).unwrap()).await.unwrap();
+    fresh
+        .state
+        .platform
+        .operator_import_bundle(&op, &parse_bundle(&bytes).unwrap())
+        .await
+        .unwrap();
     let r = fresh.authenticate(&secret).await;
     assert_eq!(r.body["outcome"], "AUTHENTICATED", "{}", r.body);
     assert_eq!(r.body["authority"]["credential"]["id"], view["id"]);
     // The export never contains the raw secret.
-    assert!(!String::from_utf8(bytes).unwrap().contains(&secret[secret.len() - 64..]));
+    assert!(!String::from_utf8(bytes)
+        .unwrap()
+        .contains(&secret[secret.len() - 64..]));
 }

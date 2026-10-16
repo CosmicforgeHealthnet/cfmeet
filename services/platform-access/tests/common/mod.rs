@@ -212,8 +212,12 @@ pub fn t0() -> DateTime<Utc> {
 pub const SERVICE_T0: i64 = 1_930_212_000;
 
 pub fn keyring(pepper: &str) -> VerifierKeyring {
-    VerifierKeyring::new(1, CredentialPepper::parse("API_CREDENTIAL_PEPPER", pepper).unwrap(), None)
-        .unwrap()
+    VerifierKeyring::new(
+        1,
+        CredentialPepper::parse("API_CREDENTIAL_PEPPER", pepper).unwrap(),
+        None,
+    )
+    .unwrap()
 }
 
 fn key(kid: &str) -> ServiceSigningKey {
@@ -232,7 +236,10 @@ pub struct Peers {
     pub rogue_calling: Arc<ServiceTokenSigner>,
 }
 
-pub fn trust_bundle(receiver: &str, grants: &[(&str, Vec<cf_service_auth::PublicJwk>, &[&str])]) -> String {
+pub fn trust_bundle(
+    receiver: &str,
+    grants: &[(&str, Vec<cf_service_auth::PublicJwk>, &[&str])],
+) -> String {
     json!({
         "bundle_version": 1,
         "receiver": receiver,
@@ -272,8 +279,16 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
         &trust_bundle(
             cf_service_auth::services::PLATFORM_ACCESS,
             &[
-                (cf_service_auth::services::CALLING, vec![calling.public_jwk()], CALLING_PERMISSIONS),
-                (cf_service_auth::services::NUMBERING, vec![numbering.public_jwk()], NUMBERING_PERMISSIONS),
+                (
+                    cf_service_auth::services::CALLING,
+                    vec![calling.public_jwk()],
+                    CALLING_PERMISSIONS,
+                ),
+                (
+                    cf_service_auth::services::NUMBERING,
+                    vec![numbering.public_jwk()],
+                    NUMBERING_PERMISSIONS,
+                ),
                 (
                     cf_service_auth::services::OPERATOR_CONSOLE,
                     vec![operator.public_jwk()],
@@ -286,7 +301,13 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
     )
     .unwrap();
     let signer = |id: ServiceId, k: ServiceSigningKey| {
-        Arc::new(ServiceTokenSigner::new(id, env, k, TokenTtl::default(), shared.clone()))
+        Arc::new(ServiceTokenSigner::new(
+            id,
+            env,
+            k,
+            TokenTtl::default(),
+            shared.clone(),
+        ))
     };
     let runtime = ServiceAuthRuntime::new(
         signer(ServiceId::platform_access(), me),
@@ -375,7 +396,8 @@ impl Harness {
         let body = if bytes.is_empty() {
             Value::Null
         } else {
-            serde_json::from_slice(&bytes).unwrap_or(Value::String(String::from_utf8_lossy(&bytes).into()))
+            serde_json::from_slice(&bytes)
+                .unwrap_or(Value::String(String::from_utf8_lossy(&bytes).into()))
         };
         Reply {
             status,
@@ -419,8 +441,15 @@ impl Harness {
 
     /// Operator administration call (operator-console identity + operator header).
     pub async fn admin(&self, method: Method, path: &str, body: Option<Value>) -> Reply {
-        self.call(&self.peers.operator, method, path, body, None, Some(OPERATOR))
-            .await
+        self.call(
+            &self.peers.operator,
+            method,
+            path,
+            body,
+            None,
+            Some(OPERATOR),
+        )
+        .await
     }
 
     pub async fn admin_ok(&self, method: Method, path: &str, body: Option<Value>) -> Value {
@@ -544,7 +573,13 @@ impl Consumer {
             "TEST" => ApplicationEnvironmentKind::Test,
             _ => ApplicationEnvironmentKind::Production,
         };
-        DelegatedPlatformContext::new(self.tenant_id, self.application_id, self.env(kind), k, self.sa(kind))
+        DelegatedPlatformContext::new(
+            self.tenant_id,
+            self.application_id,
+            self.env(kind),
+            k,
+            self.sa(kind),
+        )
     }
 
     pub fn kind(kind: &str) -> EnvironmentKind {

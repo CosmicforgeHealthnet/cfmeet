@@ -1,0 +1,16 @@
+# Build-context filter for services/platform-access/Dockerfile (context: repository root).
+# Everything is excluded except the directories the image is built from.
+*
+!packages/service-auth
+!services/platform-access
+
+# Never send build output, local configuration or key material.
+**/target
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.log
+**/*.rs.bk
+services/platform-access/Dockerfile
+services/platform-access/Dockerfile.dockerignore

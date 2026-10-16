@@ -8,6 +8,8 @@
 //! | `PLATFORM_ACCESS_METRICS_ADDRESS` | no | separate `GET /metrics` listener |
 //! | `API_CREDENTIAL_PEPPER` / `_FILE` (+ `_VERSION`, `API_CREDENTIAL_PREVIOUS_PEPPER*`) | yes | the credential verifier keyring (the same pepper Calling held in Part III — moved, not duplicated) |
 //! | `CREDENTIAL_*` | no | credential lifetime / rotation policy |
+//! | `PLATFORM_ACCESS_AUTH_FAILURE_THRESHOLD` | no | failed authentications of one credential key id tolerated per window before throttling (default 20, 1–10000) |
+//! | `PLATFORM_ACCESS_AUTH_FAILURE_WINDOW_SECONDS` | no | the failure window (default 300, 10–86400) |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
 //! Service authentication (`CF_*`) is read by [`service_auth`].
@@ -25,7 +27,10 @@ use std::{fmt, net::SocketAddr};
 use chrono::Duration;
 use secrecy::{ExposeSecret, SecretString};
 
-use crate::identity::verifier::{CredentialPepper, VerifierKeyring};
+use crate::identity::{
+    authentication::AuthFailurePolicy,
+    verifier::{CredentialPepper, VerifierKeyring},
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -75,6 +80,7 @@ pub struct PlatformAccessConfig {
     pub metrics_address: Option<SocketAddr>,
     pub keyring: VerifierKeyring,
     pub credential_policy: CredentialPolicy,
+    pub auth_failure_policy: AuthFailurePolicy,
     pub log_format: LogFormat,
 }
 
@@ -87,6 +93,7 @@ impl fmt::Debug for PlatformAccessConfig {
             .field("metrics_address", &self.metrics_address)
             .field("keyring", &self.keyring)
             .field("credential_policy", &self.credential_policy)
+            .field("auth_failure_policy", &self.auth_failure_policy)
             .field("log_format", &self.log_format)
             .finish()
     }
@@ -181,6 +188,35 @@ impl PlatformAccessConfig {
         let database_max_connections =
             positive(&non_empty, "PLATFORM_ACCESS_DATABASE_MAX_CONNECTIONS", 10)?;
 
+        let failure_defaults = AuthFailurePolicy::default();
+        let threshold = positive(
+            &non_empty,
+            "PLATFORM_ACCESS_AUTH_FAILURE_THRESHOLD",
+            failure_defaults.threshold,
+        )?;
+        if threshold > 10_000 {
+            return Err(ConfigError::invalid(
+                "PLATFORM_ACCESS_AUTH_FAILURE_THRESHOLD",
+                "must be between 1 and 10000".to_string(),
+            ));
+        }
+        let window = parse_number(
+            &non_empty,
+            "PLATFORM_ACCESS_AUTH_FAILURE_WINDOW_SECONDS",
+            failure_defaults.window.num_seconds(),
+            10,
+        )?;
+        if window > 86_400 {
+            return Err(ConfigError::invalid(
+                "PLATFORM_ACCESS_AUTH_FAILURE_WINDOW_SECONDS",
+                "must be between 10 and 86400".to_string(),
+            ));
+        }
+        let auth_failure_policy = AuthFailurePolicy {
+            threshold,
+            window: chrono::Duration::seconds(window),
+        };
+
         Ok(Self {
             database_url,
             database_max_connections: u32::try_from(database_max_connections).map_err(|_| {
@@ -193,6 +229,7 @@ impl PlatformAccessConfig {
             metrics_address,
             keyring,
             credential_policy,
+            auth_failure_policy,
             log_format,
         })
     }
@@ -299,16 +336,16 @@ mod tests {
 
     #[test]
     fn requires_database_url_and_pepper_without_fallback() {
-        let err =
-            PlatformAccessConfig::from_lookup(lookup(&[("API_CREDENTIAL_PEPPER", PEPPER)])).unwrap_err();
+        let err = PlatformAccessConfig::from_lookup(lookup(&[("API_CREDENTIAL_PEPPER", PEPPER)]))
+            .unwrap_err();
         assert!(matches!(
             err,
             ConfigError::Missing {
                 var: "DATABASE_URL"
             }
         ));
-        let err =
-            PlatformAccessConfig::from_lookup(lookup(&[("DATABASE_URL", "postgres://x/y")])).unwrap_err();
+        let err = PlatformAccessConfig::from_lookup(lookup(&[("DATABASE_URL", "postgres://x/y")]))
+            .unwrap_err();
         assert!(matches!(
             err,
             ConfigError::Missing {
@@ -319,6 +356,36 @@ mod tests {
 
     /// No fallback pepper exists in any runtime environment (§74.11): a production
     /// deployment without `API_CREDENTIAL_PEPPER` / `_FILE` refuses to start.
+    #[test]
+    fn the_failed_authentication_policy_is_configurable_and_bounded() {
+        let base = [
+            ("DATABASE_URL", "postgres://x/y"),
+            ("API_CREDENTIAL_PEPPER", PEPPER),
+        ];
+        let cfg = PlatformAccessConfig::from_lookup(lookup(&base)).unwrap();
+        assert_eq!(cfg.auth_failure_policy, AuthFailurePolicy::default());
+        let mut vars = base.to_vec();
+        vars.push(("PLATFORM_ACCESS_AUTH_FAILURE_THRESHOLD", "3"));
+        vars.push(("PLATFORM_ACCESS_AUTH_FAILURE_WINDOW_SECONDS", "60"));
+        let cfg = PlatformAccessConfig::from_lookup(lookup(&vars)).unwrap();
+        assert_eq!(cfg.auth_failure_policy.threshold, 3);
+        assert_eq!(cfg.auth_failure_policy.window, Duration::seconds(60));
+        for (var, value) in [
+            ("PLATFORM_ACCESS_AUTH_FAILURE_THRESHOLD", "0"),
+            ("PLATFORM_ACCESS_AUTH_FAILURE_THRESHOLD", "10001"),
+            ("PLATFORM_ACCESS_AUTH_FAILURE_WINDOW_SECONDS", "9"),
+            ("PLATFORM_ACCESS_AUTH_FAILURE_WINDOW_SECONDS", "86401"),
+            ("PLATFORM_ACCESS_AUTH_FAILURE_WINDOW_SECONDS", "soon"),
+        ] {
+            let mut vars = base.to_vec();
+            vars.push((var, value));
+            assert!(
+                PlatformAccessConfig::from_lookup(lookup(&vars)).is_err(),
+                "{var}={value}"
+            );
+        }
+    }
+
     #[test]
     fn production_without_a_pepper_refuses_to_start() {
         for runtime in ["production", "staging", "local", "test"] {
@@ -364,7 +431,10 @@ mod tests {
         // A missing file is an error, never the inline value or a default.
         let err = PlatformAccessConfig::from_lookup(lookup(&[
             ("DATABASE_URL", "postgres://x/y"),
-            ("API_CREDENTIAL_PEPPER_FILE", "/nonexistent/platform-access/pepper"),
+            (
+                "API_CREDENTIAL_PEPPER_FILE",
+                "/nonexistent/platform-access/pepper",
+            ),
         ]))
         .unwrap_err();
         assert!(matches!(

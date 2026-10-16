@@ -142,6 +142,13 @@ const PART_H_TABLES: &[&str] = &[
     "platform_operator_audit",
 ];
 
+/// Part IV (ADR 0032): Calling's identity becomes a projection of Platform Access — the
+/// projection cursor and the record of the controlled identity hand-off (000044).
+const PART_IV_TABLES: &[&str] = &[
+    "platform_identity_handoffs",
+    "platform_identity_projection_state",
+];
+
 /// Derived from the migrator itself (never a brittle hand-maintained count).
 fn migrations() -> usize {
     <calling_migration::Migrator as MigratorTrait>::migrations().len()
@@ -163,6 +170,7 @@ async fn migrations_apply_roll_back_and_reapply_on_a_clean_database() {
         .chain(ENTERPRISE_TABLES)
         .chain(PART_G_TABLES)
         .chain(PART_H_TABLES)
+        .chain(PART_IV_TABLES)
         .map(|s| s.to_string())
         .collect();
     expected.push(MIGRATION_TABLE.to_string());
@@ -458,7 +466,8 @@ async fn required_constraints_and_guards_exist() {
     let id_types = strings(
         &db.conn,
         "SELECT table_name || ':' || data_type FROM information_schema.columns \
-         WHERE table_schema = 'public' AND table_name <> 'calling_seaql_migrations' AND column_name = 'id'",
+         WHERE table_schema = 'public' AND table_name <> 'calling_seaql_migrations' AND column_name = 'id' \
+           AND table_name <> 'platform_identity_projection_state'",
     )
     .await;
     assert!(!id_types.is_empty());
@@ -566,6 +575,7 @@ async fn no_plaintext_secret_or_contact_columns_exist() {
             "label",
             "last_four",
             "not_before",
+            "pa_revision",
             "public_id",
             "revoked_at",
             "rotated_from_credential_id",

@@ -2,10 +2,11 @@
 //! is allowed the enterprise scopes, with separate credentials for administration,
 //! read-only administration and calling — so scope isolation is exercised, never assumed.
 
+use crate::common::IssuedCredential;
 use axum::http::{Method, StatusCode};
 use calling::{
     domain::{EnvironmentKind, TenantClassification},
-    platform::{credentials::IssuedCredential, limits::LimitValues, scopes::names},
+    platform::{limits::LimitValues, scopes::names},
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -88,7 +89,6 @@ impl EnterpriseWorld {
         configure(&mut runtime);
         let h = Harness::with_runtime(
             db,
-            super::TEST_PEPPER,
             calling::domain::ManualClock::new(super::t0()),
             media,
             bus,
@@ -246,7 +246,7 @@ impl EnterpriseWorld {
             .platform
             .register_principal(
                 self.a.w.consumer.env(self.a.w.kind).id,
-                calling::platform::principals::NewPrincipal::External {
+                crate::common::NewPrincipal::External {
                     kind: calling::domain::PrincipalKind::EnterpriseMember,
                     external_reference: reference.to_string(),
                 },

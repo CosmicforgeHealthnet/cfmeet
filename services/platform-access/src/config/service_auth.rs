@@ -160,7 +160,8 @@ impl ServiceAuthSettings {
             clock.clone(),
         ));
         let verifier = Arc::new(ServiceTokenVerifier::new(policy, clock));
-        ServiceAuthRuntime::new(signer, verifier).map_err(|e| invalid("CF_SERVICE_ID", e.to_string()))
+        ServiceAuthRuntime::new(signer, verifier)
+            .map_err(|e| invalid("CF_SERVICE_ID", e.to_string()))
     }
 }
 
@@ -188,8 +189,15 @@ mod tests {
         ];
         assert!(ServiceAuthSettings::from_lookup(&lookup(&base)).is_ok());
         for (missing, _) in base {
-            let pairs: Vec<_> = base.iter().filter(|(k, _)| *k != missing).copied().collect();
-            assert!(ServiceAuthSettings::from_lookup(&lookup(&pairs)).is_err(), "{missing}");
+            let pairs: Vec<_> = base
+                .iter()
+                .filter(|(k, _)| *k != missing)
+                .copied()
+                .collect();
+            assert!(
+                ServiceAuthSettings::from_lookup(&lookup(&pairs)).is_err(),
+                "{missing}"
+            );
         }
         let mut wrong = base.to_vec();
         wrong.push(("CF_SERVICE_ID", "cfmeet.calling"));

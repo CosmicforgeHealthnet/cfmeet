@@ -132,7 +132,7 @@ fn dev_settings() -> WebhookSettings {
 
 struct World {
     e: EnterpriseWorld,
-    manager: calling::platform::credentials::IssuedCredential,
+    manager: crate::common::IssuedCredential,
 }
 
 impl World {

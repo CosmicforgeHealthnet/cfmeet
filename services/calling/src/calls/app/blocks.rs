@@ -152,7 +152,10 @@ impl AbuseControls {
                 *slot = parsed;
             }
         }
-        for moved in ["CALLING_AUTH_FAILURE_THRESHOLD", "CALLING_AUTH_FAILURE_WINDOW_SECONDS"] {
+        for moved in [
+            "CALLING_AUTH_FAILURE_THRESHOLD",
+            "CALLING_AUTH_FAILURE_WINDOW_SECONDS",
+        ] {
             if get(moved).is_some() {
                 return Err(crate::config::ConfigError::invalid(
                     moved,

@@ -44,7 +44,6 @@ impl AppWorld {
         runtime.privacy_relay = privacy;
         let h = Harness::with_runtime(
             db,
-            super::TEST_PEPPER,
             calling::domain::ManualClock::new(super::t0()),
             media,
             bus,
@@ -92,7 +91,6 @@ impl AppWorld {
         configure(&mut runtime);
         let h = Harness::with_runtime(
             db,
-            super::TEST_PEPPER,
             calling::domain::ManualClock::new(chrono::Utc::now()),
             media,
             bus,
@@ -161,7 +159,6 @@ impl AppWorld {
         runtime.contact_delegation = contact_delegation;
         let h = Harness::with_service_auth(
             db,
-            super::TEST_PEPPER,
             calling::domain::ManualClock::new(now),
             media,
             bus,
@@ -227,7 +224,6 @@ impl AppWorld {
         configure(&mut runtime);
         let h = Harness::with_service_auth(
             db,
-            super::TEST_PEPPER,
             calling::domain::ManualClock::new(now),
             media,
             bus,

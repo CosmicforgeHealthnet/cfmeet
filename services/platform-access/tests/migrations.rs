@@ -21,7 +21,9 @@ async fn tables(conn: &sea_orm::DatabaseConnection) -> Vec<String> {
 
 #[tokio::test]
 async fn migrations_apply_roll_back_and_reapply_cleanly() {
-    let Some(db) = TestDb::empty().await else { return };
+    let Some(db) = TestDb::empty().await else {
+        return;
+    };
     Migrator::up(&db.conn, None).await.unwrap();
     let up = tables(&db.conn).await;
     for t in [
@@ -42,16 +44,24 @@ async fn migrations_apply_roll_back_and_reapply_cleanly() {
     ] {
         assert!(up.contains(&t.to_string()), "{t} missing: {up:?}");
     }
-    assert!(Migrator::get_pending_migrations(&db.conn).await.unwrap().is_empty());
+    assert!(Migrator::get_pending_migrations(&db.conn)
+        .await
+        .unwrap()
+        .is_empty());
     Migrator::down(&db.conn, None).await.unwrap();
-    assert_eq!(tables(&db.conn).await, vec!["platform_access_seaql_migrations".to_string()]);
+    assert_eq!(
+        tables(&db.conn).await,
+        vec!["platform_access_seaql_migrations".to_string()]
+    );
     Migrator::up(&db.conn, None).await.unwrap();
     assert_eq!(tables(&db.conn).await, up);
 }
 
 #[tokio::test]
 async fn the_database_enforces_identity_invariants() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     let c = h.consumer("acme", "EXTERNAL", &["calls.read"]).await;
     let (view, _) = h.issue(c.sa("SANDBOX"), &["calls.read"]).await;
     let cred = view["id"].as_str().unwrap();
@@ -79,7 +89,10 @@ async fn the_database_enforces_identity_invariants() {
         "UPDATE platform_access_audit SET actor = 'someone-else'".to_string(),
     ];
     for sql in refused {
-        assert!(h.conn().execute_unprepared(&sql).await.is_err(), "accepted: {sql}");
+        assert!(
+            h.conn().execute_unprepared(&sql).await.is_err(),
+            "accepted: {sql}"
+        );
     }
     // Revocation is terminal.
     h.conn()
@@ -101,11 +114,28 @@ async fn the_database_enforces_identity_invariants() {
             .try_get_by_index::<i64>(0)
             .unwrap()
     }
-    let before = rev(&h, format!("SELECT revision FROM platform_tenants WHERE id = '{}'", c.tenant_id)).await;
+    let before = rev(
+        &h,
+        format!(
+            "SELECT revision FROM platform_tenants WHERE id = '{}'",
+            c.tenant_id
+        ),
+    )
+    .await;
     h.conn()
-        .execute_unprepared(&format!("UPDATE platform_tenants SET revision = 999, status = 'SUSPENDED' WHERE id = '{}'", c.tenant_id))
+        .execute_unprepared(&format!(
+            "UPDATE platform_tenants SET revision = 999, status = 'SUSPENDED' WHERE id = '{}'",
+            c.tenant_id
+        ))
         .await
         .unwrap();
-    let after = rev(&h, format!("SELECT revision FROM platform_tenants WHERE id = '{}'", c.tenant_id)).await;
+    let after = rev(
+        &h,
+        format!(
+            "SELECT revision FROM platform_tenants WHERE id = '{}'",
+            c.tenant_id
+        ),
+    )
+    .await;
     assert_eq!(after, before + 1);
 }

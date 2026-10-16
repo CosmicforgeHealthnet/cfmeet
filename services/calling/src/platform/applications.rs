@@ -74,5 +74,4 @@ impl PlatformService {
             .map(Into::into)
             .collect())
     }
-
 }

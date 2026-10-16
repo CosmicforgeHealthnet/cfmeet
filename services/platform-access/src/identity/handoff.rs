@@ -272,12 +272,20 @@ pub struct IdentityBundle {
 /// Parses and integrity-checks a bundle file.
 pub fn parse_bundle(bytes: &[u8]) -> PlatformResult<IdentityBundle> {
     if bytes.len() > MAX_BUNDLE_BYTES {
-        return Err(PlatformError::Validation("the bundle is too large".to_string()));
+        return Err(PlatformError::Validation(
+            "the bundle is too large".to_string(),
+        ));
     }
     let invalid = |m: &str| PlatformError::Validation(format!("invalid identity bundle: {m}"));
     let root: Value = serde_json::from_slice(bytes).map_err(|_| invalid("not JSON"))?;
     let obj = root.as_object().ok_or_else(|| invalid("not an object"))?;
-    let allowed = ["bundleVersion", "sourceService", "exportedAt", "body", "digest"];
+    let allowed = [
+        "bundleVersion",
+        "sourceService",
+        "exportedAt",
+        "body",
+        "digest",
+    ];
     if obj.keys().any(|k| !allowed.contains(&k.as_str())) || obj.len() != allowed.len() {
         return Err(invalid("unexpected or missing top-level fields"));
     }
@@ -301,7 +309,9 @@ pub fn parse_bundle(bytes: &[u8]) -> PlatformResult<IdentityBundle> {
         .to_ascii_lowercase();
     let computed = body_digest(&obj["body"]);
     if computed != stated {
-        return Err(invalid("the body does not match its digest (corrupted or edited)"));
+        return Err(invalid(
+            "the body does not match its digest (corrupted or edited)",
+        ));
     }
     let body: BundleBody = serde_json::from_value(obj["body"].clone())
         .map_err(|_| invalid("the body does not match the bundle contract"))?;
@@ -320,7 +330,11 @@ pub fn parse_bundle(bytes: &[u8]) -> PlatformResult<IdentityBundle> {
 }
 
 /// Serializes a bundle file for `body` (digest computed here).
-pub fn write_bundle(source_service: &str, exported_at: DateTime<Utc>, body: &BundleBody) -> PlatformResult<Vec<u8>> {
+pub fn write_bundle(
+    source_service: &str,
+    exported_at: DateTime<Utc>,
+    body: &BundleBody,
+) -> PlatformResult<Vec<u8>> {
     let body = serde_json::to_value(body)
         .map_err(|_| PlatformError::Validation("the bundle cannot be serialized".to_string()))?;
     let digest = body_digest(&body);
@@ -374,16 +388,21 @@ impl ReceiptRow {
 }
 
 /// The receipt of the import of `bundle_digest`, if any.
-pub async fn receipt<C: ConnectionTrait>(db: &C, bundle_digest: &str) -> PlatformResult<Option<ImportReceipt>> {
-    Ok(ReceiptRow::find_by_statement(Statement::from_sql_and_values(
-        DbBackend::Postgres,
-        "SELECT id, source_service, bundle_digest, verifier_digest, counts, imported_at \
+pub async fn receipt<C: ConnectionTrait>(
+    db: &C,
+    bundle_digest: &str,
+) -> PlatformResult<Option<ImportReceipt>> {
+    Ok(
+        ReceiptRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT id, source_service, bundle_digest, verifier_digest, counts, imported_at \
          FROM platform_identity_imports WHERE bundle_digest = $1",
-        [bundle_digest.to_ascii_lowercase().into()],
-    ))
-    .one(db)
-    .await?
-    .map(|r| r.into_receipt(false)))
+            [bundle_digest.to_ascii_lowercase().into()],
+        ))
+        .one(db)
+        .await?
+        .map(|r| r.into_receipt(false)),
+    )
 }
 
 fn stmt(sql: &str, values: Vec<sea_orm::Value>) -> Statement {
@@ -532,7 +551,10 @@ impl PlatformService {
             ))
             .await?;
         }
-        for c in credentials.iter().filter(|c| c.superseded_by_credential_id.is_some()) {
+        for c in credentials
+            .iter()
+            .filter(|c| c.superseded_by_credential_id.is_some())
+        {
             txn.execute(stmt(
                 "UPDATE platform_api_credentials SET superseded_by_credential_id = $2, \
                    superseded_at = $3, supersession_valid_until = $4, updated_at = $5 WHERE id = $1",
@@ -651,10 +673,12 @@ impl PlatformService {
             let items = value.as_array().cloned().unwrap_or_default();
             items
                 .into_iter()
-                .map(|v| super::snapshots::from_row_json(v).map_err(|_| PlatformError::Database {
-                    summary: "an identity row does not match the bundle contract".to_string(),
-                    connectivity: false,
-                }))
+                .map(|v| {
+                    super::snapshots::from_row_json(v).map_err(|_| PlatformError::Database {
+                        summary: "an identity row does not match the bundle contract".to_string(),
+                        connectivity: false,
+                    })
+                })
                 .collect()
         }
         let db = &self.db;
@@ -681,17 +705,28 @@ impl PlatformService {
             tenants: load(db, rows("platform_tenants", "r.created_at, r.id", "")).await?,
             applications: load(db, rows("platform_applications", "r.created_at, r.id", "")).await?,
             environments: load(db, rows("platform_environments", "r.created_at, r.id", "")).await?,
-            service_accounts: load(db, rows("platform_service_accounts", "r.created_at, r.id", ""))
-                .await?,
+            service_accounts: load(
+                db,
+                rows("platform_service_accounts", "r.created_at, r.id", ""),
+            )
+            .await?,
             application_scopes: load(
                 db,
-                rows("platform_application_scopes", "r.application_id, r.scope", ""),
+                rows(
+                    "platform_application_scopes",
+                    "r.application_id, r.scope",
+                    "",
+                ),
             )
             .await?,
             credentials,
             credential_scopes: load(
                 db,
-                rows("platform_api_credential_scopes", "r.credential_id, r.scope", ""),
+                rows(
+                    "platform_api_credential_scopes",
+                    "r.credential_id, r.scope",
+                    "",
+                ),
             )
             .await?,
             principals: load(db, rows("platform_principals", "r.created_at, r.id", "")).await?,
@@ -705,8 +740,12 @@ mod tests {
 
     #[test]
     fn canonical_json_sorts_keys_at_every_level() {
-        let a: Value = serde_json::from_str(r#"{"b":1,"a":{"d":[{"y":1,"x":2}],"c":"s"}}"#).unwrap();
-        assert_eq!(canonical_json(&a), r#"{"a":{"c":"s","d":[{"x":2,"y":1}]},"b":1}"#);
+        let a: Value =
+            serde_json::from_str(r#"{"b":1,"a":{"d":[{"y":1,"x":2}],"c":"s"}}"#).unwrap();
+        assert_eq!(
+            canonical_json(&a),
+            r#"{"a":{"c":"s","d":[{"x":2,"y":1}]},"b":1}"#
+        );
     }
 
     #[test]

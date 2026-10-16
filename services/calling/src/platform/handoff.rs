@@ -188,8 +188,11 @@ pub async fn export(
     let tenants = rows(db, &agg("platform_tenants", "r.created_at, r.id", "")).await?;
     let applications = rows(db, &agg("platform_applications", "r.created_at, r.id", "")).await?;
     let environments = rows(db, &agg("platform_environments", "r.created_at, r.id", "")).await?;
-    let service_accounts =
-        rows(db, &agg("platform_service_accounts", "r.created_at, r.id", "")).await?;
+    let service_accounts = rows(
+        db,
+        &agg("platform_service_accounts", "r.created_at, r.id", ""),
+    )
+    .await?;
     let application_scopes = rows(
         db,
         "SELECT COALESCE(jsonb_agg(to_jsonb(r) ORDER BY r.application_id, r.scope), '[]'::jsonb) \
@@ -261,8 +264,12 @@ pub async fn export(
     operator::record(
         &txn,
         op,
-        &AuditEntry::new(OperatorAction::IdentityExported, AuditTargetKind::IdentityHandoff, id)
-            .detail(json!({ "bundleDigest": bundle_digest, "counts": counts })),
+        &AuditEntry::new(
+            OperatorAction::IdentityExported,
+            AuditTargetKind::IdentityHandoff,
+            id,
+        )
+        .detail(json!({ "bundleDigest": bundle_digest, "counts": counts })),
         now,
     )
     .await?;
@@ -289,7 +296,11 @@ pub struct HandoffView {
     pub completed_at: Option<DateTime<Utc>>,
 }
 
-async fn handoff<C: ConnectionTrait>(db: &C, digest: &str, lock: bool) -> PlatformResult<HandoffView> {
+async fn handoff<C: ConnectionTrait>(
+    db: &C,
+    digest: &str,
+    lock: bool,
+) -> PlatformResult<HandoffView> {
     let row = db
         .query_one(stmt(
             &format!(
@@ -332,7 +343,9 @@ pub async fn verify(
     let receipt = authority
         .import_receipt(&current.bundle_digest)
         .await
-        .map_err(|e| PlatformError::InvalidState(format!("platform access receipt unavailable: {e}")))?
+        .map_err(|e| {
+            PlatformError::InvalidState(format!("platform access receipt unavailable: {e}"))
+        })?
         .ok_or_else(|| {
             PlatformError::InvalidState(
                 "platform access has no receipt for this bundle: import it first".to_string(),
@@ -360,8 +373,12 @@ pub async fn verify(
         operator::record(
             &txn,
             op,
-            &AuditEntry::new(OperatorAction::IdentityHandoffVerified, AuditTargetKind::IdentityHandoff, locked.id)
-                .detail(json!({ "bundleDigest": locked.bundle_digest, "importId": receipt.id })),
+            &AuditEntry::new(
+                OperatorAction::IdentityHandoffVerified,
+                AuditTargetKind::IdentityHandoff,
+                locked.id,
+            )
+            .detail(json!({ "bundleDigest": locked.bundle_digest, "importId": receipt.id })),
             now,
         )
         .await?;
@@ -403,13 +420,20 @@ pub async fn complete(
     operator::record(
         &txn,
         op,
-        &AuditEntry::new(OperatorAction::IdentityHandoffCompleted, AuditTargetKind::IdentityHandoff, h.id)
-            .detail(json!({ "bundleDigest": h.bundle_digest, "verifiersScrubbed": scrubbed })),
+        &AuditEntry::new(
+            OperatorAction::IdentityHandoffCompleted,
+            AuditTargetKind::IdentityHandoff,
+            h.id,
+        )
+        .detail(json!({ "bundleDigest": h.bundle_digest, "verifiersScrubbed": scrubbed })),
         now,
     )
     .await?;
     txn.commit().await?;
-    tracing::info!(scrubbed, "identity hand-off completed: verifier material removed from Calling");
+    tracing::info!(
+        scrubbed,
+        "identity hand-off completed: verifier material removed from Calling"
+    );
     Ok(scrubbed)
 }
 
@@ -428,9 +452,14 @@ pub async fn restore_verifiers(
     if root["bundleVersion"].as_u64() != Some(BUNDLE_VERSION) {
         return Err(invalid("unsupported bundleVersion"));
     }
-    let stated = root["digest"].as_str().unwrap_or_default().to_ascii_lowercase();
+    let stated = root["digest"]
+        .as_str()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     if sha256_hex(canonical_json(&root["body"]).as_bytes()) != stated {
-        return Err(invalid("the body does not match its digest (corrupted or edited)"));
+        return Err(invalid(
+            "the body does not match its digest (corrupted or edited)",
+        ));
     }
     let credentials = root["body"]["credentials"]
         .as_array()
@@ -489,8 +518,12 @@ mod tests {
 
     #[test]
     fn canonical_json_matches_the_platform_access_form() {
-        let v: Value = serde_json::from_str(r#"{"b":1,"a":{"d":[{"y":1,"x":2}],"c":"s"}}"#).unwrap();
-        assert_eq!(canonical_json(&v), r#"{"a":{"c":"s","d":[{"x":2,"y":1}]},"b":1}"#);
+        let v: Value =
+            serde_json::from_str(r#"{"b":1,"a":{"d":[{"y":1,"x":2}],"c":"s"}}"#).unwrap();
+        assert_eq!(
+            canonical_json(&v),
+            r#"{"a":{"c":"s","d":[{"x":2,"y":1}]},"b":1}"#
+        );
     }
 
     #[test]

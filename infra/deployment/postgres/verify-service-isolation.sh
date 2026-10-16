@@ -6,8 +6,10 @@
 #   * each runtime role reads and writes its own service's data and nothing else;
 #   * no runtime role can run DDL (CREATE / ALTER / DROP / TRUNCATE) in its own database;
 #   * no role of one service can even connect to another service's database
-#     (Calling cannot open Privacy Relay's or Telephony's, and so on);
-#   * when <SERVICE>_MIGRATION_BIN is set (CALLING_MIGRATION_BIN, PRIVACY_RELAY_MIGRATION_BIN,
+#     (Calling cannot open Platform Access's, Numbering's, Privacy Relay's or Telephony's,
+#     and so on);
+#   * when <SERVICE>_MIGRATION_BIN is set (CALLING_MIGRATION_BIN,
+#     PLATFORM_ACCESS_MIGRATION_BIN, NUMBERING_MIGRATION_BIN, PRIVACY_RELAY_MIGRATION_BIN,
 #     TELEPHONY_MIGRATION_BIN), the service's REAL migrations apply as its migrator role
 #     and the runtime role can read every table they create.
 #
@@ -25,7 +27,7 @@ done
 here="$(cd "$(dirname "$0")" && pwd)"
 work="$(mktemp -d)"
 tag="iso$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')_"
-services=(calling privacy-relay telephony)
+services=(calling platform-access numbering privacy-relay telephony)
 failures=0
 
 url_for() { # url_for <role> <password> <database>

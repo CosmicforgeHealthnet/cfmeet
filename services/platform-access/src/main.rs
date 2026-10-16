@@ -95,7 +95,8 @@ async fn main() -> anyhow::Result<()> {
         registry.clone(),
         config.credential_policy,
     );
-    let authenticator = CredentialAuthenticator::new(db, keyring, registry, clock.clone());
+    let authenticator = CredentialAuthenticator::new(db, keyring, registry, clock.clone())
+        .with_failure_policy(config.auth_failure_policy);
     let state = AppState::new(platform, authenticator, service_auth);
 
     // Failed-authentication windows are bounded: prune windows older than an hour.

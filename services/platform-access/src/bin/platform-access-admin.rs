@@ -690,8 +690,13 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                 let a = admin.application(&application).await?;
                 let kinds = kinds(&environment_kinds);
                 print(
-                    &p.operator_grant_application_scope(admin.op()?, a.id, &scope, kinds.as_deref())
-                        .await?,
+                    &p.operator_grant_application_scope(
+                        admin.op()?,
+                        a.id,
+                        &scope,
+                        kinds.as_deref(),
+                    )
+                    .await?,
                 )
             }
             ScopeCmd::GrantPrivileged {
@@ -886,9 +891,7 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
                 let bytes =
                     handoff::write_bundle("cfmeet.platform-access", admin.clock.now(), &body)?;
                 write_private(&out, &bytes)?;
-                let digest = handoff::body_digest(
-                    &serde_json::to_value(&body).unwrap_or_default(),
-                );
+                let digest = handoff::body_digest(&serde_json::to_value(&body).unwrap_or_default());
                 print(&json!({
                     "file": out.display().to_string(),
                     "bundleDigest": digest,
@@ -939,9 +942,7 @@ fn is_mutating(command: &Command) -> bool {
         Command::Environment(c) => !matches!(c, EnvironmentCmd::List(_)),
         Command::ServiceAccount(c) => !matches!(c, ServiceAccountCmd::List(_)),
         Command::Scope(c) => !matches!(c, ScopeCmd::Registry | ScopeCmd::List(_)),
-        Command::Credential(c) => {
-            !matches!(c, CredentialCmd::Show(_) | CredentialCmd::List { .. })
-        }
+        Command::Credential(c) => !matches!(c, CredentialCmd::Show(_) | CredentialCmd::List { .. }),
         Command::Principal(c) => !matches!(c, PrincipalCmd::List(_) | PrincipalCmd::Show(_)),
         Command::Identity(c) => matches!(c, IdentityCmd::Import { .. }),
     }
@@ -951,7 +952,12 @@ fn is_mutating(command: &Command) -> bool {
 async fn main() -> ExitCode {
     dotenvy::dotenv().ok();
     let cli = Cli::parse();
-    let operator = match cli.operator.as_deref().map(OperatorContext::new).transpose() {
+    let operator = match cli
+        .operator
+        .as_deref()
+        .map(OperatorContext::new)
+        .transpose()
+    {
         Ok(op) => op,
         Err(e) => {
             eprintln!("error: {e}");

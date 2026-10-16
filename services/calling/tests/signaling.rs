@@ -12,7 +12,6 @@ use calling::{
 };
 use common::{
     app::AppWorld, calls::CallWorld, fake_media::FakeMediaProvider, test_runtime, Harness, TestDb,
-    TEST_PEPPER,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
@@ -325,7 +324,6 @@ async fn signals_fan_out_across_instances() {
     let local = Arc::new(calling::signaling::InMemorySignalBus::new());
     let instance_a = Harness::with_runtime(
         db.clone(),
-        TEST_PEPPER,
         clock.clone(),
         media.clone(),
         local.clone(),
@@ -382,7 +380,6 @@ async fn signals_fan_out_across_instances() {
     // Instance B reads the same authoritative state.
     let instance_b = Harness::with_runtime(
         db.clone(),
-        TEST_PEPPER,
         clock,
         media.clone(),
         local,

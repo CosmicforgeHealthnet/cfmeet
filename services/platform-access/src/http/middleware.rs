@@ -137,7 +137,9 @@ impl<S: Send + Sync> FromRequestParts<S> for InternalCaller {
             .extensions
             .get::<InternalCaller>()
             .cloned()
-            .ok_or(AccessError::Refused(ErrorCode::InternalAuthenticationFailed))
+            .ok_or(AccessError::Refused(
+                ErrorCode::InternalAuthenticationFailed,
+            ))
     }
 }
 
@@ -146,7 +148,11 @@ pub async fn require_internal_service(
     mut request: Request,
     next: Next,
 ) -> Response {
-    match state.service_auth.verifier().verify_headers(request.headers()) {
+    match state
+        .service_auth
+        .verifier()
+        .verify_headers(request.headers())
+    {
         Ok(ctx) => {
             let context = RequestContext {
                 request_id: ctx.request_id().clone(),

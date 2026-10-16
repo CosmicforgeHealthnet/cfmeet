@@ -11,7 +11,9 @@ use serde_json::json;
 
 #[tokio::test]
 async fn numbering_and_sms_scopes_are_grantable_and_effective() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     let all = [
         "numbers.search",
         "numbers.read",
@@ -33,12 +35,17 @@ async fn numbering_and_sms_scopes_are_grantable_and_effective() {
 
 #[tokio::test]
 async fn credentials_cannot_hold_scopes_the_application_does_not_allow() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     let c = h.consumer("acme", "EXTERNAL", &["numbers.read"]).await;
     let r = h
         .admin(
             Method::POST,
-            &format!("/internal/v1/admin/service-accounts/{}/credentials", c.sa("SANDBOX")),
+            &format!(
+                "/internal/v1/admin/service-accounts/{}/credentials",
+                c.sa("SANDBOX")
+            ),
             Some(json!({ "scopes": ["numbers.manage"] })),
         )
         .await;
@@ -46,7 +53,10 @@ async fn credentials_cannot_hold_scopes_the_application_does_not_allow() {
     let r = h
         .admin(
             Method::POST,
-            &format!("/internal/v1/admin/service-accounts/{}/credentials", c.sa("SANDBOX")),
+            &format!(
+                "/internal/v1/admin/service-accounts/{}/credentials",
+                c.sa("SANDBOX")
+            ),
             Some(json!({ "scopes": ["admin.everything"] })),
         )
         .await;
@@ -55,11 +65,16 @@ async fn credentials_cannot_hold_scopes_the_application_does_not_allow() {
 
 #[tokio::test]
 async fn environment_restricted_scopes_are_neither_granted_nor_honoured_elsewhere() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     let c = h.consumer("acme", "EXTERNAL", &["numbers.read"]).await;
     h.admin_ok(
         Method::POST,
-        &format!("/internal/v1/admin/applications/{}/scopes", c.application_id),
+        &format!(
+            "/internal/v1/admin/applications/{}/scopes",
+            c.application_id
+        ),
         Some(json!({ "scope": "numbers.manage", "environmentKinds": ["SANDBOX", "TEST"] })),
     )
     .await;
@@ -67,20 +82,28 @@ async fn environment_restricted_scopes_are_neither_granted_nor_honoured_elsewher
     let r = h
         .admin(
             Method::POST,
-            &format!("/internal/v1/admin/service-accounts/{}/credentials", c.sa("PRODUCTION")),
+            &format!(
+                "/internal/v1/admin/service-accounts/{}/credentials",
+                c.sa("PRODUCTION")
+            ),
             Some(json!({ "scopes": ["numbers.manage"] })),
         )
         .await;
     assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
     // Granted in SANDBOX; narrowing the restriction later withdraws it at once.
-    let (_, secret) = h.issue(c.sa("SANDBOX"), &["numbers.manage", "numbers.read"]).await;
+    let (_, secret) = h
+        .issue(c.sa("SANDBOX"), &["numbers.manage", "numbers.read"])
+        .await;
     assert_eq!(
         h.authenticate(&secret).await.body["authority"]["scopes"],
         json!(["numbers.manage", "numbers.read"])
     );
     h.admin_ok(
         Method::POST,
-        &format!("/internal/v1/admin/applications/{}/scopes", c.application_id),
+        &format!(
+            "/internal/v1/admin/applications/{}/scopes",
+            c.application_id
+        ),
         Some(json!({ "scope": "numbers.manage", "environmentKinds": ["TEST"] })),
     )
     .await;
@@ -92,7 +115,9 @@ async fn environment_restricted_scopes_are_neither_granted_nor_honoured_elsewher
 
 #[tokio::test]
 async fn numbers_admin_is_privileged_operator_authority_only() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     let first = h.consumer("cfops", "FIRST_PARTY", &[]).await;
     let external = h.consumer("acme", "EXTERNAL", &[]).await;
     // Never through the ordinary grant path.
@@ -100,7 +125,10 @@ async fn numbers_admin_is_privileged_operator_authority_only() {
         let r = h
             .admin(
                 Method::POST,
-                &format!("/internal/v1/admin/applications/{}/scopes", c.application_id),
+                &format!(
+                    "/internal/v1/admin/applications/{}/scopes",
+                    c.application_id
+                ),
                 Some(json!({ "scope": "numbers.admin" })),
             )
             .await;
@@ -110,7 +138,10 @@ async fn numbers_admin_is_privileged_operator_authority_only() {
     let r = h
         .admin(
             Method::POST,
-            &format!("/internal/v1/admin/applications/{}/scopes", external.application_id),
+            &format!(
+                "/internal/v1/admin/applications/{}/scopes",
+                external.application_id
+            ),
             Some(json!({ "scope": "numbers.admin", "privileged": true })),
         )
         .await;
@@ -119,7 +150,10 @@ async fn numbers_admin_is_privileged_operator_authority_only() {
     let view = h
         .admin_ok(
             Method::POST,
-            &format!("/internal/v1/admin/applications/{}/scopes", first.application_id),
+            &format!(
+                "/internal/v1/admin/applications/{}/scopes",
+                first.application_id
+            ),
             Some(json!({ "scope": "numbers.admin", "privileged": true })),
         )
         .await;
@@ -157,18 +191,27 @@ async fn numbers_admin_is_privileged_operator_authority_only() {
 
 #[tokio::test]
 async fn first_party_only_scopes_follow_classification() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     let external = h.consumer("acme", "EXTERNAL", &[]).await;
     let r = h
         .admin(
             Method::POST,
-            &format!("/internal/v1/admin/applications/{}/scopes", external.application_id),
+            &format!(
+                "/internal/v1/admin/applications/{}/scopes",
+                external.application_id
+            ),
             Some(json!({ "scope": "events.private_delivery" })),
         )
         .await;
     assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
-    let first = h.consumer("cf", "FIRST_PARTY", &["events.private_delivery"]).await;
-    let (_, secret) = h.issue(first.sa("SANDBOX"), &["events.private_delivery"]).await;
+    let first = h
+        .consumer("cf", "FIRST_PARTY", &["events.private_delivery"])
+        .await;
+    let (_, secret) = h
+        .issue(first.sa("SANDBOX"), &["events.private_delivery"])
+        .await;
     assert_eq!(
         h.authenticate(&secret).await.body["authority"]["scopes"],
         json!(["events.private_delivery"])
@@ -177,12 +220,19 @@ async fn first_party_only_scopes_follow_classification() {
 
 #[tokio::test]
 async fn withdrawing_an_application_scope_withdraws_it_from_every_credential() {
-    let Some(h) = Harness::new().await else { return };
-    let c = h.consumer("acme", "EXTERNAL", &["calls.read", "sms.send"]).await;
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h
+        .consumer("acme", "EXTERNAL", &["calls.read", "sms.send"])
+        .await;
     let (_, secret) = h.issue(c.sa("SANDBOX"), &["calls.read", "sms.send"]).await;
     h.admin_ok(
         Method::DELETE,
-        &format!("/internal/v1/admin/applications/{}/scopes/sms.send", c.application_id),
+        &format!(
+            "/internal/v1/admin/applications/{}/scopes/sms.send",
+            c.application_id
+        ),
         None,
     )
     .await;
@@ -194,8 +244,12 @@ async fn withdrawing_an_application_scope_withdraws_it_from_every_credential() {
 
 #[tokio::test]
 async fn evaluate_rechecks_scopes_status_and_principal_restrictions_now() {
-    let Some(h) = Harness::new().await else { return };
-    let c = h.consumer("acme", "EXTERNAL", &["numbers.read", "numbers.assign"]).await;
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h
+        .consumer("acme", "EXTERNAL", &["numbers.read", "numbers.assign"])
+        .await;
     let (view, secret) = h.issue(c.sa("SANDBOX"), &["numbers.read"]).await;
     let credential_id = uuid(&view["id"]);
     let eval = |scopes: serde_json::Value, principal: Option<uuid::Uuid>| {
@@ -207,11 +261,21 @@ async fn evaluate_rechecks_scopes_status_and_principal_restrictions_now() {
     };
     let ctx = c.delegated("SANDBOX");
     let r = h
-        .as_calling(Method::POST, "/internal/v1/authorization/evaluate", Some(eval(json!(["numbers.read"]), None)), Some(ctx.clone()))
+        .as_calling(
+            Method::POST,
+            "/internal/v1/authorization/evaluate",
+            Some(eval(json!(["numbers.read"]), None)),
+            Some(ctx.clone()),
+        )
         .await;
     assert_eq!(r.body["allowed"], true, "{}", r.body);
     let r = h
-        .as_calling(Method::POST, "/internal/v1/authorization/evaluate", Some(eval(json!(["numbers.assign"]), None)), Some(ctx.clone()))
+        .as_calling(
+            Method::POST,
+            "/internal/v1/authorization/evaluate",
+            Some(eval(json!(["numbers.assign"]), None)),
+            Some(ctx.clone()),
+        )
         .await;
     assert_eq!(r.body["allowed"], false);
     assert_eq!(r.body["reason"], "MISSING_SCOPES");
@@ -219,12 +283,18 @@ async fn evaluate_rechecks_scopes_status_and_principal_restrictions_now() {
     // Authorized-principal restriction.
     let env = c.env("SANDBOX");
     let p1 = h
-        .admin_ok(Method::POST, &format!("/internal/v1/admin/environments/{env}/principals"),
-            Some(json!({ "kind": "NATIVE_CF_USER", "externalReference": "user-1" })))
+        .admin_ok(
+            Method::POST,
+            &format!("/internal/v1/admin/environments/{env}/principals"),
+            Some(json!({ "kind": "NATIVE_CF_USER", "externalReference": "user-1" })),
+        )
         .await;
     let p2 = h
-        .admin_ok(Method::POST, &format!("/internal/v1/admin/environments/{env}/principals"),
-            Some(json!({ "kind": "NATIVE_CF_USER", "externalReference": "user-2" })))
+        .admin_ok(
+            Method::POST,
+            &format!("/internal/v1/admin/environments/{env}/principals"),
+            Some(json!({ "kind": "NATIVE_CF_USER", "externalReference": "user-2" })),
+        )
         .await;
     let (p1, p2) = (uuid(&p1["principal"]["id"]), uuid(&p2["principal"]["id"]));
     h.admin_ok(
@@ -238,18 +308,37 @@ async fn evaluate_rechecks_scopes_status_and_principal_restrictions_now() {
         json!([p1])
     );
     let r = h
-        .as_calling(Method::POST, "/internal/v1/authorization/evaluate", Some(eval(json!(["numbers.read"]), Some(p1))), Some(ctx.clone()))
+        .as_calling(
+            Method::POST,
+            "/internal/v1/authorization/evaluate",
+            Some(eval(json!(["numbers.read"]), Some(p1))),
+            Some(ctx.clone()),
+        )
         .await;
     assert_eq!(r.body["allowed"], true);
     let r = h
-        .as_calling(Method::POST, "/internal/v1/authorization/evaluate", Some(eval(json!(["numbers.read"]), Some(p2))), Some(ctx.clone()))
+        .as_calling(
+            Method::POST,
+            "/internal/v1/authorization/evaluate",
+            Some(eval(json!(["numbers.read"]), Some(p2))),
+            Some(ctx.clone()),
+        )
         .await;
     assert_eq!(r.body["reason"], "PRINCIPAL_NOT_AUTHORIZED");
     // Revocation is seen immediately.
-    h.admin_ok(Method::POST, &format!("/internal/v1/admin/credentials/{credential_id}/revoke"), None)
-        .await;
+    h.admin_ok(
+        Method::POST,
+        &format!("/internal/v1/admin/credentials/{credential_id}/revoke"),
+        None,
+    )
+    .await;
     let r = h
-        .as_calling(Method::POST, "/internal/v1/authorization/evaluate", Some(eval(json!(["numbers.read"]), Some(p1))), Some(ctx))
+        .as_calling(
+            Method::POST,
+            "/internal/v1/authorization/evaluate",
+            Some(eval(json!(["numbers.read"]), Some(p1))),
+            Some(ctx),
+        )
         .await;
     assert_eq!(r.body["reason"], "CREDENTIAL_NOT_AUTHENTICATING");
     assert_eq!(r.body["effectiveState"], "REVOKED");
@@ -257,18 +346,26 @@ async fn evaluate_rechecks_scopes_status_and_principal_restrictions_now() {
 
 #[tokio::test]
 async fn principal_restrictions_never_cross_environments() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     let c = h.consumer("acme", "EXTERNAL", &["numbers.read"]).await;
     let (view, _) = h.issue(c.sa("SANDBOX"), &["numbers.read"]).await;
     let other_env = c.env("PRODUCTION");
     let p = h
-        .admin_ok(Method::POST, &format!("/internal/v1/admin/environments/{other_env}/principals"),
-            Some(json!({ "kind": "NATIVE_CF_USER", "externalReference": "prod-user" })))
+        .admin_ok(
+            Method::POST,
+            &format!("/internal/v1/admin/environments/{other_env}/principals"),
+            Some(json!({ "kind": "NATIVE_CF_USER", "externalReference": "prod-user" })),
+        )
         .await;
     let r = h
         .admin(
             Method::PUT,
-            &format!("/internal/v1/admin/credentials/{}/principal-restriction", view["id"].as_str().unwrap()),
+            &format!(
+                "/internal/v1/admin/credentials/{}/principal-restriction",
+                view["id"].as_str().unwrap()
+            ),
             Some(json!({ "principalIds": [p["principal"]["id"]] })),
         )
         .await;

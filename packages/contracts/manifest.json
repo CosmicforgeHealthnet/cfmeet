@@ -191,6 +191,28 @@
       "description": "Usage and limits (Part G §69 / §70): the ledger of final consumption facts of the authenticated application environment (application media, public-network legs with KNOWN / ESTIMATED / UNKNOWN cost evidence, stored voicemail / recording artifacts — never a bill) and the limit status (request rate, concurrent calls, telecom spend) with every level of the API-client chain (tenant → application → service account → credential), the independent principal axis of a principal resolved in the caller's scope, and the binding level. Served by Calling's platform ingress."
     },
     {
+      "id": "cfmeet.platform-access.identity",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "platform-access/identity/v1.schema.json",
+      "owner": "platform-access",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Messages of the shared identity authority (Part IV Workstream B, ADR 0032): identity snapshots (tenant, application, environment, service account, credential WITHOUT verifier material, principal, scopes), credential authentication outcomes with the trusted authority chain and throttling, the trusted delegated context, credential status, authorization evaluation, the scope registry (Calling, Numbering and SMS scopes; PRIVILEGED_OPERATOR trust for numbers.admin), the commit-ordered identity change feed, Part III import receipts, principal resolution / telephone-endpoint registration / tombstones and the error envelope."
+    },
+    {
+      "id": "cfmeet.platform-access.internal-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "platform-access/internal/v1.openapi.json",
+      "owner": "platform-access",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Internal HTTP surface of services/platform-access: GET /health, GET /ready and the service-authenticated /internal/v1 API — credential authentication, credential status, authorization evaluation, trusted context, identity change feed, import receipts, scope registry, principal resolution / registration / tombstone (Calling, Numbering) and operator administration (operator console, audited)."
+    },
+    {
       "id": "cfmeet.privacy-relay.http-api",
       "version": "1.2.0",
       "kind": "openapi",

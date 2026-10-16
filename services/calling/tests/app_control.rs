@@ -16,7 +16,7 @@ use common::{
     app::AppWorld,
     calls::CallWorld,
     fake_media::{FakeMediaProvider, FakeOp},
-    test_runtime, Harness, TestDb, TEST_PEPPER,
+    test_runtime, Harness, TestDb,
 };
 use sea_orm::{ConnectionTrait, DbBackend, Statement};
 use serde_json::{json, Value};
@@ -48,7 +48,6 @@ async fn world_with(media: Option<Arc<FakeMediaProvider>>) -> Option<AppWorld> {
     );
     let h = Harness::with_runtime(
         db,
-        TEST_PEPPER,
         calling::domain::ManualClock::new(common::t0()),
         fake,
         bus,

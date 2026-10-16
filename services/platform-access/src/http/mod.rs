@@ -12,9 +12,10 @@ pub mod middleware;
 
 use axum::{
     extract::{DefaultBodyLimit, State},
+    http::header::CONTENT_TYPE,
     http::StatusCode,
-    middleware::{from_fn, from_fn_with_state},
-    response::IntoResponse,
+    middleware::{from_fn, from_fn_with_state, map_response},
+    response::{IntoResponse, Response},
     routing::get,
     Json, Router,
 };
@@ -22,7 +23,7 @@ use platform_access_migration::MigratorTrait;
 use serde_json::json;
 
 use self::{
-    error::{AccessError, ErrorCode},
+    error::{error_response, AccessError, ErrorCode},
     middleware::{request_id_middleware, require_internal_service},
 };
 use crate::state::AppState;
@@ -48,6 +49,7 @@ pub fn app(state: AppState) -> Router {
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )
+        .layer(map_response(normalize_rejections))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(from_fn_with_state(state.clone(), require_internal_service))
         .with_state(state);
@@ -76,6 +78,28 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
             "verifierKeyVersion": state.platform.keyring().current_version(),
         })),
     )
+}
+
+/// Extractor rejections (malformed path ids, JSON bodies, oversized bodies) leave axum as
+/// plain text that may echo the input; every such response becomes the error envelope.
+async fn normalize_rejections(response: Response) -> Response {
+    let status = response.status();
+    let json = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("application/json"));
+    if json || !(status.is_client_error() || status.is_server_error()) {
+        return response;
+    }
+    let code = match status {
+        StatusCode::PAYLOAD_TOO_LARGE => ErrorCode::PayloadTooLarge,
+        StatusCode::NOT_FOUND => ErrorCode::NotFound,
+        StatusCode::METHOD_NOT_ALLOWED => ErrorCode::MethodNotAllowed,
+        s if s.is_client_error() => ErrorCode::ValidationError,
+        _ => ErrorCode::InternalError,
+    };
+    error_response(code, code.default_message())
 }
 
 async fn not_found() -> AccessError {

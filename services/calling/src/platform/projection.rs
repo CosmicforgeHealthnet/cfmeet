@@ -243,7 +243,11 @@ impl IdentityProjection {
             // Cached revisions may be older than what the feed just applied; they only
             // ever skip redundant writes, so clearing is always safe.
             self.forget();
-            tracing::debug!(changes = report.changes, cursor = report.cursor, "identity projection synced");
+            tracing::debug!(
+                changes = report.changes,
+                cursor = report.cursor,
+                "identity projection synced"
+            );
         }
         Ok(report)
     }
@@ -311,7 +315,9 @@ pub async fn apply_change(
         "ENVIRONMENT" if !delete => upsert_environment(txn, &snapshot(change)?).await,
         "SERVICE_ACCOUNT" if !delete => upsert_service_account(txn, &snapshot(change)?).await,
         "CREDENTIAL" if !delete => upsert_credential(txn, &snapshot(change)?).await,
-        "PRINCIPAL" if !delete => upsert_principal(txn, &snapshot(change)?, now).await.map(|_| ()),
+        "PRINCIPAL" if !delete => upsert_principal(txn, &snapshot(change)?, now)
+            .await
+            .map(|_| ()),
         "APPLICATION_SCOPE" => {
             let s: ApplicationScopeSnapshot = snapshot(change)?;
             if delete {
@@ -387,7 +393,10 @@ async fn upsert_tenant<C: ConnectionTrait>(db: &C, t: &TenantSnapshot) -> Projec
     Ok(())
 }
 
-async fn upsert_application<C: ConnectionTrait>(db: &C, a: &ApplicationSnapshot) -> ProjectionResult<()> {
+async fn upsert_application<C: ConnectionTrait>(
+    db: &C,
+    a: &ApplicationSnapshot,
+) -> ProjectionResult<()> {
     db.execute(stmt(
         "INSERT INTO platform_applications (id, tenant_id, slug, display_name, status, created_at, \
            updated_at, pa_revision) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
@@ -409,7 +418,10 @@ async fn upsert_application<C: ConnectionTrait>(db: &C, a: &ApplicationSnapshot)
     Ok(())
 }
 
-async fn upsert_environment<C: ConnectionTrait>(db: &C, e: &EnvironmentSnapshot) -> ProjectionResult<()> {
+async fn upsert_environment<C: ConnectionTrait>(
+    db: &C,
+    e: &EnvironmentSnapshot,
+) -> ProjectionResult<()> {
     // Defence in depth: never project live telecom outside PRODUCTION (the CHECK refuses
     // it too).
     let live = e.live_telecom_allowed && e.kind.may_allow_live_telecom();
@@ -436,7 +448,10 @@ async fn upsert_environment<C: ConnectionTrait>(db: &C, e: &EnvironmentSnapshot)
     Ok(())
 }
 
-async fn upsert_service_account<C: ConnectionTrait>(db: &C, s: &ServiceAccountSnapshot) -> ProjectionResult<()> {
+async fn upsert_service_account<C: ConnectionTrait>(
+    db: &C,
+    s: &ServiceAccountSnapshot,
+) -> ProjectionResult<()> {
     db.execute(stmt(
         "INSERT INTO platform_service_accounts (id, tenant_id, application_id, environment_id, name, \
            description, status, revoked_at, created_at, updated_at, pa_revision) \
@@ -463,7 +478,10 @@ async fn upsert_service_account<C: ConnectionTrait>(db: &C, s: &ServiceAccountSn
     Ok(())
 }
 
-async fn upsert_credential<C: ConnectionTrait>(db: &C, c: &CredentialSnapshot) -> ProjectionResult<()> {
+async fn upsert_credential<C: ConnectionTrait>(
+    db: &C,
+    c: &CredentialSnapshot,
+) -> ProjectionResult<()> {
     let inserted = db
         .query_one(stmt(
             "INSERT INTO platform_api_credentials (id, public_id, tenant_id, application_id, environment_id, \

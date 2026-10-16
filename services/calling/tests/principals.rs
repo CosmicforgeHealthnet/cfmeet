@@ -4,13 +4,15 @@
 
 mod common;
 
+use common::NewPrincipal;
+
 use axum::http::{Method, StatusCode};
 use calling::{
     domain::{
         EnvironmentKind, PrincipalKind, PrincipalStatus, ServiceAccountStatus, TenantClassification,
     },
     platform::{
-        principals::{NewPrincipal, PrincipalReference, PrincipalResolutionError},
+        principals::{PrincipalReference, PrincipalResolutionError},
         scopes::names,
         PlatformError,
     },

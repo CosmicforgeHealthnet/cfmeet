@@ -71,7 +71,6 @@ async fn outage_world() -> Option<(AppWorld, Arc<DownBus>)> {
     let runtime = common::test_runtime(Some(media.clone()), down.clone());
     let h = Harness::with_runtime(
         db,
-        common::TEST_PEPPER,
         calling::domain::ManualClock::new(common::t0()),
         media,
         bus,

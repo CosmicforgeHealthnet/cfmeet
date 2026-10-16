@@ -15,9 +15,13 @@ const SCOPES: &[&str] = &["calls.read", "calls.write", "numbers.read"];
 
 #[tokio::test]
 async fn a_valid_credential_returns_its_full_trusted_authority_chain() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     let c = h.consumer("acme", "EXTERNAL", SCOPES).await;
-    let (view, secret) = h.issue(c.sa("SANDBOX"), &["calls.read", "numbers.read"]).await;
+    let (view, secret) = h
+        .issue(c.sa("SANDBOX"), &["calls.read", "numbers.read"])
+        .await;
     let r = h.authenticate(&secret).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.body);
     assert_eq!(r.body["outcome"], "AUTHENTICATED");
@@ -43,7 +47,9 @@ async fn a_valid_credential_returns_its_full_trusted_authority_chain() {
 
 #[tokio::test]
 async fn malformed_unknown_wrong_secret_and_wrong_tag_are_rejected() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     let c = h.consumer("acme", "EXTERNAL", SCOPES).await;
     let (_, secret) = h.issue(c.sa("PRODUCTION"), &["calls.read"]).await;
     let cases = [
@@ -53,11 +59,18 @@ async fn malformed_unknown_wrong_secret_and_wrong_tag_are_rejected() {
             "unknown_credential",
         ),
         (
-            format!("{}{}", &secret[..secret.len() - 1], if secret.ends_with('0') { "1" } else { "0" }),
+            format!(
+                "{}{}",
+                &secret[..secret.len() - 1],
+                if secret.ends_with('0') { "1" } else { "0" }
+            ),
             "secret_mismatch",
         ),
         // The tag is bound into the verifier: an edited tag never verifies.
-        (secret.replacen("cfmk_live_", "cfmk_sbx_", 1), "secret_mismatch"),
+        (
+            secret.replacen("cfmk_live_", "cfmk_sbx_", 1),
+            "secret_mismatch",
+        ),
     ];
     for (presented, reason) in cases {
         let r = h.authenticate(&presented).await;
@@ -70,7 +83,9 @@ async fn malformed_unknown_wrong_secret_and_wrong_tag_are_rejected() {
 
 #[tokio::test]
 async fn rotation_overlap_expiry_and_revocation_follow_the_lifecycle() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     let c = h.consumer("acme", "EXTERNAL", SCOPES).await;
     let (old, old_secret) = h.issue(c.sa("TEST"), &["calls.read"]).await;
     let old_id = uuid(&old["id"]);
@@ -86,17 +101,30 @@ async fn rotation_overlap_expiry_and_revocation_follow_the_lifecycle() {
     // Both work during the overlap; the predecessor reports ROTATION_OVERLAP.
     let r = h.authenticate(&old_secret).await;
     assert_eq!(r.body["authority"]["effectiveState"], "ROTATION_OVERLAP");
-    assert_eq!(h.authenticate(&new_secret).await.body["outcome"], "AUTHENTICATED");
+    assert_eq!(
+        h.authenticate(&new_secret).await.body["outcome"],
+        "AUTHENTICATED"
+    );
     // After the overlap the predecessor is superseded.
     h.clock.advance(Duration::minutes(31));
     let r = h.authenticate(&old_secret).await;
     assert_eq!(r.body["reason"], "credential_superseded");
-    assert_eq!(h.authenticate(&new_secret).await.body["outcome"], "AUTHENTICATED");
+    assert_eq!(
+        h.authenticate(&new_secret).await.body["outcome"],
+        "AUTHENTICATED"
+    );
     // Revocation is immediate (no cache).
     let new_id = uuid(&rotated["credential"]["id"]);
-    h.admin_ok(Method::POST, &format!("/internal/v1/admin/credentials/{new_id}/revoke"), None)
-        .await;
-    assert_eq!(h.authenticate(&new_secret).await.body["reason"], "credential_revoked");
+    h.admin_ok(
+        Method::POST,
+        &format!("/internal/v1/admin/credentials/{new_id}/revoke"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        h.authenticate(&new_secret).await.body["reason"],
+        "credential_revoked"
+    );
     // Expiry.
     let (_, short) = h
         .admin_ok(
@@ -106,14 +134,22 @@ async fn rotation_overlap_expiry_and_revocation_follow_the_lifecycle() {
         )
         .await
         .pipe(|b| (b["credential"].clone(), b["secret"].as_str().unwrap().to_string()));
-    assert_eq!(h.authenticate(&short).await.body["outcome"], "AUTHENTICATED");
+    assert_eq!(
+        h.authenticate(&short).await.body["outcome"],
+        "AUTHENTICATED"
+    );
     h.clock.advance(Duration::days(2));
-    assert_eq!(h.authenticate(&short).await.body["reason"], "credential_expired");
+    assert_eq!(
+        h.authenticate(&short).await.body["reason"],
+        "credential_expired"
+    );
 }
 
 #[tokio::test]
 async fn not_yet_valid_credentials_do_not_authenticate() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     let c = h.consumer("acme", "EXTERNAL", SCOPES).await;
     let body = h
         .admin_ok(
@@ -123,23 +159,44 @@ async fn not_yet_valid_credentials_do_not_authenticate() {
         )
         .await;
     let secret = body["secret"].as_str().unwrap();
-    assert_eq!(h.authenticate(secret).await.body["reason"], "credential_not_yet_valid");
+    assert_eq!(
+        h.authenticate(secret).await.body["reason"],
+        "credential_not_yet_valid"
+    );
     h.clock.advance(Duration::hours(2));
-    assert_eq!(h.authenticate(secret).await.body["outcome"], "AUTHENTICATED");
+    assert_eq!(
+        h.authenticate(secret).await.body["outcome"],
+        "AUTHENTICATED"
+    );
 }
 
 #[tokio::test]
 async fn suspended_scopes_yield_safety_only_authority_and_inactive_accounts_fail() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     let c = h.consumer("acme", "EXTERNAL", SCOPES).await;
     let (_, secret) = h.issue(c.sa("SANDBOX"), &["calls.read"]).await;
     let env = c.env("SANDBOX");
     for (path, link) in [
-        (format!("/internal/v1/admin/environments/{env}/status"), "ENVIRONMENT"),
-        (format!("/internal/v1/admin/applications/{}/status", c.application_id), "APPLICATION"),
-        (format!("/internal/v1/admin/tenants/{}/status", c.tenant_id), "TENANT"),
+        (
+            format!("/internal/v1/admin/environments/{env}/status"),
+            "ENVIRONMENT",
+        ),
+        (
+            format!(
+                "/internal/v1/admin/applications/{}/status",
+                c.application_id
+            ),
+            "APPLICATION",
+        ),
+        (
+            format!("/internal/v1/admin/tenants/{}/status", c.tenant_id),
+            "TENANT",
+        ),
     ] {
-        h.admin_ok(Method::POST, &path, Some(json!({ "status": "SUSPENDED" }))).await;
+        h.admin_ok(Method::POST, &path, Some(json!({ "status": "SUSPENDED" })))
+            .await;
         let r = h.authenticate(&secret).await;
         assert_eq!(r.body["outcome"], "AUTHENTICATED");
         assert_eq!(r.body["authority"]["authorityMode"], "SAFETY_ONLY");
@@ -148,12 +205,19 @@ async fn suspended_scopes_yield_safety_only_authority_and_inactive_accounts_fail
     }
     for path in [
         format!("/internal/v1/admin/tenants/{}/status", c.tenant_id),
-        format!("/internal/v1/admin/applications/{}/status", c.application_id),
+        format!(
+            "/internal/v1/admin/applications/{}/status",
+            c.application_id
+        ),
         format!("/internal/v1/admin/environments/{env}/status"),
     ] {
-        h.admin_ok(Method::POST, &path, Some(json!({ "status": "ACTIVE" }))).await;
+        h.admin_ok(Method::POST, &path, Some(json!({ "status": "ACTIVE" })))
+            .await;
     }
-    assert_eq!(h.authenticate(&secret).await.body["authority"]["authorityMode"], "FULL");
+    assert_eq!(
+        h.authenticate(&secret).await.body["authority"]["authorityMode"],
+        "FULL"
+    );
     let sa = c.sa("SANDBOX");
     h.admin_ok(
         Method::POST,
@@ -161,15 +225,24 @@ async fn suspended_scopes_yield_safety_only_authority_and_inactive_accounts_fail
         Some(json!({ "status": "SUSPENDED" })),
     )
     .await;
-    assert_eq!(h.authenticate(&secret).await.body["reason"], "service_account_inactive");
+    assert_eq!(
+        h.authenticate(&secret).await.body["reason"],
+        "service_account_inactive"
+    );
 }
 
 #[tokio::test]
 async fn repeated_failures_are_throttled_without_locking_out_the_correct_secret() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     let c = h.consumer("acme", "EXTERNAL", SCOPES).await;
     let (_, secret) = h.issue(c.sa("SANDBOX"), &["calls.read"]).await;
-    let wrong = format!("{}{}", &secret[..secret.len() - 1], if secret.ends_with('0') { "1" } else { "0" });
+    let wrong = format!(
+        "{}{}",
+        &secret[..secret.len() - 1],
+        if secret.ends_with('0') { "1" } else { "0" }
+    );
     let mut crossed = 0;
     for i in 1..=25 {
         let r = h.authenticate(&wrong).await;
@@ -184,14 +257,125 @@ async fn repeated_failures_are_throttled_without_locking_out_the_correct_secret(
             }
         }
     }
-    assert_eq!(crossed, 1, "the guessing signal is raised exactly once per window");
+    assert_eq!(
+        crossed, 1,
+        "the guessing signal is raised exactly once per window"
+    );
     // The correct secret is never refused by the window.
-    assert_eq!(h.authenticate(&secret).await.body["outcome"], "AUTHENTICATED");
+    assert_eq!(
+        h.authenticate(&secret).await.body["outcome"],
+        "AUTHENTICATED"
+    );
+}
+
+/// Unknown key ids share ONE bucket (guessing ids never grows the table), windows reset,
+/// and old windows are pruned.
+#[tokio::test]
+async fn failure_windows_are_bounded_reset_and_pruned() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.consumer("acme", "EXTERNAL", SCOPES).await;
+    let (_, secret) = h.issue(c.sa("SANDBOX"), &["calls.read"]).await;
+    let wrong = format!(
+        "{}{}",
+        &secret[..secret.len() - 1],
+        if secret.ends_with('0') { "1" } else { "0" }
+    );
+    let parts: Vec<&str> = secret.splitn(4, '_').collect();
+    for _ in 0..25 {
+        let unknown = format!(
+            "{}_{}_{}_{}",
+            parts[0],
+            parts[1],
+            &uuid::Uuid::new_v4().simple().to_string()[..24],
+            parts[3]
+        );
+        assert_eq!(
+            h.authenticate(&unknown).await.body["reason"],
+            "unknown_credential"
+        );
+    }
+    let unknown_now = format!("{}_{}_{}_{}", parts[0], parts[1], "ab".repeat(12), parts[3]);
+    assert!(
+        h.authenticate(&unknown_now).await.body["throttle"]["retryAfterSeconds"]
+            .as_u64()
+            .is_some()
+    );
+    for _ in 0..21 {
+        h.authenticate(&wrong).await;
+    }
+    assert!(!h.authenticate(&wrong).await.body["throttle"].is_null());
+    let conn = h.conn().clone();
+    let count = |sql: &'static str| {
+        let conn = conn.clone();
+        async move {
+            use sea_orm::ConnectionTrait;
+            conn.query_one(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Postgres,
+                sql,
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get_by_index::<i64>(0)
+            .unwrap()
+        }
+    };
+    assert_eq!(
+        count("SELECT count(*) FROM platform_auth_failure_windows WHERE subject_key = 'unknown'")
+            .await,
+        1
+    );
+    assert_eq!(
+        count("SELECT count(*) FROM platform_auth_failure_windows WHERE subject_key <> 'unknown'")
+            .await,
+        1,
+        "one row per (known key id, window)"
+    );
+    // The next window starts afresh.
+    h.clock.advance(Duration::seconds(301));
+    assert!(h.authenticate(&wrong).await.body["throttle"].is_null());
+    // Old windows are pruned.
+    let pruned = h
+        .state
+        .authenticator
+        .prune_failure_windows(h.clock_now() + Duration::hours(1))
+        .await
+        .unwrap();
+    assert_eq!(pruned, 3);
+    assert_eq!(
+        count("SELECT count(*) FROM platform_auth_failure_windows").await,
+        0
+    );
+}
+
+#[tokio::test]
+async fn verifiers_are_bound_to_the_deployment_pepper() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.consumer("acme", "EXTERNAL", SCOPES).await;
+    let (_, secret) = h.issue(c.sa("SANDBOX"), &["calls.read"]).await;
+    let other = Harness::on(
+        h.db.clone(),
+        keyring("another-deployment-pepper-99f0c3b8e1d24a6f8c7b5e3d2a1f0e9d"),
+    );
+    assert_eq!(
+        other.authenticate(&secret).await.body["reason"],
+        "secret_mismatch"
+    );
+    assert_eq!(
+        h.authenticate(&secret).await.body["outcome"],
+        "AUTHENTICATED"
+    );
 }
 
 #[tokio::test]
 async fn previous_pepper_keeps_verifying_during_a_pepper_rotation() {
-    let Some(h) = Harness::new().await else { return };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
     let c = h.consumer("acme", "EXTERNAL", SCOPES).await;
     let (_, minted_v1) = h.issue(c.sa("SANDBOX"), &["calls.read"]).await;
     // Deploy pepper v2 with v1 as the previous pepper: old credentials still verify.
@@ -202,7 +386,10 @@ async fn previous_pepper_keeps_verifying_during_a_pepper_rotation() {
     )
     .unwrap();
     let h2 = Harness::on(h.db.clone(), rotated);
-    assert_eq!(h2.authenticate(&minted_v1).await.body["outcome"], "AUTHENTICATED");
+    assert_eq!(
+        h2.authenticate(&minted_v1).await.body["outcome"],
+        "AUTHENTICATED"
+    );
     // Without the previous pepper the v1 verifier is unsupported (fail closed).
     let only_v2 = VerifierKeyring::new(
         2,
@@ -211,7 +398,10 @@ async fn previous_pepper_keeps_verifying_during_a_pepper_rotation() {
     )
     .unwrap();
     let h3 = Harness::on(h.db.clone(), only_v2);
-    assert_eq!(h3.authenticate(&minted_v1).await.body["reason"], "unsupported_verifier");
+    assert_eq!(
+        h3.authenticate(&minted_v1).await.body["reason"],
+        "unsupported_verifier"
+    );
 }
 
 trait Pipe: Sized {

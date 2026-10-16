@@ -169,6 +169,9 @@ mod tests {
         });
         assert_eq!(err.code(), ErrorCode::InternalError);
         let service = AccessError::service(PlatformError::Validation("detail".into()));
-        assert!(matches!(service, AccessError::Refused(ErrorCode::ValidationError)));
+        assert!(matches!(
+            service,
+            AccessError::Refused(ErrorCode::ValidationError)
+        ));
     }
 }

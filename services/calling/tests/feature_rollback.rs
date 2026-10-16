@@ -46,7 +46,6 @@ fn redeploy(x: &mut PublicWorld, adjust: impl FnOnce(&mut CallingRuntime)) {
     adjust(&mut runtime);
     let h = Harness::with_runtime(
         old.db.clone(),
-        common::TEST_PEPPER,
         old.clock.clone(),
         old.media.clone(),
         old.bus.clone(),
@@ -297,7 +296,7 @@ async fn member(
             .platform
             .register_principal(
                 x.w.w.consumer.env(x.w.w.kind).id,
-                calling::platform::principals::NewPrincipal::External {
+                crate::common::NewPrincipal::External {
                     kind: calling::domain::PrincipalKind::EnterpriseMember,
                     external_reference: reference.to_string(),
                 },

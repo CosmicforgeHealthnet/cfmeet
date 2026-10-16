@@ -8,7 +8,6 @@ use calling::{calls::CallState, domain::EnvironmentKind, platform::scopes::names
 use common::{
     app::{AppWorld, Device},
     calls::CallWorld,
-    TEST_PEPPER,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -71,12 +70,7 @@ async fn endpoints_belong_to_one_principal_of_one_application_environment() {
 
     // Another application (same database) sees and touches nothing of this one.
     let other = AppWorld {
-        w: CallWorld::in_harness(
-            a.h().sibling(TEST_PEPPER),
-            "other-app",
-            EnvironmentKind::Production,
-        )
-        .await,
+        w: CallWorld::in_harness(a.h().sibling(), "other-app", EnvironmentKind::Production).await,
     };
     let r = other
         .get(&format!("/v1/calling/endpoints?principalId={}", bob.id()))

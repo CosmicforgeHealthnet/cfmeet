@@ -15,8 +15,7 @@
 
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseConnection,
-    EntityTrait, QueryFilter, QueryOrder,
+    ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
 };
 use serde::Serialize;
 use uuid::Uuid;
@@ -273,9 +272,12 @@ impl PrincipalResolver {
             Err(PrincipalResolutionError::NotFound) => {}
             other => return other,
         }
-        let projection = self.projection.as_ref().ok_or(PrincipalResolutionError::Unavailable {
-            summary: "platform access is not configured".to_string(),
-        })?;
+        let projection = self
+            .projection
+            .as_ref()
+            .ok_or(PrincipalResolutionError::Unavailable {
+                summary: "platform access is not configured".to_string(),
+            })?;
         let unavailable = |e: &dyn std::fmt::Display| PrincipalResolutionError::Unavailable {
             summary: e.to_string(),
         };

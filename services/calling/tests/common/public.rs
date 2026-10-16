@@ -4,12 +4,13 @@
 //! helper exposes the side effects a control must prevent (Privacy Relay authorizations,
 //! grants, spend reservations, Telephony commands and originates, Calls).
 
+use crate::common::IssuedCredential;
 use std::sync::Arc;
 
 use axum::http::Method;
 use calling::{
     domain::EnvironmentKind,
-    platform::{credentials::IssuedCredential, scopes::names},
+    platform::scopes::names,
     routing::{
         policy::{CountryDecision, DestinationPolicy, RoutingPolicy},
         RoutingClass,

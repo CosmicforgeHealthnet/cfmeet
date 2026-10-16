@@ -1,7 +1,10 @@
-//! Operational CLI (`platform_admin`) end to end: it drives the same domain services,
-//! prints the raw credential exactly once (create / rotate) and never otherwise, and
-//! audits every mutation (Part H §72.8): an operator is required, and exactly one
-//! append-only `platform_operator_audit` row is written with the change.
+//! Operational CLI (`platform_admin`) end to end. Identity administration moved to
+//! Platform Access (`platform-access-admin`, ADR 0032; its CLI tests prove the credential
+//! lifecycle there): Calling's CLI reads the identity PROJECTION (masked, never a secret)
+//! and administers what Calling owns — limits, routing / spend policy, compliance,
+//! abuse, retention, incidents — auditing every mutation (Part H §72.8): an operator is
+//! required, and exactly one append-only `platform_operator_audit` row is written with the
+//! change.
 
 mod common;
 
@@ -9,12 +12,13 @@ use std::{process::Command, sync::Arc};
 
 use calling::domain::{ManualClock, TenantClassification};
 use chrono::Utc;
-use common::{secret_part, Harness, TestDb, TEST_PEPPER};
+use common::{secret_part, Harness, TestDb};
 use serde_json::Value;
 
 struct Cli {
     database_url: String,
-    pepper: String,
+    /// Service authentication towards Platform Access (only some commands reach it).
+    env: Vec<(String, String)>,
 }
 
 /// The operator every mutating command in these tests acts as.
@@ -38,6 +42,14 @@ impl Output {
 }
 
 impl Cli {
+    /// The CLI of a Calling deployment over `db`, able to reach its Platform Access.
+    fn of(db: &TestDb) -> Self {
+        Self {
+            database_url: db.url.clone(),
+            env: db.pa().calling_process_env(),
+        }
+    }
+
     /// Runs as [`OPERATOR`] (`--operator`).
     fn run(&self, args: &[&str]) -> Output {
         let mut all = vec!["--operator", OPERATOR];
@@ -52,7 +64,7 @@ impl Cli {
             .current_dir(std::env::temp_dir())
             .env_clear()
             .env("DATABASE_URL", &self.database_url)
-            .env("API_CREDENTIAL_PEPPER", &self.pepper)
+            .envs(self.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .env("RUST_LOG", "info")
             .envs(env.iter().copied())
             .output()
@@ -71,107 +83,47 @@ impl Cli {
     }
 }
 
-const APP: &[&str] = &["--tenant", "cosmicforge", "--application", "dispatch"];
-
 fn with<'a>(base: &[&'a str], extra: &[&'a str]) -> Vec<&'a str> {
     base.iter().chain(extra.iter()).copied().collect()
 }
 
 #[tokio::test]
-async fn cli_manages_the_full_credential_lifecycle() {
+async fn cli_reads_the_identity_projection_and_manages_calling_limits() {
     let Some(db) = TestDb::new().await else {
         return;
     };
-    let cli = Cli {
-        database_url: db.url.clone(),
-        pepper: TEST_PEPPER.to_string(),
-    };
+    let h = Harness::on(Arc::new(db), ManualClock::new(Utc::now()));
+    let c = h
+        .consumer("cosmicforge", TenantClassification::FirstParty)
+        .await;
+    let issued = h
+        .issue(
+            c.sa(calling::domain::EnvironmentKind::Production),
+            &["principals.read"],
+        )
+        .await;
+    let secret = issued.secret.expose_once().to_string();
+    let public_id = issued.credential.public_id.clone();
+    let credential_id = issued.credential.id.to_string();
+    let cli = Cli::of(&h.db);
+    let app = ["--tenant", "cosmicforge", "--application", "app"];
 
-    cli.ok(&[
-        "tenant",
-        "create",
-        "--slug",
-        "cosmicforge",
-        "--name",
-        "CosmicForge",
-        "--classification",
-        "first-party",
-    ]);
-    cli.ok(&[
-        "application",
-        "create",
-        "--tenant",
-        "cosmicforge",
-        "--slug",
-        "dispatch",
-        "--name",
-        "Dispatch",
-    ]);
-    for env in ["production", "sandbox"] {
-        cli.ok(&with(
-            &["environment", "create"],
-            &with(APP, &["--environment", env]),
-        ));
-        cli.ok(&with(
-            &["service-account", "create"],
-            &with(APP, &["--environment", env, "--name", "backend"]),
-        ));
-    }
-    cli.ok(&with(
-        &["scope", "grant"],
-        &with(APP, &["--scope", "principals.read"]),
-    ));
-    let registry = cli.ok(&["scope", "registry"]).json();
-    assert!(registry
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|s| s["name"] == "principals.read"));
-
-    // Create: the secret is printed exactly once, on stdout only.
-    let created = cli.ok(&with(
-        &["credential", "create"],
-        &with(
-            APP,
-            &[
-                "--environment",
-                "production",
-                "--service-account",
-                "backend",
-                "--scope",
-                "principals.read",
-                "--label",
-                "cli",
-            ],
-        ),
-    ));
-    let json = created.json();
-    let secret = json["secret"].as_str().unwrap().to_string();
-    let public_id = json["credential"]["public_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let credential_id = json["credential"]["id"].as_str().unwrap().to_string();
-    assert!(secret.starts_with("cfmk_live_"));
-    assert_eq!(created.stdout.matches(secret_part(&secret)).count(), 1);
-    assert!(
-        !created.stderr.contains(secret_part(&secret)),
-        "secret in CLI logs"
-    );
-    assert_eq!(
-        json["credential"]["scopes"],
-        serde_json::json!(["principals.read"])
-    );
-
-    // No other command can recover it.
+    // Identity administration is not Calling's: the mutating commands do not exist.
     for args in [
-        vec!["credential", "show", "--credential", public_id.as_str()],
-        vec!["credential", "show", "--credential", credential_id.as_str()],
-        with(&["credential", "list"], APP),
+        vec![
+            "tenant",
+            "create",
+            "--slug",
+            "x",
+            "--name",
+            "X",
+            "--classification",
+            "external",
+        ],
         with(
-            &["credential", "list"],
+            &["credential", "create"],
             &with(
-                APP,
+                &app,
                 &[
                     "--environment",
                     "production",
@@ -180,8 +132,28 @@ async fn cli_manages_the_full_credential_lifecycle() {
                 ],
             ),
         ),
+        vec!["credential", "revoke", "--credential", public_id.as_str()],
+        with(&["scope", "grant"], &with(&app, &["--scope", "calls.read"])),
+    ] {
+        let out = cli.run(&args);
+        assert_eq!(out.code, 2, "{args:?} exists: {}", out.stdout);
+        assert!(out.stdout.is_empty());
+    }
+
+    // Reads of the projection: masked, never the secret.
+    let tenants = cli.ok(&["tenant", "list"]).json();
+    assert!(tenants
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|t| t["slug"] == "cosmicforge" && t["classification"] == "FIRST_PARTY"));
+    for args in [
+        vec!["credential", "show", "--credential", public_id.as_str()],
+        vec!["credential", "show", "--credential", credential_id.as_str()],
+        with(&["credential", "list"], &app),
     ] {
         let out = cli.ok(&args);
+        assert!(out.stdout.contains(&public_id), "{args:?}");
         assert!(
             !out.stdout.contains(secret_part(&secret)),
             "{args:?} printed the secret"
@@ -189,214 +161,37 @@ async fn cli_manages_the_full_credential_lifecycle() {
         assert!(!out.stderr.contains(secret_part(&secret)));
     }
 
-    // The issued credential authenticates through the service.
-    let h = Harness::on(Arc::new(db), TEST_PEPPER, ManualClock::new(Utc::now()));
-    h.clock.set(Utc::now());
-    let ctx = h.ctx(&secret).await;
-    assert_eq!(
-        ctx.tenant_classification(),
-        TenantClassification::FirstParty
-    );
-    assert!(ctx.has_scope("principals.read"));
-
-    // Rotate: new secret once; both valid during the overlap.
-    let rotated = cli.ok(&[
-        "credential",
-        "rotate",
-        "--credential",
-        &public_id,
-        "--overlap-minutes",
-        "10",
-    ]);
-    let new_secret = rotated.json()["secret"].as_str().unwrap().to_string();
-    assert_ne!(new_secret, secret);
-    assert!(!rotated.stderr.contains(secret_part(&new_secret)));
-    h.clock.set(Utc::now());
-    h.ctx(&secret).await;
-    h.ctx(&new_secret).await;
-
-    // Revoke: immediate.
-    let revoked = cli
-        .ok(&["credential", "revoke", "--credential", &public_id])
-        .json();
-    assert_eq!(revoked["status"], "REVOKED");
-    assert!(h.authenticate(&secret).await.is_err());
-    h.ctx(&new_secret).await;
-
-    // Limits and the effective policy.
+    // Limits are Calling's, and the effective policy resolves through the projection.
     cli.ok(&with(
         &["limits", "set-application"],
-        &with(APP, &["--requests-per-minute", "100"]),
+        &with(&app, &["--requests-per-minute", "100"]),
     ));
-    let new_public = rotated.json()["credential"]["public_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
     cli.ok(&[
         "limits",
         "set-credential",
         "--credential",
-        &new_public,
+        &public_id,
         "--requests-per-minute",
         "20",
     ]);
     let effective = cli
-        .ok(&["limits", "effective", "--credential", &new_public])
+        .ok(&["limits", "effective", "--credential", &public_id])
         .json();
     assert_eq!(effective["requests_per_minute"]["value"], 20);
     assert_eq!(effective["requests_per_minute"]["source"], "CREDENTIAL");
+    // The credential still authenticates (through Platform Access).
+    h.ctx(&secret).await;
 
-    // Principals: opaque references only.
-    let phone = cli.run(&with(
-        &["principal", "register"],
-        &with(
-            APP,
-            &[
-                "--environment",
-                "production",
-                "--kind",
-                "telephone-endpoint",
-                "--reference",
-                "+2348012345678",
-            ],
-        ),
-    ));
-    assert_eq!(phone.code, 1);
-    assert!(phone.stderr.contains("telephone"), "{}", phone.stderr);
-    let registered = cli
-        .ok(&with(
-            &["principal", "register"],
-            &with(
-                APP,
-                &[
-                    "--environment",
-                    "production",
-                    "--kind",
-                    "external-application-principal",
-                    "--reference",
-                    "user-7",
-                ],
-            ),
-        ))
-        .json();
-    assert_eq!(registered["created"], true);
-    let sa_principal = cli
-        .ok(&with(
-            &["principal", "register-service-account"],
-            &with(
-                APP,
-                &[
-                    "--environment",
-                    "production",
-                    "--service-account",
-                    "backend",
-                ],
-            ),
-        ))
-        .json();
-    assert_eq!(sa_principal["principal"]["kind"], "SERVICE_ACCOUNT");
-
-    // Policy violations surface as failures.
-    let live_sandbox = cli.run(&with(
-        &["environment", "set-live-telecom"],
-        &with(APP, &["--environment", "sandbox", "--allowed", "true"]),
-    ));
-    assert_eq!(live_sandbox.code, 1);
-    cli.ok(&[
-        "tenant",
-        "create",
-        "--slug",
-        "acme",
-        "--name",
-        "Acme",
-        "--classification",
-        "external",
-    ]);
-    cli.ok(&[
-        "application",
-        "create",
-        "--tenant",
-        "acme",
-        "--slug",
-        "app",
-        "--name",
-        "App",
-    ]);
-    let trusted = cli.run(&[
-        "scope",
-        "grant",
-        "--tenant",
-        "acme",
-        "--application",
-        "app",
-        "--scope",
-        "events.private_delivery",
-    ]);
-    assert_eq!(trusted.code, 1);
-    assert!(trusted.stderr.contains("FIRST_PARTY"));
-
-    // Suspension through the CLI leaves only the safety-only authority (Part H §72):
-    // every ordinary route is refused, safety operations (end a call, stop a
-    // recording, ...) remain possible.
-    cli.ok(&["tenant", "suspend", "--tenant", "cosmicforge"]);
-    assert!(h.authenticate(&new_secret).await.unwrap().is_safety_only());
-    cli.ok(&["tenant", "reactivate", "--tenant", "cosmicforge"]);
-    h.ctx(&new_secret).await;
-
-    // Operator audit (Part H §72.8): exactly one row per successful mutation, none for
-    // the refused ones (telephone reference, live telecom in sandbox, first-party scope),
-    // each attributed to the operator with its own correlation id.
-    let actions = audit_actions(h.conn()).await;
-    let expected = [
-        ("APPLICATION_CREATED", 2),
-        ("CREDENTIAL_CREATED", 1),
-        ("CREDENTIAL_REVOKED", 1),
-        ("CREDENTIAL_ROTATED", 1),
-        ("ENVIRONMENT_CREATED", 2),
-        ("LIMITS_SET", 2),
-        ("PRINCIPAL_REGISTERED", 2),
-        ("SCOPE_GRANTED", 1),
-        ("SERVICE_ACCOUNT_CREATED", 2),
-        ("TENANT_CREATED", 2),
-        ("TENANT_STATUS_SET", 2),
-    ];
+    // Calling's audit has exactly the Calling mutations.
     assert_eq!(
-        actions,
-        expected
-            .iter()
-            .map(|(a, n)| (a.to_string(), *n as i64))
-            .collect::<Vec<_>>()
+        audit_actions(h.conn()).await,
+        vec![("LIMITS_SET".to_string(), 2)]
     );
-    let total: i64 = expected.iter().map(|(_, n)| *n as i64).sum();
-    assert_eq!(
-        common::scalar_i64(
-            h.conn(),
-            &format!("SELECT count(*) FROM platform_operator_audit WHERE actor = '{OPERATOR}'")
-        )
-        .await,
-        total
-    );
-    assert_eq!(
-        common::scalar_i64(
-            h.conn(),
-            "SELECT count(DISTINCT correlation_id) FROM platform_operator_audit"
-        )
-        .await,
-        total,
-        "one correlation id per command"
-    );
-    // The credential rows name the credential, never its secret.
     let rows =
         common::enterprise::strings(h.conn(), "SELECT t::text FROM platform_operator_audit t")
             .await
             .join("\n");
-    for secret in [&secret, &new_secret] {
-        assert!(
-            !rows.contains(secret_part(secret)),
-            "a secret reached the audit"
-        );
-    }
-    assert!(rows.contains(&credential_id));
+    assert!(!rows.contains(secret_part(&secret)));
 }
 
 /// `(action, rows)` of the operator audit, by action.
@@ -452,10 +247,7 @@ async fn every_mutation_needs_an_operator_and_writes_one_append_only_audit_row()
         return;
     };
     let conn = w.h().conn();
-    let cli = Cli {
-        database_url: w.h().db.url.clone(),
-        pepper: TEST_PEPPER.to_string(),
-    };
+    let cli = Cli::of(&w.h().db);
     let env = [
         "--tenant",
         "acme",
@@ -464,45 +256,26 @@ async fn every_mutation_needs_an_operator_and_writes_one_append_only_audit_row()
         "--environment",
         "production",
     ];
+    let tenant_limit = [
+        "limits",
+        "set-tenant",
+        "--tenant",
+        "acme",
+        "--requests-per-minute",
+        "1000",
+    ];
 
     // No operator: refused before anything is touched (exit 2), whatever the command.
-    for args in [
-        vec![
-            "tenant",
-            "create",
-            "--slug",
-            "nobody",
-            "--name",
-            "Nobody",
-            "--classification",
-            "external",
-        ],
-        vec!["tenant", "suspend", "--tenant", "acme"],
-        with(&["compliance", "revoke"], &env),
-    ] {
+    for args in [tenant_limit.to_vec(), with(&["compliance", "revoke"], &env)] {
         let out = cli.run_raw(&args, &[]);
         assert_eq!(out.code, 2, "{args:?}: {}", out.stderr);
         assert!(out.stderr.contains("--operator"), "{}", out.stderr);
     }
     // A malformed operator id is no operator.
-    let out = cli.run_raw(
-        &[
-            "--operator",
-            "bad op",
-            "tenant",
-            "suspend",
-            "--tenant",
-            "acme",
-        ],
-        &[],
-    );
+    let out = cli.run_raw(&with(&["--operator", "bad op"], &tenant_limit), &[]);
     assert_eq!(out.code, 2, "{}", out.stderr);
     assert_eq!(
-        common::scalar_i64(
-            conn,
-            "SELECT count(*) FROM platform_tenants WHERE slug = 'nobody' OR status <> 'ACTIVE'"
-        )
-        .await,
+        common::scalar_i64(conn, "SELECT count(*) FROM platform_tenant_limits").await,
         0
     );
     assert_eq!(
@@ -512,19 +285,15 @@ async fn every_mutation_needs_an_operator_and_writes_one_append_only_audit_row()
     // Reads need no operator.
     assert_eq!(cli.run_raw(&["tenant", "list"], &[]).code, 0);
     // CF_OPERATOR_ID is the operator when --operator is absent.
-    let out = cli.run_raw(
-        &["tenant", "suspend", "--tenant", "acme"],
-        &[("CF_OPERATOR_ID", "ops.env")],
-    );
+    let out = cli.run_raw(&tenant_limit, &[("CF_OPERATOR_ID", "ops.env")]);
     assert_eq!(out.code, 0, "{}", out.stderr);
-    cli.ok(&["tenant", "reactivate", "--tenant", "acme"]);
-    let status = audit_rows(conn, "TENANT_STATUS_SET").await;
-    assert_eq!(status.len(), 2);
-    assert_eq!(status[0].0, "ops.env");
-    assert_eq!(status[1].0, OPERATOR);
-    assert_eq!(status[0].4["status"], "SUSPENDED");
-    assert_ne!(status[0].1, status[1].1);
-    assert_eq!(status[0].3, Some(w.w.consumer.tenant.id.as_uuid()));
+    cli.ok(&tenant_limit);
+    let limits = audit_rows(conn, "LIMITS_SET").await;
+    assert_eq!(limits.len(), 2);
+    assert_eq!(limits[0].0, "ops.env");
+    assert_eq!(limits[1].0, OPERATOR);
+    assert_ne!(limits[0].1, limits[1].1);
+    assert_eq!(limits[0].3, Some(w.w.consumer.tenant.id.as_uuid()));
 
     // An abuse report and a block rule to administer.
     let (call, _, _) = w.connected_call("VOICE").await;
@@ -559,48 +328,6 @@ async fn every_mutation_needs_an_operator_and_writes_one_append_only_audit_row()
     let sa = with(&env, &["--service-account", "backend"]);
     for args in [
         with(
-            &["environment", "set-live-telecom"],
-            &with(&env, &["--allowed", "true"]),
-        ),
-        with(&["environment", "suspend"], &env),
-        with(&["environment", "reactivate"], &env),
-        vec![
-            "application",
-            "suspend",
-            "--tenant",
-            "acme",
-            "--application",
-            "app",
-        ],
-        vec![
-            "application",
-            "reactivate",
-            "--tenant",
-            "acme",
-            "--application",
-            "app",
-        ],
-        with(&["service-account", "suspend"], &sa),
-        with(&["service-account", "reactivate"], &sa),
-        vec![
-            "scope",
-            "revoke",
-            "--tenant",
-            "acme",
-            "--application",
-            "app",
-            "--scope",
-            "privacy.evidence.read",
-        ],
-        vec![
-            "limits",
-            "set-tenant",
-            "--tenant",
-            "acme",
-            "--requests-per-minute",
-            "1000",
-        ],
-        with(
             &["limits", "set-service-account"],
             &with(&sa, &["--requests-per-minute", "900"]),
         ),
@@ -612,8 +339,6 @@ async fn every_mutation_needs_an_operator_and_writes_one_append_only_audit_row()
             "--requests-per-minute",
             "50",
         ],
-        vec!["principal", "suspend", "--principal", principal.as_str()],
-        vec!["principal", "reactivate", "--principal", principal.as_str()],
         with(
             &["routing-policy", "set"],
             &with(&env, &["--file", policy_file.to_str().unwrap()]),
@@ -679,24 +404,22 @@ async fn every_mutation_needs_an_operator_and_writes_one_append_only_audit_row()
         .collect();
     for action in [
         "ABUSE_REPORT_STATUS_SET",
-        "APPLICATION_STATUS_SET",
         "BLOCK_RULE_RELEASED",
         "COMPLIANCE_ELIGIBILITY_REVOKED",
         "COMPLIANCE_ELIGIBILITY_SET",
         "ENTERPRISE_CAPABILITIES_SET",
-        "ENVIRONMENT_LIVE_TELECOM_SET",
-        "ENVIRONMENT_STATUS_SET",
         "INBOUND_OWNER_SET",
         "LIMITS_SET",
-        "PRINCIPAL_STATUS_SET",
         "ROUTING_POLICY_SET",
-        "SCOPE_REVOKED",
-        "SERVICE_ACCOUNT_STATUS_SET",
         "SPEND_POLICY_SET",
     ] {
         let rows = audit_rows(conn, action).await;
         assert!(!rows.is_empty(), "{action} was not audited");
         for (actor, correlation, ..) in &rows {
+            // The first tenant limit was set through CF_OPERATOR_ID (checked above).
+            if action == "LIMITS_SET" && actor == "ops.env" {
+                continue;
+            }
             assert_eq!(actor, OPERATOR, "{action}");
             assert!(
                 correlation.starts_with("op_") && correlation.len() >= 8,
@@ -705,10 +428,10 @@ async fn every_mutation_needs_an_operator_and_writes_one_append_only_audit_row()
         }
         assert!(actions.contains(&action.to_string()));
     }
-    // 2 tenant status rows + 21 commands above (limits: 3 rows, one per level).
+    // 2 tenant limit rows + 10 commands above (limits: one row per level).
     assert_eq!(
         common::scalar_i64(conn, "SELECT count(*) FROM platform_operator_audit").await,
-        23
+        12
     );
     let block_row = &audit_rows(conn, "BLOCK_RULE_RELEASED").await[0];
     assert_eq!(block_row.2, "BLOCK_RULE");
@@ -750,7 +473,7 @@ async fn every_mutation_needs_an_operator_and_writes_one_append_only_audit_row()
     }
     assert_eq!(
         common::scalar_i64(conn, "SELECT count(*) FROM platform_operator_audit").await,
-        23
+        12
     );
 }
 
@@ -759,12 +482,9 @@ async fn compliance_commands_validate_bounded_opaque_input_and_show_a_safe_view(
     let Some(db) = TestDb::new().await else {
         return;
     };
-    let h = Harness::on(Arc::new(db), TEST_PEPPER, ManualClock::new(Utc::now()));
+    let h = Harness::on(Arc::new(db), ManualClock::new(Utc::now()));
     h.consumer("acme", TenantClassification::External).await;
-    let cli = Cli {
-        database_url: h.db.url.clone(),
-        pepper: TEST_PEPPER.to_string(),
-    };
+    let cli = Cli::of(&h.db);
     let env = [
         "--tenant",
         "acme",
@@ -828,22 +548,25 @@ async fn compliance_commands_validate_bounded_opaque_input_and_show_a_safe_view(
     );
 }
 
+/// The credential pepper is Platform Access's: a Calling process that still has one in its
+/// environment refuses to start (no second verifier authority, no stray secret).
 #[tokio::test]
-async fn cli_refuses_to_start_without_a_strong_pepper() {
+async fn cli_refuses_to_start_with_a_leftover_pepper() {
     let Some(db) = TestDb::new().await else {
         return;
     };
-    for pepper in ["", "changeme", "secret123", "development-secret"] {
-        let cli = Cli {
-            database_url: db.url.clone(),
-            pepper: pepper.to_string(),
-        };
-        let out = cli.run(&["tenant", "list"]);
-        assert_eq!(out.code, 2, "pepper `{pepper}` accepted");
-        assert!(out.stderr.contains("API_CREDENTIAL_PEPPER"));
-        if !pepper.is_empty() {
-            assert!(!out.stderr.contains(pepper));
-        }
+    let cli = Cli::of(&db);
+    for var in [
+        "API_CREDENTIAL_PEPPER",
+        "API_CREDENTIAL_PREVIOUS_PEPPER_FILE",
+    ] {
+        let out = cli.run_raw(
+            &["tenant", "list"],
+            &[(var, "leftover-pepper-value-0123456789abcdefghijkl")],
+        );
+        assert_eq!(out.code, 2, "{var} accepted");
+        assert!(out.stderr.contains("API_CREDENTIAL_"), "{}", out.stderr);
+        assert!(!out.stderr.contains("leftover-pepper-value"));
         assert!(out.stdout.is_empty());
     }
 }
@@ -859,10 +582,7 @@ async fn retention_holds_tombstones_and_reseals_are_operator_audited() {
         return;
     };
     let conn = w.h().conn();
-    let cli = Cli {
-        database_url: w.h().db.url.clone(),
-        pepper: TEST_PEPPER.to_string(),
-    };
+    let cli = Cli::of(&w.h().db);
     let env = [
         "--tenant",
         "acme",
@@ -1039,8 +759,13 @@ async fn retention_holds_tombstones_and_reseals_are_operator_audited() {
         .json();
     assert_eq!(shown["status"], "DEACTIVATED");
     assert_ne!(shown["externalReference"], "recipient-1");
-    let out = cli.run(&["principal", "reactivate", "--principal", principal.as_str()]);
-    assert_ne!(out.code, 0, "a tombstoned principal was reactivated");
+    // Platform Access refuses to bring it back.
+    assert!(w
+        .h()
+        .platform
+        .set_principal_status(w.w.recipient.id(), calling::domain::PrincipalStatus::Active)
+        .await
+        .is_err());
 
     // Webhook key reseal: one audit row with counts and the batch size only.
     let out = cli.run_raw(
@@ -1077,10 +802,7 @@ async fn incidents_are_listed_and_resolved_by_an_audited_operator() {
         return;
     };
     let conn = w.h().conn();
-    let cli = Cli {
-        database_url: w.h().db.url.clone(),
-        pepper: TEST_PEPPER.to_string(),
-    };
+    let cli = Cli::of(&w.h().db);
     let scope = w.w.scope();
     let scoped = uuid::Uuid::new_v4();
     let platform = uuid::Uuid::new_v4();

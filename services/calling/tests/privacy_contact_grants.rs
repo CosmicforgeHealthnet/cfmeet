@@ -36,7 +36,6 @@ async fn world(configured: bool) -> Option<(CallWorld, Option<Arc<ContactDelegat
     runtime.contact_delegation = signer.clone();
     let h = Harness::with_runtime(
         db,
-        common::TEST_PEPPER,
         calling::domain::ManualClock::new(common::t0()),
         media,
         bus,

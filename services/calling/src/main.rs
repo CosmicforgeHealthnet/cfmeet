@@ -349,9 +349,8 @@ async fn main() -> anyhow::Result<()> {
         tracing::error!("CF_PLATFORM_ACCESS_BASE_URL is required: Platform Access verifies every customer credential");
         std::process::exit(2);
     }
-    let authority: Arc<dyn IdentityAuthority> = Arc::new(HttpIdentityAuthority::new(
-        service_auth.client_arc(),
-    ));
+    let authority: Arc<dyn IdentityAuthority> =
+        Arc::new(HttpIdentityAuthority::new(service_auth.client_arc()));
     let clock: SharedClock = Arc::new(SystemClock);
     let state = AppState::new(
         db,

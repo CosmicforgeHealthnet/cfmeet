@@ -58,6 +58,34 @@ pub mod names {
     pub const WEBHOOKS_MANAGE: &str = "webhooks.manage";
     /// Read the application's usage facts and effective limits (Part G §69 / §70).
     pub const USAGE_READ: &str = "usage.read";
+
+    /// Every scope Calling enforces. Each must be registered by Platform Access (the
+    /// scope registry is Platform Access's; Calling only checks granted names).
+    pub const ALL: &[&str] = &[
+        PRINCIPALS_READ,
+        PRINCIPALS_WRITE,
+        CALLS_READ,
+        CALLS_WRITE,
+        EVENTS_PRIVATE_DELIVERY,
+        PRIVACY_CONTEXTS_READ,
+        PRIVACY_CONTEXTS_WRITE,
+        PRIVACY_SESSIONS_READ,
+        PRIVACY_SESSIONS_WRITE,
+        PRIVACY_CONTACTS_READ,
+        PRIVACY_CONTACTS_WRITE,
+        PRIVACY_CONTACTS_VERIFY,
+        PRIVACY_EVIDENCE_READ,
+        ENTERPRISE_CONFIG_READ,
+        ENTERPRISE_CONFIG_WRITE,
+        ENTERPRISE_CALLS_USE,
+        ENTERPRISE_VOICEMAIL_READ,
+        ENTERPRISE_VOICEMAIL_MANAGE,
+        ENTERPRISE_RECORDING_MANAGE,
+        ENTERPRISE_RECORDING_READ,
+        WEBHOOKS_READ,
+        WEBHOOKS_MANAGE,
+        USAGE_READ,
+    ];
 }
 
 /// A scope name granted by the Platform Access scope registry.
@@ -104,4 +132,3 @@ impl ScopeSet {
         Self(names.into_iter().map(Scope).collect())
     }
 }
-
