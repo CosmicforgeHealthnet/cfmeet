@@ -17,6 +17,7 @@ pub mod callbacks;
 pub mod catalog;
 pub mod customer;
 pub mod error;
+pub mod grants;
 pub mod internal;
 pub mod kyc;
 pub mod middleware;

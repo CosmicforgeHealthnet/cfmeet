@@ -37,6 +37,7 @@ pub fn routes() -> Router<AppState> {
             "/number-resources/:number_resource_id/route-readiness",
             post(acknowledge_route),
         )
+        .merge(super::grants::routes())
 }
 
 /// The current provider route configuration of every family of a number, with consumer

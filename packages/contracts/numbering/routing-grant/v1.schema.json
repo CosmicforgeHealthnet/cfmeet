@@ -1,0 +1,796 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/numbering/routing-grant/v1.schema.json",
+  "title": "CF Meet number routing grants v1",
+  "description": "Number routing grants (Part IV Workstream K): inbound resolution, caller-identity / SMS-sender grant requests, verification, the grant claims (typ cf-number-grant+jwt, dedicated key) and the receiver trust bundle. The root accepts exactly one of them (fixtures).",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/RoutingGrantClaims"
+    },
+    {
+      "$ref": "#/$defs/RoutingGrantTrustBundle"
+    },
+    {
+      "$ref": "#/$defs/IssuedGrant"
+    },
+    {
+      "$ref": "#/$defs/InboundResolutionRequest"
+    },
+    {
+      "$ref": "#/$defs/InboundResolution"
+    },
+    {
+      "$ref": "#/$defs/OutboundGrantRequest"
+    },
+    {
+      "$ref": "#/$defs/GrantVerificationRequest"
+    },
+    {
+      "$ref": "#/$defs/GrantVerification"
+    }
+  ],
+  "$defs": {
+    "GrantKind": {
+      "description": "What a grant authorizes: INBOUND_VOICE / INBOUND_SMS (a resolved received call / message), CALLER_IDENTITY (present an owned number on one outbound call), SMS_SENDER (send one message from an owned number).",
+      "type": "string",
+      "enum": [
+        "INBOUND_VOICE",
+        "INBOUND_SMS",
+        "CALLER_IDENTITY",
+        "SMS_SENDER"
+      ]
+    },
+    "GrantReason": {
+      "description": "Stable reasons a resolution is unavailable or a grant does not verify.",
+      "type": "string",
+      "enum": [
+        "UNKNOWN_NUMBER",
+        "NOT_ASSIGNED",
+        "NOT_ACTIVE",
+        "CAPABILITY_NOT_USABLE",
+        "ROUTE_NOT_READY",
+        "SYNTHETIC_NOT_ROUTABLE",
+        "GRANT_INVALID",
+        "GRANT_EXPIRED",
+        "GRANT_REVOKED",
+        "AUDIENCE_MISMATCH",
+        "STALE_ROUTING_REVISION",
+        "ASSIGNMENT_NOT_ACTIVE",
+        "GRANT_ALREADY_USED",
+        "OPERATION_MISMATCH"
+      ]
+    },
+    "RoutingGrantClaims": {
+      "description": "Claims of a number routing grant (JWS typ cf-number-grant+jwt, alg EdDSA, signed with Numbering's DEDICATED grant key — never its service-auth key). Closed claim set; no telephone number. Receivers enforce aud, runtime environment, iat <= nbf < exp, exp - iat <= 300 s, 30 s skew and the trusted grant kinds; the AUTHORITATIVE check is Numbering's verification against current state (routing revision, ACTIVE assignment, capability, single use).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ver",
+        "use",
+        "grant_kind",
+        "iss",
+        "aud",
+        "runtime_environment",
+        "iat",
+        "nbf",
+        "exp",
+        "jti",
+        "number_resource_id",
+        "assignment_id",
+        "routing_revision",
+        "scope"
+      ],
+      "properties": {
+        "ver": {
+          "const": 1
+        },
+        "use": {
+          "const": "NUMBER_ROUTING_GRANT"
+        },
+        "grant_kind": {
+          "$ref": "#/$defs/GrantKind"
+        },
+        "iss": {
+          "const": "cfmeet.numbering"
+        },
+        "aud": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ServiceId"
+        },
+        "runtime_environment": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RuntimeEnvironment"
+        },
+        "iat": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/UnixTime"
+        },
+        "nbf": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/UnixTime"
+        },
+        "exp": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/UnixTime"
+        },
+        "jti": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "assignment_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "routing_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scope": {
+          "description": "The customer scope of the number's assignment (from Numbering's records).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tenant_id",
+            "application_id",
+            "environment_id"
+          ],
+          "properties": {
+            "tenant_id": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "application_id": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "environment_id": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        },
+        "principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "target": {
+          "description": "An opaque CF Meet routing target.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "ref"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z_]{1,39}$",
+              "not": {
+                "const": "NONE"
+              }
+            },
+            "ref": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        },
+        "operation_ref": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "grant_kind": {
+                "enum": [
+                  "CALLER_IDENTITY",
+                  "SMS_SENDER"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "operation_ref"
+            ],
+            "not": {
+              "required": [
+                "target"
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "target"
+            ],
+            "not": {
+              "required": [
+                "operation_ref"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "RoutingGrantTrustBundle": {
+      "description": "Receiver-authoritative routing grant trust (each receiver's own file): the issuers whose grant keys it accepts and for which grant kinds. A key listed here is never also trusted for service tokens.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bundle_version",
+        "token_use",
+        "audience",
+        "runtime_environment",
+        "trusted_issuers"
+      ],
+      "properties": {
+        "bundle_version": {
+          "const": 1
+        },
+        "token_use": {
+          "const": "NUMBER_ROUTING_GRANT"
+        },
+        "audience": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ServiceId"
+        },
+        "runtime_environment": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RuntimeEnvironment"
+        },
+        "trusted_issuers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "description": "A trusted issuer.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "issuer",
+              "keys",
+              "grant_kinds"
+            ],
+            "properties": {
+              "issuer": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ServiceId"
+              },
+              "keys": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 4,
+                "items": {
+                  "$ref": "https://schemas.cfmeet.com/platform/service-auth/trust-bundle/v1.schema.json#/$defs/PublicKey"
+                }
+              },
+              "grant_kinds": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 4,
+                "uniqueItems": true,
+                "items": {
+                  "$ref": "#/$defs/GrantKind"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "IssuedGrant": {
+      "description": "A signed grant handed to the requesting service (bearer: forward it only to its audience). Never returned by a customer route.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grant",
+        "grantId",
+        "grantKind",
+        "audience",
+        "numberResourceId",
+        "routingRevision",
+        "issuedAt",
+        "expiresAt"
+      ],
+      "properties": {
+        "grant": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 4096,
+          "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
+        },
+        "grantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "grantKind": {
+          "$ref": "#/$defs/GrantKind"
+        },
+        "audience": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ServiceId"
+        },
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "routingRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "issuedAt": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "expiresAt": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Timestamp"
+        }
+      }
+    },
+    "InboundResolutionRequest": {
+      "description": "POST /internal/v1/routing/inbound-resolutions (number-route.resolve): the received number of a family; only the family's carrier resolves it (Telephony: VOICE, SMS Gateway: SMS).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "family",
+        "e164"
+      ],
+      "properties": {
+        "family": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RouteFamily"
+        },
+        "e164": {
+          "type": "string",
+          "pattern": "^\\+[1-9][0-9]{6,14}$"
+        }
+      }
+    },
+    "InboundResolution": {
+      "description": "The routing of a received call / message from Numbering's canonical state. ROUTED: the ACTIVE assignment's owner scope, class and target, with an INBOUND grant (VOICE: audience Calling; SMS: the SMS Gateway). NOT_ROUTED: assigned and ready but the family routes nowhere. UNAVAILABLE: a stable reason (unknown, not active / assigned, capability not usable, route not ready, synthetic in a protected runtime). No telephone number is returned.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "family",
+        "numberResourceId",
+        "assignmentId",
+        "scope",
+        "ownershipClass",
+        "target",
+        "routingRevision",
+        "grant",
+        "reason"
+      ],
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "ROUTED",
+            "NOT_ROUTED",
+            "UNAVAILABLE"
+          ]
+        },
+        "family": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RouteFamily"
+        },
+        "numberResourceId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "assignmentId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scope": {
+          "oneOf": [
+            {
+              "description": "The customer scope of the number's assignment (from Numbering's records).",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "tenantId",
+                "applicationId",
+                "environmentId"
+              ],
+              "properties": {
+                "tenantId": {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                },
+                "applicationId": {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                },
+                "environmentId": {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ownershipClass": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/OwnershipClass"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "oneOf": [
+            {
+              "description": "An opaque CF Meet routing target.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "ref"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z_]{1,39}$",
+                  "not": {
+                    "const": "NONE"
+                  }
+                },
+                "ref": {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "routingRevision": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "grant": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/IssuedGrant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/GrantReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "ROUTED"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "grant": {
+                "$ref": "#/$defs/IssuedGrant"
+              },
+              "target": {
+                "description": "An opaque CF Meet routing target.",
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "ref"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "pattern": "^[A-Z][A-Z_]{1,39}$",
+                    "not": {
+                      "const": "NONE"
+                    }
+                  },
+                  "ref": {
+                    "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                  }
+                }
+              },
+              "reason": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "UNAVAILABLE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "grant": {
+                "type": "null"
+              },
+              "reason": {
+                "$ref": "#/$defs/GrantReason"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "NOT_ROUTED"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "grant": {
+                "type": "null"
+              },
+              "target": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "OutboundGrantRequest": {
+      "description": "POST /internal/v1/routing/caller-identity-grants (number-caller-identity.authorize, Calling) or /sms-sender-grants (number-sms-sender.authorize, SMS Gateway), with a signed DELEGATED customer context: a single-use grant for ONE operation on a number the scope actively owns. Never a telephone number: an arbitrary caller id or sender cannot be requested.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numberResourceId",
+        "operationRef"
+      ],
+      "properties": {
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "operationRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+        }
+      }
+    },
+    "GrantVerificationRequest": {
+      "description": "POST /internal/v1/routing/grant-verifications (number-grant.verify): the grant's audience verifies it against current state; consume performs the single use of an outbound grant for its operation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grant"
+      ],
+      "properties": {
+        "grant": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "consume": {
+          "type": "boolean"
+        },
+        "operationRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+        }
+      }
+    },
+    "GrantVerification": {
+      "description": "A verification. valid: false names a stable reason only. e164 is returned only for an outbound grant (to its audience: Telephony / the SMS Gateway).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "valid",
+        "reason",
+        "grantId"
+      ],
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "reason": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/GrantReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "grantId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "grantKind": {
+          "$ref": "#/$defs/GrantKind"
+        },
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "assignmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "routingRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scope": {
+          "description": "The customer scope of the number's assignment (from Numbering's records).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tenantId",
+            "applicationId",
+            "environmentId"
+          ],
+          "properties": {
+            "tenantId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "applicationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "environmentId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        },
+        "principalId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "oneOf": [
+            {
+              "description": "An opaque CF Meet routing target.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "ref"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z_]{1,39}$",
+                  "not": {
+                    "const": "NONE"
+                  }
+                },
+                "ref": {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "operationRef": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "e164": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^\\+[1-9][0-9]{6,14}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "consumed": {
+          "type": "boolean"
+        },
+        "expiresAt": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Timestamp"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "valid": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "grantKind",
+              "numberResourceId",
+              "assignmentId",
+              "routingRevision",
+              "scope",
+              "principalId",
+              "target",
+              "operationRef",
+              "e164",
+              "consumed",
+              "expiresAt"
+            ],
+            "properties": {
+              "reason": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "reason": {
+                "$ref": "#/$defs/GrantReason"
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "e164"
+                  ]
+                },
+                {
+                  "required": [
+                    "scope"
+                  ]
+                },
+                {
+                  "required": [
+                    "target"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

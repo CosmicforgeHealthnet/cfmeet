@@ -103,7 +103,11 @@
         "platform-identity.read",
         "platform-identity.administer",
         "number-resource.read",
-        "number-route.acknowledge"
+        "number-route.acknowledge",
+        "number-route.resolve",
+        "number-caller-identity.authorize",
+        "number-sms-sender.authorize",
+        "number-grant.verify"
       ]
     }
   }

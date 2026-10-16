@@ -13,8 +13,15 @@ library, not a deployable service; it never depends on a service.
 * Receiver-authoritative permissions from a trust bundle; tokens carry none. The
   permission registry fixes each permission's receiver and the issuers it may ever be
   granted to.
-* Contracts: `packages/contracts/platform/` (`cfmeet.platform.*`); conformance is tested
-  in both directions.
+* Separately typed delegated credentials with their own keys and trust bundles:
+  Contact Vault access tokens (`contact_delegation`, `cf-contact-access+jwt`) and number
+  routing grants (`number_grant`, `cf-number-grant+jwt`, Part IV Workstream K: signed by
+  Numbering's dedicated grant key, revision-bound, at most 300 s, no telephone number;
+  receivers verify locally with a `NumberGrantTrust` bundle and Numbering's verification
+  is authoritative for revocation and single use).
+* Contracts: `packages/contracts/platform/` (`cfmeet.platform.*`) and
+  `numbering/routing-grant` (`cfmeet.numbering.routing-grant`); conformance is tested in
+  both directions.
 
 ## Use
 

@@ -144,6 +144,23 @@ pub enum InternalPermission {
     /// prerequisite, never fabricated by Numbering.
     #[serde(rename = "number-route.acknowledge")]
     NumberRouteAcknowledge,
+    /// Numbering: resolve a received call / message on a public number to the owner scope
+    /// and routing target of its ACTIVE assignment, with an inbound routing grant (the
+    /// carrier of the family's traffic only: Telephony voice, SMS Gateway SMS).
+    #[serde(rename = "number-route.resolve")]
+    NumberRouteResolve,
+    /// Numbering: obtain a single-use CALLER_IDENTITY grant for a number the delegated
+    /// customer scope actively owns (never an arbitrary caller id).
+    #[serde(rename = "number-caller-identity.authorize")]
+    NumberCallerIdentityAuthorize,
+    /// Numbering: obtain a single-use SMS_SENDER grant for a number the delegated customer
+    /// scope actively owns.
+    #[serde(rename = "number-sms-sender.authorize")]
+    NumberSmsSenderAuthorize,
+    /// Numbering: verify (and consume) a routing grant addressed to the caller against
+    /// CURRENT state (assignment, routing revision, capability, single use).
+    #[serde(rename = "number-grant.verify")]
+    NumberGrantVerify,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -416,6 +433,38 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: false,
         description: "Acknowledge that a configured number route (voice: Telephony, SMS: SMS Gateway) is ready to carry traffic; an activation prerequisite",
     },
+    PermissionDefinition {
+        permission: InternalPermission::NumberRouteResolve,
+        name: "number-route.resolve",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::TELEPHONY, services::SMS_GATEWAY],
+        sensitive: true,
+        description: "Resolve a received call (Telephony) or message (SMS Gateway) on a public number to its owner scope and routing target, with a short-lived inbound routing grant",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberCallerIdentityAuthorize,
+        name: "number-caller-identity.authorize",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Obtain a single-use caller-identity grant (audience Telephony) for a number the delegated customer scope actively owns",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberSmsSenderAuthorize,
+        name: "number-sms-sender.authorize",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::SMS_GATEWAY],
+        sensitive: false,
+        description: "Obtain a single-use SMS sender grant for a number the delegated customer scope actively owns",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberGrantVerify,
+        name: "number-grant.verify",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::CALLING, services::TELEPHONY, services::SMS_GATEWAY],
+        sensitive: false,
+        description: "Verify (and consume) a number routing grant addressed to the caller against current state",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -455,6 +504,10 @@ impl InternalPermission {
         InternalPermission::PlatformIdentityAdminister,
         InternalPermission::NumberResourceRead,
         InternalPermission::NumberRouteAcknowledge,
+        InternalPermission::NumberRouteResolve,
+        InternalPermission::NumberCallerIdentityAuthorize,
+        InternalPermission::NumberSmsSenderAuthorize,
+        InternalPermission::NumberGrantVerify,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {

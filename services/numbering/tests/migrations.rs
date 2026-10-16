@@ -51,6 +51,7 @@ const DOMAIN: &[&str] = &[
     "number_resources",
     "number_route_configurations",
     "number_route_readiness",
+    "number_routing_grants",
     "number_routing_profiles",
     "number_search_windows",
     "number_type_catalog",

@@ -35,6 +35,9 @@ pub struct AppState {
     pub acquisition_settings: crate::acquisition::AcquisitionSettings,
     /// Principal resolution in the trusted scope (Platform Access).
     pub principals: Arc<dyn crate::identity::PrincipalDirectory>,
+    /// Routing grant issuance / verification (Workstream K); `None`: not configured (the
+    /// grant endpoints refuse, fail closed).
+    pub grants: Option<crate::grants::RoutingGrants>,
 }
 
 impl AppState {
@@ -59,6 +62,7 @@ impl AppState {
             providers: None,
             acquisition_settings: Default::default(),
             principals: Arc::new(crate::identity::UnconfiguredPrincipals),
+            grants: None,
             numbers,
             db,
             clock,
@@ -84,6 +88,21 @@ impl AppState {
             self.acquisition_settings.clone(),
         )
         .with_principals(self.principals.clone())
+    }
+
+    /// Installs the routing grant signer (Numbering's dedicated grant key).
+    /// `clock` is the grant verifier's clock (the signer carries its own).
+    pub fn with_grants(
+        mut self,
+        signer: cf_service_auth::number_grant::NumberGrantSigner,
+        clock: cf_service_auth::SharedClock,
+    ) -> Self {
+        self.grants = Some(crate::grants::RoutingGrants::new(
+            self.numbers.clone(),
+            signer,
+            clock,
+        ));
+        self
     }
 
     /// Installs the principal directory.

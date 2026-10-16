@@ -51,6 +51,7 @@ pub mod catalog;
 pub mod e164;
 pub mod eligibility;
 pub mod error;
+pub mod grants;
 pub mod inventory;
 pub mod kyc;
 pub mod lifecycle;

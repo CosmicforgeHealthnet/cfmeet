@@ -18,6 +18,7 @@
 pub mod acquisition;
 pub mod config;
 pub mod domain;
+pub mod grants;
 pub mod http;
 pub mod identity;
 pub mod infra;

@@ -257,6 +257,17 @@ impl NumberDomain {
         .ok_or(DomainError::NotFound("number resource"))
     }
 
+    /// Every resource of a canonical number (a real and a synthetic test resource may
+    /// share digits); real inventory first.
+    pub async fn resources_by_e164(&self, e164: &str) -> DomainResult<Vec<ResourceRow>> {
+        Ok(ResourceRow::find_by_statement(stmt(
+            "SELECT * FROM number_resources WHERE e164 = $1 ORDER BY (inventory_source = 'SYNTHETIC_TEST'), id",
+            vec![e164.into()],
+        ))
+        .all(&self.db)
+        .await?)
+    }
+
     /// A resource by number within an inventory class (real or synthetic).
     pub async fn resource_by_number(
         &self,

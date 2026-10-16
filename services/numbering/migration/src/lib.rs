@@ -18,6 +18,7 @@ mod m20261019_000005_provider_commands;
 mod m20261020_000006_inventory_reservations;
 mod m20261021_000007_provisioning_activation;
 mod m20261022_000008_ownership_assignment;
+mod m20261023_000009_routing_grants;
 
 /// Name of the table recording which Numbering migrations have been applied.
 pub const MIGRATION_TABLE: &str = "numbering_seaql_migrations";
@@ -36,6 +37,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261020_000006_inventory_reservations::Migration),
             Box::new(m20261021_000007_provisioning_activation::Migration),
             Box::new(m20261022_000008_ownership_assignment::Migration),
+            Box::new(m20261023_000009_routing_grants::Migration),
         ]
     }
 

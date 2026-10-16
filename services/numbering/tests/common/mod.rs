@@ -290,17 +290,31 @@ pub fn service_auth(
                 (
                     cf_service_auth::services::CALLING,
                     vec![calling.public_jwk()],
-                    &["number-resource.read"],
+                    &[
+                        "number-resource.read",
+                        "number-caller-identity.authorize",
+                        "number-grant.verify",
+                    ],
                 ),
                 (
                     cf_service_auth::services::TELEPHONY,
                     vec![telephony.public_jwk()],
-                    &["number-resource.read", "number-route.acknowledge"],
+                    &[
+                        "number-resource.read",
+                        "number-route.acknowledge",
+                        "number-route.resolve",
+                        "number-grant.verify",
+                    ],
                 ),
                 (
                     cf_service_auth::services::SMS_GATEWAY,
                     vec![sms_gateway.public_jwk()],
-                    &["number-route.acknowledge"],
+                    &[
+                        "number-route.acknowledge",
+                        "number-route.resolve",
+                        "number-sms-sender.authorize",
+                        "number-grant.verify",
+                    ],
                 ),
             ],
         ),
@@ -479,6 +493,49 @@ impl Harness {
         }
         self.raw(builder.body(Body::from(body.to_string())).unwrap())
             .await
+    }
+
+    /// A signed internal request with a JSON body and a signed delegated customer
+    /// context.
+    pub async fn internal_delegated(
+        &self,
+        signer: &ServiceTokenSigner,
+        path: &str,
+        body: Value,
+        delegated: cf_service_auth::DelegatedPlatformContext,
+    ) -> Reply {
+        let signed = signer
+            .sign(
+                &OutboundServiceRequest::new_operation(ServiceId::numbering())
+                    .with_delegated_context(delegated),
+            )
+            .unwrap();
+        let mut builder = Request::builder()
+            .method(Method::POST)
+            .uri(path)
+            .header("content-type", "application/json");
+        for (name, value) in signed.headers().iter() {
+            builder = builder.header(name, value);
+        }
+        self.raw(builder.body(Body::from(body.to_string())).unwrap())
+            .await
+    }
+
+    /// The same harness with routing grants (a dedicated grant key) installed; the
+    /// returned clock drives grant issuance and verification (starts at the domain clock).
+    pub fn with_grants(mut self) -> (Self, cf_service_auth::ManualClock) {
+        let clock = cf_service_auth::ManualClock::new(self.now().timestamp());
+        let shared: SharedClock = Arc::new(clock.clone());
+        let signer = numbering::config::grants::signer(
+            key("numbering-grant-test-1"),
+            ENV,
+            60,
+            shared.clone(),
+        )
+        .unwrap();
+        self.state = self.state.clone().with_grants(signer, shared);
+        self.app = http::app(self.state.clone());
+        (self, clock)
     }
 
     /// A signed internal request from `signer`.

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Numbering API",
-    "version": "1.6.0",
+    "version": "1.7.0",
     "description": "HTTP surface of services/numbering: GET /health, /ready and /openapi.json (public, no data); the customer API under /v1 (credential verified by Platform Access on every request; normalized 401, 429 when Platform Access throttles or a quota is exhausted, 503 when it is unreachable — fail closed): assignment / reservation reads, the catalog, KYC and eligibility (F), provider-neutral inventory search and reservations (H); provider callbacks (G); and the service-authenticated /internal/v1 API (cfmeet.platform.internal-http; permission from Numbering's own trust bundle). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 64 KiB."
   },
   "components": {
@@ -3567,6 +3567,257 @@
             "$ref": "#/components/responses/Error"
           },
           "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/routing/inbound-resolutions": {
+      "post": {
+        "operationId": "resolveInbound",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "description": "The routing of a received call (Telephony, VOICE) or message (SMS Gateway, SMS) from the number's ACTIVE assignment, with a signed INBOUND grant bound to the routing revision. Only the family's carrier resolves it (CONSUMER_MISMATCH otherwise). Permission `number-route.resolve`. 503 without a configured grant key.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/routing-grant/v1.schema.json#/$defs/InboundResolutionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/routing-grant/v1.schema.json#/$defs/InboundResolution"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/routing/caller-identity-grants": {
+      "post": {
+        "operationId": "authorizeCallerIdentity",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "description": "A single-use CALLER_IDENTITY grant (audience Telephony) for ONE operation on a number the DELEGATED customer scope actively owns, with usable outbound voice; a personal / professional number only for its owner, an employee's direct line only for its routed employee (PRINCIPAL_NOT_PERMITTED). Another scope's number is NOT_FOUND; one grant per operation (OPERATION_ALREADY_AUTHORIZED). Permission `number-caller-identity.authorize` (Calling) and a signed delegated context.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/routing-grant/v1.schema.json#/$defs/OutboundGrantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/routing-grant/v1.schema.json#/$defs/IssuedGrant"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/routing/sms-sender-grants": {
+      "post": {
+        "operationId": "authorizeSmsSender",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "description": "A single-use SMS_SENDER grant (audience the SMS Gateway) for ONE message from a number the DELEGATED customer scope actively owns, with usable outbound SMS (same principal rules). Permission `number-sms-sender.authorize` (SMS Gateway) and a signed delegated context.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/routing-grant/v1.schema.json#/$defs/OutboundGrantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/routing-grant/v1.schema.json#/$defs/IssuedGrant"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/routing/grant-verifications": {
+      "post": {
+        "operationId": "verifyRoutingGrant",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "description": "The grant's audience verifies it: signature (dedicated grant key), type, lifetime, then CURRENT state — recorded and not revoked, the assignment still the number's ACTIVE one, the routing revision unchanged (a routing change, transfer or suspension revokes at once), the capability usable; an outbound grant is consumed once for its operation. Refusals are valid: false with a stable reason. Permission `number-grant.verify`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/routing-grant/v1.schema.json#/$defs/GrantVerificationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/routing-grant/v1.schema.json#/$defs/GrantVerification"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
             "$ref": "#/components/responses/Error"
           },
           "503": {

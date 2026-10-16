@@ -316,6 +316,15 @@ async fn transition_assignment(
         now,
     )
     .await?;
+    if from == A::Active {
+        super::grants::revoke_grants_in(
+            txn,
+            row.number_resource_id,
+            super::grants::revoke_reason::ASSIGNMENT_NOT_ACTIVE,
+            now,
+        )
+        .await?;
+    }
     crate::metrics::inc(
         "numbering_assignment_transitions_total",
         &[("to", to.as_str())],
@@ -642,6 +651,14 @@ impl NumberDomain {
                updated_at = $2 WHERE id = $1",
             vec![row.number_resource_id.into(), now.into()],
         ))
+        .await?;
+        // Grants bound to the previous routing revision are revoked now.
+        super::grants::revoke_grants_in(
+            &txn,
+            row.number_resource_id,
+            super::grants::revoke_reason::ROUTING_CHANGED,
+            now,
+        )
         .await?;
         let status = row.status();
         append_history(
@@ -1250,6 +1267,14 @@ impl NumberDomain {
             vec![row.number_resource_id.into(), now.into()],
         ))
         .await?;
+        // Grants bound to the previous routing revision are revoked now.
+        super::grants::revoke_grants_in(
+            txn,
+            row.number_resource_id,
+            super::grants::revoke_reason::ROUTING_CHANGED,
+            now,
+        )
+        .await?;
         let status = row.status();
         append_history(
             txn,
@@ -1394,6 +1419,13 @@ impl NumberDomain {
             Some(A::Active),
             actor,
             "TRANSFERRED_INTERNALLY",
+            now,
+        )
+        .await?;
+        super::grants::revoke_grants_in(
+            txn,
+            row.number_resource_id,
+            super::grants::revoke_reason::TRANSFERRED,
             now,
         )
         .await?;

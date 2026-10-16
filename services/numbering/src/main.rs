@@ -76,6 +76,15 @@ async fn main() -> anyhow::Result<()> {
                 std::process::exit(2);
             }
         };
+    let grant_settings = match numbering::config::grants::GrantSettings::from_lookup(|key| {
+        std::env::var(key).ok()
+    }) {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("numbering: routing grant configuration error: {err}");
+            std::process::exit(2);
+        }
+    };
     if !settings.has_platform_access() {
         eprintln!("numbering: CF_PLATFORM_ACCESS_BASE_URL is required: Platform Access verifies every customer credential");
         std::process::exit(2);
@@ -97,6 +106,19 @@ async fn main() -> anyhow::Result<()> {
             tracing::error!(error = %err, "service authentication configuration error");
             std::process::exit(2);
         }
+    };
+    let grant_signer = match &grant_settings {
+        None => {
+            tracing::warn!("no routing grant key is configured: routing grants are refused (503)");
+            None
+        }
+        Some(g) => match g.load(&settings, Arc::new(cf_service_auth::SystemClock)) {
+            Ok(signer) => Some(signer),
+            Err(err) => {
+                tracing::error!(error = %err, "routing grant configuration error");
+                std::process::exit(2);
+            }
+        },
     };
     tracing::info!(
         service = %service_auth.signer().issuer(),
@@ -135,13 +157,16 @@ async fn main() -> anyhow::Result<()> {
     let principals = Arc::new(numbering::identity::PlatformAccessPrincipals::new(
         service_auth.client(),
     ));
-    let state = AppState::new(
+    let mut state = AppState::new(
         db.clone(),
         clock.clone(),
         authority,
         service_auth,
         config.workers,
     );
+    if let Some(signer) = grant_signer {
+        state = state.with_grants(signer, Arc::new(cf_service_auth::SystemClock));
+    }
     let verifier: Arc<dyn KycVerifier> = match kyc_config.verifier {
         VerifierChoice::Manual => Arc::new(ManualKycVerifier),
         VerifierChoice::Deterministic => {
@@ -241,6 +266,9 @@ async fn main() -> anyhow::Result<()> {
                         acquisition.numbers().clock().now() - chrono::Duration::minutes(10);
                     if let Err(e) = acquisition.purge_search_windows(before).await {
                         tracing::warn!(error = %e, "search quota purge failed");
+                    }
+                    if let Err(e) = acquisition.numbers().purge_expired_grants().await {
+                        tracing::warn!(error = %e, "routing grant purge failed");
                     }
                 }
             });

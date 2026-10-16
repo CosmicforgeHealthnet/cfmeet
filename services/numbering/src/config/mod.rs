@@ -16,11 +16,15 @@
 //! Acquisition limits (`NUMBERING_SEARCH_*`, `NUMBERING_RESERVATION_TTL_SECONDS`,
 //! `NUMBERING_PRE_ELIGIBILITY_HOLDS`, …) are read by [`acquisition`].
 //!
+//! Routing grant signing (`NUMBERING_GRANT_*`, a dedicated key) is read by [`grants`].
+//!
 //! Service authentication (`CF_*`, including `CF_PLATFORM_ACCESS_BASE_URL`) is read by
 //! [`service_auth`]. The database URL is held in a redacted container. Numbering holds
-//! no other secret: customer credentials are verified by Platform Access.
+//! no other secret beyond its service-auth and grant keys (files): customer credentials are
+//! verified by Platform Access.
 
 pub mod acquisition;
+pub mod grants;
 pub mod kyc;
 pub mod providers;
 pub mod service_auth;
