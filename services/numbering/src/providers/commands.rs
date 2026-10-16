@@ -46,11 +46,12 @@ use crate::{
         capabilities::NewCapability,
         inventory::NewObservation,
         lifecycle::{transition_in, TransitionRequest},
-        reservations::ReservationRow,
+        reservations::{ReservationBasis, ReservationRow},
         resources::{lock, NewResource, ResourceFacts, ResourceRow},
         stmt, Actor, ActorKind, Availability, BindingChangeReason, Capability, CapabilitySource,
         ClassificationSource, DomainError, DomainResult, FailureCategory, InventorySource,
-        LifecycleState as S, NumberDomain, OwnerScope, RestrictionFlag, UncertainOperation,
+        LifecycleState as S, NumberDomain, OwnerScope, ReleaseState, RestrictionFlag,
+        UncertainOperation,
     },
 };
 
@@ -402,104 +403,145 @@ impl ProviderCommands {
         };
         let mut out = Vec::new();
         for offer in offers {
-            let mut observation =
-                NewObservation::offered(source, offer.observed_at, offer.fresh_for);
-            observation.provider_id = if synthetic {
-                None
-            } else {
-                Some(provider_id.to_string())
-            };
-            observation.availability = Availability::Available;
-            observation.offered_capabilities = offer.capabilities.clone();
-            observation.observed_number_type = Some(offer.number_type);
-            observation.monthly_cost_minor = offer.monthly_cost_minor;
-            observation.currency = offer.currency.clone();
-            let existing = self
-                .resource_for_ref(provider_id, &offer.external_ref)
-                .await?;
-            let resource = match existing {
-                Some(id) => self.numbers.observe(ctx, id, observation).await?,
-                None => {
-                    let discovered = self
-                        .numbers
-                        .discover(
-                            ctx,
-                            executor(),
-                            NewResource {
-                                number: offer.e164.clone(),
-                                country: offer.country.clone(),
-                                inventory_source: source,
-                                classification: Some((
-                                    offer.number_type,
-                                    if synthetic {
-                                        ClassificationSource::Synthetic
-                                    } else {
-                                        ClassificationSource::ProviderInventory
-                                    },
-                                )),
-                                facts: ResourceFacts {
-                                    region: offer.region.clone(),
-                                    restriction_flags: if offer.kyc_required {
-                                        vec![RestrictionFlag::KycRequired]
-                                    } else {
-                                        vec![]
-                                    },
-                                    ..Default::default()
-                                },
-                            },
-                            observation,
-                        )
-                        .await;
-                    let r = match discovered {
-                        Ok(r) => r,
-                        Err(DomainError::Conflict {
-                            code: "NUMBER_EXISTS",
-                            ..
-                        }) => {
-                            self.numbers
-                                .resource_by_number(&offer.e164, synthetic)
-                                .await?
-                        }
-                        Err(e) => return Err(e),
-                    };
-                    self.numbers
-                        .db()
-                        .execute(stmt(
-                            "INSERT INTO number_provider_inventory_refs (id, number_resource_id, provider_id, external_ref, first_seen_at) \
-                             VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
-                            vec![Uuid::new_v4().into(), r.id.into(), provider_id.into(), offer.external_ref.clone().into(), self.now().into()],
-                        ))
-                        .await?;
-                    for c in &offer.capabilities {
-                        let new = if synthetic {
-                            NewCapability::declared(*c, CapabilitySource::Synthetic)
-                        } else {
-                            NewCapability::declared(*c, CapabilitySource::ProviderInventory)
-                        };
-                        self.numbers.record_capability(ctx, r.id, new).await?;
-                    }
-                    let r = self.numbers.resource(r.id).await?;
-                    if r.lifecycle_state() == S::Discovered {
-                        self.numbers
-                            .transition(
-                                ctx,
-                                r.id,
-                                TransitionRequest::new(
-                                    S::Available,
-                                    r.revision,
-                                    executor(),
-                                    "INVENTORY_OFFERED",
-                                ),
-                            )
-                            .await?
-                    } else {
-                        r
-                    }
+            match self.ingest_offer(ctx, provider_id, source, &offer).await {
+                Ok(Some(r)) => out.push(r),
+                Ok(None) => {}
+                // One malformed offer never hides the others; it is counted and skipped.
+                Err(DomainError::Validation(_)) => {
+                    crate::metrics::inc("numbering_inventory_offers_rejected_total", &[]);
+                    tracing::warn!("a provider offer failed canonical validation and was skipped");
                 }
-            };
-            out.push(resource);
+                Err(e) => return Err(e),
+            }
         }
         Ok(out)
+    }
+
+    /// Ingests one offer as canonical inventory (Workstream H §142.1): the same provider
+    /// object always maps to the same Number Resource; concurrent ingestion of a new
+    /// object creates exactly one resource (the database's E.164 uniqueness decides and
+    /// the loser observes the winner's resource); an older observation never makes a
+    /// resource look fresher; a resource that is no longer in inventory (reserved,
+    /// assigned, quarantined, released, uncertain) is observed but never changed here.
+    async fn ingest_offer(
+        &self,
+        ctx: &RequestContext,
+        provider_id: &str,
+        source: InventorySource,
+        offer: &super::InventoryOffer,
+    ) -> DomainResult<Option<ResourceRow>> {
+        let synthetic = source == InventorySource::SyntheticTest;
+        let mut observation = NewObservation::offered(source, offer.observed_at, offer.fresh_for);
+        observation.provider_id = if synthetic {
+            None
+        } else {
+            Some(provider_id.to_string())
+        };
+        observation.availability = Availability::Available;
+        observation.offered_capabilities = offer.capabilities.clone();
+        observation.observed_number_type = Some(offer.number_type);
+        observation.monthly_cost_minor = offer.monthly_cost_minor;
+        observation.currency = offer.currency.clone();
+        if let Some(id) = self
+            .resource_for_ref(provider_id, &offer.external_ref)
+            .await?
+        {
+            let row = self.numbers.observe(ctx, id, observation).await?;
+            return self.offer_available(ctx, row).await.map(Some);
+        }
+        let discovered = self
+            .numbers
+            .discover(
+                ctx,
+                executor(),
+                NewResource {
+                    number: offer.e164.clone(),
+                    country: offer.country.clone(),
+                    inventory_source: source,
+                    classification: Some((
+                        offer.number_type,
+                        if synthetic {
+                            ClassificationSource::Synthetic
+                        } else {
+                            ClassificationSource::ProviderInventory
+                        },
+                    )),
+                    facts: ResourceFacts {
+                        region: offer.region.clone(),
+                        restriction_flags: if offer.kyc_required {
+                            vec![RestrictionFlag::KycRequired]
+                        } else {
+                            vec![]
+                        },
+                        ..Default::default()
+                    },
+                },
+                observation.clone(),
+            )
+            .await;
+        let (r, created) = match discovered {
+            Ok(r) => (r, true),
+            Err(DomainError::Conflict {
+                code: "NUMBER_EXISTS",
+                ..
+            }) => {
+                // A concurrent ingestion (or another provider object) created it: this
+                // offer is one more observation of the same canonical resource.
+                let r = self
+                    .numbers
+                    .resource_by_number(&offer.e164, synthetic)
+                    .await?;
+                (self.numbers.observe(ctx, r.id, observation).await?, false)
+            }
+            Err(e) => return Err(e),
+        };
+        self.numbers
+            .db()
+            .execute(stmt(
+                "INSERT INTO number_provider_inventory_refs (id, number_resource_id, provider_id, external_ref, first_seen_at) \
+                 VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
+                vec![Uuid::new_v4().into(), r.id.into(), provider_id.into(), offer.external_ref.clone().into(), self.now().into()],
+            ))
+            .await?;
+        if created {
+            for c in &offer.capabilities {
+                let new = if synthetic {
+                    NewCapability::declared(*c, CapabilitySource::Synthetic)
+                } else {
+                    NewCapability::declared(*c, CapabilitySource::ProviderInventory)
+                };
+                self.numbers.record_capability(ctx, r.id, new).await?;
+            }
+        }
+        let r = self.numbers.resource(r.id).await?;
+        self.offer_available(ctx, r).await.map(Some)
+    }
+
+    /// DISCOVERED → AVAILABLE once a fresh offer exists (idempotent under concurrency: a
+    /// lost race re-reads the winner's state).
+    async fn offer_available(
+        &self,
+        ctx: &RequestContext,
+        r: ResourceRow,
+    ) -> DomainResult<ResourceRow> {
+        if r.lifecycle_state() != S::Discovered {
+            return Ok(r);
+        }
+        match self
+            .numbers
+            .transition(
+                ctx,
+                r.id,
+                TransitionRequest::new(S::Available, r.revision, executor(), "INVENTORY_OFFERED"),
+            )
+            .await
+        {
+            Ok(row) => Ok(row),
+            Err(DomainError::VersionConflict(_) | DomainError::InvalidTransition { .. }) => {
+                self.numbers.resource(r.id).await
+            }
+            Err(e) => Err(e),
+        }
     }
 
     async fn resource_for_ref(
@@ -667,22 +709,58 @@ impl ProviderCommands {
         ttl: Duration,
         idempotency_key: &str,
     ) -> DomainResult<(ReservationRow, Submitted)> {
+        let txn = self.numbers.db().begin().await?;
+        let out = self
+            .request_hold_in(
+                &txn,
+                ctx,
+                scope,
+                actor,
+                resource_id,
+                ttl,
+                ReservationBasis::direct(None),
+                idempotency_key,
+            )
+            .await?;
+        txn.commit().await?;
+        if out.1.replayed {
+            let reservation = self.numbers.reservation(scope, out.0.id).await?;
+            return Ok((reservation, out.1));
+        }
+        Ok(out)
+    }
+
+    /// [`Self::request_hold`] inside the caller's transaction (the reservation
+    /// orchestration commits it together with its scoped idempotency record).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn request_hold_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        scope: &OwnerScope,
+        actor: Actor,
+        resource_id: Uuid,
+        ttl: Duration,
+        basis: ReservationBasis,
+        idempotency_key: &str,
+    ) -> DomainResult<(ReservationRow, Submitted)> {
         let now = self.now();
-        let (provider_id, external_ref) =
-            Self::provider_object(self.numbers.db(), resource_id).await?;
+        let (provider_id, external_ref) = Self::provider_object(txn, resource_id).await?;
         let operation = OperationKind::Reserve {
             hold_seconds: ttl.num_seconds().min(self.settings.hold.num_seconds()),
         };
-        let txn = self.numbers.db().begin().await?;
         if let Some(c) = self
-            .existing(&txn, &provider_id, idempotency_key, resource_id, &operation)
+            .existing(txn, &provider_id, idempotency_key, resource_id, &operation)
             .await?
         {
-            txn.commit().await?;
-            let reservation = self
-                .numbers
-                .reservation(scope, c.reservation_id.expect("RESERVE has one"))
-                .await?;
+            let reservation = ReservationRow::find_by_statement(stmt(
+                "SELECT * FROM number_reservations WHERE id = $1",
+                vec![c.reservation_id.expect("RESERVE has one").into()],
+            ))
+            .one(txn)
+            .await?
+            .filter(|r| r.in_scope(scope))
+            .ok_or(DomainError::NotFound("reservation"))?;
             return Ok((
                 reservation,
                 Submitted {
@@ -693,11 +771,11 @@ impl ProviderCommands {
         }
         let reservation = self
             .numbers
-            .reserve_in(&txn, ctx, scope, actor, resource_id, ttl, None, now)
+            .reserve_in(txn, ctx, scope, actor, resource_id, ttl, basis, now)
             .await?;
         let command = self
             .insert(
-                &txn,
+                txn,
                 ctx,
                 resource_id,
                 idempotency_key,
@@ -710,7 +788,6 @@ impl ProviderCommands {
                 now,
             )
             .await?;
-        txn.commit().await?;
         Ok((
             reservation,
             Submitted {
@@ -718,6 +795,81 @@ impl ProviderCommands {
                 replayed: false,
             },
         ))
+    }
+
+    /// Submits the `RELEASE_HOLD` command of an ended reservation whose release is owed
+    /// (inside the caller's transaction). The key is derived from the reservation and its
+    /// release attempt, so a repeated submission never sends a second release.
+    pub(crate) async fn request_release_hold_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        reservation: &ReservationRow,
+        now: DateTime<Utc>,
+    ) -> DomainResult<Submitted> {
+        let (provider_id, external_ref) =
+            Self::provider_object(txn, reservation.number_resource_id).await?;
+        #[derive(FromQueryResult)]
+        struct N {
+            n: i64,
+        }
+        let previous = N::find_by_statement(stmt(
+            "SELECT count(*) AS n FROM number_provider_commands WHERE reservation_id = $1 AND operation = 'RELEASE_HOLD'",
+            vec![reservation.id.into()],
+        ))
+        .one(txn)
+        .await?
+        .map(|n| n.n)
+        .unwrap_or(0);
+        let key = format!("release-hold:{}:{}", reservation.id.simple(), previous + 1);
+        let operation = OperationKind::ReleaseHold;
+        if let Some(c) = self
+            .existing(
+                txn,
+                &provider_id,
+                &key,
+                reservation.number_resource_id,
+                &operation,
+            )
+            .await?
+        {
+            return Ok(Submitted {
+                command: c,
+                replayed: true,
+            });
+        }
+        let command = self
+            .insert(
+                txn,
+                ctx,
+                reservation.number_resource_id,
+                &key,
+                Intent {
+                    provider_id,
+                    external_ref,
+                    operation,
+                    reservation_id: Some(reservation.id),
+                },
+                now,
+            )
+            .await?;
+        Ok(Submitted {
+            command,
+            replayed: false,
+        })
+    }
+
+    /// The commands of one reservation (oldest first).
+    pub async fn reservation_commands(
+        &self,
+        reservation_id: Uuid,
+    ) -> DomainResult<Vec<CommandRow>> {
+        Ok(CommandRow::find_by_statement(stmt(
+            "SELECT * FROM number_provider_commands WHERE reservation_id = $1 ORDER BY created_at, id",
+            vec![reservation_id.into()],
+        ))
+        .all(self.numbers.db())
+        .await?)
     }
 
     /// Requests provisioning of a RESERVED number (→ PROVISIONING with the command).
@@ -1113,6 +1265,28 @@ impl ProviderCommands {
                     message: f.code,
                 });
             }
+            ProviderOutcome::Failed(f)
+                if f.transmitted && cmd.operation() == CommandOperation::ReleaseHold =>
+            {
+                // A refused release says nothing certain about the hold (it may have
+                // lapsed, or still be ours): only read-back decides.
+                insert_attempt(
+                    &txn,
+                    cmd.id,
+                    attempt,
+                    label,
+                    true,
+                    None,
+                    Some(&f.code),
+                    json!({}),
+                    now,
+                    finished,
+                )
+                .await?;
+                self.enter_unknown(&txn, ctx, &cmd, "RELEASE_REFUSED_READ_BACK", finished)
+                    .await?;
+                JobOutcome::Succeeded
+            }
             ProviderOutcome::Failed(f) => {
                 insert_attempt(
                     &txn,
@@ -1211,6 +1385,21 @@ impl ProviderCommands {
                             .mark_reservation_unknown_in(txn, ctx, executor(), rid, now)
                             .await?;
                     }
+                }
+                None
+            }
+            CommandOperation::ReleaseHold => {
+                if let Some(rid) = cmd.reservation_id {
+                    self.numbers
+                        .set_release_state_in(
+                            txn,
+                            ctx,
+                            rid,
+                            ReleaseState::Unknown,
+                            "PROVIDER_RELEASE_UNKNOWN",
+                            now,
+                        )
+                        .await?;
                 }
                 None
             }
@@ -1402,10 +1591,31 @@ impl ProviderCommands {
                     )
                     .await?;
                 } else {
-                    self.numbers
-                        .confirm_hold_in(txn, ctx, actor, rid, evidence, now)
-                        .await?;
+                    let current = ReservationRow::find_by_statement(stmt(
+                        "SELECT * FROM number_reservations WHERE id = $1",
+                        vec![rid.into()],
+                    ))
+                    .one(txn)
+                    .await?
+                    .ok_or(DomainError::NotFound("reservation"))?;
+                    if current.status == "PENDING" && current.is_expired_at(now) {
+                        // The hold arrived after the reservation expired: record it and
+                        // give it back (the sweep submits the release).
+                        self.numbers
+                            .record_late_hold_in(txn, ctx, rid, evidence, now)
+                            .await?;
+                    } else {
+                        self.numbers
+                            .confirm_hold_in(txn, ctx, actor, rid, evidence, now)
+                            .await?;
+                    }
                 }
+            }
+            CommandOperation::ReleaseHold => {
+                let rid = cmd.reservation_id.expect("RELEASE_HOLD has a reservation");
+                self.numbers
+                    .confirm_reservation_release_in(txn, ctx, actor, rid, evidence, now)
+                    .await?;
             }
             CommandOperation::Provision => {
                 let OperationKind::Provision { capabilities } = cmd.request().operation else {
@@ -1615,6 +1825,21 @@ impl ProviderCommands {
                     }
                     transition_in(txn, ctx, id, t, now).await?;
                 }
+            }
+            CommandOperation::ReleaseHold => {
+                // Still held (or never transmitted): the release stays owed and is
+                // submitted again by the reservation sweep.
+                let rid = cmd.reservation_id.expect("RELEASE_HOLD has a reservation");
+                self.numbers
+                    .set_release_state_in(
+                        txn,
+                        ctx,
+                        rid,
+                        ReleaseState::Pending,
+                        "PROVIDER_RELEASE_NOT_APPLIED",
+                        now,
+                    )
+                    .await?;
             }
             CommandOperation::Release => match row.lifecycle_state() {
                 S::Releasing => {

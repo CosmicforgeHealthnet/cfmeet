@@ -18,6 +18,7 @@ pub mod error;
 pub mod internal;
 pub mod kyc;
 pub mod middleware;
+pub mod numbers;
 
 use axum::{
     extract::{DefaultBodyLimit, State},
@@ -44,6 +45,7 @@ pub fn app(state: AppState) -> Router {
     let public = Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
+        .route("/openapi.json", get(openapi))
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
         .with_state(state.clone())
@@ -84,6 +86,22 @@ pub fn app(state: AppState) -> Router {
         .layer(from_fn_with_state(state.clone(), require_internal_service))
         .with_state(state);
     public.merge(customer).merge(callbacks).merge(internal)
+}
+
+/// The served API description: exactly the checked-in contract
+/// `cfmeet.numbering.internal-api` (contract-first; a test proves every route it lists is
+/// registered and vice versa). Public, like the probes: it describes, never authorizes.
+pub const OPENAPI: &str =
+    include_str!("../../../../packages/contracts/numbering/internal/v1.openapi.json");
+
+async fn openapi() -> impl IntoResponse {
+    (
+        [
+            (CONTENT_TYPE, "application/json"),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=300"),
+        ],
+        OPENAPI,
+    )
 }
 
 async fn health() -> impl IntoResponse {

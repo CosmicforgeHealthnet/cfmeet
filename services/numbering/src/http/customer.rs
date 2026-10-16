@@ -31,6 +31,7 @@ pub fn routes() -> Router<AppState> {
             "/numbers/reservations/:reservation_id",
             get(get_reservation),
         )
+        .merge(super::numbers::routes())
         .merge(super::catalog::customer_routes())
         .merge(super::catalog::admin_routes())
         .merge(super::kyc::customer_routes())
@@ -70,7 +71,12 @@ pub fn reservation_view(r: &ReservationRow) -> Value {
         "revision": r.revision,
         "expiresAt": r.expires_at,
         "providerReleaseState": r.provider_release_state,
+        "holdBasis": r.hold_basis,
+        "eligibilityDecisionId": r.eligibility_decision_ref,
+        "requestedCapabilities": r.requested_capabilities,
+        "convertedTo": r.converted_to,
         "createdAt": r.created_at,
+        "endedAt": r.ended_at,
     })
 }
 

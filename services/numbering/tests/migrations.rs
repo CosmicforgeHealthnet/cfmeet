@@ -29,6 +29,7 @@ const DOMAIN: &[&str] = &[
     "number_catalog_revisions",
     "number_country_catalog",
     "number_eligibility_decisions",
+    "number_inventory_refreshes",
     "number_inventory_snapshots",
     "number_kyc_appeals",
     "number_kyc_cases",
@@ -46,6 +47,7 @@ const DOMAIN: &[&str] = &[
     "number_reservations",
     "number_resources",
     "number_routing_profiles",
+    "number_search_windows",
     "number_type_catalog",
     "numbering_incidents",
 ];

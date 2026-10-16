@@ -1322,3 +1322,77 @@ pub mod providers {
         }))
     }
 }
+
+impl Harness {
+    /// A customer request with a JSON body and extra headers (e.g. `Idempotency-Key`).
+    pub async fn customer_with(
+        &self,
+        token: &str,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        headers: &[(&str, &str)],
+    ) -> Reply {
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("authorization", format!("Bearer {token}"));
+        for (k, v) in headers {
+            builder = builder.header(*k, *v);
+        }
+        let body = match body {
+            Some(b) => {
+                builder = builder.header("content-type", "application/json");
+                Body::from(b.to_string())
+            }
+            None => Body::empty(),
+        };
+        self.raw(builder.body(body).unwrap()).await
+    }
+}
+
+/// Workstreams H–K fixtures: the acquisition workflows over the deterministic provider.
+pub mod acquisition {
+    use std::sync::Arc;
+
+    use numbering::{
+        acquisition::{reservations::ExpiryHandler, Acquisition, AcquisitionSettings},
+        infra::jobs::JobRunner,
+    };
+
+    use super::{providers, Harness};
+
+    pub fn of(h: &Harness, p: &providers::Providers, settings: AcquisitionSettings) -> Acquisition {
+        Acquisition::new(h.numbers.clone(), Some(p.commands.clone()), settings)
+    }
+
+    /// The provider dispatch / reconcile handlers plus the reservation expiry handler.
+    pub fn runner(h: &Harness, p: &providers::Providers, a: &Acquisition) -> JobRunner {
+        providers::runner(h, &p.commands, "acquisition-worker").with_handler(Arc::new(
+            ExpiryHandler {
+                acquisition: Arc::new(a.clone()),
+            },
+        ))
+    }
+
+    /// Runs every due job until none is left (bounded).
+    pub async fn drain(runner: &JobRunner) {
+        for _ in 0..20 {
+            if runner.run_due().await.unwrap().claimed == 0 {
+                break;
+            }
+        }
+    }
+}
+
+/// How many `down` steps roll back every migration from `name` (inclusive) onwards — so
+/// a workstream's rollback test keeps targeting its own migration as later ones are added.
+pub fn steps_down_to(name: &str) -> u32 {
+    use numbering_migration::MigratorTrait;
+    let all = numbering_migration::Migrator::migrations();
+    let at = all
+        .iter()
+        .position(|m| m.name() == name)
+        .unwrap_or_else(|| panic!("no migration {name}"));
+    (all.len() - at) as u32
+}

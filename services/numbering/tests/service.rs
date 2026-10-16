@@ -593,9 +593,14 @@ async fn every_implemented_route_is_in_the_contract_and_vice_versa() {
     let src = |p: &str| {
         std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(p)).unwrap()
     };
-    let mut implemented = vec!["GET /health".to_string(), "GET /ready".to_string()];
+    let mut implemented = vec![
+        "GET /health".to_string(),
+        "GET /ready".to_string(),
+        "GET /openapi.json".to_string(),
+    ];
     for (file, prefix) in [
         ("src/http/customer.rs", "/v1"),
+        ("src/http/numbers.rs", "/v1"),
         ("src/http/catalog.rs", "/v1"),
         ("src/http/kyc.rs", "/v1"),
         ("src/http/callbacks.rs", "/provider-callbacks/v1"),

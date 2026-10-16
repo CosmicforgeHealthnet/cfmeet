@@ -3,8 +3,10 @@
 #
 #   docker build -f services/numbering/Dockerfile -t cfmeet-numbering .
 #
-# Only packages/service-auth and services/numbering enter the build context
-# (services/numbering/Dockerfile.dockerignore); no other service's source is copied.
+# Only the shared packages Numbering builds from (service-auth, object-storage, webhooks,
+# its own contracts — the served OpenAPI document is compiled in) and services/numbering
+# enter the build context (services/numbering/Dockerfile.dockerignore); no other service's
+# source is copied.
 #
 # The image contains the service (`numbering`) and its migration runner
 # (`numbering-migration`). Configuration — DATABASE_URL, the service signing key FILE,
@@ -14,6 +16,9 @@
 FROM rust:1-bookworm AS builder
 WORKDIR /src
 COPY packages/service-auth packages/service-auth
+COPY packages/object-storage packages/object-storage
+COPY packages/webhooks packages/webhooks
+COPY packages/contracts/numbering packages/contracts/numbering
 COPY services/numbering services/numbering
 WORKDIR /src/services/numbering
 RUN cargo build --release --locked -p numbering-migration --bin numbering-migration \

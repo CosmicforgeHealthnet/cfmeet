@@ -120,6 +120,21 @@
     },
     {
       "$ref": "#/$defs/Error"
+    },
+    {
+      "$ref": "#/$defs/CountryList"
+    },
+    {
+      "$ref": "#/$defs/NumberTypeList"
+    },
+    {
+      "$ref": "#/$defs/NumberSearchPage"
+    },
+    {
+      "$ref": "#/$defs/CreateReservationRequest"
+    },
+    {
+      "$ref": "#/$defs/ReservationList"
     }
   ],
   "$defs": {
@@ -627,7 +642,7 @@
       }
     },
     "Reservation": {
-      "description": "GET /v1/numbers/reservations/{id}: a reservation of the caller's trusted scope (other scopes: NOT_FOUND).",
+      "description": "A reservation of the caller's trusted scope (other scopes: NOT_FOUND). PENDING until the provider hold is confirmed (HELD). Ending it never assumes a provider release: providerReleaseState stays PENDING / UNKNOWN until the provider's release is evidenced.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -637,7 +652,12 @@
         "revision",
         "expiresAt",
         "providerReleaseState",
-        "createdAt"
+        "createdAt",
+        "holdBasis",
+        "eligibilityDecisionId",
+        "requestedCapabilities",
+        "convertedTo",
+        "endedAt"
       ],
       "properties": {
         "reservationId": {
@@ -660,6 +680,53 @@
         },
         "createdAt": {
           "$ref": "#/$defs/Timestamp"
+        },
+        "holdBasis": {
+          "$ref": "#/$defs/HoldBasis"
+        },
+        "eligibilityDecisionId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requestedCapabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "VOICE_INBOUND",
+              "VOICE_OUTBOUND",
+              "SMS_INBOUND",
+              "SMS_OUTBOUND",
+              "MMS_RICH"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "convertedTo": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ReservationConversion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -2095,7 +2162,9 @@
         "OPERATION_UNSUPPORTED",
         "PROVIDER_NOT_REGISTERED",
         "PROVIDER_OBJECT_UNKNOWN",
-        "PROVIDER_UNAVAILABLE"
+        "PROVIDER_UNAVAILABLE",
+        "RESERVATION_BUSY",
+        "REQUEST_IN_PROGRESS"
       ]
     },
     "Error": {
@@ -4011,7 +4080,7 @@
       ]
     },
     "ProviderCommandOperation": {
-      "description": "Provider-affecting operations executed as durable commands.",
+      "description": "Provider-affecting operations executed as durable commands (RELEASE_HOLD: a reservation's provider hold given back on cancellation / expiry, Workstream H).",
       "type": "string",
       "enum": [
         "RESERVE",
@@ -4021,7 +4090,8 @@
         "SUSPEND",
         "RESTORE",
         "RELEASE",
-        "PORT_IN"
+        "PORT_IN",
+        "RELEASE_HOLD"
       ]
     },
     "ProviderEventKind": {
@@ -4090,6 +4160,428 @@
               "const": "DUPLICATE"
             }
           ]
+        }
+      }
+    },
+    "HoldBasis": {
+      "description": "Why a reservation holds a number: a domain-level hold (D primitives), a recorded ELIGIBLE decision of the reserving scope, or a temporary hold before eligibility where policy permits it (never PRODUCTION; provisioning always requires eligibility).",
+      "type": "string",
+      "enum": [
+        "DIRECT",
+        "ELIGIBILITY_DECISION",
+        "PRE_ELIGIBILITY_HOLD"
+      ]
+    },
+    "ReservationConversion": {
+      "description": "What a CONVERTED reservation became: taken over by a DCN assignment, or a provisioned acquisition (Workstream I).",
+      "type": "string",
+      "enum": [
+        "ASSIGNMENT",
+        "ACQUISITION"
+      ]
+    },
+    "CreateReservationRequest": {
+      "description": "POST /v1/numbers/reservations (Idempotency-Key required). The scope is the caller's trusted one; a body never names a tenant, application or environment.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numberResourceId"
+      ],
+      "properties": {
+        "numberResourceId": {
+          "$ref": "#/$defs/NumberResourceId"
+        },
+        "capabilities": {
+          "description": "Routable capabilities the number is reserved for; each must be supported (E resolver).",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "VOICE_INBOUND",
+              "VOICE_OUTBOUND",
+              "SMS_INBOUND",
+              "SMS_OUTBOUND",
+              "MMS_RICH"
+            ]
+          },
+          "uniqueItems": true,
+          "maxItems": 5
+        },
+        "holdSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400
+        },
+        "eligibilityDecisionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "ReservationList": {
+      "description": "GET /v1/numbers/reservations: the caller's reservations, newest first (keyset pages).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "nextCursor"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Reservation"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "CountryList": {
+      "description": "GET /v1/numbers/countries: the supported countries of the caller's inventory class (SANDBOX / TEST: synthetic; PRODUCTION: real, verified).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "notice"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CountryCatalogEntry"
+          }
+        },
+        "notice": {
+          "$ref": "#/$defs/ExternalVerificationNotice"
+        }
+      }
+    },
+    "NumberTypeList": {
+      "description": "GET /v1/numbers/countries/{countryCode}/number-types: the generic number-type entries in force, with their capability metadata.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "countryCode",
+        "data",
+        "notice"
+      ],
+      "properties": {
+        "countryCode": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NumberTypeCatalogEntry"
+          }
+        },
+        "notice": {
+          "$ref": "#/$defs/ExternalVerificationNotice"
+        }
+      }
+    },
+    "SearchAvailability": {
+      "description": "AVAILABLE: offered by a fresh observation (reservable, never guaranteed); STALE: the newest observation expired (not reservable until observed again).",
+      "type": "string",
+      "enum": [
+        "AVAILABLE",
+        "STALE"
+      ]
+    },
+    "InventoryRefresh": {
+      "description": "How the inventory behind a search page was obtained: REFRESHED (a provider was asked now), CACHED (asked within the refresh interval), PROVIDER_UNAVAILABLE (a provider could not be reached; cached observations only), NOT_CONFIGURED (no provider serves the class, or live telecom is not allowed), NOT_REQUESTED (a later page).",
+      "type": "string",
+      "enum": [
+        "REFRESHED",
+        "CACHED",
+        "PROVIDER_UNAVAILABLE",
+        "NOT_CONFIGURED",
+        "NOT_REQUESTED"
+      ]
+    },
+    "KycIndicator": {
+      "description": "What the KYC requirements in force say about a search result (Workstream F): UNKNOWN when none are published (eligibility then fails closed).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "ownershipClasses",
+        "numberFlagged"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "NOT_REQUIRED",
+            "REQUIRED",
+            "REQUIRED_FOR_OWNERSHIP_CLASSES",
+            "UNKNOWN"
+          ]
+        },
+        "ownershipClasses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OwnershipClass"
+          },
+          "uniqueItems": true
+        },
+        "numberFlagged": {
+          "type": "boolean"
+        }
+      }
+    },
+    "NumberSearchResult": {
+      "description": "One search result: an OBSERVATION of a canonical Number Resource, never a reservation or a guarantee. Provider identifiers never appear.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numberResourceId",
+        "e164",
+        "countryCode",
+        "region",
+        "numberType",
+        "inventoryClass",
+        "capabilities",
+        "restrictionFlags",
+        "kyc",
+        "cost",
+        "observation"
+      ],
+      "properties": {
+        "numberResourceId": {
+          "$ref": "#/$defs/NumberResourceId"
+        },
+        "e164": {
+          "$ref": "#/$defs/E164"
+        },
+        "countryCode": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "region": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "numberType": {
+          "$ref": "#/$defs/NumberType"
+        },
+        "inventoryClass": {
+          "$ref": "#/$defs/InventoryClass"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "description": "A supported capability with its provenance (synthetic for test inventory; carrierConfirmed only for a verified real provider confirmation).",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "capability",
+              "evidenceStatus",
+              "synthetic",
+              "carrierConfirmed"
+            ],
+            "properties": {
+              "capability": {
+                "$ref": "#/$defs/Capability"
+              },
+              "evidenceStatus": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/CapabilityStatus"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "synthetic": {
+                "type": "boolean"
+              },
+              "carrierConfirmed": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "restrictionFlags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RestrictionFlag"
+          }
+        },
+        "kyc": {
+          "$ref": "#/$defs/KycIndicator"
+        },
+        "cost": {
+          "description": "Commercial facts as observed (an estimate until billing evidence exists).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "monthlyMinor",
+            "setupMinor",
+            "currency",
+            "evidence"
+          ],
+          "properties": {
+            "monthlyMinor": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "setupMinor": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "currency": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[A-Z]{3}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "evidence": {
+              "$ref": "#/$defs/CostEvidence"
+            }
+          }
+        },
+        "observation": {
+          "description": "Freshness of the observation behind the result.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "observedAt",
+            "freshUntil",
+            "availability",
+            "guaranteed"
+          ],
+          "properties": {
+            "observedAt": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/Timestamp"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "freshUntil": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/Timestamp"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "availability": {
+              "$ref": "#/$defs/SearchAvailability"
+            },
+            "guaranteed": {
+              "const": false
+            }
+          }
+        }
+      }
+    },
+    "NumberSearchPage": {
+      "description": "GET /v1/numbers/search: one bounded page of the caller's inventory class (a country is required; keyset cursor bound to the query).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "nextCursor",
+        "inventory",
+        "notice"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NumberSearchResult"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inventory": {
+          "description": "How the inventory behind the page was obtained.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "inventoryClass",
+            "refresh",
+            "refreshedAt",
+            "guaranteed"
+          ],
+          "properties": {
+            "inventoryClass": {
+              "$ref": "#/$defs/InventoryClass"
+            },
+            "refresh": {
+              "$ref": "#/$defs/InventoryRefresh"
+            },
+            "refreshedAt": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/Timestamp"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "guaranteed": {
+              "const": false
+            }
+          }
+        },
+        "notice": {
+          "$ref": "#/$defs/ExternalVerificationNotice"
         }
       }
     }

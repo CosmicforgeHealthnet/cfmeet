@@ -68,6 +68,14 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(2);
         }
     };
+    let acquisition_settings =
+        match numbering::config::acquisition::from_lookup(|key| std::env::var(key).ok()) {
+            Ok(s) => s,
+            Err(err) => {
+                eprintln!("numbering: acquisition configuration error: {err}");
+                std::process::exit(2);
+            }
+        };
     if !settings.has_platform_access() {
         eprintln!("numbering: CF_PLATFORM_ACCESS_BASE_URL is required: Platform Access verifies every customer credential");
         std::process::exit(2);
@@ -167,7 +175,9 @@ async fn main() -> anyhow::Result<()> {
     let state = match &providers {
         Some(p) => state.with_providers(p.clone()),
         None => state,
-    };
+    }
+    .with_acquisition_settings(acquisition_settings);
+    let acquisition = Arc::new(state.acquisition());
 
     // Worker foundation: lease recovery of interrupted jobs (UNKNOWN_OUTCOME parking for
     // provider-affecting ones) and idempotency-key expiry. Business job handlers are
@@ -181,7 +191,12 @@ async fn main() -> anyhow::Result<()> {
             config.workers.lease,
             config.workers.retry,
         )
-        .with_handler(Arc::new(VerificationHandler { kyc: kyc.clone() }));
+        .with_handler(Arc::new(VerificationHandler { kyc: kyc.clone() }))
+        .with_handler(Arc::new(
+            numbering::acquisition::reservations::ExpiryHandler {
+                acquisition: acquisition.clone(),
+            },
+        ));
         if let Some(p) = &providers {
             runner = runner
                 .with_handler(Arc::new(numbering::providers::commands::DispatchHandler {
@@ -206,6 +221,26 @@ async fn main() -> anyhow::Result<()> {
             });
         }
         tokio::spawn(runner.run(config.workers.interval));
+        // Reservation expiry (leased jobs) and owed provider-hold releases; search quota
+        // windows are forgotten once they ended.
+        {
+            let acquisition = acquisition.clone();
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(Duration::from_secs(15));
+                loop {
+                    ticker.tick().await;
+                    let ctx = numbering::domain::RequestContext::generate();
+                    if let Err(e) = acquisition.sweep_reservations(&ctx, 500).await {
+                        tracing::warn!(error = %e, "reservation sweep failed");
+                    }
+                    let before =
+                        acquisition.numbers().clock().now() - chrono::Duration::minutes(10);
+                    if let Err(e) = acquisition.purge_search_windows(before).await {
+                        tracing::warn!(error = %e, "search quota purge failed");
+                    }
+                }
+            });
+        }
         let db = db.clone();
         let clock = clock.clone();
         tokio::spawn(async move {

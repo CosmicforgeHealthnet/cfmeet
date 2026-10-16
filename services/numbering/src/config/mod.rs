@@ -13,10 +13,14 @@
 //! | `NUMBERING_IDEMPOTENCY_TTL_HOURS` | no | how long idempotency keys are kept (1–720, default 24) |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
+//! Acquisition limits (`NUMBERING_SEARCH_*`, `NUMBERING_RESERVATION_TTL_SECONDS`,
+//! `NUMBERING_PRE_ELIGIBILITY_HOLDS`, …) are read by [`acquisition`].
+//!
 //! Service authentication (`CF_*`, including `CF_PLATFORM_ACCESS_BASE_URL`) is read by
 //! [`service_auth`]. The database URL is held in a redacted container. Numbering holds
 //! no other secret: customer credentials are verified by Platform Access.
 
+pub mod acquisition;
 pub mod kyc;
 pub mod providers;
 pub mod service_auth;

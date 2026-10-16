@@ -554,8 +554,8 @@ impl NumberDomain {
             ));
         }
         txn.execute(stmt(
-            "UPDATE number_reservations SET status = 'CONVERTED', revision = revision + 1, updated_at = $2, \
-               ended_at = $2 WHERE id = $1",
+            "UPDATE number_reservations SET status = 'CONVERTED', converted_to = 'ASSIGNMENT', revision = revision + 1, \
+               updated_at = $2, ended_at = $2 WHERE id = $1",
             vec![reservation.id.into(), now.into()],
         ))
         .await?;

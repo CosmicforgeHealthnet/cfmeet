@@ -58,6 +58,44 @@ pub struct ReservationRow {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
+    /// Why the hold exists (`DIRECT`, `ELIGIBILITY_DECISION`, `PRE_ELIGIBILITY_HOLD`).
+    pub hold_basis: String,
+    pub eligibility_decision_ref: Option<Uuid>,
+    pub requested_capabilities: Vec<String>,
+    /// What a CONVERTED reservation became (`ASSIGNMENT`, `ACQUISITION`).
+    pub converted_to: Option<String>,
+}
+
+text_enum!(
+    /// Why a reservation holds a number (Workstream H): a domain-level hold (D primitives,
+    /// operators, fixtures), a recorded ELIGIBLE decision of the reserving scope, or a
+    /// temporary hold before eligibility where policy permits it (never in PRODUCTION;
+    /// provisioning always requires eligibility).
+    HoldBasis {
+        Direct = "DIRECT",
+        EligibilityDecision = "ELIGIBILITY_DECISION",
+        PreEligibilityHold = "PRE_ELIGIBILITY_HOLD",
+    }
+);
+
+/// The recorded basis of a new reservation.
+#[derive(Debug, Clone)]
+pub struct ReservationBasis {
+    pub basis: HoldBasis,
+    pub eligibility_decision_ref: Option<Uuid>,
+    pub capabilities: Vec<super::Capability>,
+    pub for_principal: Option<Uuid>,
+}
+
+impl ReservationBasis {
+    pub fn direct(for_principal: Option<Uuid>) -> Self {
+        Self {
+            basis: HoldBasis::Direct,
+            eligibility_decision_ref: None,
+            capabilities: vec![],
+            for_principal,
+        }
+    }
 }
 
 impl ReservationRow {
@@ -229,7 +267,7 @@ impl NumberDomain {
                 actor,
                 resource_id,
                 ttl,
-                for_principal,
+                ReservationBasis::direct(for_principal),
                 now,
             )
             .await?;
@@ -246,7 +284,7 @@ impl NumberDomain {
         actor: Actor,
         resource_id: Uuid,
         ttl: Duration,
-        for_principal: Option<Uuid>,
+        basis: ReservationBasis,
         now: DateTime<Utc>,
     ) -> DomainResult<ReservationRow> {
         if !(MIN_TTL_SECONDS..=MAX_TTL_SECONDS).contains(&ttl.num_seconds()) {
@@ -270,11 +308,23 @@ impl NumberDomain {
                 "the number's latest observation has expired; observe it again before reserving",
             ));
         }
+        if basis.capabilities.iter().any(|c| !c.is_routable()) {
+            return Err(DomainError::Validation(
+                "a reservation names routable capabilities only".into(),
+            ));
+        }
+        let mut capabilities: Vec<String> = basis
+            .capabilities
+            .iter()
+            .map(|c| c.as_str().to_string())
+            .collect();
+        capabilities.sort();
+        capabilities.dedup();
         let reservation = ReservationRow::find_by_statement(stmt(
             "INSERT INTO number_reservations (id, number_resource_id, tenant_id, application_id, environment_id, \
                environment_kind, service_account_id, requested_for_principal_id, status, revision, expires_at, \
-               correlation_id, created_at, updated_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'PENDING', 1, $9, $10, $11, $11) RETURNING *",
+               correlation_id, created_at, updated_at, hold_basis, eligibility_decision_ref, requested_capabilities) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'PENDING', 1, $9, $10, $11, $11, $12, $13, $14) RETURNING *",
             vec![
                 Uuid::new_v4().into(),
                 resource_id.into(),
@@ -283,10 +333,13 @@ impl NumberDomain {
                 scope.environment_id.into(),
                 scope.environment_kind.as_str().into(),
                 scope.service_account_id.into(),
-                for_principal.into(),
+                basis.for_principal.into(),
                 (now + ttl).into(),
                 ctx.correlation_id.as_str().into(),
                 now.into(),
+                basis.basis.as_str().into(),
+                basis.eligibility_decision_ref.into(),
+                capabilities.into(),
             ],
         ))
         .one(txn)
@@ -678,13 +731,35 @@ impl NumberDomain {
     ) -> DomainResult<ReservationRow> {
         let now = self.clock.now();
         let txn = self.db.begin().await?;
-        let current = lock_reservation(&txn, reservation_id).await?;
-        let resource = lock(&txn, current.number_resource_id).await?;
+        let row = self
+            .confirm_reservation_release_in(&txn, ctx, actor, reservation_id, evidence_ref, now)
+            .await?;
+        txn.commit().await?;
+        Ok(row)
+    }
+
+    /// See [`Self::confirm_reservation_release`] (inside `txn`). An UNKNOWN release that
+    /// read-back proved is confirmed the same way.
+    pub(crate) async fn confirm_reservation_release_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        actor: Actor,
+        reservation_id: Uuid,
+        evidence_ref: Uuid,
+        now: DateTime<Utc>,
+    ) -> DomainResult<ReservationRow> {
+        let current = lock_reservation(txn, reservation_id).await?;
+        let resource = lock(txn, current.number_resource_id).await?;
         let ended = matches!(
             current.status(),
             ReservationStatus::Expired | ReservationStatus::Cancelled
         );
-        if !ended || current.provider_release_state != ReleaseState::Pending.as_str() {
+        let awaiting = matches!(
+            ReleaseState::parse(&current.provider_release_state),
+            Some(ReleaseState::Pending | ReleaseState::Unknown)
+        );
+        if !ended || !awaiting {
             return Err(DomainError::precondition(
                 "RELEASE_NOT_PENDING",
                 "only an ended reservation awaiting its provider release can be confirmed",
@@ -696,14 +771,17 @@ impl NumberDomain {
                revision = revision + 1, updated_at = $4 WHERE id = $1 AND revision = $2 RETURNING *",
             vec![current.id.into(), current.revision.into(), evidence_ref.into(), now.into()],
         ))
-        .one(&txn)
+        .one(txn)
         .await?
         .ok_or(DomainError::VersionConflict("reservation"))?;
-        event(&txn, ctx, &row, "PROVIDER_RELEASE_CONFIRMED", now).await?;
-        if resource.lifecycle_state() == LifecycleState::Reserved {
-            let origin = origin_state(&txn, resource.id).await?;
+        event(txn, ctx, &row, "PROVIDER_RELEASE_CONFIRMED", now).await?;
+        if matches!(
+            resource.lifecycle_state(),
+            LifecycleState::Reserved | LifecycleState::Reserving
+        ) {
+            let origin = origin_state(txn, resource.id).await?;
             transition_in(
-                &txn,
+                txn,
                 ctx,
                 resource.id,
                 TransitionRequest::new(
@@ -717,7 +795,6 @@ impl NumberDomain {
             )
             .await?;
         }
-        txn.commit().await?;
         Ok(row)
     }
 
@@ -730,6 +807,191 @@ impl NumberDomain {
         .one(&self.db)
         .await?
         .filter(|r| r.in_scope(scope))
+        .ok_or(DomainError::NotFound("reservation"))
+    }
+}
+
+/// Reservation operations of the acquisition workflows (Workstreams H–I): ending a
+/// reservation whose provider hold must be given back, late hold confirmations, release
+/// bookkeeping, conversion into a provisioned acquisition, listing and sweeps.
+impl NumberDomain {
+    /// Ends a HELD reservation (EXPIRED / CANCELLED) whose provider hold must be released
+    /// through a `RELEASE_HOLD` command: the release is PENDING and the number stays
+    /// RESERVED until the provider's release is evidenced (synthetic inventory included —
+    /// the deterministic provider holds it too).
+    pub(crate) async fn end_for_release_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        reservation_id: Uuid,
+        to: ReservationStatus,
+        reason: &str,
+        now: DateTime<Utc>,
+    ) -> DomainResult<ReservationRow> {
+        let current = lock_reservation(txn, reservation_id).await?;
+        lock(txn, current.number_resource_id).await?;
+        if current.status() != ReservationStatus::Held
+            || !matches!(
+                to,
+                ReservationStatus::Expired | ReservationStatus::Cancelled
+            )
+        {
+            return Err(DomainError::InvalidTransition {
+                entity: "reservation",
+                from: current.status.clone(),
+                to: to.as_str().into(),
+            });
+        }
+        update_reservation(
+            txn,
+            ctx,
+            &current,
+            Change {
+                status: to,
+                release: Some(ReleaseState::Pending),
+                hold_ref: None,
+                evidence_ref: None,
+                reason,
+            },
+            now,
+        )
+        .await
+    }
+
+    /// The provider confirmed a hold whose reservation had already expired: the hold
+    /// exists and is recorded (EXPIRED, release PENDING), so it is given back, never
+    /// silently kept or forgotten. The number stays RESERVING until the release.
+    pub(crate) async fn record_late_hold_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        reservation_id: Uuid,
+        hold_ref: Uuid,
+        now: DateTime<Utc>,
+    ) -> DomainResult<ReservationRow> {
+        let current = lock_reservation(txn, reservation_id).await?;
+        lock(txn, current.number_resource_id).await?;
+        if current.status() != ReservationStatus::Pending || !current.is_expired_at(now) {
+            return Err(DomainError::precondition(
+                "RELEASE_NOT_PENDING",
+                "only an expired pending reservation records a late hold",
+            ));
+        }
+        update_reservation(
+            txn,
+            ctx,
+            &current,
+            Change {
+                status: ReservationStatus::Expired,
+                release: Some(ReleaseState::Pending),
+                hold_ref: Some(hold_ref),
+                evidence_ref: None,
+                reason: "LATE_HOLD_RELEASE_REQUIRED",
+            },
+            now,
+        )
+        .await
+    }
+
+    /// Release bookkeeping of an ended reservation (`PENDING` / `UNKNOWN`): a release
+    /// whose outcome is unknown is never assumed to have happened.
+    pub(crate) async fn set_release_state_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        reservation_id: Uuid,
+        state: ReleaseState,
+        reason: &str,
+        now: DateTime<Utc>,
+    ) -> DomainResult<ReservationRow> {
+        let current = lock_reservation(txn, reservation_id).await?;
+        if current.status().is_current()
+            || !matches!(state, ReleaseState::Pending | ReleaseState::Unknown)
+        {
+            return Err(DomainError::precondition(
+                "RELEASE_NOT_PENDING",
+                "release bookkeeping applies to ended reservations only",
+            ));
+        }
+        if current.provider_release_state == state.as_str() {
+            return Ok(current);
+        }
+        let row = ReservationRow::find_by_statement(stmt(
+            "UPDATE number_reservations SET provider_release_state = $3, revision = revision + 1, updated_at = $4 \
+             WHERE id = $1 AND revision = $2 RETURNING *",
+            vec![current.id.into(), current.revision.into(), state.as_str().into(), now.into()],
+        ))
+        .one(txn)
+        .await?
+        .ok_or(DomainError::VersionConflict("reservation"))?;
+        event(txn, ctx, &row, reason, now).await?;
+        Ok(row)
+    }
+
+    /// The caller scope's reservations, newest first (bounded keyset page). `before` is
+    /// the `(created_at, id)` of the last row of the previous page.
+    pub async fn list_reservations(
+        &self,
+        scope: &OwnerScope,
+        status: Option<ReservationStatus>,
+        before: Option<(DateTime<Utc>, Uuid)>,
+        limit: u64,
+    ) -> DomainResult<Vec<ReservationRow>> {
+        let (at, id) = before.unzip();
+        Ok(ReservationRow::find_by_statement(stmt(
+            "SELECT * FROM number_reservations WHERE tenant_id = $1 AND application_id = $2 AND environment_id = $3 \
+               AND ($4::text IS NULL OR status = $4) \
+               AND ($5::timestamptz IS NULL OR (created_at, id) < ($5, $6)) \
+             ORDER BY created_at DESC, id DESC LIMIT $7",
+            vec![
+                scope.tenant_id.into(),
+                scope.application_id.into(),
+                scope.environment_id.into(),
+                status.map(|s| s.as_str().to_string()).into(),
+                at.into(),
+                id.into(),
+                (limit.clamp(1, 100) as i64).into(),
+            ],
+        ))
+        .all(&self.db)
+        .await?)
+    }
+
+    /// Current reservations whose expiry has passed (bounded, oldest first).
+    pub async fn reservations_due(
+        &self,
+        now: DateTime<Utc>,
+        limit: u64,
+    ) -> DomainResult<Vec<ReservationRow>> {
+        Ok(ReservationRow::find_by_statement(stmt(
+            "SELECT * FROM number_reservations WHERE status IN ('PENDING', 'HELD') AND expires_at <= $1 \
+             ORDER BY expires_at LIMIT $2",
+            vec![now.into(), (limit.clamp(1, 1_000) as i64).into()],
+        ))
+        .all(&self.db)
+        .await?)
+    }
+
+    /// Ended reservations whose provider release is still owed (PENDING) — the release
+    /// command is (re)submitted for them.
+    pub async fn releases_owed(&self, limit: u64) -> DomainResult<Vec<ReservationRow>> {
+        Ok(ReservationRow::find_by_statement(stmt(
+            "SELECT * FROM number_reservations WHERE provider_release_state = 'PENDING' \
+               AND status IN ('EXPIRED', 'CANCELLED') ORDER BY updated_at LIMIT $1",
+            vec![(limit.clamp(1, 1_000) as i64).into()],
+        ))
+        .all(&self.db)
+        .await?)
+    }
+
+    /// A reservation by id, whatever its scope (workers only).
+    pub async fn reservation_any(&self, id: Uuid) -> DomainResult<ReservationRow> {
+        ReservationRow::find_by_statement(stmt(
+            "SELECT * FROM number_reservations WHERE id = $1",
+            vec![id.into()],
+        ))
+        .one(&self.db)
+        .await?
         .ok_or(DomainError::NotFound("reservation"))
     }
 }

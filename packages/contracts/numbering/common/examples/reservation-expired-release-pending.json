@@ -5,5 +5,13 @@
   "revision": 3,
   "expiresAt": "2031-03-01T10:10:30Z",
   "providerReleaseState": "PENDING",
-  "createdAt": "2031-03-01T10:00:30Z"
+  "createdAt": "2031-03-01T10:00:30Z",
+  "holdBasis": "ELIGIBILITY_DECISION",
+  "eligibilityDecisionId": "7c2e4a6b-1d3f-4e5a-9b8c-0d1e2f3a4b5c",
+  "requestedCapabilities": [
+    "VOICE_INBOUND",
+    "VOICE_OUTBOUND"
+  ],
+  "convertedTo": null,
+  "endedAt": "2031-03-01T10:10:31Z"
 }

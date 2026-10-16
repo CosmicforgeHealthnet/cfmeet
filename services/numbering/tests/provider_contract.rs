@@ -1608,12 +1608,13 @@ async fn the_provider_migration_refuses_to_drop_in_flight_commands_and_reapplies
         )
         .await
         .unwrap();
-    assert!(Migrator::down(g.h.conn(), Some(1)).await.is_err());
+    let steps = common::steps_down_to("m20261019_000005_provider_commands");
+    assert!(Migrator::down(g.h.conn(), Some(steps)).await.is_err());
     let Some(fresh) = common::TestDb::empty().await else {
         return;
     };
     Migrator::up(&fresh.conn, None).await.unwrap();
-    Migrator::down(&fresh.conn, Some(1)).await.unwrap();
+    Migrator::down(&fresh.conn, Some(steps)).await.unwrap();
     let q = "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND (table_name LIKE 'number_provider_%' \
              AND table_name <> 'number_provider_bindings' OR table_name = 'numbering_incidents')";
     assert_eq!(scalar(&fresh.conn, q).await, 0);

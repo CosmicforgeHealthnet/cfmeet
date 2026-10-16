@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Numbering API",
-    "version": "1.3.0",
-    "description": "HTTP surface of services/numbering (Part IV Workstream C foundation, ADR 0033): GET /health and /ready (public, no data); customer reads of the caller's own DCN assignments and reservations under /v1 (credential verified by Platform Access on every request; normalized 401, 429 when Platform Access throttles, 503 when it is unreachable — fail closed); and the service-authenticated /internal/v1 API (cfmeet.platform.internal-http; permission from Numbering's own trust bundle). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 64 KiB. Full public number search / provisioning / assignment-mutation APIs are later workstreams."
+    "version": "1.4.0",
+    "description": "HTTP surface of services/numbering: GET /health, /ready and /openapi.json (public, no data); the customer API under /v1 (credential verified by Platform Access on every request; normalized 401, 429 when Platform Access throttles or a quota is exhausted, 503 when it is unreachable — fail closed): assignment / reservation reads, the catalog, KYC and eligibility (F), provider-neutral inventory search and reservations (H); provider callbacks (G); and the service-authenticated /internal/v1 API (cfmeet.platform.internal-http; permission from Numbering's own trust bundle). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 64 KiB."
   },
   "components": {
     "securitySchemes": {
@@ -347,7 +347,7 @@
             "customerCredential": []
           }
         ],
-        "description": "One reservation of the caller's scope. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain for the presented credential; other scopes' records are NOT_FOUND.",
+        "description": "One reservation of the caller's scope, with its hold basis, conversion and provider release state. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
             "name": "reservationId",
@@ -1945,6 +1945,441 @@
           },
           "503": {
             "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/numbers/countries": {
+      "get": {
+        "operationId": "listNumberCountries",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "The supported countries of the caller's inventory class. Requires scope `numbers.search`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CountryList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/numbers/countries/{countryCode}/number-types": {
+      "get": {
+        "operationId": "listNumberTypes",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Number types / classes of a supported country with their capability metadata (generic catalog entries; provider applicability is internal). Requires scope `numbers.search`.",
+        "parameters": [
+          {
+            "name": "countryCode",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CountryCode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberTypeList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/numbers/search": {
+      "get": {
+        "operationId": "searchNumbers",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Provider-neutral inventory search of the caller's inventory class (SANDBOX / TEST: synthetic test inventory only; PRODUCTION: real inventory only, a real provider consulted only when live telecom is allowed). Results are observations with freshness, never reservations; reserved, assigned, quarantined or uncertain numbers never appear. The first page of a query may refresh the providers (at most once per query and interval). Bounded: a country is required, pages hold at most 50 results, and each application environment has a per-minute search quota (429 RATE_LIMITED with Retry-After). Requires scope `numbers.search`.",
+        "parameters": [
+          {
+            "name": "countryCode",
+            "in": "query",
+            "required": true,
+            "description": "ISO 3166-1 alpha-2 (required).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CountryCode"
+            }
+          },
+          {
+            "name": "region",
+            "in": "query",
+            "required": false,
+            "description": "Region / locality.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "numberType",
+            "in": "query",
+            "required": false,
+            "description": "Number class.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "GEOGRAPHIC",
+                "MOBILE",
+                "TOLL_FREE",
+                "NATIONAL"
+              ]
+            }
+          },
+          {
+            "name": "capabilities",
+            "in": "query",
+            "required": false,
+            "description": "Comma-separated capabilities every result must support.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200,
+              "pattern": "^[A-Z_]+(,[A-Z_]+)*$"
+            }
+          },
+          {
+            "name": "prefix",
+            "in": "query",
+            "required": false,
+            "description": "Leading digits of the E.164 number (1-15 digits, optional +).",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\+?[0-9]{1,15}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1-50, default 20).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "nextCursor of the previous page of the same query.",
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberSearchPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/numbers/reservations": {
+      "get": {
+        "operationId": "listReservations",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "The caller's reservations, newest first. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Filter by status.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReservationStatus"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1-100, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "nextCursor of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReservationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createReservation",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Reserve a number (202: PENDING until the provider hold is confirmed; poll GET /v1/numbers/reservations/{reservationId}). In order: the number is in the caller's inventory class, allocatable with a fresh offer, every requested capability supported; the eligibility basis is a recorded ELIGIBLE decision of the caller's scope for this number's country / type / capabilities (PRODUCTION always), or a pre-eligibility hold where policy permits (SANDBOX / TEST); one transaction then records the scoped idempotency key, the PENDING reservation and the durable RESERVE provider command. Concurrent claims of one number: exactly one wins (others PRECONDITION_FAILED / NOT_ALLOCATABLE, never an oracle on another scope). A provider timeout after possible execution is reconciled from read-back, never retried blindly. Requires scope `numbers.manage`.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Required. Scoped to the caller's application environment and this operation: a replay returns the original result (200, Idempotent-Replayed: true); a different request with the key is IDEMPOTENCY_KEY_REUSED (422).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Reservation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "200": {
+            "description": "Replayed (same Idempotency-Key and request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Reservation"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CreateReservationRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/numbers/reservations/{reservationId}/cancel": {
+      "post": {
+        "operationId": "cancelReservation",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Cancel a HELD reservation of the caller's scope. A provider hold is never assumed released: the reservation is CANCELLED with providerReleaseState PENDING and a RELEASE_HOLD command gives the hold back (the number returns to inventory only on the provider's evidence or a read-back). A reservation whose hold is still being requested is RESERVATION_BUSY (409); one whose outcome is uncertain is RECONCILIATION_REQUIRED. Requires scope `numbers.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
+        "parameters": [
+          {
+            "name": "reservationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Reservation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "getOpenApi",
+        "security": [],
+        "description": "This API description (the checked-in contract cfmeet.numbering.internal-api, served as is). Public like the probes; it describes, never authorizes.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
           }
         }
       }

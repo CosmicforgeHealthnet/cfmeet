@@ -214,36 +214,36 @@
     },
     {
       "id": "cfmeet.numbering.common",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "kind": "json-schema",
       "path": "numbering/common/v1.schema.json",
       "owner": "numbering",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "The canonical Numbering vocabulary and messages (Part IV C5, ADR 0033): Number Resource identity (CF Meet ids canonical, provider identifiers never exposed), type, capabilities with provenance, opaque provider binding references, inventory observations, reservations, DCN assignments with ownership and routing references, routing profiles, lifecycle transitions, the trusted context and the error envelope; 1.1.0 the capability and country catalog (E); 1.2.0 KYC requirements, cases, protected evidence metadata, decisions, appeals and eligibility decisions (F); 1.3.0 provider command, provider event and incident vocabularies and the provider callback acknowledgement (G)."
+      "description": "The canonical Numbering vocabulary and messages (Part IV C5, ADR 0033): Number Resource identity (CF Meet ids canonical, provider identifiers never exposed), type, capabilities with provenance, opaque provider binding references, inventory observations, reservations, DCN assignments with ownership and routing references, routing profiles, lifecycle transitions, the trusted context and the error envelope; 1.1.0 the capability and country catalog (E); 1.2.0 KYC requirements, cases, protected evidence metadata, decisions, appeals and eligibility decisions (F); 1.3.0 provider command, provider event and incident vocabularies and the provider callback acknowledgement (G). 1.4.0 inventory search results / pages with freshness, KYC indicators, country and number-type lists, reservation creation / list, hold basis and conversion, RELEASE_HOLD commands (H)."
     },
     {
       "id": "cfmeet.numbering.event",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "kind": "json-schema",
       "path": "numbering/events/v1.schema.json",
       "owner": "numbering",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Numbering domain events in the platform envelope (transactional outbox, at least once, per-aggregate order): resource discovered / lifecycle-changed / classified, binding changed, capability changed, reservation changed, assignment changed, routing profile revised, catalog revised, KYC requirements published, KYC case changed, KYC evidence received, eligibility evaluated, provider command changed, provider event received. No telephone number, provider identifier, credential or secret."
+      "description": "Numbering domain events in the platform envelope (transactional outbox, at least once, per-aggregate order): resource discovered / lifecycle-changed / classified, binding changed, capability changed, reservation changed, assignment changed, routing profile revised, catalog revised, KYC requirements published, KYC case changed, KYC evidence received, eligibility evaluated, provider command changed, provider event received. No telephone number, provider identifier, credential or secret; 1.4.0 RELEASE_HOLD provider commands (H)."
     },
     {
       "id": "cfmeet.numbering.internal-api",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "kind": "openapi",
       "path": "numbering/internal/v1.openapi.json",
       "owner": "numbering",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface of services/numbering: GET /health, GET /ready, customer reads of the caller's own DCN assignments / history / reservations (/v1, authenticated by Platform Access, numbers.read) and the service-authenticated internal Number Resource view (/internal/v1, number-resource.read). Full public search / provisioning APIs are later workstreams."
+      "description": "HTTP surface of services/numbering: GET /health, /ready, /openapi.json (the served contract); customer reads of the caller's own DCN assignments / history / reservations, the catalog, KYC / eligibility (F); 1.4.0 provider-neutral inventory search, countries and number types, reservations (create with Idempotency-Key, list, cancel) (H); provider callbacks (G); and the service-authenticated internal Number Resource view (/internal/v1, number-resource.read)."
     },
     {
       "id": "cfmeet.privacy-relay.http-api",

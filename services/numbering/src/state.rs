@@ -31,6 +31,8 @@ pub struct AppState {
     /// Provider commands, callbacks and reconciliation (Workstream G); `None` when no
     /// provider adapter is configured.
     pub providers: Option<crate::providers::commands::ProviderCommands>,
+    /// Limits of the acquisition workflows (Workstreams H–K).
+    pub acquisition_settings: crate::acquisition::AcquisitionSettings,
 }
 
 impl AppState {
@@ -53,6 +55,7 @@ impl AppState {
             ),
             eligibility: Arc::new(EligibilityPolicy::default()),
             providers: None,
+            acquisition_settings: Default::default(),
             numbers,
             db,
             clock,
@@ -66,6 +69,24 @@ impl AppState {
     pub fn with_kyc(mut self, kyc: KycService, eligibility: EligibilityPolicy) -> Self {
         self.kyc = kyc;
         self.eligibility = Arc::new(eligibility);
+        self
+    }
+
+    /// The acquisition workflows over this state's domain and providers.
+    pub fn acquisition(&self) -> crate::acquisition::Acquisition {
+        crate::acquisition::Acquisition::new(
+            self.numbers.clone(),
+            self.providers.clone(),
+            self.acquisition_settings.clone(),
+        )
+    }
+
+    /// Replaces the acquisition limits.
+    pub fn with_acquisition_settings(
+        mut self,
+        settings: crate::acquisition::AcquisitionSettings,
+    ) -> Self {
+        self.acquisition_settings = settings;
         self
     }
 

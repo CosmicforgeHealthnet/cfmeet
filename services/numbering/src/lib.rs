@@ -14,6 +14,7 @@
 //! Numbering owns no logical call, SIP / PSTN execution, relay-session semantics or SMS
 //! transport envelope, and never reads another service's database.
 
+pub mod acquisition;
 pub mod config;
 pub mod domain;
 pub mod http;

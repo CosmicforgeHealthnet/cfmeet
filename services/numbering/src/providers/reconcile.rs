@@ -54,6 +54,17 @@ fn judge(op: &OperationKind, request_id: Uuid, s: &ProviderNumberState) -> Verdi
             }
             _ => Drift("HELD_OR_OWNED_BY_ANOTHER_REQUEST"),
         },
+        OperationKind::ReleaseHold => match s.status {
+            St::Held | St::Provisioned | St::Suspended if s.owned_by_us => {
+                if s.status == St::Held {
+                    DidNotHappen(FailureCategory::ProviderRejected)
+                } else {
+                    Drift("HOLD_PROVISIONED_AT_PROVIDER")
+                }
+            }
+            St::Available | St::Unavailable | St::NotFound | St::Released => Happened,
+            _ => Drift("UNEXPECTED_HOLD_STATE"),
+        },
         OperationKind::Provision { capabilities } => match s.status {
             St::Provisioned | St::Suspended if s.owned_by_us => {
                 if capabilities.iter().any(|c| s.capabilities.contains(c)) {

@@ -49,6 +49,11 @@ Contract `cfmeet.numbering.internal-api` (messages `cfmeet.numbering.common`, ev
 | Route | Authentication | Purpose |
 |---|---|---|
 | `GET /health`, `GET /ready` | none | liveness; readiness with outbox / dead-letter / unknown-outcome counts |
+| `GET /openapi.json` | none | the served API description: exactly the checked-in contract `cfmeet.numbering.internal-api` |
+| `GET /v1/numbers/countries`, `GET /v1/numbers/countries/{cc}/number-types` | customer, `numbers.search` | supported countries / number types of the caller's inventory class (H) |
+| `GET /v1/numbers/search` | customer, `numbers.search` | provider-neutral inventory search: observations with freshness, capability provenance, KYC indicator; bounded pages, per-environment quota (H) |
+| `POST /v1/numbers/reservations` | customer, `numbers.manage`, `Idempotency-Key` required | eligibility-bound reservation with a durable provider hold (202, PENDING → HELD) (H) |
+| `GET /v1/numbers/reservations`, `POST /v1/numbers/reservations/{id}/cancel` | customer, `numbers.read` / `numbers.manage` | the caller's reservations; cancellation with an evidence-only provider release (H) |
 | `GET /v1/numbers/assignments[/{id}[/history]]` | customer credential → Platform Access, `numbers.read` | the caller's own DCN assignments |
 | `GET /v1/numbers/reservations/{id}` | customer credential → Platform Access, `numbers.read` | the caller's own reservation |
 | `GET /internal/v1/number-resources/{id}` | service token, `number-resource.read` (Calling, Telephony) | canonical, provider-independent Number Resource |
@@ -66,9 +71,9 @@ Contract `cfmeet.numbering.internal-api` (messages `cfmeet.numbering.common`, ev
 
 Customer credentials are verified by **Platform Access** on every request; the tenant /
 application / environment come only from its authority chain (a request-supplied id is
-never authority). Platform Access unreachable → 503 (fail closed). Full public search /
-provisioning / assignment-mutation APIs, SMS, portability and real carrier adapters
-are later workstreams (provider operations run through the provider-neutral contract and
+never authority). Platform Access unreachable → 503 (fail closed). Search and reservations are
+Workstream H ([ADR 0037](../../docs/decisions/0037-numbering-inventory-search-and-reservation.md));
+SMS, portability and real carrier adapters are later workstreams (provider operations run through the provider-neutral contract and
 the deterministic synthetic provider, ADR 0036); no telecom carrier is contacted.
 
 ## Running locally (no Docker required)
@@ -101,4 +106,5 @@ start the real Platform Access binary with its own database.
 | `contracts` | Rust = contract = database vocabulary, error / rule codes, event types |
 | `capability_catalog` | Workstream E: catalog versioning, verified vs synthetic, combinations / false-mobile prevention, expiry / stale / conflicting evidence, upgrades / downgrades / revocation, binding replacement, normalized errors, HTTP isolation and admin gating, external-verification claims, migration rollback |
 | `kyc_eligibility` | Workstream F: requirement selection / versioning / provider extensions, the case lifecycle and database guards, sealed / typed / retained / access-audited evidence, every deterministic verifier outcome, unknown outcomes across a worker restart, privileged manual review and appeals, expiry / revalidation / revocation, eligibility outcomes and isolation, assignment admission, concurrency and idempotency, sensitive-data leakage, HTTP scopes and contracts, migration rollback |
+| `inventory_reservations` | Workstream H: canonical ingestion (repeated / concurrent / stale), search filters / capabilities / KYC / freshness / outages / pagination / quotas, idempotent eligibility-bound reservations, single-winner contention, cancellation and expiry with evidence-only releases, unknown release / hold outcomes, late holds, production separation, database guards, migration rollback, the customer API and the served OpenAPI |
 | `provider_contract` | Workstream G: the reusable certification suite (and its gating), registry environment restrictions, inventory → canonical resources with provenance and F requirements, the whole lifecycle through durable commands, idempotency / in-flight exclusivity, every scripted fault (not transmitted, unknown after execution, lost, refusals, partial provisioning, release unknown, drift, outage, process interruption), authenticated / de-duplicated / order-safe callbacks, capability downgrades into E, no resurrection, binding replacement, migration rollback |

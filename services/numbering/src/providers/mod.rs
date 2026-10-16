@@ -86,6 +86,8 @@ simple_enum!(
     /// The provider-affecting operations executed as durable commands.
     CommandOperation {
         Reserve = "RESERVE",
+        /// Gives a reservation's provider hold back (cancellation / expiry).
+        ReleaseHold = "RELEASE_HOLD",
         Provision = "PROVISION",
         ConfigureVoice = "CONFIGURE_VOICE",
         ConfigureSms = "CONFIGURE_SMS",
@@ -100,6 +102,7 @@ impl CommandOperation {
     pub fn provider_operation(&self) -> ProviderOperation {
         match self {
             CommandOperation::Reserve => ProviderOperation::Reserve,
+            CommandOperation::ReleaseHold => ProviderOperation::Release,
             CommandOperation::Provision => ProviderOperation::Provision,
             CommandOperation::ConfigureVoice => ProviderOperation::ConfigureVoice,
             CommandOperation::ConfigureSms => ProviderOperation::ConfigureSms,
@@ -213,20 +216,35 @@ pub struct ProviderNumberState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum OperationKind {
-    Reserve { hold_seconds: i64 },
-    Provision { capabilities: Vec<Capability> },
-    ConfigureVoice { route_ref: Uuid },
-    ConfigureSms { route_ref: Uuid },
-    Suspend { reason_code: String },
+    Reserve {
+        hold_seconds: i64,
+    },
+    /// The provider releases a hold (provider operation `release` on a held number).
+    ReleaseHold,
+    Provision {
+        capabilities: Vec<Capability>,
+    },
+    ConfigureVoice {
+        route_ref: Uuid,
+    },
+    ConfigureSms {
+        route_ref: Uuid,
+    },
+    Suspend {
+        reason_code: String,
+    },
     Restore,
     Release,
-    PortIn { losing_carrier_ref: String },
+    PortIn {
+        losing_carrier_ref: String,
+    },
 }
 
 impl OperationKind {
     pub fn operation(&self) -> CommandOperation {
         match self {
             OperationKind::Reserve { .. } => CommandOperation::Reserve,
+            OperationKind::ReleaseHold => CommandOperation::ReleaseHold,
             OperationKind::Provision { .. } => CommandOperation::Provision,
             OperationKind::ConfigureVoice { .. } => CommandOperation::ConfigureVoice,
             OperationKind::ConfigureSms { .. } => CommandOperation::ConfigureSms,
@@ -408,6 +426,7 @@ pub async fn dispatch(
 ) -> ProviderOutcome<OperationReceipt> {
     match request.operation {
         OperationKind::Reserve { .. } => provider.reserve(request).await,
+        OperationKind::ReleaseHold => provider.release(request).await,
         OperationKind::Provision { .. } => provider.provision(request).await,
         OperationKind::ConfigureVoice { .. } => provider.configure_voice(request).await,
         OperationKind::ConfigureSms { .. } => provider.configure_sms(request).await,
