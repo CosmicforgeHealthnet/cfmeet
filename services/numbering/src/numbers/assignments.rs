@@ -26,8 +26,8 @@ use super::{
     reservations::ReservationRow,
     resources::lock,
     routing::RoutingProfileRow,
-    stmt, Actor, ActorKind, AssignmentStatus, DomainError, DomainResult, LifecycleState,
-    NumberDomain, OwnerKind, OwnerScope, OwnershipClass, ReservationStatus,
+    stmt, Actor, ActorKind, AssignmentStatus, DomainError, DomainResult, EnvironmentKind,
+    LifecycleState, NumberDomain, OwnerKind, OwnerScope, OwnershipClass, ReservationStatus,
 };
 use crate::{
     domain::RequestContext,
@@ -466,6 +466,40 @@ impl NumberDomain {
         expected_revision: i64,
         decision_ref: Uuid,
     ) -> DomainResult<AssignmentRow> {
+        // Only an ELIGIBLE decision of the assignment's own scope, still in force, for its
+        // number (when the decision names one) admits it (Workstream F).
+        let assignment = AssignmentRow::find_by_statement(stmt(
+            "SELECT * FROM dcn_assignments WHERE id = $1",
+            vec![id.into()],
+        ))
+        .one(&self.db)
+        .await?
+        .ok_or(DomainError::NotFound("assignment"))?;
+        let decision = super::eligibility::EligibilityDecisionRow::find_by_statement(stmt(
+            "SELECT * FROM number_eligibility_decisions WHERE id = $1",
+            vec![decision_ref.into()],
+        ))
+        .one(&self.db)
+        .await?;
+        let scope = OwnerScope {
+            tenant_id: assignment.tenant_id,
+            application_id: assignment.application_id,
+            environment_id: assignment.environment_id,
+            environment_kind: EnvironmentKind::parse(&assignment.environment_kind)
+                .expect("CHECK-constrained kind"),
+            service_account_id: Uuid::nil(),
+        };
+        let admitted = decision.as_ref().is_some_and(|d| {
+            d.valid_for(&scope, self.clock.now())
+                && d.number_resource_id
+                    .is_none_or(|n| n == assignment.number_resource_id)
+        });
+        if !admitted {
+            return Err(DomainError::precondition(
+                "ELIGIBILITY_REQUIRED",
+                "an ELIGIBLE decision of this scope and number, still in force, is required",
+            ));
+        }
         self.simple_transition(
             ctx,
             actor,

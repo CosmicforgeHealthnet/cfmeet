@@ -29,6 +29,9 @@ pub struct TrustedContext {
     pub service_account_id: Uuid,
     pub credential_id: Uuid,
     pub first_party: bool,
+    /// The environment may use live telecom (Platform Access `liveTelecomAllowed`;
+    /// absent = false, fail closed).
+    pub live_telecom_allowed: bool,
     /// FULL; SAFETY_ONLY contexts are refused by Numbering (it has no safety operation).
     pub full_authority: bool,
     pub scopes: BTreeSet<String>,
@@ -74,6 +77,11 @@ impl TrustedContext {
             service_account_id: id(&["serviceAccount", "id"])?,
             credential_id: id(&["credential", "id"])?,
             first_party: authority.get("tenant")?.get("classification")?.as_str()? == "FIRST_PARTY",
+            live_telecom_allowed: authority
+                .get("environment")?
+                .get("liveTelecomAllowed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             full_authority: authority.get("authorityMode")?.as_str()? == "FULL",
             scopes,
         })

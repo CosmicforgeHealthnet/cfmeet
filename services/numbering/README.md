@@ -56,11 +56,17 @@ Contract `cfmeet.numbering.internal-api` (messages `cfmeet.numbering.common`, ev
 | `GET /v1/numbers/catalog/countries/{cc}` | customer, `numbers.search` / `numbers.read` | catalog of the caller's inventory class |
 | `GET /v1/numbers/assignments/{id}/capabilities` | customer, `numbers.read` | resolved capabilities of the caller's own number |
 | `POST /v1/admin/catalog/…`, `POST /v1/admin/number-resources/{id}/capabilities/{c}/revoke` | `numbers.admin` (first-party) + `X-CF-Operator` | catalog publication / withdrawal, capability revocation |
+| `GET /v1/numbers/kyc/requirements/{cc}/{type}/{ownership}` | customer, `numbers.kyc.read` | KYC requirements in force (fail closed) |
+| `POST /v1/numbers/kyc/cases`, `…/cases/{id}/evidence`, `…/submit`, `…/appeals` | customer, `numbers.kyc.manage`, `Idempotency-Key` | open a case, attach protected evidence, submit, appeal |
+| `GET /v1/numbers/kyc/cases/{id}[/history]` | customer, `numbers.kyc.read` | case status, missing requirements, immutable history |
+| `POST /v1/numbers/eligibility`, `GET /v1/numbers/eligibility/{id}` | customer, `numbers.kyc.read` | explainable eligibility decision (never reserves) |
+| `POST /v1/admin/kyc/requirements`, `GET /v1/admin/kyc/cases/{id}`, `POST …/decisions`, `…/revoke`, `POST /v1/admin/kyc/evidence/{id}/access` | `numbers.admin` (first-party) + `X-CF-Operator` | requirement publication, manual review, revocation, audited evidence read |
+| `GET /internal/v1/assignments/{id}/kyc-status` | service token, `number-resource.read` | whether an assignment's KYC basis is in force |
 
 Customer credentials are verified by **Platform Access** on every request; the tenant /
 application / environment come only from its authority chain (a request-supplied id is
 never authority). Platform Access unreachable → 503 (fail closed). Full public search /
-provisioning / assignment-mutation APIs, KYC, SMS, portability and real carrier adapters
+provisioning / assignment-mutation APIs, SMS, portability and real carrier adapters
 are later workstreams; no telecom carrier is contacted.
 
 ## Running locally (no Docker required)
@@ -92,3 +98,4 @@ start the real Platform Access binary with its own database.
 | `allocation` | D10.8–D10.17: reservation contention and expiry, ownership, exclusivity, isolation, history, routing revisions, premature activation, quarantine / uncertainty, rollback |
 | `contracts` | Rust = contract = database vocabulary, error / rule codes, event types |
 | `capability_catalog` | Workstream E: catalog versioning, verified vs synthetic, combinations / false-mobile prevention, expiry / stale / conflicting evidence, upgrades / downgrades / revocation, binding replacement, normalized errors, HTTP isolation and admin gating, external-verification claims, migration rollback |
+| `kyc_eligibility` | Workstream F: requirement selection / versioning / provider extensions, the case lifecycle and database guards, sealed / typed / retained / access-audited evidence, every deterministic verifier outcome, unknown outcomes across a worker restart, privileged manual review and appeals, expiry / revalidation / revocation, eligibility outcomes and isolation, assignment admission, concurrency and idempotency, sensitive-data leakage, HTTP scopes and contracts, migration rollback |

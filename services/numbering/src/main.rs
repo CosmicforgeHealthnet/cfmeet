@@ -4,13 +4,23 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::anyhow;
 use numbering::{
-    config::{service_auth::ServiceAuthSettings, LogFormat, NumberingConfig},
+    config::{
+        kyc::{KycConfig, VerifierChoice},
+        service_auth::ServiceAuthSettings,
+        LogFormat, NumberingConfig,
+    },
     domain::{SharedClock, SystemClock},
     http,
     identity::PlatformAccessAuthority,
     infra::{idempotency, jobs::JobRunner},
     metrics,
-    numbers::error::summarize_db_error,
+    numbers::{
+        error::summarize_db_error,
+        kyc::{
+            verifier::{DeterministicKycVerifier, KycVerifier, ManualKycVerifier},
+            KycService, VerificationHandler,
+        },
+    },
     state::AppState,
 };
 use numbering_migration::MigratorTrait;
@@ -31,6 +41,19 @@ async fn main() -> anyhow::Result<()> {
         Ok(settings) => settings,
         Err(err) => {
             eprintln!("numbering: service authentication configuration error: {err}");
+            std::process::exit(2);
+        }
+    };
+    // KYC / eligibility (fail closed: the deterministic verifier is refused in staging /
+    // production; evidence is refused without a protected store and key).
+    let kyc_config = match KycConfig::from_lookup(
+        |key| std::env::var(key).ok(),
+        settings.runtime_environment,
+        None,
+    ) {
+        Ok(c) => c,
+        Err(err) => {
+            eprintln!("numbering: KYC configuration error: {err}");
             std::process::exit(2);
         }
     };
@@ -97,19 +120,41 @@ async fn main() -> anyhow::Result<()> {
         service_auth,
         config.workers,
     );
+    let verifier: Arc<dyn KycVerifier> = match kyc_config.verifier {
+        VerifierChoice::Manual => Arc::new(ManualKycVerifier),
+        VerifierChoice::Deterministic => {
+            tracing::warn!("the deterministic KYC verifier is active (test-only, never an external KYC provider)");
+            Arc::new(DeterministicKycVerifier::new())
+        }
+    };
+    if !kyc_config.vault.is_configured() {
+        tracing::warn!(
+            "no protected KYC evidence store is configured: evidence submissions are refused"
+        );
+    }
+    let kyc = KycService::new(
+        state.numbers.clone(),
+        kyc_config.vault.clone(),
+        verifier,
+        kyc_config.settings,
+    );
+    let state = state.with_kyc(kyc.clone(), kyc_config.eligibility.clone());
 
     // Worker foundation: lease recovery of interrupted jobs (UNKNOWN_OUTCOME parking for
     // provider-affecting ones) and idempotency-key expiry. Business job handlers are
     // registered by later workstreams; the outbox publisher starts once a consumer
     // transport is configured (events stay PENDING and visible in /ready until then).
     {
-        let runner = Arc::new(JobRunner::new(
-            db.clone(),
-            clock.clone(),
-            format!("numbering-{}", std::process::id()),
-            config.workers.lease,
-            config.workers.retry,
-        ));
+        let runner = Arc::new(
+            JobRunner::new(
+                db.clone(),
+                clock.clone(),
+                format!("numbering-{}", std::process::id()),
+                config.workers.lease,
+                config.workers.retry,
+            )
+            .with_handler(Arc::new(VerificationHandler { kyc: kyc.clone() })),
+        );
         tokio::spawn(runner.run(config.workers.interval));
         let db = db.clone();
         let clock = clock.clone();
@@ -132,6 +177,25 @@ async fn main() -> anyhow::Result<()> {
                 let ctx = numbering::domain::RequestContext::generate();
                 if let Err(e) = numbers.expire_capabilities(&ctx, 500).await {
                     tracing::warn!(error = %e, "capability expiry sweep failed");
+                }
+            }
+        });
+        // KYC lifecycle sweeps: approval expiry and abandonment, revalidation scheduling,
+        // evidence retention.
+        let kyc = kyc.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(Duration::from_secs(60));
+            loop {
+                ticker.tick().await;
+                let ctx = numbering::domain::RequestContext::generate();
+                if let Err(e) = kyc.expire_due(&ctx, 500).await {
+                    tracing::warn!(error = %e, "KYC expiry sweep failed");
+                }
+                if let Err(e) = kyc.schedule_revalidations(&ctx, 500).await {
+                    tracing::warn!(error = %e, "KYC revalidation sweep failed");
+                }
+                if let Err(e) = kyc.purge_expired_evidence(500).await {
+                    tracing::warn!(error = %e, "KYC evidence retention sweep failed");
                 }
             }
         });

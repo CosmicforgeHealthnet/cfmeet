@@ -15,6 +15,7 @@ pub mod catalog;
 pub mod customer;
 pub mod error;
 pub mod internal;
+pub mod kyc;
 pub mod middleware;
 
 use axum::{

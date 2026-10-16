@@ -1,0 +1,23 @@
+{
+  "event_id": "evt_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "event_type": "number.eligibility.evaluated",
+  "schema_version": 1,
+  "occurred_at": "2031-03-01T10:05:00.000000Z",
+  "producer_service": "cfmeet.numbering",
+  "runtime_environment": "staging",
+  "correlation_id": "corr_0123456789abcdef0123456789abcdef",
+  "payload": {
+    "eligibility_decision_id": "6f8b0d2e-4a6c-4b8d-9f0e-2a4c6e8b0d2f",
+    "outcome": "DENIED",
+    "reason_codes": [
+      "KYC_REVOKED"
+    ],
+    "kyc_case_id": "7a1c3b5d-9f01-4e2d-8b6f-5f0b2c1e8d3a",
+    "valid_until": "2031-04-01T10:30:00Z"
+  },
+  "ownership": {
+    "tenant_id": "2b4d6f8a-1c3e-4a5b-8c7d-9e0f1a2b3c4d",
+    "application_id": "3c5e7a9b-2d4f-4b6c-9d8e-0f1a2b3c4d5e",
+    "application_environment_id": "4d6f8b0c-3e5a-4c7d-8e9f-1a2b3c4d5e6f"
+  }
+}

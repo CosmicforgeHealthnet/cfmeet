@@ -30,6 +30,18 @@
     },
     {
       "$ref": "#/$defs/RoutingProfileRevised"
+    },
+    {
+      "$ref": "#/$defs/KycRequirementsPublished"
+    },
+    {
+      "$ref": "#/$defs/KycCaseChanged"
+    },
+    {
+      "$ref": "#/$defs/KycEvidenceReceived"
+    },
+    {
+      "$ref": "#/$defs/EligibilityEvaluated"
     }
   ],
   "$defs": {
@@ -733,6 +745,318 @@
             },
             "payload": {
               "$ref": "#/$defs/RoutingProfileRevisedPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
+        }
+      ]
+    },
+    "KycRequirementsPublishedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requirement_set_id",
+        "scope_kind",
+        "country_code",
+        "inventory_class",
+        "number_type",
+        "ownership_class",
+        "version",
+        "kyc_mandatory",
+        "reason_code"
+      ],
+      "properties": {
+        "requirement_set_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "scope_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RequirementScope"
+        },
+        "country_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CountryCode"
+        },
+        "inventory_class": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/InventoryClass"
+        },
+        "number_type": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "GEOGRAPHIC",
+                "MOBILE",
+                "TOLL_FREE",
+                "NATIONAL"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ownership_class": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/OwnershipClass"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kyc_mandatory": {
+          "type": "boolean"
+        },
+        "reason_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+        }
+      }
+    },
+    "KycRequirementsPublished": {
+      "description": "A requirement set version was published (platform policy: no ownership).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.kyc-requirements.published"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/KycRequirementsPublishedPayload"
+            }
+          },
+          "not": {
+            "required": [
+              "ownership"
+            ]
+          }
+        }
+      ]
+    },
+    "KycCaseChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kyc_case_id",
+        "from_status",
+        "to_status",
+        "revision",
+        "decision_kind",
+        "verifier_kind",
+        "reason_code",
+        "expires_at"
+      ],
+      "properties": {
+        "kyc_case_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "from_status": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/KycStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "to_status": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/KycStatus"
+        },
+        "revision": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Revision"
+        },
+        "decision_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/KycDecisionKind"
+        },
+        "verifier_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/VerifierKind"
+        },
+        "reason_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+        },
+        "expires_at": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "KycCaseChanged": {
+      "description": "A KYC case was opened or changed status (one event per immutable decision). Ids, statuses and reason codes only — never evidence or subject data.",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.kyc-case.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/KycCaseChangedPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
+        }
+      ]
+    },
+    "KycEvidenceReceivedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kyc_case_id",
+        "evidence_id",
+        "evidence_kind",
+        "requirement_type"
+      ],
+      "properties": {
+        "kyc_case_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "evidence_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "evidence_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/EvidenceKind"
+        },
+        "requirement_type": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RequirementType"
+        }
+      }
+    },
+    "KycEvidenceReceived": {
+      "description": "Protected evidence was attached to a case (reference only: never content, object key or digest).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.kyc-evidence.received"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/KycEvidenceReceivedPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
+        }
+      ]
+    },
+    "EligibilityEvaluatedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eligibility_decision_id",
+        "outcome",
+        "reason_codes",
+        "kyc_case_id",
+        "valid_until"
+      ],
+      "properties": {
+        "eligibility_decision_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "outcome": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/EligibilityOutcome"
+        },
+        "reason_codes": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/EligibilityReasonCode"
+          }
+        },
+        "kyc_case_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "valid_until": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Timestamp"
+        }
+      }
+    },
+    "EligibilityEvaluated": {
+      "description": "An eligibility decision was recorded (it never reserves or provisions).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.eligibility.evaluated"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/EligibilityEvaluatedPayload"
             },
             "ownership": {
               "required": [

@@ -5,6 +5,63 @@
   "description": "The canonical vocabulary and messages of services/numbering (Part IV Workstreams C-D, ADR 0033): Number Resource identity (CF Meet ids are canonical; provider identifiers never appear), type, capabilities with provenance, opaque provider binding references, inventory observations, reservations, DCN assignments with ownership and routing references, routing profiles, lifecycle transitions, the trusted context and the error envelope. Values equal the database CHECK constraints and the Rust domain types (a conformance test compares them). Full public number search / provisioning APIs are later workstreams.",
   "anyOf": [
     {
+      "$ref": "#/$defs/KycRequirements"
+    },
+    {
+      "$ref": "#/$defs/RequirementSet"
+    },
+    {
+      "$ref": "#/$defs/PublishRequirementsRequest"
+    },
+    {
+      "$ref": "#/$defs/CreateKycCaseRequest"
+    },
+    {
+      "$ref": "#/$defs/KycCase"
+    },
+    {
+      "$ref": "#/$defs/KycEvidence"
+    },
+    {
+      "$ref": "#/$defs/SubmitEvidenceRequest"
+    },
+    {
+      "$ref": "#/$defs/SubmitKycCaseRequest"
+    },
+    {
+      "$ref": "#/$defs/KycDecision"
+    },
+    {
+      "$ref": "#/$defs/KycAppeal"
+    },
+    {
+      "$ref": "#/$defs/KycCaseHistory"
+    },
+    {
+      "$ref": "#/$defs/ReviewKycCaseRequest"
+    },
+    {
+      "$ref": "#/$defs/KycReviewResult"
+    },
+    {
+      "$ref": "#/$defs/AdminKycCase"
+    },
+    {
+      "$ref": "#/$defs/EvidenceAccessRequest"
+    },
+    {
+      "$ref": "#/$defs/EvidenceContent"
+    },
+    {
+      "$ref": "#/$defs/EligibilityRequest"
+    },
+    {
+      "$ref": "#/$defs/EligibilityDecision"
+    },
+    {
+      "$ref": "#/$defs/AssignmentKycStatus"
+    },
+    {
       "$ref": "#/$defs/CapabilityResolution"
     },
     {
@@ -2017,7 +2074,20 @@
         "COUNTRY_UNKNOWN",
         "COUNTRY_NOT_SUPPORTED",
         "CAPABILITY_NOT_SUPPORTED",
-        "CAPABILITY_NOT_USABLE"
+        "CAPABILITY_NOT_USABLE",
+        "KYC_REQUIREMENTS_UNKNOWN",
+        "KYC_NOT_REQUIRED",
+        "OWNERSHIP_SUBJECT_MISMATCH",
+        "MANDATORY_EVIDENCE_MISSING",
+        "EVIDENCE_NOT_REQUIRED",
+        "EVIDENCE_NOT_IN_CASE",
+        "EVIDENCE_STORAGE_UNAVAILABLE",
+        "EVIDENCE_INTEGRITY",
+        "EVIDENCE_PURGED",
+        "CASE_NOT_COLLECTING_EVIDENCE",
+        "NOT_APPEALABLE",
+        "IDEMPOTENCY_IN_PROGRESS",
+        "IDEMPOTENCY_KEY_REUSED"
       ]
     },
     "Error": {
@@ -2059,6 +2129,1862 @@
               "$ref": "#/$defs/DomainRule"
             }
           }
+        }
+      }
+    },
+    "KycStatus": {
+      "description": "The KYC case lifecycle: DRAFT → EVIDENCE_REQUIRED → SUBMITTED → UNDER_REVIEW → APPROVED, with MORE_EVIDENCE_REQUIRED, REJECTED, EXPIRED and REVOKED (the same edge set in Rust and SQL; APPROVED → APPROVED is a revalidation renewal).",
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "EVIDENCE_REQUIRED",
+        "SUBMITTED",
+        "UNDER_REVIEW",
+        "MORE_EVIDENCE_REQUIRED",
+        "APPROVED",
+        "REJECTED",
+        "EXPIRED",
+        "REVOKED"
+      ]
+    },
+    "RequirementType": {
+      "description": "What a KYC requirement asks the subject to prove.",
+      "type": "string",
+      "enum": [
+        "INDIVIDUAL_IDENTITY",
+        "BUSINESS_REGISTRATION",
+        "ADDRESS",
+        "LOCAL_PRESENCE",
+        "PURPOSE_OF_USE",
+        "BENEFICIAL_OWNERSHIP"
+      ]
+    },
+    "EvidenceKind": {
+      "description": "Kinds of protected evidence.",
+      "type": "string",
+      "enum": [
+        "IDENTITY_DOCUMENT",
+        "PASSPORT",
+        "BUSINESS_REGISTRATION_CERTIFICATE",
+        "PROOF_OF_ADDRESS",
+        "LOCAL_PRESENCE_ATTESTATION",
+        "PURPOSE_STATEMENT",
+        "BENEFICIAL_OWNERSHIP_DECLARATION"
+      ]
+    },
+    "EvidenceContentType": {
+      "description": "Accepted evidence content (minimum data; magic bytes must match).",
+      "type": "string",
+      "enum": [
+        "application/pdf",
+        "image/jpeg",
+        "image/png"
+      ]
+    },
+    "SubjectKind": {
+      "description": "Who is verified: an individual for PERSONAL / PROFESSIONAL numbers, an organization for organizational ones.",
+      "type": "string",
+      "enum": [
+        "INDIVIDUAL",
+        "ORGANIZATION"
+      ]
+    },
+    "RequirementScope": {
+      "description": "BASE: the requirements of a selector; PROVIDER_EXTENSION: added by the serving provider (merged, never replacing BASE).",
+      "type": "string",
+      "enum": [
+        "BASE",
+        "PROVIDER_EXTENSION"
+      ]
+    },
+    "TenantClassification": {
+      "description": "The tenant's trust classification (from Platform Access).",
+      "type": "string",
+      "enum": [
+        "FIRST_PARTY",
+        "EXTERNAL"
+      ]
+    },
+    "VerifierKind": {
+      "description": "Who verified: the deterministic test adapter (never in staging / production), the audited manual reviewer, or the system (lifecycle steps).",
+      "type": "string",
+      "enum": [
+        "DETERMINISTIC",
+        "MANUAL",
+        "SYSTEM"
+      ]
+    },
+    "KycDecisionKind": {
+      "description": "Kinds of immutable KYC decision records.",
+      "type": "string",
+      "enum": [
+        "CREATED",
+        "EVIDENCE_COLLECTION",
+        "SUBMISSION",
+        "REVIEW_STARTED",
+        "VERIFICATION",
+        "MANUAL_REVIEW",
+        "REVALIDATION",
+        "EXPIRY",
+        "REVOCATION",
+        "APPEAL_OPENED",
+        "APPEAL_RESOLVED"
+      ]
+    },
+    "AppealStatus": {
+      "description": "An appeal is resolved by the next final manual decision.",
+      "type": "string",
+      "enum": [
+        "OPEN",
+        "UPHELD",
+        "OVERTURNED"
+      ]
+    },
+    "ReviewDecision": {
+      "description": "A manual reviewer's explicit decision.",
+      "type": "string",
+      "enum": [
+        "APPROVE",
+        "REJECT",
+        "REQUEST_EVIDENCE"
+      ]
+    },
+    "EligibilityOutcome": {
+      "description": "Eligibility outcomes. Precedence: DENIED > UNSUPPORTED_CAPABILITY > RISK_RESTRICTED > LIMIT_EXCEEDED > ADDITIONAL_EVIDENCE_REQUIRED > KYC_REQUIRED > PENDING_REVIEW > ELIGIBLE.",
+      "type": "string",
+      "enum": [
+        "ELIGIBLE",
+        "KYC_REQUIRED",
+        "ADDITIONAL_EVIDENCE_REQUIRED",
+        "PENDING_REVIEW",
+        "DENIED",
+        "UNSUPPORTED_CAPABILITY",
+        "LIMIT_EXCEEDED",
+        "RISK_RESTRICTED"
+      ]
+    },
+    "EligibilityReasonCode": {
+      "description": "Why an eligibility outcome applies (fail closed: unknown is a refusal).",
+      "type": "string",
+      "enum": [
+        "TENANT_NOT_ACTIVE",
+        "LIVE_TELECOM_NOT_ALLOWED",
+        "FEATURE_DISABLED",
+        "COUNTRY_NOT_SUPPORTED",
+        "CATALOG_UNVERIFIED",
+        "NUMBER_TYPE_NOT_SUPPORTED",
+        "CAPABILITY_NOT_SUPPORTED",
+        "NUMBER_MISMATCH",
+        "OWNERSHIP_SUBJECT_MISMATCH",
+        "NUMBER_LIMIT_REACHED",
+        "RISK_RESTRICTED",
+        "JURISDICTION_RESTRICTED",
+        "KYC_REQUIREMENTS_UNKNOWN",
+        "KYC_REQUIRED",
+        "KYC_INCOMPLETE",
+        "KYC_ADDITIONAL_EVIDENCE",
+        "KYC_PENDING_REVIEW",
+        "KYC_REJECTED",
+        "KYC_REVOKED",
+        "KYC_EXPIRED",
+        "KYC_REQUIREMENTS_CHANGED",
+        "PROVIDER_REQUIREMENTS_UNMET"
+      ]
+    },
+    "RequirementItem": {
+      "description": "One requirement of a set.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "mandatory",
+        "acceptedEvidence"
+      ],
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/RequirementType"
+        },
+        "mandatory": {
+          "type": "boolean"
+        },
+        "acceptedEvidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceKind"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      }
+    },
+    "KycRequirements": {
+      "description": "GET /v1/numbers/kyc/requirements/{countryCode}/{numberType}/{ownershipClass}: the requirements in force for the caller's inventory class (SANDBOX / TEST: explicitly non-production policies). Unknown mandatory requirements are KYC_REQUIREMENTS_UNKNOWN (422), never an empty list.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "countryCode",
+        "inventoryClass",
+        "numberType",
+        "ownershipClass",
+        "kycMandatory",
+        "requirementSetIds",
+        "items",
+        "approvalValidityDays",
+        "revalidationDays",
+        "nonProduction"
+      ],
+      "properties": {
+        "countryCode": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "inventoryClass": {
+          "$ref": "#/$defs/InventoryClass"
+        },
+        "numberType": {
+          "type": "string",
+          "enum": [
+            "GEOGRAPHIC",
+            "MOBILE",
+            "TOLL_FREE",
+            "NATIONAL"
+          ]
+        },
+        "ownershipClass": {
+          "$ref": "#/$defs/OwnershipClass"
+        },
+        "kycMandatory": {
+          "type": "boolean"
+        },
+        "requirementSetIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "minItems": 1
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RequirementItem"
+          }
+        },
+        "approvalValidityDays": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "revalidationDays": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nonProduction": {
+          "type": "boolean"
+        }
+      }
+    },
+    "RequirementSet": {
+      "description": "A published requirement set version (administration view).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requirementSetId",
+        "scopeKind",
+        "countryCode",
+        "inventoryClass",
+        "numberType",
+        "ownershipClass",
+        "tenantClassification",
+        "kycMandatory",
+        "items",
+        "approvalValidityDays",
+        "revalidationDays",
+        "source",
+        "sourceVersion",
+        "version",
+        "effectiveFrom",
+        "effectiveTo",
+        "providerId"
+      ],
+      "properties": {
+        "requirementSetId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "scopeKind": {
+          "$ref": "#/$defs/RequirementScope"
+        },
+        "countryCode": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "inventoryClass": {
+          "$ref": "#/$defs/InventoryClass"
+        },
+        "numberType": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "GEOGRAPHIC",
+                "MOBILE",
+                "TOLL_FREE",
+                "NATIONAL"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ownershipClass": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/OwnershipClass"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tenantClassification": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/TenantClassification"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kycMandatory": {
+          "type": "boolean"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RequirementItem"
+          }
+        },
+        "approvalValidityDays": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "revalidationDays": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/CatalogSource"
+        },
+        "sourceVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "effectiveFrom": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "effectiveTo": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "providerId": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PublishRequirementsRequest": {
+      "description": "POST /v1/admin/kyc/requirements (numbers.admin, X-CF-Operator): a new version of a selector's requirement set (supersedes the current one). REAL requirements need a non-synthetic source; SYNTHETIC ones are SYNTHETIC_TEST only.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scopeKind",
+        "countryCode",
+        "inventoryClass",
+        "kycMandatory",
+        "approvalValidityDays",
+        "source",
+        "sourceVersion",
+        "reasonCode"
+      ],
+      "properties": {
+        "scopeKind": {
+          "$ref": "#/$defs/RequirementScope"
+        },
+        "countryCode": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "inventoryClass": {
+          "$ref": "#/$defs/InventoryClass"
+        },
+        "numberType": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "GEOGRAPHIC",
+                "MOBILE",
+                "TOLL_FREE",
+                "NATIONAL"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ownershipClass": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/OwnershipClass"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "providerId": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tenantClassification": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/TenantClassification"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kycMandatory": {
+          "type": "boolean"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RequirementItem"
+          }
+        },
+        "approvalValidityDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3660
+        },
+        "revalidationDays": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/CatalogSource"
+        },
+        "sourceVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "effectiveFrom": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effectiveTo": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasonCode": {
+          "$ref": "#/$defs/ReasonCode"
+        }
+      }
+    },
+    "CreateKycCaseRequest": {
+      "description": "POST /v1/numbers/kyc/cases (numbers.kyc.manage, optional Idempotency-Key). subjectRef is an opaque CF Meet reference (a principal or organization id) — never personal data.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subjectKind",
+        "subjectRef",
+        "countryCode",
+        "numberType",
+        "ownershipClass",
+        "purposeCode"
+      ],
+      "properties": {
+        "subjectKind": {
+          "$ref": "#/$defs/SubjectKind"
+        },
+        "subjectRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "countryCode": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "numberType": {
+          "type": "string",
+          "enum": [
+            "GEOGRAPHIC",
+            "MOBILE",
+            "TOLL_FREE",
+            "NATIONAL"
+          ]
+        },
+        "ownershipClass": {
+          "$ref": "#/$defs/OwnershipClass"
+        },
+        "purposeCode": {
+          "$ref": "#/$defs/ReasonCode"
+        }
+      }
+    },
+    "KycEvidence": {
+      "description": "Evidence METADATA (content is never returned outside the privileged access route; no object key, digest or key id).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidenceId",
+        "kycCaseId",
+        "evidenceKind",
+        "requirementType",
+        "contentType",
+        "sizeBytes",
+        "status",
+        "submittedAt",
+        "retentionUntil",
+        "purgedAt"
+      ],
+      "properties": {
+        "evidenceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "kycCaseId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "evidenceKind": {
+          "$ref": "#/$defs/EvidenceKind"
+        },
+        "requirementType": {
+          "$ref": "#/$defs/RequirementType"
+        },
+        "contentType": {
+          "$ref": "#/$defs/EvidenceContentType"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5242880
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "PURGED"
+          ]
+        },
+        "submittedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "retentionUntil": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "purgedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "KycCase": {
+      "description": "A KYC case of the caller's scope (other scopes' cases are NOT_FOUND). Carries ids, statuses and reason codes only.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kycCaseId",
+        "status",
+        "revision",
+        "subject",
+        "countryCode",
+        "inventoryClass",
+        "numberType",
+        "ownershipClass",
+        "purposeCode",
+        "requirements",
+        "missingRequirements",
+        "decisionReason",
+        "verifierKind",
+        "submittedAt",
+        "decidedAt",
+        "approvedAt",
+        "expiresAt",
+        "revalidateAt",
+        "revokedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "kycCaseId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "$ref": "#/$defs/KycStatus"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "subject": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "subjectKind",
+            "subjectRef"
+          ],
+          "properties": {
+            "subjectKind": {
+              "$ref": "#/$defs/SubjectKind"
+            },
+            "subjectRef": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        },
+        "countryCode": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "inventoryClass": {
+          "$ref": "#/$defs/InventoryClass"
+        },
+        "numberType": {
+          "type": "string",
+          "enum": [
+            "GEOGRAPHIC",
+            "MOBILE",
+            "TOLL_FREE",
+            "NATIONAL"
+          ]
+        },
+        "ownershipClass": {
+          "$ref": "#/$defs/OwnershipClass"
+        },
+        "purposeCode": {
+          "$ref": "#/$defs/ReasonCode"
+        },
+        "requirements": {
+          "description": "The exact requirement snapshot the case was opened against.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "requirementSetIds",
+            "items",
+            "approvalValidityDays",
+            "nonProduction"
+          ],
+          "properties": {
+            "requirementSetIds": {
+              "type": "array",
+              "items": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "minItems": 1
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RequirementItem"
+              }
+            },
+            "approvalValidityDays": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "nonProduction": {
+              "type": "boolean"
+            }
+          }
+        },
+        "missingRequirements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RequirementType"
+          },
+          "uniqueItems": true
+        },
+        "decisionReason": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ReasonCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verifierKind": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/VerifierKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "submittedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decidedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "approvedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expiresAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revalidateAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revokedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KycEvidence"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "APPROVED"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "approvedAt": {
+                "$ref": "#/$defs/Timestamp"
+              },
+              "expiresAt": {
+                "$ref": "#/$defs/Timestamp"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "SubmitEvidenceRequest": {
+      "description": "POST /v1/numbers/kyc/cases/{caseId}/evidence (numbers.kyc.manage). Content is sealed (AES-256-GCM, bound to the evidence id) and stored privately; ≤ 5 MiB decoded. The kind must be accepted by a requirement of the case.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidenceKind",
+        "contentType",
+        "contentBase64"
+      ],
+      "properties": {
+        "evidenceKind": {
+          "$ref": "#/$defs/EvidenceKind"
+        },
+        "contentType": {
+          "$ref": "#/$defs/EvidenceContentType"
+        },
+        "contentBase64": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 6990512,
+          "contentEncoding": "base64"
+        }
+      }
+    },
+    "SubmitKycCaseRequest": {
+      "description": "POST /v1/numbers/kyc/cases/{caseId}/submit: every mandatory requirement needs accepted ACTIVE evidence (else MANDATORY_EVIDENCE_MISSING).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedRevision"
+      ],
+      "properties": {
+        "expectedRevision": {
+          "$ref": "#/$defs/Revision"
+        }
+      }
+    },
+    "KycDecision": {
+      "description": "One immutable KYC decision record (one per case revision).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decisionId",
+        "caseRevision",
+        "fromStatus",
+        "toStatus",
+        "decisionKind",
+        "verifierKind",
+        "actorKind",
+        "reasonCode",
+        "evidenceIds",
+        "detail",
+        "decidedAt"
+      ],
+      "properties": {
+        "decisionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "caseRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "fromStatus": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/KycStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "toStatus": {
+          "$ref": "#/$defs/KycStatus"
+        },
+        "decisionKind": {
+          "$ref": "#/$defs/KycDecisionKind"
+        },
+        "verifierKind": {
+          "$ref": "#/$defs/VerifierKind"
+        },
+        "actorKind": {
+          "$ref": "#/$defs/ActorKind"
+        },
+        "reasonCode": {
+          "$ref": "#/$defs/ReasonCode"
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "uniqueItems": true
+        },
+        "detail": {
+          "type": "object"
+        },
+        "decidedAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "decisionKind": {
+                "const": "MANUAL_REVIEW"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "verifierKind": {
+                "const": "MANUAL"
+              },
+              "actorKind": {
+                "const": "OPERATOR"
+              },
+              "evidenceIds": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "KycAppeal": {
+      "description": "An appeal of a REJECTED / REVOKED case (back to UNDER_REVIEW for a human reviewer).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "appealId",
+        "kycCaseId",
+        "appealedDecisionId",
+        "status",
+        "reasonCode",
+        "submittedAt",
+        "resolvedAt",
+        "resolutionDecisionId"
+      ],
+      "properties": {
+        "appealId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "kycCaseId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "appealedDecisionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "$ref": "#/$defs/AppealStatus"
+        },
+        "reasonCode": {
+          "$ref": "#/$defs/ReasonCode"
+        },
+        "submittedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "resolvedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolutionDecisionId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "KycCaseHistory": {
+      "description": "GET /v1/numbers/kyc/cases/{caseId}/history: the immutable decision history and appeals.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kycCaseId",
+        "decisions",
+        "appeals"
+      ],
+      "properties": {
+        "kycCaseId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "decisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KycDecision"
+          }
+        },
+        "appeals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KycAppeal"
+          }
+        }
+      }
+    },
+    "ReviewKycCaseRequest": {
+      "description": "POST /v1/admin/kyc/cases/{caseId}/decisions (numbers.admin, X-CF-Operator): an explicit, reason-coded decision on a case UNDER_REVIEW naming the ACTIVE evidence examined. APPROVE never bypasses a mandatory requirement; validForDays may shorten, never extend, the policy validity.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision",
+        "reasonCode",
+        "evidenceIds",
+        "expectedRevision"
+      ],
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/ReviewDecision"
+        },
+        "reasonCode": {
+          "$ref": "#/$defs/ReasonCode"
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "expectedRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "missingRequirements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RequirementType"
+          },
+          "uniqueItems": true
+        },
+        "validForDays": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "KycReviewResult": {
+      "description": "The case after a manual decision and the decision record.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case",
+        "decision"
+      ],
+      "properties": {
+        "case": {
+          "$ref": "#/$defs/KycCase"
+        },
+        "decision": {
+          "$ref": "#/$defs/KycDecision"
+        }
+      }
+    },
+    "AdminKycCase": {
+      "description": "GET /v1/admin/kyc/cases/{caseId}: the case with its scope, reviewer, evidence metadata, decisions, appeals and verification attempts.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kycCaseId",
+        "status",
+        "revision",
+        "subject",
+        "countryCode",
+        "inventoryClass",
+        "numberType",
+        "ownershipClass",
+        "purposeCode",
+        "requirements",
+        "missingRequirements",
+        "decisionReason",
+        "verifierKind",
+        "submittedAt",
+        "decidedAt",
+        "approvedAt",
+        "expiresAt",
+        "revalidateAt",
+        "revokedAt",
+        "createdAt",
+        "updatedAt",
+        "evidence",
+        "scope",
+        "reviewer",
+        "decisions",
+        "appeals",
+        "verifications"
+      ],
+      "properties": {
+        "kycCaseId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "$ref": "#/$defs/KycStatus"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "subject": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "subjectKind",
+            "subjectRef"
+          ],
+          "properties": {
+            "subjectKind": {
+              "$ref": "#/$defs/SubjectKind"
+            },
+            "subjectRef": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        },
+        "countryCode": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "inventoryClass": {
+          "$ref": "#/$defs/InventoryClass"
+        },
+        "numberType": {
+          "type": "string",
+          "enum": [
+            "GEOGRAPHIC",
+            "MOBILE",
+            "TOLL_FREE",
+            "NATIONAL"
+          ]
+        },
+        "ownershipClass": {
+          "$ref": "#/$defs/OwnershipClass"
+        },
+        "purposeCode": {
+          "$ref": "#/$defs/ReasonCode"
+        },
+        "requirements": {
+          "description": "The exact requirement snapshot the case was opened against.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "requirementSetIds",
+            "items",
+            "approvalValidityDays",
+            "nonProduction"
+          ],
+          "properties": {
+            "requirementSetIds": {
+              "type": "array",
+              "items": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "minItems": 1
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RequirementItem"
+              }
+            },
+            "approvalValidityDays": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "nonProduction": {
+              "type": "boolean"
+            }
+          }
+        },
+        "missingRequirements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RequirementType"
+          },
+          "uniqueItems": true
+        },
+        "decisionReason": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ReasonCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verifierKind": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/VerifierKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "submittedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decidedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "approvedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expiresAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revalidateAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revokedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KycEvidence"
+          }
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tenantId",
+            "applicationId",
+            "environmentId",
+            "environmentKind"
+          ],
+          "properties": {
+            "tenantId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "applicationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "environmentId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "environmentKind": {
+              "$ref": "#/$defs/EnvironmentKind"
+            }
+          }
+        },
+        "reviewer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "ref"
+          ],
+          "properties": {
+            "kind": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ActorKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "ref": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "decisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KycDecision"
+          }
+        },
+        "appeals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KycAppeal"
+          }
+        },
+        "verifications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "verificationId",
+              "caseRevision",
+              "purpose",
+              "verifierKind",
+              "status",
+              "outcome",
+              "startedAt",
+              "completedAt"
+            ],
+            "properties": {
+              "verificationId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "caseRevision": {
+                "$ref": "#/$defs/Revision"
+              },
+              "purpose": {
+                "type": "string",
+                "enum": [
+                  "SUBMISSION",
+                  "REVALIDATION"
+                ]
+              },
+              "verifierKind": {
+                "type": "string",
+                "enum": [
+                  "DETERMINISTIC",
+                  "MANUAL"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "PENDING",
+                  "COMPLETED",
+                  "UNKNOWN",
+                  "SUPERSEDED"
+                ]
+              },
+              "outcome": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[A-Z][A-Z_]{1,31}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "startedAt": {
+                "$ref": "#/$defs/Timestamp"
+              },
+              "completedAt": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/Timestamp"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "EvidenceAccessRequest": {
+      "description": "POST /v1/admin/kyc/evidence/{evidenceId}/access (numbers.admin, X-CF-Operator): every read, denial and purged read is audited.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "purposeCode"
+      ],
+      "properties": {
+        "purposeCode": {
+          "$ref": "#/$defs/ReasonCode"
+        }
+      }
+    },
+    "EvidenceContent": {
+      "description": "The privileged, audited evidence read (Cache-Control: no-store; integrity verified).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidenceId",
+        "kycCaseId",
+        "evidenceKind",
+        "requirementType",
+        "contentType",
+        "sizeBytes",
+        "status",
+        "submittedAt",
+        "retentionUntil",
+        "purgedAt",
+        "contentBase64"
+      ],
+      "properties": {
+        "evidenceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "kycCaseId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "evidenceKind": {
+          "$ref": "#/$defs/EvidenceKind"
+        },
+        "requirementType": {
+          "$ref": "#/$defs/RequirementType"
+        },
+        "contentType": {
+          "$ref": "#/$defs/EvidenceContentType"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5242880
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "PURGED"
+          ]
+        },
+        "submittedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "retentionUntil": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "purgedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contentBase64": {
+          "type": "string",
+          "contentEncoding": "base64"
+        }
+      }
+    },
+    "EligibilityRequest": {
+      "description": "POST /v1/numbers/eligibility (numbers.kyc.read): may this scope request such a number? Evaluation only — never reserves or provisions.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subjectKind",
+        "subjectRef",
+        "countryCode",
+        "numberType",
+        "ownershipClass",
+        "capabilities"
+      ],
+      "properties": {
+        "subjectKind": {
+          "$ref": "#/$defs/SubjectKind"
+        },
+        "subjectRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "countryCode": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "numberType": {
+          "type": "string",
+          "enum": [
+            "GEOGRAPHIC",
+            "MOBILE",
+            "TOLL_FREE",
+            "NATIONAL"
+          ]
+        },
+        "ownershipClass": {
+          "$ref": "#/$defs/OwnershipClass"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Capability"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "numberResourceId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "EligibilityReason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "outcome"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/EligibilityReasonCode"
+        },
+        "outcome": {
+          "$ref": "#/$defs/EligibilityOutcome"
+        },
+        "capability": {
+          "$ref": "#/$defs/Capability"
+        },
+        "missingRequirements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RequirementType"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "EligibilityDecision": {
+      "description": "A recorded (append-only) eligibility decision with every reason. ELIGIBLE has no reasons and is valid until the earlier of its TTL and the KYC approval expiry; an assignment becomes ELIGIBLE only with such a decision of its own scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eligibilityDecisionId",
+        "outcome",
+        "reasons",
+        "subject",
+        "countryCode",
+        "inventoryClass",
+        "numberType",
+        "ownershipClass",
+        "numberResourceId",
+        "requestedCapabilities",
+        "kycCaseId",
+        "kycCaseRevision",
+        "requirementSetIds",
+        "catalogRevision",
+        "policyVersion",
+        "evaluatedAt",
+        "validUntil"
+      ],
+      "properties": {
+        "eligibilityDecisionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "outcome": {
+          "$ref": "#/$defs/EligibilityOutcome"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EligibilityReason"
+          }
+        },
+        "subject": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "subjectKind",
+            "subjectRef"
+          ],
+          "properties": {
+            "subjectKind": {
+              "$ref": "#/$defs/SubjectKind"
+            },
+            "subjectRef": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        },
+        "countryCode": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "inventoryClass": {
+          "$ref": "#/$defs/InventoryClass"
+        },
+        "numberType": {
+          "type": "string",
+          "enum": [
+            "GEOGRAPHIC",
+            "MOBILE",
+            "TOLL_FREE",
+            "NATIONAL"
+          ]
+        },
+        "ownershipClass": {
+          "$ref": "#/$defs/OwnershipClass"
+        },
+        "numberResourceId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requestedCapabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Capability"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "kycCaseId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kycCaseRevision": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Revision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requirementSetIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "catalogRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "policyVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "evaluatedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "validUntil": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "ELIGIBLE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "reasons": {
+                "maxItems": 0
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "reasons": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "AssignmentKycStatus": {
+      "description": "GET /internal/v1/assignments/{assignmentId}/kyc-status (number-resource.read): whether the KYC basis of an assignment is in force (no evidence, no subject data).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignmentId",
+        "eligibilityDecisionId",
+        "kycRequired",
+        "inForce",
+        "kycCaseId",
+        "status",
+        "expiresAt"
+      ],
+      "properties": {
+        "assignmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "eligibilityDecisionId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kycRequired": {
+          "type": "boolean"
+        },
+        "inForce": {
+          "type": "boolean"
+        },
+        "kycCaseId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/KycStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expiresAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     }

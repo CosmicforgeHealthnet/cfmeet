@@ -9,7 +9,7 @@ use common::{contracts::read, scalar, strings, Harness};
 use numbering::{
     http::error::ErrorCode,
     numbers::{
-        assignments::allowed, ActorKind, AssignmentStatus, Availability, BindingChangeReason,
+        assignments::allowed, kyc, ActorKind, AssignmentStatus, Availability, BindingChangeReason,
         Capability, CapabilityChangeKind, CapabilitySource, CapabilityStatus, CatalogSource,
         CatalogVerification, ClassificationSource, CostEvidence, CountrySupport, EnvironmentKind,
         FailureCategory, InventoryClass, InventorySource, LifecycleState, LocalityClass,
@@ -223,6 +223,64 @@ async fn rust_contract_and_database_share_one_vocabulary() {
             set(numbering::numbers::resolution::reason::ALL.iter().copied()),
             &[],
         ),
+        // Workstream F.
+        (
+            "KycStatus",
+            all!(kyc::KycStatus),
+            &["ck_number_kyc_cases_status"],
+        ),
+        (
+            "RequirementType",
+            all!(kyc::RequirementType),
+            &["ck_number_kyc_evidence_refs_requirement"],
+        ),
+        (
+            "EvidenceKind",
+            all!(kyc::EvidenceKind),
+            &["ck_number_kyc_evidence_refs_kind"],
+        ),
+        (
+            "EvidenceContentType",
+            set(kyc::evidence::ACCEPTED_CONTENT_TYPES.iter().copied()),
+            &["ck_number_kyc_evidence_refs_content"],
+        ),
+        (
+            "SubjectKind",
+            all!(kyc::SubjectKind),
+            &["ck_number_kyc_cases_subject"],
+        ),
+        (
+            "RequirementScope",
+            all!(kyc::RequirementScope),
+            &["ck_number_kyc_requirements_scope"],
+        ),
+        ("TenantClassification", all!(kyc::TenantClassification), &[]),
+        (
+            "VerifierKind",
+            all!(kyc::VerifierKind),
+            &["ck_number_kyc_decisions_verifier"],
+        ),
+        (
+            "KycDecisionKind",
+            all!(kyc::DecisionKind),
+            &["ck_number_kyc_decisions_kind"],
+        ),
+        (
+            "AppealStatus",
+            all!(kyc::AppealStatus),
+            &["ck_number_kyc_appeals_status"],
+        ),
+        ("ReviewDecision", all!(kyc::ReviewDecision), &[]),
+        (
+            "EligibilityOutcome",
+            all!(kyc::EligibilityOutcome),
+            &["ck_number_eligibility_decisions_outcome"],
+        ),
+        (
+            "EligibilityReasonCode",
+            set(numbering::numbers::eligibility::reason::ALL.iter().copied()),
+            &[],
+        ),
     ];
     for (def, rust, constraints) in cases {
         assert_eq!(contract(def), rust, "contract {def} vs Rust");
@@ -265,6 +323,26 @@ async fn the_assignment_policy_is_one_edge_set_in_rust_and_sql() {
     assert_eq!(edges, 19);
 }
 
+#[tokio::test]
+async fn the_kyc_lifecycle_is_one_edge_set_in_rust_and_sql() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let mut edges = 0;
+    for from in kyc::KycStatus::ALL {
+        for to in kyc::KycStatus::ALL {
+            let sql = scalar(
+                h.conn(),
+                &format!("SELECT CASE WHEN number_kyc_transition_allowed('{from}', '{to}') THEN 1 ELSE 0 END::bigint"),
+            )
+            .await;
+            assert_eq!(sql == 1, kyc::kyc_allowed(*from, *to), "{from} -> {to}");
+            edges += sql;
+        }
+    }
+    assert_eq!(edges, 16);
+}
+
 #[test]
 fn error_and_rule_codes_match_the_contract() {
     assert_eq!(
@@ -275,8 +353,20 @@ fn error_and_rule_codes_match_the_contract() {
     let rules = contract("DomainRule");
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/numbers");
     let mut used = BTreeSet::new();
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+    let mut files = Vec::new();
+    let mut stack = vec![dir];
+    while let Some(d) = stack.pop() {
+        for entry in std::fs::read_dir(d).unwrap() {
+            let p = entry.unwrap().path();
+            if p.is_dir() {
+                stack.push(p);
+            } else {
+                files.push(p);
+            }
+        }
+    }
+    for path in files {
+        let text = std::fs::read_to_string(path).unwrap();
         // `precondition(` / `conflict(` followed (after any whitespace, as rustfmt lays
         // it out) by the code literal.
         for marker in ["precondition(", "conflict("] {

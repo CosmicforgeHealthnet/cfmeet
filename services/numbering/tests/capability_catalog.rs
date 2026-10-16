@@ -1583,13 +1583,23 @@ async fn the_catalog_migration_rolls_back_and_reapplies_safely() {
         )
         .await
         .unwrap();
-    assert!(Migrator::down(&db.conn, Some(1)).await.is_err());
+    // Steps that roll back down to (and including) the catalog migration, whatever later
+    // workstreams add after it.
+    let steps = {
+        let all = Migrator::migrations();
+        let at = all
+            .iter()
+            .position(|m| m.name() == "m20261017_000003_capability_catalog")
+            .expect("catalog migration registered");
+        (all.len() - at) as u32
+    };
+    assert!(Migrator::down(&db.conn, Some(steps)).await.is_err());
     // …and otherwise restores the previous schema (fresh database), then re-applies.
     let Some(fresh) = common::TestDb::empty().await else {
         return;
     };
     Migrator::up(&fresh.conn, None).await.unwrap();
-    Migrator::down(&fresh.conn, Some(1)).await.unwrap();
+    Migrator::down(&fresh.conn, Some(steps)).await.unwrap();
     assert_eq!(
         common::scalar(&fresh.conn, "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'number_%catalog%'").await,
         0

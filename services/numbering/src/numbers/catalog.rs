@@ -535,7 +535,7 @@ impl NumberDomain {
         Ok(revision)
     }
 
-    async fn current_country_in<C: ConnectionTrait>(
+    pub(crate) async fn current_country_in<C: ConnectionTrait>(
         &self,
         db: &C,
         country: &str,
@@ -589,18 +589,34 @@ impl NumberDomain {
 
     /// The latest published catalog revision (0: empty catalog).
     pub async fn catalog_revision(&self) -> DomainResult<i64> {
-        #[derive(FromQueryResult)]
-        struct Rev {
-            n: i64,
-        }
-        Ok(Rev::find_by_statement(stmt(
-            "SELECT COALESCE(MAX(revision), 0) AS n FROM number_catalog_revisions",
-            vec![],
+        catalog_revision_in(&self.db).await
+    }
+}
+
+/// The latest published catalog revision read through `db` (0: empty catalog).
+pub(crate) async fn catalog_revision_in<C: ConnectionTrait>(db: &C) -> DomainResult<i64> {
+    #[derive(FromQueryResult)]
+    struct Rev {
+        n: i64,
+    }
+    Ok(Rev::find_by_statement(stmt(
+        "SELECT COALESCE(MAX(revision), 0) AS n FROM number_catalog_revisions",
+        vec![],
+    ))
+    .one(db)
+    .await?
+    .map(|r| r.n)
+    .unwrap_or(0))
+}
+
+/// A well-formed ISO 3166-1 alpha-2 code.
+pub(crate) fn valid_country(country: &str) -> DomainResult<()> {
+    if country.len() == 2 && country.bytes().all(|b| b.is_ascii_uppercase()) {
+        Ok(())
+    } else {
+        Err(DomainError::Validation(
+            "a country is an ISO 3166-1 alpha-2 code".into(),
         ))
-        .one(&self.db)
-        .await?
-        .map(|r| r.n)
-        .unwrap_or(0))
     }
 }
 

@@ -1,0 +1,24 @@
+{
+  "event_id": "evt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "event_type": "number.kyc-case.changed",
+  "schema_version": 1,
+  "occurred_at": "2031-03-01T10:05:00.000000Z",
+  "producer_service": "cfmeet.numbering",
+  "runtime_environment": "staging",
+  "correlation_id": "corr_0123456789abcdef0123456789abcdef",
+  "payload": {
+    "kyc_case_id": "7a1c3b5d-9f01-4e2d-8b6f-5f0b2c1e8d3a",
+    "from_status": "UNDER_REVIEW",
+    "to_status": "REVOKED",
+    "revision": 6,
+    "decision_kind": "REVOCATION",
+    "verifier_kind": "MANUAL",
+    "reason_code": "FRAUD_SIGNAL",
+    "expires_at": "2032-02-29T10:01:00Z"
+  },
+  "ownership": {
+    "tenant_id": "2b4d6f8a-1c3e-4a5b-8c7d-9e0f1a2b3c4d",
+    "application_id": "3c5e7a9b-2d4f-4b6c-9d8e-0f1a2b3c4d5e",
+    "application_environment_id": "4d6f8b0c-3e5a-4c7d-8e9f-1a2b3c4d5e6f"
+  }
+}

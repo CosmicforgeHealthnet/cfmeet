@@ -17,6 +17,7 @@
 //! [`service_auth`]. The database URL is held in a redacted container. Numbering holds
 //! no other secret: customer credentials are verified by Platform Access.
 
+pub mod kyc;
 pub mod service_auth;
 
 use std::{fmt, net::SocketAddr, time::Duration};

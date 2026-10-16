@@ -90,6 +90,14 @@
     {"id": "numbering-idempotency-expiry", "owner": "numbering", "source": "src/infra/idempotency.rs", "entry": "purge_expired",
      "tests": ["tests/workers.rs::idempotency_keys_replay_refuse_mismatches_and_are_scoped"]},
     {"id": "numbering-capability-expiry", "owner": "numbering", "source": "src/numbers/capabilities.rs", "entry": "expire_capabilities",
-     "tests": ["tests/capability_catalog.rs::expired_stale_and_conflicting_evidence_cannot_authorize"]}
+     "tests": ["tests/capability_catalog.rs::expired_stale_and_conflicting_evidence_cannot_authorize"]},
+    {"id": "numbering-kyc-verification", "owner": "numbering", "source": "src/numbers/kyc/cases.rs", "entry": "run_verification",
+     "tests": ["tests/kyc_eligibility.rs::an_unknown_verifier_outcome_is_polled_never_resubmitted_across_a_worker_restart"]},
+    {"id": "numbering-kyc-expiry", "owner": "numbering", "source": "src/numbers/kyc/cases.rs", "entry": "expire_due",
+     "tests": ["tests/kyc_eligibility.rs::the_deterministic_verifier_reproduces_every_outcome"]},
+    {"id": "numbering-kyc-revalidation", "owner": "numbering", "source": "src/numbers/kyc/cases.rs", "entry": "schedule_revalidations",
+     "tests": ["tests/kyc_eligibility.rs::the_deterministic_verifier_reproduces_every_outcome"]},
+    {"id": "numbering-kyc-evidence-retention", "owner": "numbering", "source": "src/numbers/kyc/cases.rs", "entry": "purge_expired_evidence",
+     "tests": ["tests/kyc_eligibility.rs::evidence_is_sealed_typed_minimal_audited_and_retained"]}
   ]
 }

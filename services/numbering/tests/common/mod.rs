@@ -677,7 +677,13 @@ impl Harness {
             .await
             .unwrap();
         let a = n
-            .record_eligibility(&ctx, actor(), a.id, a.revision, Uuid::new_v4())
+            .record_eligibility(
+                &ctx,
+                actor(),
+                a.id,
+                a.revision,
+                eligible_decision(self.conn(), scope, self.now()).await,
+            )
             .await
             .unwrap();
         let a = n
@@ -770,6 +776,42 @@ impl Harness {
 /// Runs `statements` in one transaction (committed if all succeed, rolled back on the
 /// first error, which is returned). Raw `BEGIN … COMMIT` strings would leave a pooled
 /// connection in an aborted transaction.
+/// A recorded ELIGIBLE decision of `scope` (fixture: the D journeys predate the
+/// eligibility engine; F's own tests evaluate real decisions).
+pub async fn eligible_decision(
+    conn: &DatabaseConnection,
+    scope: &OwnerScope,
+    now: DateTime<Utc>,
+) -> Uuid {
+    let id = Uuid::new_v4();
+    let class = if scope.environment_kind == EnvironmentKind::Production {
+        "REAL"
+    } else {
+        "SYNTHETIC"
+    };
+    exec(
+        conn,
+        &format!(
+            "INSERT INTO number_eligibility_decisions (id, tenant_id, application_id, environment_id, environment_kind, \
+               service_account_id, subject_kind, subject_ref, country_code, inventory_class, number_type, ownership_class, \
+               requested_capabilities, outcome, reasons, catalog_revision, policy_version, evaluated_at, valid_until, \
+               correlation_id) VALUES ('{id}', '{}', '{}', '{}', '{}', '{}', 'ORGANIZATION', gen_random_uuid(), 'US', '{class}', \
+               'GEOGRAPHIC', 'CAMPAIGN', ARRAY['VOICE_INBOUND'], 'ELIGIBLE', '[]', 0, 'fixture', '{}'::timestamptz - interval '1 minute', \
+               '{}'::timestamptz + interval '30 days', 'corr_fixture01')",
+            scope.tenant_id,
+            scope.application_id,
+            scope.environment_id,
+            scope.environment_kind.as_str(),
+            scope.service_account_id,
+            now.to_rfc3339(),
+            now.to_rfc3339(),
+        ),
+    )
+    .await
+    .expect("insert eligibility fixture");
+    id
+}
+
 pub async fn in_txn(conn: &DatabaseConnection, statements: &[&str]) -> Result<(), sea_orm::DbErr> {
     use sea_orm::TransactionTrait;
     let txn = conn.begin().await?;
@@ -1062,5 +1104,150 @@ impl Harness {
             None => Body::empty(),
         };
         self.raw(builder.body(body).unwrap()).await
+    }
+}
+
+impl Harness {
+    /// The same harness with another KYC service and eligibility policy (router rebuilt).
+    pub fn with_kyc(
+        mut self,
+        kyc: numbering::numbers::kyc::KycService,
+        policy: numbering::numbers::eligibility::EligibilityPolicy,
+    ) -> Self {
+        self.state = self.state.clone().with_kyc(kyc, policy);
+        self.app = http::app(self.state.clone());
+        self
+    }
+}
+
+/// Workstream F fixtures: a protected in-memory evidence vault, verifiers and the
+/// synthetic US requirement sets.
+pub mod kyc {
+    use std::sync::Arc;
+
+    use cf_object_storage::MemoryObjectStore;
+    use cf_webhooks::secret_box::{SealingKey, SecretBox};
+    use numbering::{
+        domain::RequestContext,
+        numbers::{
+            kyc::{
+                evidence::EvidenceVault,
+                requirements::{RequirementItem, RequirementSet},
+                verifier::KycVerifier,
+                EvidenceKind, KycService, KycSettings, RequirementScope, RequirementType,
+            },
+            Actor, CatalogSource, InventoryClass, NumberType, OwnershipClass,
+        },
+    };
+
+    use super::Harness;
+
+    /// Test-only evidence key (bytes 0..31), never used outside tests.
+    pub const TEST_EVIDENCE_KEY: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+
+    pub fn vault() -> (Arc<MemoryObjectStore>, Arc<EvidenceVault>) {
+        let store = Arc::new(MemoryObjectStore::new());
+        let sealing = SecretBox::new(
+            SealingKey::from_base64("kyc-test-1", TEST_EVIDENCE_KEY).unwrap(),
+            None,
+        )
+        .unwrap();
+        let vault = Arc::new(EvidenceVault::new(store.clone(), Some(Arc::new(sealing))));
+        (store, vault)
+    }
+
+    pub fn service(
+        h: &Harness,
+        vault: Arc<EvidenceVault>,
+        verifier: Arc<dyn KycVerifier>,
+    ) -> KycService {
+        KycService::new(h.numbers.clone(), vault, verifier, KycSettings::default())
+    }
+
+    pub fn item(t: RequirementType, mandatory: bool, kinds: &[EvidenceKind]) -> RequirementItem {
+        RequirementItem {
+            requirement_type: t,
+            mandatory,
+            accepted_evidence: kinds.to_vec(),
+        }
+    }
+
+    pub fn set(
+        number_type: Option<NumberType>,
+        ownership: Option<OwnershipClass>,
+        items: Vec<RequirementItem>,
+        validity: i32,
+        revalidation: Option<i32>,
+    ) -> RequirementSet {
+        RequirementSet {
+            scope: RequirementScope::Base,
+            country: "US".into(),
+            inventory_class: InventoryClass::Synthetic,
+            number_type,
+            ownership_class: ownership,
+            provider_id: None,
+            tenant_classification: None,
+            kyc_mandatory: !items.is_empty(),
+            items,
+            approval_validity_days: validity,
+            revalidation_days: revalidation,
+            source: CatalogSource::SyntheticTest,
+            source_version: "synthetic-2026.10".into(),
+            effective_from: None,
+            effective_to: None,
+        }
+    }
+
+    pub fn operator() -> Actor {
+        Actor::operator("kyc-reviewer")
+    }
+
+    /// The synthetic US requirements: no KYC by default; MOBILE / PERSONAL needs identity
+    /// (address optional); MOBILE / ORGANIZATION needs a business registration and a purpose.
+    pub async fn synthetic_us(h: &Harness) {
+        use EvidenceKind as K;
+        use RequirementType as T;
+        let ctx = RequestContext::generate();
+        for s in [
+            set(None, None, vec![], 365, None),
+            set(
+                Some(NumberType::Mobile),
+                Some(OwnershipClass::Personal),
+                vec![
+                    item(
+                        T::IndividualIdentity,
+                        true,
+                        &[K::IdentityDocument, K::Passport],
+                    ),
+                    item(T::Address, false, &[K::ProofOfAddress]),
+                ],
+                365,
+                Some(180),
+            ),
+            set(
+                Some(NumberType::Mobile),
+                Some(OwnershipClass::Organization),
+                vec![
+                    item(
+                        T::BusinessRegistration,
+                        true,
+                        &[K::BusinessRegistrationCertificate],
+                    ),
+                    item(T::PurposeOfUse, true, &[K::PurposeStatement]),
+                ],
+                365,
+                None,
+            ),
+        ] {
+            h.numbers
+                .publish_requirements(&ctx, operator(), "SYNTHETIC_POLICY", s)
+                .await
+                .unwrap();
+        }
+    }
+
+    /// A minimal PDF carrying `marker` (to prove it never leaks).
+    pub fn pdf(marker: &str) -> Vec<u8> {
+        format!("%PDF-1.7\n% {marker}\n%%EOF\n").into_bytes()
     }
 }

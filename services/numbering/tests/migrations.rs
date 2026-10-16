@@ -28,7 +28,15 @@ const DOMAIN: &[&str] = &[
     "number_capabilities",
     "number_catalog_revisions",
     "number_country_catalog",
+    "number_eligibility_decisions",
     "number_inventory_snapshots",
+    "number_kyc_appeals",
+    "number_kyc_cases",
+    "number_kyc_decisions",
+    "number_kyc_evidence_access",
+    "number_kyc_evidence_refs",
+    "number_kyc_requirements",
+    "number_kyc_verifications",
     "number_lifecycle_events",
     "number_provider_bindings",
     "number_reservations",
@@ -72,11 +80,10 @@ async fn fresh_migration_creates_exactly_numbering_tables_and_down_removes_them(
         scalar(&db.conn, "SELECT count(*) FROM numbering_seaql_migrations").await,
         Migrator::migrations().len() as i64
     );
-    // Nothing that later workstreams own yet (KYC, SMS, portability, fraud, billing),
-    // nothing of another service.
+    // Nothing that later workstreams own yet (SMS, portability, fraud, billing), nothing of
+    // another service. (KYC is Workstream F's.)
     for t in tables(&db.conn).await {
         for forbidden in [
-            "kyc",
             "sms",
             "port",
             "fraud",

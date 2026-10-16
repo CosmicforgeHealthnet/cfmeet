@@ -327,6 +327,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cf-object-storage"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "hex",
+ "hmac",
+ "reqwest",
+ "sha2",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "cf-service-auth"
 version = "0.1.0"
 dependencies = [
@@ -344,6 +358,22 @@ dependencies = [
  "url",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "cf-webhooks"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "hex",
+ "hmac",
+ "rand 0.8.8",
+ "reqwest",
+ "ring",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "url",
 ]
 
 [[package]]
@@ -1743,7 +1773,10 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "base64 0.22.1",
+ "cf-object-storage",
  "cf-service-auth",
+ "cf-webhooks",
  "chrono",
  "dotenvy",
  "hex",

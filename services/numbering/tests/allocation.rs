@@ -6,7 +6,10 @@ mod common;
 use std::collections::HashSet;
 
 use chrono::Duration;
-use common::{actor, binding_for, exec, in_txn, reconciler, scope, voice_to_principal, Harness};
+use common::{
+    actor, binding_for, eligible_decision, exec, in_txn, reconciler, scope, voice_to_principal,
+    Harness,
+};
 use numbering::{
     domain::RequestContext,
     numbers::{
@@ -574,7 +577,13 @@ async fn tenants_and_environments_are_isolated() {
         .unwrap();
     let a = h
         .numbers
-        .record_eligibility(&ctx(), actor(), a.id, a.revision, Uuid::new_v4())
+        .record_eligibility(
+            &ctx(),
+            actor(),
+            a.id,
+            a.revision,
+            eligible_decision(h.conn(), &mine, h.now()).await,
+        )
         .await
         .unwrap();
     assert!(matches!(
@@ -1014,7 +1023,13 @@ async fn an_assignment_never_becomes_active_prematurely() {
         .await
         .unwrap();
     let a = n
-        .record_eligibility(&ctx(), actor(), a.id, a.revision, Uuid::new_v4())
+        .record_eligibility(
+            &ctx(),
+            actor(),
+            a.id,
+            a.revision,
+            eligible_decision(h.conn(), &s, h.now()).await,
+        )
         .await
         .unwrap();
     let pending = n

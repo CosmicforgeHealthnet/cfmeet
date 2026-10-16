@@ -137,6 +137,10 @@ impl IntoResponse for ApiError {
                     DomainError::Precondition { code, .. } => {
                         (ErrorCode::PreconditionFailed, Some(*code))
                     }
+                    DomainError::Conflict {
+                        code: "IDEMPOTENCY_KEY_REUSED",
+                        ..
+                    } => (ErrorCode::IdempotencyKeyReused, None),
                     DomainError::Conflict { code, .. } => (ErrorCode::Conflict, Some(*code)),
                     DomainError::Database { summary, .. } => {
                         tracing::error!(%summary, "numbering database failure");

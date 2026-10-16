@@ -1,0 +1,63 @@
+{
+  "kycCaseId": "7a1c3b5d-9f01-4e2d-8b6f-5f0b2c1e8d3a",
+  "status": "APPROVED",
+  "revision": 5,
+  "subject": {
+    "subjectKind": "INDIVIDUAL",
+    "subjectRef": "0e2a4c6e-8a0c-4e2a-9c4e-6a8c0e2a4c6e"
+  },
+  "countryCode": "US",
+  "inventoryClass": "SYNTHETIC",
+  "numberType": "MOBILE",
+  "ownershipClass": "PERSONAL",
+  "purposeCode": "PERSONAL_LINE",
+  "requirements": {
+    "requirementSetIds": [
+      "3c5e7a9b-1d3f-4e5a-8c7b-9d1f3e5a7c9b"
+    ],
+    "items": [
+      {
+        "type": "INDIVIDUAL_IDENTITY",
+        "mandatory": true,
+        "acceptedEvidence": [
+          "IDENTITY_DOCUMENT",
+          "PASSPORT"
+        ]
+      },
+      {
+        "type": "ADDRESS",
+        "mandatory": false,
+        "acceptedEvidence": [
+          "PROOF_OF_ADDRESS"
+        ]
+      }
+    ],
+    "approvalValidityDays": 365,
+    "nonProduction": true
+  },
+  "missingRequirements": [],
+  "decisionReason": "VERIFIED",
+  "verifierKind": "DETERMINISTIC",
+  "submittedAt": "2031-03-01T10:00:00Z",
+  "decidedAt": "2031-03-01T10:01:00Z",
+  "approvedAt": "2031-03-01T10:01:00Z",
+  "expiresAt": "2032-02-29T10:01:00Z",
+  "revalidateAt": "2031-08-28T10:01:00Z",
+  "revokedAt": null,
+  "createdAt": "2031-03-01T09:55:00Z",
+  "updatedAt": "2031-03-01T10:01:00Z",
+  "evidence": [
+    {
+      "evidenceId": "4d6f8a0c-2e4a-4f6b-8d0c-2e4a6f8b0d2e",
+      "kycCaseId": "7a1c3b5d-9f01-4e2d-8b6f-5f0b2c1e8d3a",
+      "evidenceKind": "PASSPORT",
+      "requirementType": "INDIVIDUAL_IDENTITY",
+      "contentType": "application/pdf",
+      "sizeBytes": 182044,
+      "status": "ACTIVE",
+      "submittedAt": "2031-03-01T09:58:00Z",
+      "retentionUntil": "2033-02-28T09:58:00Z",
+      "purgedAt": null
+    }
+  ]
+}

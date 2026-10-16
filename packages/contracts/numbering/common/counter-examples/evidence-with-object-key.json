@@ -1,0 +1,13 @@
+{
+  "evidenceId": "4d6f8a0c-2e4a-4f6b-8d0c-2e4a6f8b0d2e",
+  "kycCaseId": "7a1c3b5d-9f01-4e2d-8b6f-5f0b2c1e8d3a",
+  "evidenceKind": "PASSPORT",
+  "requirementType": "INDIVIDUAL_IDENTITY",
+  "contentType": "application/pdf",
+  "sizeBytes": 182044,
+  "status": "ACTIVE",
+  "submittedAt": "2031-03-01T09:58:00Z",
+  "retentionUntil": "2033-02-28T09:58:00Z",
+  "purgedAt": null,
+  "objectKey": "kyc-evidence/7a1c3b5d-9f01-4e2d-8b6f-5f0b2c1e8d3a/x"
+}

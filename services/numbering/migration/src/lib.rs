@@ -13,6 +13,7 @@ pub use sea_orm_migration::prelude::*;
 mod m20261016_000001_numbering_foundation;
 mod m20261016_000002_number_domain;
 mod m20261017_000003_capability_catalog;
+mod m20261018_000004_kyc_eligibility;
 
 /// Name of the table recording which Numbering migrations have been applied.
 pub const MIGRATION_TABLE: &str = "numbering_seaql_migrations";
@@ -26,6 +27,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261016_000001_numbering_foundation::Migration),
             Box::new(m20261016_000002_number_domain::Migration),
             Box::new(m20261017_000003_capability_catalog::Migration),
+            Box::new(m20261018_000004_kyc_eligibility::Migration),
         ]
     }
 

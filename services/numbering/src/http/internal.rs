@@ -24,6 +24,22 @@ pub fn routes() -> Router<AppState> {
             "/number-resources/:number_resource_id/capabilities",
             get(number_resource_capabilities),
         )
+        .route(
+            "/assignments/:assignment_id/kyc-status",
+            get(assignment_kyc_status),
+        )
+}
+
+/// Whether an assignment's KYC basis is in force (Workstream F), for consumers that must
+/// not act on a number whose approval expired or was revoked.
+async fn assignment_kyc_status(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    caller.require_permission(InternalPermission::NumberResourceRead)?;
+    let status = s.kyc.assignment_kyc_status(id).await?;
+    Ok(Json(serde_json::to_value(status).expect("serializable")))
 }
 
 async fn number_resource(

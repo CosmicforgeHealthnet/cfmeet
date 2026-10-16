@@ -8,7 +8,11 @@ use crate::{
     config::{service_auth::ServiceAuthRuntime, WorkerSettings},
     domain::SharedClock,
     identity::CustomerAuthority,
-    numbers::NumberDomain,
+    numbers::{
+        eligibility::EligibilityPolicy,
+        kyc::{evidence::EvidenceVault, verifier::ManualKycVerifier, KycService, KycSettings},
+        NumberDomain,
+    },
 };
 
 #[derive(Clone)]
@@ -21,6 +25,9 @@ pub struct AppState {
     /// Internal service authentication.
     pub service_auth: ServiceAuthRuntime,
     pub workers: WorkerSettings,
+    /// KYC cases, evidence and verification (Workstream F).
+    pub kyc: KycService,
+    pub eligibility: Arc<EligibilityPolicy>,
 }
 
 impl AppState {
@@ -31,13 +38,30 @@ impl AppState {
         service_auth: ServiceAuthRuntime,
         workers: WorkerSettings,
     ) -> Self {
+        let numbers = NumberDomain::new(db.clone(), clock.clone());
         Self {
-            numbers: NumberDomain::new(db.clone(), clock.clone()),
+            // Fail-closed defaults: manual review only, evidence refused until a protected
+            // store is configured (`with_kyc`).
+            kyc: KycService::new(
+                numbers.clone(),
+                Arc::new(EvidenceVault::unconfigured()),
+                Arc::new(ManualKycVerifier),
+                KycSettings::default(),
+            ),
+            eligibility: Arc::new(EligibilityPolicy::default()),
+            numbers,
             db,
             clock,
             authority,
             service_auth,
             workers,
         }
+    }
+
+    /// Replaces the KYC service and eligibility policy.
+    pub fn with_kyc(mut self, kyc: KycService, eligibility: EligibilityPolicy) -> Self {
+        self.kyc = kyc;
+        self.eligibility = Arc::new(eligibility);
+        self
     }
 }

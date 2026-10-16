@@ -131,6 +131,8 @@ jobs:
         run: cargo test --locked --test contracts
       - name: Capability and country catalog (Workstream E)
         run: cargo test --locked --test capability_catalog
+      - name: KYC, protected evidence and eligibility (Workstream F)
+        run: cargo test --locked --test kyc_eligibility
       - name: cargo test (whole workspace)
         run: cargo test --workspace --no-fail-fast --locked
 
@@ -173,12 +175,14 @@ jobs:
           q() { psql -h 127.0.0.1 -U postgres -d numbering_migration_smoke -tAc "$1"; }
           # Applied = registered migrations (derived from the migrator, never hand-counted).
           test "$(q "SELECT count(*) FROM numbering_seaql_migrations")" = "$(grep -c 'Box::new(m20' migration/src/lib.rs)"
-          # Foundation (outbox, jobs, idempotency) + the D9 number domain + the E catalog —
-          # and nothing of any other service.
-          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'numbering_seaql_migrations'")" = "15"
+          # Foundation (outbox, jobs, idempotency) + the D9 number domain + the E catalog +
+          # the F KYC / eligibility tables — and nothing of any other service.
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'numbering_seaql_migrations'")" = "23"
           test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'numbering_seaql_migrations' AND tablename !~ '^(number_|numbering_|dcn_)'")" = "0"
-          # No provider identifier column outside bindings / inventory snapshots.
-          test "$(q "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name IN ('provider_id', 'external_ref') AND table_name NOT IN ('number_provider_bindings', 'number_inventory_snapshots')")" = "0"
+          # No provider identifier column outside bindings / inventory snapshots and the
+          # internal applicability of catalog entries, KYC requirement sets and KYC cases
+          # (never exposed to customers).
+          test "$(q "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name IN ('provider_id', 'external_ref') AND table_name NOT IN ('number_provider_bindings', 'number_inventory_snapshots', 'number_type_catalog', 'number_kyc_requirements', 'number_kyc_cases')")" = "0"
 
       - name: Per-service database roles with the real migrations
         env:
@@ -228,6 +232,8 @@ jobs:
           refuses "bundle of another receiver" CF_SERVICE_TRUST_BUNDLE_FILE="$K/calling-bundle.json"
           refuses "wrong service identity" CF_SERVICE_ID=cfmeet.calling
           refuses "unknown runtime environment" CF_RUNTIME_ENVIRONMENT=prod
+          refuses "unknown KYC verifier" NUMBERING_KYC_VERIFIER=external
+          refuses "KYC evidence key without a protected store" NUMBERING_KYC_EVIDENCE_KEY=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
 
           ./target/debug/numbering > "$K/run.log" 2>&1 &
           pid=$!

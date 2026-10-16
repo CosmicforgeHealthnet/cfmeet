@@ -21,6 +21,10 @@ path = "src/main.rs"
 numbering-migration = { path = "migration" }
 # Shared internal service authentication protocol (packages/, never another service).
 cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
+# Protected KYC evidence: private object storage + AES-256-GCM sealing (packages/, never another service).
+cf-object-storage = { path = "../../packages/object-storage" }
+cf-webhooks = { path = "../../packages/webhooks" }
+base64 = "0.22"
 tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync", "net"] }
 sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono", "with-json", "postgres-array"] }
 axum = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio", "query", "matched-path"] }
