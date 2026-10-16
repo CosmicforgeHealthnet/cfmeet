@@ -214,7 +214,7 @@ DATABASE_URL=postgres://cfmeet:CHANGE_THIS_SECURE_PASSWORD@postgres:5432/cfmeet
 REDIS_URL=redis://redis:6379
 
 # JWT (generate with: openssl rand -base64 64)
-JWT_SECRET=CHANGE_THIS_GENERATE_WITH_OPENSSL_RAND_BASE64_64
+JWT_SECRET=<generated-jwt-secret>
 
 # LiveKit
 LIVEKIT_URL=wss://livekit.cfmeet.com
