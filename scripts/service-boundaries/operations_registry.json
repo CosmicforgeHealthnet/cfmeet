@@ -110,7 +110,11 @@
     {"id": "sms-gateway-outbox-publication", "owner": "sms-gateway", "source": "src/infra/outbox.rs", "entry": "publish_due",
      "tests": ["tests/foundation.rs::the_outbox_publishes_in_order_retries_and_dead_letters",
                "tests/foundation.rs::concurrent_publishers_deliver_each_event_once_and_a_dead_publishers_claim_is_taken_over"]},
-    {"id": "sms-gateway-rate-window-sweep", "owner": "sms-gateway", "source": "src/sms/workers.rs", "entry": "sweep",
-     "tests": ["tests/foundation.rs::rate_windows_count_hits_and_the_sweep_purges_only_expired_windows"]}
+    {"id": "sms-gateway-retention-sweep", "owner": "sms-gateway", "source": "src/sms/workers.rs", "entry": "sweep",
+     "tests": ["tests/foundation.rs::rate_windows_count_hits_and_the_sweep_purges_only_expired_windows",
+               "tests/inbound.rs::content_and_quarantine_are_purged_after_their_retention"]},
+    {"id": "sms-gateway-inbound-callbacks", "owner": "sms-gateway", "source": "src/sms/inbound.rs", "entry": "receive",
+     "tests": ["tests/inbound.rs::duplicate_and_concurrent_duplicate_callbacks_store_the_message_once",
+               "tests/inbound.rs::a_numbering_outage_fails_closed_and_the_providers_retry_is_applied_once"]}
   ]
 }

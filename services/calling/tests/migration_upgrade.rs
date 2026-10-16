@@ -255,8 +255,9 @@ fn donor_rows(table: &str) -> String {
 }
 
 /// Copies every row of `donor` (head) into `target` (N-1) through each target table's own
-/// row type; foreign keys and guard triggers are suspended for the copy only (replica
-/// role), CHECK / NOT NULL / unique constraints of N-1 apply.
+/// row type (replacing rows N-1's own migrations seeded); foreign keys and guard triggers
+/// are suspended for the copy only (replica role), CHECK / NOT NULL / unique constraints
+/// of N-1 apply.
 async fn copy_rows(donor: &DatabaseConnection, target: &DatabaseConnection) -> usize {
     let mut copied = 0;
     let txn = target.begin().await.unwrap();
@@ -268,6 +269,11 @@ async fn copy_rows(donor: &DatabaseConnection, target: &DatabaseConnection) -> u
             continue;
         }
         let rows = strings(donor, &donor_rows(&table)).await.pop().unwrap();
+        // Rows a migration seeded itself (singletons such as the projection cursor) are
+        // replaced by head's copy (guard triggers are suspended by the replica role).
+        txn.execute_unprepared(&format!("DELETE FROM \"{table}\""))
+            .await
+            .unwrap();
         let result = txn
             .execute(Statement::from_sql_and_values(
                 DbBackend::Postgres,

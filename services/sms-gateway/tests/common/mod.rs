@@ -39,7 +39,10 @@ use sms_gateway::{
         Authentication, AuthorityUnavailable, CustomerAuthority, EnvironmentKind, OwnerScope,
         PrincipalDirectory, PrincipalStatus, TrustedContext,
     },
-    numbering::{NumberingError, NumberingPort, ReleasedSender, Scope, SmsDestination, SmsRoute},
+    numbering::{
+        NumberingError, NumberingPort, ReleasedSender, Scope, SmsDestination, SmsRoute,
+        VerifiedRouting,
+    },
     providers::deterministic::DeterministicSmsProvider,
     sms::protection::Protection,
     state::AppState,
@@ -314,6 +317,14 @@ pub struct FakeNumbering {
     pub routes: StdMutex<HashMap<Uuid, SmsRoute>>,
     pub acknowledged: StdMutex<Vec<(Uuid, SmsRoute)>>,
     pub resolutions: StdMutex<usize>,
+    /// Inbound grants issued: token -> (grant id, the number as resolved).
+    pub inbound_grants: StdMutex<HashMap<String, (Uuid, FakeNumber)>>,
+    pub verifications: StdMutex<usize>,
+    /// Numbering unreachable for grant verification only.
+    pub verify_down: StdMutex<bool>,
+    /// Runs once, right after the next resolution (a routing change racing delivery).
+    #[allow(clippy::type_complexity)]
+    pub after_resolve: StdMutex<Option<Box<dyn FnOnce(&mut Vec<FakeNumber>) + Send>>>,
 }
 
 impl FakeNumbering {
@@ -353,19 +364,73 @@ impl NumberingPort for FakeNumbering {
                 reason: reason.clone(),
             });
         }
-        Ok(match &n.sms_target {
+        let out = match &n.sms_target {
             None => SmsDestination::NotRouted {
                 reason: "NOT_ROUTED".into(),
             },
-            Some((kind, target)) => SmsDestination::Routed {
-                number_resource_id: n.id,
-                assignment_id: n.assignment_id,
-                routing_revision: n.routing_revision,
-                scope: n.scope,
-                target_kind: kind.clone(),
-                target_ref: *target,
-                grant_id: Uuid::new_v4(),
-            },
+            Some((kind, target)) => {
+                let grant_id = Uuid::new_v4();
+                let token = format!("fake-inbound-grant.{}", Uuid::new_v4().simple());
+                self.inbound_grants
+                    .lock()
+                    .unwrap()
+                    .insert(token.clone(), (grant_id, n.clone()));
+                SmsDestination::Routed {
+                    number_resource_id: n.id,
+                    assignment_id: n.assignment_id,
+                    routing_revision: n.routing_revision,
+                    scope: n.scope,
+                    target_kind: kind.clone(),
+                    target_ref: *target,
+                    grant_id,
+                    grant: Zeroizing::new(token),
+                }
+            }
+        };
+        drop(numbers);
+        if let Some(hook) = self.after_resolve.lock().unwrap().take() {
+            hook(&mut self.numbers.lock().unwrap());
+        }
+        Ok(out)
+    }
+
+    async fn verify_inbound_sms(
+        &self,
+        grant: &str,
+        _: &CorrelationId,
+    ) -> Result<VerifiedRouting, NumberingError> {
+        if *self.down.lock().unwrap() || *self.verify_down.lock().unwrap() {
+            return Err(NumberingError::Unavailable);
+        }
+        *self.verifications.lock().unwrap() += 1;
+        let (grant_id, then) = self
+            .inbound_grants
+            .lock()
+            .unwrap()
+            .get(grant)
+            .cloned()
+            .ok_or(NumberingError::Refused("GRANT_INVALID".into()))?;
+        // Verified against CURRENT state: any change since issuance revokes the grant.
+        let numbers = self.numbers.lock().unwrap();
+        let now = numbers
+            .iter()
+            .find(|n| n.id == then.id)
+            .ok_or(NumberingError::Refused("GRANT_REVOKED".into()))?;
+        if now.unavailable.is_some()
+            || now.assignment_id != then.assignment_id
+            || now.routing_revision != then.routing_revision
+            || now.scope != then.scope
+            || now.sms_target != then.sms_target
+        {
+            return Err(NumberingError::Refused("GRANT_REVOKED".into()));
+        }
+        Ok(VerifiedRouting {
+            grant_id,
+            number_resource_id: now.id,
+            assignment_id: now.assignment_id,
+            routing_revision: now.routing_revision,
+            scope: now.scope,
+            target: now.sms_target.clone(),
         })
     }
 
@@ -712,6 +777,21 @@ impl Harness {
             b = b.header(k, v);
         }
         self.raw(b.body(Body::from(body)).unwrap()).await
+    }
+
+    /// A signed inbound-message callback of the deterministic provider at the gateway's now.
+    pub fn inbound_callback(&self, from: &str, to: &str, text: &str) -> (HeaderMap, Vec<u8>) {
+        self.provider.inbound_callback(from, to, text, self.now())
+    }
+
+    /// Posts an inbound callback (headers + raw body).
+    pub async fn inbound(&self, signed: &(HeaderMap, Vec<u8>)) -> Response {
+        self.callback(
+            "/provider-callbacks/v1/sms/deterministic/inbound",
+            signed.0.clone(),
+            signed.1.clone(),
+        )
+        .await
     }
 
     /// An internal request signed by `signer`.

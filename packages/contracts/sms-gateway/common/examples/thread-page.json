@@ -1,0 +1,15 @@
+{
+  "threads": [
+    {
+      "threadId": "6d7e8f90-1a2b-4c3d-9e4f-5a6b7c8d9e0f",
+      "numberResourceId": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+      "remote": {
+        "masked": "+***0123"
+      },
+      "messageCount": 3,
+      "lastMessageAt": "2031-03-01T10:00:00.000Z",
+      "createdAt": "2031-03-01T09:00:00.000Z"
+    }
+  ],
+  "nextCursor": null
+}

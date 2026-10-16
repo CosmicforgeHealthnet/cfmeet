@@ -9,7 +9,9 @@
 //! * `POST /internal/v1/routing/sms-sender-grants` (`number-sms-sender.authorize`, signed
 //!   delegated context) — a single-use SMS_SENDER grant for ONE message.
 //! * `POST /internal/v1/routing/grant-verifications` (`number-grant.verify`) — consumes the
-//!   sender grant for exactly that message and releases the sender number.
+//!   sender grant for exactly that message and releases the sender number; re-verifies an
+//!   INBOUND_SMS grant against CURRENT state at the final delivery boundary (a routing
+//!   change, reassignment, suspension or release since the resolution refuses it).
 //! * `GET /internal/v1/number-resources/{id}/routes` + `POST …/route-readiness`
 //!   (`number-resource.read`, `number-route.acknowledge`) — SMS route readiness.
 //!
@@ -52,6 +54,8 @@ pub enum SmsDestination {
         target_kind: String,
         target_ref: Uuid,
         grant_id: Uuid,
+        /// The signed INBOUND_SMS grant (re-verified before the message is stored).
+        grant: Zeroizing<String>,
     },
     /// Assigned, but SMS routes nowhere.
     NotRouted { reason: String },
@@ -90,6 +94,17 @@ impl fmt::Debug for ReleasedSender {
     }
 }
 
+/// An INBOUND_SMS grant Numbering verified against its current state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedRouting {
+    pub grant_id: Uuid,
+    pub number_resource_id: Uuid,
+    pub assignment_id: Uuid,
+    pub routing_revision: i64,
+    pub scope: Scope,
+    pub target: Option<(String, Uuid)>,
+}
+
 /// Numbering's current SMS route configuration of a number.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SmsRoute {
@@ -105,6 +120,13 @@ pub trait NumberingPort: Send + Sync {
         destination: &str,
         correlation: &CorrelationId,
     ) -> Result<SmsDestination, NumberingError>;
+
+    /// Re-verifies an INBOUND_SMS grant against Numbering's CURRENT state (not consumed).
+    async fn verify_inbound_sms(
+        &self,
+        grant: &str,
+        correlation: &CorrelationId,
+    ) -> Result<VerifiedRouting, NumberingError>;
 
     /// Obtains AND consumes the single-use SMS_SENDER grant of message `operation_ref`.
     async fn release_sender(
@@ -135,6 +157,14 @@ impl NumberingPort for UnconfiguredNumbering {
         _: &str,
         _: &CorrelationId,
     ) -> Result<SmsDestination, NumberingError> {
+        Err(NumberingError::Unavailable)
+    }
+
+    async fn verify_inbound_sms(
+        &self,
+        _: &str,
+        _: &CorrelationId,
+    ) -> Result<VerifiedRouting, NumberingError> {
         Err(NumberingError::Unavailable)
     }
 
@@ -230,6 +260,13 @@ impl NumberingPort for HttpNumbering {
                     .to_string(),
                 target_ref: uuid_at(&v["target"], "ref")?,
                 grant_id: uuid_at(&v["grant"], "grantId")?,
+                grant: Zeroizing::new(
+                    v["grant"]["grant"]
+                        .as_str()
+                        .filter(|g| g.len() <= 4096)
+                        .ok_or(NumberingError::Unavailable)?
+                        .to_string(),
+                ),
             }),
             Some("NOT_ROUTED") => Ok(SmsDestination::NotRouted {
                 reason: "NOT_ROUTED".into(),
@@ -237,6 +274,53 @@ impl NumberingPort for HttpNumbering {
             Some("UNAVAILABLE") => Ok(SmsDestination::Unavailable { reason: reason() }),
             _ => Err(NumberingError::Unavailable),
         }
+    }
+
+    async fn verify_inbound_sms(
+        &self,
+        grant: &str,
+        correlation: &CorrelationId,
+    ) -> Result<VerifiedRouting, NumberingError> {
+        let outbound = OutboundServiceRequest::continuing(ServiceId::numbering(), correlation);
+        let v: Value = self
+            .client
+            .post_json(
+                &outbound,
+                "/internal/v1/routing/grant-verifications",
+                &json!({ "grant": grant, "consume": false }),
+            )
+            .await
+            .map_err(failed)?
+            .json()
+            .map_err(|_| NumberingError::Unavailable)?;
+        if v["valid"] != true {
+            return Err(NumberingError::Refused(
+                v["reason"].as_str().unwrap_or("GRANT_INVALID").to_string(),
+            ));
+        }
+        if v["grantKind"] != "INBOUND_SMS" {
+            return Err(NumberingError::Refused("GRANT_INVALID".into()));
+        }
+        let target = match &v["target"] {
+            Value::Null => None,
+            t => Some((
+                t["kind"]
+                    .as_str()
+                    .ok_or(NumberingError::Unavailable)?
+                    .to_string(),
+                uuid_at(t, "ref")?,
+            )),
+        };
+        Ok(VerifiedRouting {
+            grant_id: uuid_at(&v, "grantId")?,
+            number_resource_id: uuid_at(&v, "numberResourceId")?,
+            assignment_id: uuid_at(&v, "assignmentId")?,
+            routing_revision: v["routingRevision"]
+                .as_i64()
+                .ok_or(NumberingError::Unavailable)?,
+            scope: scope_at(&v["scope"])?,
+            target,
+        })
     }
 
     async fn release_sender(

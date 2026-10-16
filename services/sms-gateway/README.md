@@ -48,9 +48,23 @@ Served at `GET /openapi.json` — exactly the checked-in contract
 |---|---|---|
 | `GET /health`, `GET /ready` | none | liveness; readiness (database, migrations, provider, outbox / dead-letter / UNKNOWN counts) |
 | `GET /openapi.json` | none | the served contract |
+| `POST /provider-callbacks/v1/sms/{providerId}/inbound` | provider signature (raw body, 300 s window) | an inbound message: authenticated BEFORE parsing, de-duplicated by the provider event id, resolved by Numbering (`sms-destination-resolutions`) and its grant re-verified against current state right before storage; ROUTED → stored for the environment Numbering named (`sms.received`), a routing change in between → quarantined `ROUTING_CHANGED`; otherwise QUARANTINED; 503 while Numbering is unreachable (nothing stored, the provider retries) (N) |
+| `GET /v1/sms/messages[/{messageId}]` | customer, `sms.read` | the environment's messages (filters `numberResourceId`, `direction`; cursor pages) — content to its owner only, remote party masked (N) |
+| `GET /v1/sms/threads`, `GET /v1/sms/threads/{threadId}/messages` | customer, `sms.read` | transport threads and their messages (N) |
 
-Customer routes (`/v1/sms/**`) and provider callbacks (`/provider-callbacks/v1/sms/**`)
-are added by Workstreams N (inbound, reads) and O (sending).
+Another environment's message or thread is NOT_FOUND. Sending is Workstream O.
+
+## Inbound messages (Workstream N)
+
+* STOP / START keywords (the whole message) block / unblock the sender for that number.
+* An unattributable message (unknown number, not ACTIVE, released, SMS not routed) is
+  kept sealed in `sms_quarantined_inbound`, attributed to no customer, and purged after
+  `SMS_GATEWAY_QUARANTINE_RETENTION_DAYS`; numbers or content that are not valid are
+  recorded REFUSED.
+* Content of final messages is purged after `SMS_GATEWAY_CONTENT_RETENTION_DAYS` (the
+  message stays, with `contentPurged: true`).
+* `sms-gateway.message.received` is published to Calling's platform event ingestion and
+  delivered as the `sms.received` customer webhook (references, status and codes only).
 
 ## Provider adapters
 
@@ -79,5 +93,6 @@ Each test gets its own database cloned from a migrated template. Suites:
 `foundation` (schema guards, protection, outbox, auth boundaries, served OpenAPI,
 provider contract), `startup` (the real binary: fail-closed configuration, the
 deterministic provider refused in protected runtimes, pending migrations),
+`inbound` (callbacks, quarantine, ownership changes, keywords, reads, retention),
 `architecture` (no other service's source / tables, no Numbering authority replicated,
 no numbers or content in logs).

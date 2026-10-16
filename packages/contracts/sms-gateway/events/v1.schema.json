@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/sms-gateway/events/v1.schema.json",
+  "title": "CF Meet SMS Gateway events v1",
+  "description": "SMS Gateway domain events in the platform envelope (transactional outbox, at least once, per-message order): sms-gateway.message.received. Published to the platform's customer webhook delivery as sms.received.",
+  "$ref": "#/$defs/MessageEvent",
+  "$defs": {
+    "MessagePayload": {
+      "description": "Payload of a message event (snake_case; references, status, bounded codes and the MASKED remote party only — never content, a number, a provider identifier or a grant).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message_id",
+        "direction",
+        "status",
+        "number_resource_id",
+        "thread_id",
+        "segment_count",
+        "encoding",
+        "remote_masked"
+      ],
+      "properties": {
+        "message_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "direction": {
+          "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/Direction"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/Status"
+        },
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "thread_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "segment_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "encoding": {
+          "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/Encoding"
+        },
+        "remote_masked": {
+          "type": "string",
+          "pattern": "^\\+\\*{3}[0-9]{0,4}$",
+          "description": "The remote party, masked: `+***` and the last four digits. The full number is never returned."
+        },
+        "principal_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target_kind": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z_]{1,39}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target_ref": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "failure_code": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blocked_reason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "estimated_cost_minor": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confirmed_cost_minor": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "currency": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MessageEvent": {
+      "type": "object",
+      "required": [
+        "event_type",
+        "payload"
+      ],
+      "properties": {
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "sms-gateway.message.received"
+          ]
+        },
+        "payload": {
+          "$ref": "#/$defs/MessagePayload"
+        }
+      }
+    }
+  }
+}

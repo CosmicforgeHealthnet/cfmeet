@@ -69,7 +69,8 @@
         "relay.participant_changed",
         "usage.recorded",
         "limit.warning",
-        "limit.exceeded"
+        "limit.exceeded",
+        "sms.received"
       ]
     },
     "CreateWebhookRequest": {
@@ -450,7 +451,18 @@
               "window",
               "threshold",
               "current",
-              "ceiling"
+              "ceiling",
+              "threadId",
+              "numberResourceId",
+              "direction",
+              "status",
+              "segmentCount",
+              "encoding",
+              "principalId",
+              "targetKind",
+              "targetRef",
+              "failureCode",
+              "blockedReason"
             ]
           },
           "additionalProperties": {

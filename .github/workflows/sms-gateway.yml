@@ -110,6 +110,8 @@ jobs:
       # then the whole workspace.
       - name: Foundation (M) — schema guards, protection, outbox, auth, served OpenAPI, provider contract
         run: cargo test --locked --test foundation --test startup --test architecture
+      - name: Inbound SMS (N) — authenticated callbacks, Numbering resolution, quarantine, threads, reads, retention
+        run: cargo test --locked --test inbound
       - name: cargo test (whole workspace)
         run: cargo test --workspace --no-fail-fast --locked
 

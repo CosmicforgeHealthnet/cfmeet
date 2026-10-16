@@ -1,0 +1,10 @@
+{
+  "id": "whe_00000000000000000000000000000004",
+  "type": "sms.received",
+  "apiVersion": "v1",
+  "occurredAt": "2031-03-01T10:05:00.000Z",
+  "data": {
+    "messageId": "0b2c8f5e-7a41-4d3e-9b6c-1f2e3d4c5b6a",
+    "remoteMasked": "+***0123"
+  }
+}

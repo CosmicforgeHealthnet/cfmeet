@@ -55,9 +55,12 @@ Platform Access.
    * *Inbound:* the destination is resolved by a dedicated SMS resolver
      (`POST /internal/v1/routing/sms-destination-resolutions`, `number-sms-route.resolve`,
      SMS Gateway only). `inbound-resolutions` is voice-only (`FAMILY_NOT_SUPPORTED`).
-     ROUTED → the message is stored for the owning environment; anything else is
-     quarantined and never delivered to a customer; Numbering unreachable → 503 so the
-     provider retries, nothing stored.
+     ROUTED → the message is stored for the owning environment, but only after Numbering
+     re-verifies the INBOUND_SMS grant against its CURRENT state at the final delivery
+     boundary (a reassignment, routing change, suspension or release in between →
+     quarantined `ROUTING_CHANGED`, never delivered to the previous or the next owner);
+     anything else is quarantined and never delivered to a customer; Numbering
+     unreachable → 503 so the provider retries, nothing stored.
 6. **Provider abstraction.** One adapter trait (submit with four outcomes — accepted,
    rejected, definitely not sent, unknown; status query; callback authentication before
    parsing; callback parsing). The deterministic adapter scripts every fault mode for

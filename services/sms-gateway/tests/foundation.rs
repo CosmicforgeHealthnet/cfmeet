@@ -586,12 +586,11 @@ async fn the_served_openapi_is_the_checked_in_contract() {
         for method in item.as_object().unwrap().keys() {
             let concrete = path
                 .split('/')
-                .map(|s| {
-                    if s.starts_with('{') {
-                        Uuid::new_v4().to_string()
-                    } else {
-                        s.to_string()
-                    }
+                .map(|s| match s {
+                    // The configured provider (an unknown provider id is a real 404).
+                    "{providerId}" => "deterministic".to_string(),
+                    s if s.starts_with('{') => Uuid::new_v4().to_string(),
+                    s => s.to_string(),
                 })
                 .collect::<Vec<_>>()
                 .join("/");
@@ -605,7 +604,7 @@ async fn the_served_openapi_is_the_checked_in_contract() {
             let r = h.raw(request).await;
             let unrouted = r.status == StatusCode::METHOD_NOT_ALLOWED
                 || (r.status == StatusCode::NOT_FOUND
-                    && r.json["error"]["message"] == "The resource was not found.");
+                    && r.json["error"]["message"] == sms_gateway::http::NO_ROUTE_MESSAGE);
             assert!(
                 !unrouted,
                 "{method} {path} is documented but not served ({})",

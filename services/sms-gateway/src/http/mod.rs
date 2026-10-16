@@ -164,8 +164,11 @@ async fn normalize_rejections(response: Response) -> Response {
     error_response(code, code.default_message(), None, None)
 }
 
-async fn not_found() -> ApiError {
-    ApiError::Code(ErrorCode::NotFound)
+/// No route matched (distinct from a resource that does not exist, same code).
+pub const NO_ROUTE_MESSAGE: &str = "No such route.";
+
+async fn not_found() -> Response {
+    error_response(ErrorCode::NotFound, NO_ROUTE_MESSAGE, None, None)
 }
 
 async fn method_not_allowed() -> ApiError {

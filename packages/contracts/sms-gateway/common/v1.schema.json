@@ -2,10 +2,25 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json",
   "title": "CF Meet SMS Gateway common v1",
-  "description": "SMS Gateway vocabulary and messages (Part IV M–O): transport status / direction / encoding, control reasons, the error envelope. Never a full telephone number in a response, never a provider identifier.",
+  "description": "SMS Gateway vocabulary and messages (Part IV M–O): transport status / direction / encoding, control reasons, the error envelope, messages, threads, callback acknowledgements. Never a full telephone number in a response, never a provider identifier.",
   "oneOf": [
     {
       "$ref": "#/$defs/Error"
+    },
+    {
+      "$ref": "#/$defs/Message"
+    },
+    {
+      "$ref": "#/$defs/MessagePage"
+    },
+    {
+      "$ref": "#/$defs/Thread"
+    },
+    {
+      "$ref": "#/$defs/ThreadPage"
+    },
+    {
+      "$ref": "#/$defs/CallbackAck"
     }
   ],
   "$defs": {
@@ -118,6 +133,386 @@
               "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
             }
           }
+        }
+      }
+    },
+    "RemoteParty": {
+      "description": "The remote party (masked only).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "masked"
+      ],
+      "properties": {
+        "masked": {
+          "type": "string",
+          "pattern": "^\\+\\*{3}[0-9]{0,4}$",
+          "description": "The remote party, masked: `+***` and the last four digits. The full number is never returned."
+        }
+      }
+    },
+    "Routing": {
+      "description": "Numbering's SMS routing target of an inbound message (opaque CF Meet reference).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targetKind",
+        "targetRef"
+      ],
+      "properties": {
+        "targetKind": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,39}$"
+        },
+        "targetRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "Cost": {
+      "description": "Estimated / provider-confirmed cost in minor units.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "estimatedMinor",
+        "confirmedMinor",
+        "currency"
+      ],
+      "properties": {
+        "estimatedMinor": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confirmedMinor": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        }
+      }
+    },
+    "Message": {
+      "description": "One message (inbound or outbound). `content` is the plaintext for the owning environment only (null once purged by retention); the remote party is masked; no provider identifier.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "messageId",
+        "direction",
+        "status",
+        "numberResourceId",
+        "threadId",
+        "remote",
+        "content",
+        "contentPurged",
+        "encoding",
+        "segmentCount",
+        "characterCount",
+        "principalId",
+        "routing",
+        "failureCode",
+        "blockedReason",
+        "cost",
+        "createdAt",
+        "expiresAt",
+        "submittedAt",
+        "deliveredAt",
+        "receivedAt",
+        "failedAt"
+      ],
+      "properties": {
+        "messageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "status": {
+          "$ref": "#/$defs/Status"
+        },
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "threadId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "remote": {
+          "$ref": "#/$defs/RemoteParty"
+        },
+        "content": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 1600
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contentPurged": {
+          "type": "boolean"
+        },
+        "encoding": {
+          "$ref": "#/$defs/Encoding"
+        },
+        "segmentCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "characterCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1600
+        },
+        "principalId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "routing": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Routing"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "failureCode": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blockedReason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cost": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Cost"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "submittedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deliveredAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "receivedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "failedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MessagePage": {
+      "description": "A page of messages, newest first.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "messages",
+        "nextCursor"
+      ],
+      "properties": {
+        "messages": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/Message"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Thread": {
+      "description": "A transport thread: the messages between one Number Resource and one remote party. A transport index, not a conversation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "threadId",
+        "numberResourceId",
+        "remote",
+        "messageCount",
+        "lastMessageAt",
+        "createdAt"
+      ],
+      "properties": {
+        "threadId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "remote": {
+          "$ref": "#/$defs/RemoteParty"
+        },
+        "messageCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastMessageAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "ThreadPage": {
+      "description": "A page of threads, most recent first.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "threads",
+        "nextCursor"
+      ],
+      "properties": {
+        "threads": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/Thread"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "CallbackAck": {
+      "description": "Provider callback acknowledgement (the provider stops retrying).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "disposition"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ACCEPTED",
+            "DUPLICATE"
+          ]
+        },
+        "disposition": {
+          "type": "string",
+          "enum": [
+            "APPLIED",
+            "STALE",
+            "UNMATCHED",
+            "QUARANTINED",
+            "REFUSED"
+          ]
         }
       }
     }

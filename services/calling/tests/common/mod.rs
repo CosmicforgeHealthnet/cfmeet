@@ -276,6 +276,8 @@ pub struct Peers {
     pub clock: cf_service_auth::ManualClock,
     pub privacy_relay: Arc<ServiceTokenSigner>,
     pub telephony: Arc<ServiceTokenSigner>,
+    /// The SMS Gateway: `platform-event.publish` only (Part IV N / O).
+    pub sms_gateway: Arc<ServiceTokenSigner>,
     /// A correctly signing service that Calling does NOT trust.
     pub untrusted: Arc<ServiceTokenSigner>,
     /// A verifier for a privacy-relay identity that trusts Calling (outbound tests).
@@ -322,6 +324,7 @@ pub fn service_auth_fixture_targeting(
     let relay_key = service_key("privacy-relay-test-1");
     let telephony_key = service_key("telephony-test-1");
     let untrusted_key = service_key("untrusted-test-1");
+    let sms_gateway_key = service_key("sms-gateway-test-1");
     let calling_jwk = calling_key.public_jwk();
 
     let calling_policy = TrustPolicy::from_json(
@@ -349,6 +352,11 @@ pub fn service_auth_fixture_targeting(
                         "telephony-enterprise.offer",
                         "telephony-capture.deliver",
                     ],
+                ),
+                (
+                    cf_service_auth::services::SMS_GATEWAY,
+                    vec![sms_gateway_key.public_jwk()],
+                    &["platform-event.publish"],
                 ),
             ],
         ),
@@ -412,6 +420,13 @@ pub fn service_auth_fixture_targeting(
             ServiceId::telephony(),
             env,
             telephony_key,
+            TokenTtl::default(),
+            shared.clone(),
+        )),
+        sms_gateway: Arc::new(ServiceTokenSigner::new(
+            ServiceId::sms_gateway(),
+            env,
+            sms_gateway_key,
             TokenTtl::default(),
             shared.clone(),
         )),

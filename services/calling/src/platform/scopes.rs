@@ -58,6 +58,9 @@ pub mod names {
     pub const WEBHOOKS_MANAGE: &str = "webhooks.manage";
     /// Read the application's usage facts and effective limits (Part G §69 / §70).
     pub const USAGE_READ: &str = "usage.read";
+    /// Receive SMS message events (`sms.*` webhooks; the SMS Gateway's reads use the same
+    /// Platform Access scope, Part IV N / O).
+    pub const SMS_READ: &str = "sms.read";
 
     /// Every scope Calling enforces. Each must be registered by Platform Access (the
     /// scope registry is Platform Access's; Calling only checks granted names).
@@ -85,6 +88,7 @@ pub mod names {
         WEBHOOKS_READ,
         WEBHOOKS_MANAGE,
         USAGE_READ,
+        SMS_READ,
     ];
 }
 
