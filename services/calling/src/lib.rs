@@ -35,6 +35,7 @@ pub mod metrics;
 pub mod middleware;
 pub mod models;
 pub mod platform;
+pub mod public_docs;
 pub mod privacy_relay;
 pub mod retention;
 pub mod routes;
