@@ -256,7 +256,7 @@ mod tests {
             .into_iter()
             .flat_map(|paths| paths.values())
             .filter_map(Value::as_object)
-            .map(|item| METHODS.iter().filter(|method| item.contains_key(**method)).count())
+            .map(|item| METHODS.iter().filter(|method| item.contains_key(*method)).count())
             .sum()
     }
 
