@@ -156,6 +156,54 @@
     },
     {
       "$ref": "#/$defs/RouteReadiness"
+    },
+    {
+      "$ref": "#/$defs/RoutingTargets"
+    },
+    {
+      "$ref": "#/$defs/CreateAssignmentRequest"
+    },
+    {
+      "$ref": "#/$defs/RoutingProfileView"
+    },
+    {
+      "$ref": "#/$defs/AssignmentRouting"
+    },
+    {
+      "$ref": "#/$defs/UpdateRoutingRequest"
+    },
+    {
+      "$ref": "#/$defs/OffboardingRequest"
+    },
+    {
+      "$ref": "#/$defs/TransferAssignmentRequest"
+    },
+    {
+      "$ref": "#/$defs/TransferResult"
+    },
+    {
+      "$ref": "#/$defs/PoolMember"
+    },
+    {
+      "$ref": "#/$defs/NumberPool"
+    },
+    {
+      "$ref": "#/$defs/NumberPoolList"
+    },
+    {
+      "$ref": "#/$defs/CreatePoolRequest"
+    },
+    {
+      "$ref": "#/$defs/AddPoolMemberRequest"
+    },
+    {
+      "$ref": "#/$defs/PoolMembership"
+    },
+    {
+      "$ref": "#/$defs/AdminAssignmentHistoryEntry"
+    },
+    {
+      "$ref": "#/$defs/AssignmentHistoryList"
     }
   ],
   "$defs": {
@@ -303,7 +351,7 @@
       ]
     },
     "AssignmentStatus": {
-      "description": "DCN assignment states (Part IV D6). ACTIVE is reachable only from ACTIVATING (and back from SUSPENDED); one open (not CLOSED) assignment per number.",
+      "description": "DCN assignment states (Part IV D6). ACTIVE is reachable only from ACTIVATING (and back from SUSPENDED) and only once every routed family is READY; one open (not CLOSED) assignment per number. ACTIVE -> CLOSED only by an internal transfer to a successor of the same legal owner (close reason TRANSFERRED_INTERNALLY).",
       "type": "string",
       "enum": [
         "REQUESTED",
@@ -341,7 +389,7 @@
       ]
     },
     "VoiceTargetKind": {
-      "description": "Voice routing target: opaque CF Meet ids of Calling / enterprise constructs, never SIP or provider data.",
+      "description": "Voice routing target: opaque CF Meet ids of Calling / enterprise constructs (principal, professional identity, endpoint, extension, ring group, queue, IVR, department, shared team, voicemail, approved forwarding), never SIP or provider data. The kinds a number may use are bounded by its ownership class (TARGET_NOT_PERMITTED).",
       "type": "string",
       "enum": [
         "NONE",
@@ -351,16 +399,22 @@
         "ENTERPRISE_RING_GROUP",
         "ENTERPRISE_QUEUE",
         "ENTERPRISE_IVR",
-        "ENTERPRISE_DEPARTMENT"
+        "ENTERPRISE_DEPARTMENT",
+        "PROFESSIONAL_IDENTITY",
+        "SHARED_TEAM",
+        "VOICEMAIL",
+        "APPROVED_FORWARDING"
       ]
     },
     "SmsTargetKind": {
-      "description": "SMS routing target (opaque CF Meet ids).",
+      "description": "SMS routing target (opaque CF Meet ids): a principal, an application, a shared-team or department inbox; bounded by the ownership class.",
       "type": "string",
       "enum": [
         "NONE",
         "PRINCIPAL",
-        "APPLICATION"
+        "APPLICATION",
+        "SHARED_TEAM",
+        "DEPARTMENT"
       ]
     },
     "ActorKind": {
@@ -818,7 +872,7 @@
       }
     },
     "DcnAssignment": {
-      "description": "GET /v1/numbers/assignments/{id}: a DCN assignment of the caller's trusted scope.",
+      "description": "A DCN assignment of the caller's trusted scope: the legal owner (immutable on the record), the pinned routing revision and the transfer links (an internal transfer closes the predecessor and opens a successor of the same owner).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -832,7 +886,10 @@
         "eligibilityDecisionRef",
         "requestedAt",
         "activatedAt",
-        "closedAt"
+        "closedAt",
+        "closeReason",
+        "predecessorAssignmentId",
+        "successorAssignmentId"
       ],
       "properties": {
         "assignmentId": {
@@ -899,11 +956,41 @@
               "type": "null"
             }
           ]
+        },
+        "closeReason": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ReasonCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "predecessorAssignmentId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "successorAssignmentId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
     "DcnAssignmentList": {
-      "description": "GET /v1/numbers/assignments: the caller scope's assignments, newest first (at most 100).",
+      "description": "GET /v1/numbers/assignments: the caller scope's assignments, newest first (keyset pages, optional status / ownershipClass filters).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -916,6 +1003,17 @@
             "$ref": "#/$defs/DcnAssignment"
           },
           "maxItems": 100
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -2191,7 +2289,22 @@
         "ROUTE_ACK_CONFLICT",
         "CONSUMER_MISMATCH",
         "STALE_ROUTE_REVISION",
-        "ROUTE_NOT_CONFIGURED"
+        "ROUTE_NOT_CONFIGURED",
+        "TARGET_NOT_PERMITTED",
+        "CROSS_OWNER_TRANSFER_UNSUPPORTED",
+        "ROUTING_NOT_READY",
+        "PRINCIPAL_NOT_ACTIVE",
+        "PRINCIPAL_NOT_FOUND",
+        "PRINCIPAL_UNVERIFIED",
+        "ELIGIBILITY_SUBJECT_MISMATCH",
+        "ACQUISITION_IN_PROGRESS",
+        "ASSIGNMENT_NOT_ACTIVE",
+        "ASSIGNMENT_NOT_ROUTABLE",
+        "NOT_AN_EMPLOYEE_NUMBER",
+        "POOL_EXISTS",
+        "POOL_ARCHIVED",
+        "POOL_MEMBER_EXISTS",
+        "POOL_MEMBER_NOT_ORGANIZATIONAL"
       ]
     },
     "Error": {
@@ -5115,6 +5228,662 @@
         },
         "acknowledgedAt": {
           "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "RoutingTargets": {
+      "description": "Where a number routes: one voice and one SMS target (kind NONE: not routed). Validated against the ownership class: a personal / professional number routes to its owner only; an employee's direct line to one employee; organizational classes to their constructs.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "voice",
+        "sms"
+      ],
+      "properties": {
+        "voice": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/RoutingTarget"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "$ref": "#/$defs/VoiceTargetKind"
+                }
+              }
+            }
+          ]
+        },
+        "sms": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/RoutingTarget"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "$ref": "#/$defs/SmsTargetKind"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "CreateAssignmentRequest": {
+      "description": "POST /v1/numbers/assignments (Idempotency-Key required): assign a PROVISIONED acquisition (acquisitionId) or a HELD reservation (reservationId) of the caller to its legal owner. Organizational classes belong to the authenticated organization and name no owner; PERSONAL / PROFESSIONAL name an owning principal Platform Access resolves ACTIVE in the caller's environment.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ownershipClass",
+        "routing",
+        "capabilities"
+      ],
+      "properties": {
+        "acquisitionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "reservationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "ownershipClass": {
+          "$ref": "#/$defs/OwnershipClass"
+        },
+        "ownerPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "routing": {
+          "$ref": "#/$defs/RoutingTargets"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "VOICE_INBOUND",
+              "VOICE_OUTBOUND",
+              "SMS_INBOUND",
+              "SMS_OUTBOUND",
+              "MMS_RICH"
+            ]
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 5
+        },
+        "eligibilityDecisionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "poolId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "acquisitionId"
+          ],
+          "not": {
+            "required": [
+              "reservationId"
+            ]
+          }
+        },
+        {
+          "required": [
+            "reservationId"
+          ],
+          "not": {
+            "required": [
+              "acquisitionId"
+            ]
+          }
+        }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "ownershipClass": {
+                "enum": [
+                  "PERSONAL",
+                  "PROFESSIONAL"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "ownerPrincipalId"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "ownerPrincipalId"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "RoutingProfileView": {
+      "description": "The pinned routing profile revision.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "routingProfileId",
+        "revision",
+        "voice",
+        "sms",
+        "status",
+        "createdAt"
+      ],
+      "properties": {
+        "routingProfileId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "voice": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/RoutingTarget"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "$ref": "#/$defs/VoiceTargetKind"
+                }
+              }
+            }
+          ]
+        },
+        "sms": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/RoutingTarget"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "$ref": "#/$defs/SmsTargetKind"
+                }
+              }
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "CURRENT",
+            "SUPERSEDED"
+          ]
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "AssignmentRouting": {
+      "description": "GET /v1/numbers/assignments/{id}/routing: the pinned routing revision, the number's routing revision (advanced by every routing change; routing grants are bound to it) and per-family readiness.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignmentId",
+        "routing",
+        "routingRevision",
+        "readiness"
+      ],
+      "properties": {
+        "assignmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "routing": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RoutingProfileView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "routingRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "readiness": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FamilyReadiness"
+          }
+        }
+      }
+    },
+    "UpdateRoutingRequest": {
+      "description": "POST /v1/numbers/assignments/{id}/routing: a new routing revision (same class, same owner). expectedRoutingRevision is the profile revision the caller saw (VERSION_CONFLICT otherwise).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedRoutingRevision",
+        "routing"
+      ],
+      "properties": {
+        "expectedRoutingRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "routing": {
+          "$ref": "#/$defs/RoutingTargets"
+        }
+      }
+    },
+    "OffboardingRequest": {
+      "description": "POST /v1/numbers/assignments/{id}/offboarding: an EMPLOYEE_DIRECT number leaves the departing employee — unrouted (no replacement) or routed to a replacement (never the departing employee). The number stays the organization's.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedRoutingRevision"
+      ],
+      "properties": {
+        "expectedRoutingRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "replacement": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RoutingTargets"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "TransferAssignmentRequest": {
+      "description": "POST /v1/numbers/assignments/{id}/transfer (Idempotency-Key required): within the same legal owner only. Same class: a routing revision. Another class of the same owner: the ACTIVE assignment closes (TRANSFERRED_INTERNALLY) and a successor opens, admitted on a re-evaluated eligibility decision of the new class and activated in the same transaction. A different owner is CROSS_OWNER_TRANSFER_UNSUPPORTED.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ownershipClass",
+        "routing",
+        "expectedRoutingRevision"
+      ],
+      "properties": {
+        "ownershipClass": {
+          "$ref": "#/$defs/OwnershipClass"
+        },
+        "ownerPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "routing": {
+          "$ref": "#/$defs/RoutingTargets"
+        },
+        "eligibilityDecisionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "expectedRoutingRevision": {
+          "$ref": "#/$defs/Revision"
+        }
+      }
+    },
+    "TransferResult": {
+      "description": "The outcome of an internal transfer.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transferKind",
+        "assignment",
+        "predecessor"
+      ],
+      "properties": {
+        "transferKind": {
+          "type": "string",
+          "enum": [
+            "RETARGET",
+            "RECLASSIFY"
+          ]
+        },
+        "assignment": {
+          "$ref": "#/$defs/DcnAssignment"
+        },
+        "predecessor": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DcnAssignment"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PoolMember": {
+      "description": "A current member of an organizational pool.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignmentId",
+        "numberResourceId",
+        "ownershipClass",
+        "assignmentStatus",
+        "usage",
+        "routing",
+        "addedAt"
+      ],
+      "properties": {
+        "assignmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "numberResourceId": {
+          "$ref": "#/$defs/NumberResourceId"
+        },
+        "ownershipClass": {
+          "$ref": "#/$defs/OwnershipClass"
+        },
+        "assignmentStatus": {
+          "$ref": "#/$defs/AssignmentStatus"
+        },
+        "usage": {
+          "description": "ASSIGNED while routed to a target, AVAILABLE while unrouted.",
+          "type": "string",
+          "enum": [
+            "ASSIGNED",
+            "AVAILABLE"
+          ]
+        },
+        "routing": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RoutingProfileView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "addedAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "NumberPool": {
+      "description": "An organizational number pool of the caller's scope (organization-owned numbers only; an assignment is in at most one pool; usage / subscription policies are opaque references).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "poolId",
+        "name",
+        "status",
+        "usagePolicyRef",
+        "subscriptionPolicyRef",
+        "revision",
+        "createdAt"
+      ],
+      "properties": {
+        "poolId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "ARCHIVED"
+          ]
+        },
+        "usagePolicyRef": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subscriptionPolicyRef": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PoolMember"
+          }
+        }
+      }
+    },
+    "NumberPoolList": {
+      "description": "GET /v1/numbers/pools.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NumberPool"
+          },
+          "maxItems": 200
+        }
+      }
+    },
+    "CreatePoolRequest": {
+      "description": "POST /v1/numbers/pools.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "usagePolicyRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "subscriptionPolicyRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "AddPoolMemberRequest": {
+      "description": "POST /v1/numbers/pools/{poolId}/members.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignmentId"
+      ],
+      "properties": {
+        "assignmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "PoolMembership": {
+      "description": "A pool membership (ended memberships are kept as history).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "poolId",
+        "assignmentId",
+        "numberResourceId",
+        "addedAt",
+        "removedAt"
+      ],
+      "properties": {
+        "poolId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "assignmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "numberResourceId": {
+          "$ref": "#/$defs/NumberResourceId"
+        },
+        "addedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "removedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "AdminAssignmentHistoryEntry": {
+      "description": "One history row of any owner's assignment of a number (operator view).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "assignmentId",
+        "tenantId",
+        "applicationId",
+        "environmentId",
+        "eventKind",
+        "fromStatus",
+        "toStatus",
+        "revision",
+        "ownerKind",
+        "ownerRef",
+        "ownershipClass",
+        "routingProfileId",
+        "routingProfileRevision",
+        "actorKind",
+        "actorRef",
+        "reasonCode",
+        "occurredAt"
+      ],
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "assignmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "tenantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "applicationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "eventKind": {
+          "type": "string",
+          "enum": [
+            "CREATED",
+            "STATUS_CHANGED",
+            "ROUTING_CHANGED",
+            "ELIGIBILITY_RECORDED"
+          ]
+        },
+        "fromStatus": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AssignmentStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "toStatus": {
+          "$ref": "#/$defs/AssignmentStatus"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "ownerKind": {
+          "$ref": "#/$defs/OwnerKind"
+        },
+        "ownerRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "ownershipClass": {
+          "$ref": "#/$defs/OwnershipClass"
+        },
+        "routingProfileId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "routingProfileRevision": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Revision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actorKind": {
+          "$ref": "#/$defs/ActorKind"
+        },
+        "actorRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "reasonCode": {
+          "$ref": "#/$defs/ReasonCode"
+        },
+        "occurredAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "AssignmentHistoryList": {
+      "description": "GET /v1/admin/number-resources/{id}/assignment-history: every owner's assignment history of a number, oldest first (numbers.admin, operator-attributed).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AdminAssignmentHistoryEntry"
+          }
         }
       }
     }

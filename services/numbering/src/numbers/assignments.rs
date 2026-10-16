@@ -45,7 +45,7 @@ pub fn allowed(from: AssignmentStatus, to: AssignmentStatus) -> bool {
             | (A::Eligible, A::Reserved | A::Closed)
             | (A::Reserved, A::Activating | A::Closed)
             | (A::Activating, A::Active | A::Reserved | A::Closed)
-            | (A::Active, A::Suspended | A::ReleaseRequested)
+            | (A::Active, A::Suspended | A::ReleaseRequested | A::Closed)
             | (A::Suspended, A::Active | A::ReleaseRequested)
             | (A::ReleaseRequested, A::RoutingRemoved)
             | (A::RoutingRemoved, A::Quarantined | A::Closed)
@@ -84,6 +84,10 @@ pub struct AssignmentRow {
     pub close_reason: Option<String>,
     pub created_by: String,
     pub updated_at: DateTime<Utc>,
+    /// The assignment this one succeeded by an internal transfer (same legal owner).
+    pub predecessor_assignment_id: Option<Uuid>,
+    /// The assignment that succeeded this one by an internal transfer.
+    pub successor_assignment_id: Option<Uuid>,
 }
 
 impl AssignmentRow {
@@ -1011,6 +1015,449 @@ impl NumberDomain {
     }
 }
 
+/// What a new assignment records (Workstream J orchestration).
+#[derive(Debug, Clone)]
+pub struct OpenAssignment {
+    pub id: Uuid,
+    pub number_resource_id: Uuid,
+    pub ownership_class: OwnershipClass,
+    pub owner_ref: Uuid,
+    /// The capabilities the assignment relies on (what is provisioned for it).
+    pub capability_snapshot: Vec<String>,
+    pub policy_snapshot_ref: Option<Uuid>,
+    pub kyc_profile_ref: Option<Uuid>,
+    pub predecessor_assignment_id: Option<Uuid>,
+}
+
+/// The in-transaction steps the assignment orchestration composes (Workstream J). Each
+/// goes through the one status-changing path and appends history and the outbox event.
+impl NumberDomain {
+    /// Inserts a REQUESTED assignment (the open-assignment index refuses a second one).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn open_assignment_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        scope: &OwnerScope,
+        actor: &Actor,
+        new: OpenAssignment,
+        reason: &str,
+        now: DateTime<Utc>,
+    ) -> DomainResult<AssignmentRow> {
+        let resource = lock(txn, new.number_resource_id).await?;
+        if !scope.may_use(resource.inventory()) {
+            return Err(DomainError::precondition(
+                "ENVIRONMENT_INVENTORY_MISMATCH",
+                "SANDBOX / TEST environments use synthetic test inventory only; PRODUCTION never does",
+            ));
+        }
+        let row = AssignmentRow::find_by_statement(stmt(
+            "INSERT INTO dcn_assignments (id, number_resource_id, tenant_id, application_id, environment_id, \
+               environment_kind, owner_kind, owner_ref, ownership_class, capability_snapshot, policy_snapshot_ref, \
+               kyc_profile_ref, risk_tier_snapshot, status, revision, requested_at, created_by, updated_at, \
+               predecessor_assignment_id) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'REQUESTED', 1, $14, $15, $14, $16) \
+             RETURNING *",
+            vec![
+                new.id.into(),
+                resource.id.into(),
+                scope.tenant_id.into(),
+                scope.application_id.into(),
+                scope.environment_id.into(),
+                scope.environment_kind.as_str().into(),
+                new.ownership_class.owner_kind().as_str().into(),
+                new.owner_ref.into(),
+                new.ownership_class.as_str().into(),
+                new.capability_snapshot.into(),
+                new.policy_snapshot_ref.into(),
+                new.kyc_profile_ref.into(),
+                Some(resource.risk_tier.clone()).into(),
+                now.into(),
+                actor.reference.clone().into(),
+                new.predecessor_assignment_id.into(),
+            ],
+        ))
+        .one(txn)
+        .await?
+        .expect("insert returns the row");
+        append_history(txn, ctx, &row, "CREATED", None, actor, reason, now).await?;
+        Ok(row)
+    }
+
+    /// REQUESTED → PENDING_ELIGIBILITY → ELIGIBLE on a decision the caller validated (and
+    /// re-evaluated) in the same flow.
+    pub(crate) async fn admit_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        actor: &Actor,
+        assignment: &AssignmentRow,
+        decision_ref: Uuid,
+        now: DateTime<Utc>,
+    ) -> DomainResult<AssignmentRow> {
+        let row = transition_assignment(
+            txn,
+            ctx,
+            assignment,
+            assignment.revision,
+            A::PendingEligibility,
+            Fields::default(),
+            actor,
+            "ELIGIBILITY_REQUESTED",
+            now,
+        )
+        .await?;
+        transition_assignment(
+            txn,
+            ctx,
+            &row,
+            row.revision,
+            A::Eligible,
+            Fields {
+                eligibility_decision_ref: Some(decision_ref),
+                ..Default::default()
+            },
+            actor,
+            "ELIGIBILITY_GRANTED",
+            now,
+        )
+        .await
+    }
+
+    /// ELIGIBLE → RESERVED holding `reservation` of the same scope and number: a HELD
+    /// reservation is taken over (CONVERTED to the assignment), a reservation already
+    /// converted into a provisioned acquisition is linked.
+    pub(crate) async fn hold_for_assignment_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        actor: &Actor,
+        assignment: &AssignmentRow,
+        reservation_id: Uuid,
+        now: DateTime<Utc>,
+    ) -> DomainResult<AssignmentRow> {
+        let reservation = ReservationRow::find_by_statement(stmt(
+            "SELECT * FROM number_reservations WHERE id = $1 FOR UPDATE",
+            vec![reservation_id.into()],
+        ))
+        .one(txn)
+        .await?
+        .filter(|r| {
+            r.tenant_id == assignment.tenant_id
+                && r.application_id == assignment.application_id
+                && r.environment_id == assignment.environment_id
+                && r.number_resource_id == assignment.number_resource_id
+        })
+        .ok_or(DomainError::NotFound("reservation"))?;
+        match (reservation.status(), reservation.converted_to.as_deref()) {
+            (ReservationStatus::Held, _) => {
+                if reservation.is_expired_at(now) {
+                    return Err(DomainError::precondition(
+                        "RESERVATION_EXPIRED",
+                        "the reservation has expired",
+                    ));
+                }
+                txn.execute(stmt(
+                    "UPDATE number_reservations SET status = 'CONVERTED', converted_to = 'ASSIGNMENT', revision = revision + 1, \
+                       updated_at = $2, ended_at = $2 WHERE id = $1",
+                    vec![reservation.id.into(), now.into()],
+                ))
+                .await?;
+            }
+            (ReservationStatus::Converted, Some("ACQUISITION")) => {}
+            // The successor of an internal transfer takes over its predecessor's hold.
+            (ReservationStatus::Converted, Some("ASSIGNMENT"))
+                if assignment.predecessor_assignment_id.is_some() =>
+            {
+                let predecessor =
+                    lock_assignment(txn, assignment.predecessor_assignment_id.expect("checked"))
+                        .await?;
+                if predecessor.reservation_id != Some(reservation.id)
+                    || predecessor.successor_assignment_id != Some(assignment.id)
+                {
+                    return Err(DomainError::precondition(
+                        "HOLD_REQUIRED",
+                        "a successor takes over its predecessor's hold only",
+                    ));
+                }
+            }
+            _ => {
+                return Err(DomainError::precondition(
+                    "HOLD_REQUIRED",
+                    "an assignment holds a held reservation or a provisioned acquisition",
+                ))
+            }
+        }
+        transition_assignment(
+            txn,
+            ctx,
+            assignment,
+            assignment.revision,
+            A::Reserved,
+            Fields {
+                reservation_id: Some(reservation.id),
+                ..Default::default()
+            },
+            actor,
+            "RESERVATION_ATTACHED",
+            now,
+        )
+        .await
+    }
+
+    /// Pins the CURRENT revision of `profile_id` (same scope) on an open assignment;
+    /// the number's routing revision advances (every routing change is versioned).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn pin_routing_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        actor: &Actor,
+        assignment: &AssignmentRow,
+        profile_id: Uuid,
+        reason: &str,
+        now: DateTime<Utc>,
+    ) -> DomainResult<AssignmentRow> {
+        let profile = RoutingProfileRow::find_by_statement(stmt(
+            "SELECT * FROM number_routing_profiles WHERE profile_id = $1 AND status = 'CURRENT'",
+            vec![profile_id.into()],
+        ))
+        .one(txn)
+        .await?
+        .filter(|p| {
+            p.tenant_id == assignment.tenant_id
+                && p.application_id == assignment.application_id
+                && p.environment_id == assignment.environment_id
+        })
+        .ok_or(DomainError::NotFound("routing profile"))?;
+        let row = AssignmentRow::find_by_statement(stmt(
+            "UPDATE dcn_assignments SET routing_profile_id = $3, routing_profile_revision = $4, revision = revision + 1, \
+               updated_at = $5 WHERE id = $1 AND revision = $2 RETURNING *",
+            vec![
+                assignment.id.into(),
+                assignment.revision.into(),
+                profile.profile_id.into(),
+                profile.revision.into(),
+                now.into(),
+            ],
+        ))
+        .one(txn)
+        .await?
+        .ok_or(DomainError::VersionConflict("assignment"))?;
+        txn.execute(stmt(
+            "UPDATE number_resources SET routing_revision = routing_revision + 1, revision = revision + 1, \
+               updated_at = $2 WHERE id = $1",
+            vec![row.number_resource_id.into(), now.into()],
+        ))
+        .await?;
+        let status = row.status();
+        append_history(
+            txn,
+            ctx,
+            &row,
+            "ROUTING_CHANGED",
+            Some(status),
+            actor,
+            reason,
+            now,
+        )
+        .await?;
+        Ok(row)
+    }
+
+    /// RESERVED → ACTIVATING → ACTIVE, the number PROVISIONED → ACTIVE (one transaction;
+    /// a successor of an internal transfer finds the number ACTIVE already).
+    pub(crate) async fn activate_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        actor: &Actor,
+        assignment: &AssignmentRow,
+        reason: &str,
+        now: DateTime<Utc>,
+    ) -> DomainResult<AssignmentRow> {
+        if assignment.routing_profile_id.is_none() {
+            return Err(DomainError::precondition(
+                "ROUTING_REQUIRED",
+                "activation needs a routing profile",
+            ));
+        }
+        if assignment.eligibility_decision_ref.is_none() {
+            return Err(DomainError::precondition(
+                "ELIGIBILITY_REQUIRED",
+                "no eligibility decision is recorded",
+            ));
+        }
+        let row = match assignment.status() {
+            A::Reserved => {
+                transition_assignment(
+                    txn,
+                    ctx,
+                    assignment,
+                    assignment.revision,
+                    A::Activating,
+                    Fields::default(),
+                    actor,
+                    "ACTIVATION_STARTED",
+                    now,
+                )
+                .await?
+            }
+            A::Activating => assignment.clone(),
+            other => {
+                return Err(DomainError::InvalidTransition {
+                    entity: "assignment",
+                    from: other.as_str().into(),
+                    to: "ACTIVE".into(),
+                })
+            }
+        };
+        let resource = lock(txn, row.number_resource_id).await?;
+        match resource.lifecycle_state() {
+            LifecycleState::Provisioned => {
+                transition_in(
+                    txn,
+                    ctx,
+                    resource.id,
+                    TransitionRequest::new(
+                        LifecycleState::Active,
+                        resource.revision,
+                        actor.clone(),
+                        "ASSIGNMENT_ACTIVATED",
+                    ),
+                    now,
+                )
+                .await?;
+            }
+            LifecycleState::Active if row.predecessor_assignment_id.is_some() => {}
+            _ => {
+                return Err(DomainError::precondition(
+                    "PROVISIONING_REQUIRED",
+                    "the number must be provisioned before it is activated",
+                ))
+            }
+        }
+        transition_assignment(
+            txn,
+            ctx,
+            &row,
+            row.revision,
+            A::Active,
+            Fields::default(),
+            actor,
+            reason,
+            now,
+        )
+        .await
+    }
+
+    /// ACTIVE → CLOSED by an internal transfer to `successor_id` (inserted next in the
+    /// same transaction; the deferred link is checked at commit).
+    pub(crate) async fn close_for_transfer_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        actor: &Actor,
+        assignment: &AssignmentRow,
+        successor_id: Uuid,
+        now: DateTime<Utc>,
+    ) -> DomainResult<AssignmentRow> {
+        txn.execute(stmt(
+            "SELECT set_config('numbering.assignment', 'transition', true)",
+            vec![],
+        ))
+        .await?;
+        let row = AssignmentRow::find_by_statement(stmt(
+            "UPDATE dcn_assignments SET status = 'CLOSED', revision = revision + 1, updated_at = $3, closed_at = $3, \
+               close_reason = 'TRANSFERRED_INTERNALLY', successor_assignment_id = $4 \
+             WHERE id = $1 AND revision = $2 AND status = 'ACTIVE' RETURNING *",
+            vec![
+                assignment.id.into(),
+                assignment.revision.into(),
+                now.into(),
+                successor_id.into(),
+            ],
+        ))
+        .one(txn)
+        .await?
+        .ok_or(DomainError::VersionConflict("assignment"))?;
+        txn.execute(stmt(
+            "SELECT set_config('numbering.assignment', 'off', true)",
+            vec![],
+        ))
+        .await?;
+        append_history(
+            txn,
+            ctx,
+            &row,
+            "STATUS_CHANGED",
+            Some(A::Active),
+            actor,
+            "TRANSFERRED_INTERNALLY",
+            now,
+        )
+        .await?;
+        Ok(row)
+    }
+
+    /// Locks an assignment of `scope` (other scopes: not found).
+    pub(crate) async fn lock_assignment_in(
+        &self,
+        txn: &DatabaseTransaction,
+        scope: &OwnerScope,
+        id: Uuid,
+    ) -> DomainResult<AssignmentRow> {
+        lock_assignment(txn, id)
+            .await
+            .ok()
+            .filter(|a| a.in_scope(scope))
+            .ok_or(DomainError::NotFound("assignment"))
+    }
+
+    /// The open (not CLOSED) assignment of a number, whatever its scope (internal).
+    pub async fn open_assignment_of(
+        &self,
+        resource_id: Uuid,
+    ) -> DomainResult<Option<AssignmentRow>> {
+        Ok(AssignmentRow::find_by_statement(stmt(
+            "SELECT * FROM dcn_assignments WHERE number_resource_id = $1 AND status <> 'CLOSED'",
+            vec![resource_id.into()],
+        ))
+        .one(&self.db)
+        .await?)
+    }
+
+    /// The caller scope's assignments, newest first (keyset page, optional filters).
+    pub async fn list_assignments(
+        &self,
+        scope: &OwnerScope,
+        status: Option<AssignmentStatus>,
+        ownership_class: Option<OwnershipClass>,
+        before: Option<(DateTime<Utc>, Uuid)>,
+        limit: u64,
+    ) -> DomainResult<Vec<AssignmentRow>> {
+        let (at, id) = before.unzip();
+        Ok(AssignmentRow::find_by_statement(stmt(
+            "SELECT * FROM dcn_assignments WHERE tenant_id = $1 AND application_id = $2 AND environment_id = $3 \
+               AND ($4::text IS NULL OR status = $4) AND ($5::text IS NULL OR ownership_class = $5) \
+               AND ($6::timestamptz IS NULL OR (requested_at, id) < ($6, $7)) \
+             ORDER BY requested_at DESC, id DESC LIMIT $8",
+            vec![
+                scope.tenant_id.into(),
+                scope.application_id.into(),
+                scope.environment_id.into(),
+                status.map(|s| s.as_str().to_string()).into(),
+                ownership_class.map(|c| c.as_str().to_string()).into(),
+                at.into(),
+                id.into(),
+                (limit.clamp(1, 200) as i64).into(),
+            ],
+        ))
+        .all(&self.db)
+        .await?)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1026,6 +1473,9 @@ mod tests {
             .collect();
         assert_eq!(into_active, vec![&A::Activating, &A::Suspended]);
         assert!(!allowed(A::Requested, A::Active) && !allowed(A::Eligible, A::Active));
+        // ACTIVE closes directly only by an internal transfer (database-enforced reason
+        // and successor); SUSPENDED never does.
+        assert!(allowed(A::Active, A::Closed) && !allowed(A::Suspended, A::Closed));
     }
 
     #[test]

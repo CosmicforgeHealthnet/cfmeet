@@ -402,13 +402,22 @@ impl Harness {
             Some(_) => Arc::new(PlatformAccessAuthority::new(service_auth.client())),
             None => Arc::new(UnconfiguredAuthority),
         };
-        let state = AppState::new(
+        let principals: Option<Arc<dyn numbering::identity::PrincipalDirectory>> =
+            pa.as_ref().map(|_| {
+                Arc::new(numbering::identity::PlatformAccessPrincipals::new(
+                    service_auth.client(),
+                )) as Arc<dyn numbering::identity::PrincipalDirectory>
+            });
+        let mut state = AppState::new(
             db.conn.clone(),
             Arc::new(clock.clone()),
             authority,
             service_auth,
             WorkerSettings::default(),
         );
+        if let Some(p) = principals {
+            state = state.with_principals(p);
+        }
         Self {
             numbers: state.numbers.clone(),
             app: http::app(state.clone()),
@@ -1390,6 +1399,7 @@ pub mod acquisition {
 
     use numbering::{
         acquisition::{reservations::ExpiryHandler, Acquisition, AcquisitionSettings},
+        identity::{AuthorityUnavailable, PrincipalDirectory, PrincipalStatus},
         infra::jobs::JobRunner,
     };
 
@@ -1402,6 +1412,46 @@ pub mod acquisition {
             h.state.eligibility.clone(),
             settings,
         )
+        .with_principals(h.state.principals.clone())
+    }
+
+    /// An in-memory principal directory (domain tests without Platform Access).
+    #[derive(Default)]
+    pub struct Principals {
+        known: std::sync::Mutex<std::collections::HashMap<uuid::Uuid, PrincipalStatus>>,
+        pub unavailable: std::sync::atomic::AtomicBool,
+    }
+
+    impl Principals {
+        pub fn add(&self, status: PrincipalStatus) -> uuid::Uuid {
+            let id = uuid::Uuid::new_v4();
+            self.known.lock().unwrap().insert(id, status);
+            id
+        }
+
+        pub fn set(&self, id: uuid::Uuid, status: PrincipalStatus) {
+            self.known.lock().unwrap().insert(id, status);
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl PrincipalDirectory for Principals {
+        async fn resolve(
+            &self,
+            _scope: &numbering::numbers::OwnerScope,
+            principal_id: uuid::Uuid,
+        ) -> Result<PrincipalStatus, AuthorityUnavailable> {
+            if self.unavailable.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(AuthorityUnavailable("directory down".into()));
+            }
+            Ok(self
+                .known
+                .lock()
+                .unwrap()
+                .get(&principal_id)
+                .copied()
+                .unwrap_or(PrincipalStatus::NotFound))
+        }
     }
 
     /// The provider dispatch / reconcile handlers plus the reservation expiry handler.

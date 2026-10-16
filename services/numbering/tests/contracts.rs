@@ -349,7 +349,8 @@ async fn the_assignment_policy_is_one_edge_set_in_rust_and_sql() {
             edges += sql;
         }
     }
-    assert_eq!(edges, 19);
+    // 19 Workstream D edges + ACTIVE -> CLOSED (internal transfer only, Workstream J).
+    assert_eq!(edges, 20);
 }
 
 #[tokio::test]

@@ -12,6 +12,7 @@
 //! unknown paths; extractor rejections are normalized to the error envelope.
 
 pub mod acquisitions;
+pub mod assignments;
 pub mod callbacks;
 pub mod catalog;
 pub mod customer;

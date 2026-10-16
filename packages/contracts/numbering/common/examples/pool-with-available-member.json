@@ -1,0 +1,33 @@
+{
+  "poolId": "4b0c6e8a-3f5d-4a7b-8c9d-6e1f3a5b7c9d",
+  "name": "Front desk",
+  "status": "ACTIVE",
+  "usagePolicyRef": null,
+  "subscriptionPolicyRef": "5c1d7f9b-4a6e-4b8c-9d0e-7f2a4b6c8d0e",
+  "revision": 1,
+  "createdAt": "2031-04-01T08:00:00Z",
+  "members": [
+    {
+      "assignmentId": "1e7f3b5d-0c2a-4d4e-9f6b-3a8c0d2e4f6a",
+      "numberResourceId": "5f0b2c1e-8d3a-4b6f-9e2d-7a1c3b5d9f01",
+      "ownershipClass": "EMPLOYEE_DIRECT",
+      "assignmentStatus": "ACTIVE",
+      "usage": "AVAILABLE",
+      "routing": {
+        "routingProfileId": "8a0c2e4f-6b8d-4f0a-9b1c-4d5e6f7a8b9c",
+        "revision": 3,
+        "voice": {
+          "kind": "NONE",
+          "ref": null
+        },
+        "sms": {
+          "kind": "NONE",
+          "ref": null
+        },
+        "status": "CURRENT",
+        "createdAt": "2031-04-02T08:00:00Z"
+      },
+      "addedAt": "2031-04-01T08:05:00Z"
+    }
+  ]
+}

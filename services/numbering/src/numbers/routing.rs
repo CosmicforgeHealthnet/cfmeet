@@ -50,7 +50,7 @@ pub struct RoutingTargets {
 }
 
 impl RoutingTargets {
-    fn validate(&self) -> DomainResult<()> {
+    pub fn validate(&self) -> DomainResult<()> {
         if (self.voice.0 == VoiceTargetKind::None) != self.voice.1.is_none()
             || (self.sms.0 == SmsTargetKind::None) != self.sms.1.is_none()
         {
@@ -132,14 +132,27 @@ impl NumberDomain {
         actor: Actor,
         targets: RoutingTargets,
     ) -> DomainResult<RoutingProfileRow> {
-        targets.validate()?;
         let now = self.clock.now();
         let txn = self.db.begin().await?;
         let row = self
-            .insert_revision(&txn, ctx, Uuid::new_v4(), 1, scope, targets, &actor, now)
+            .create_routing_profile_in(&txn, ctx, scope, &actor, targets, now)
             .await?;
         txn.commit().await?;
         Ok(row)
+    }
+
+    pub(crate) async fn create_routing_profile_in(
+        &self,
+        txn: &sea_orm::DatabaseTransaction,
+        ctx: &RequestContext,
+        scope: &OwnerScope,
+        actor: &Actor,
+        targets: RoutingTargets,
+        now: DateTime<Utc>,
+    ) -> DomainResult<RoutingProfileRow> {
+        targets.validate()?;
+        self.insert_revision(txn, ctx, Uuid::new_v4(), 1, scope, targets, actor, now)
+            .await
     }
 
     /// Supersedes the CURRENT revision `expected_revision` and adds the next one.
@@ -152,14 +165,42 @@ impl NumberDomain {
         expected_revision: i64,
         targets: RoutingTargets,
     ) -> DomainResult<RoutingProfileRow> {
-        targets.validate()?;
         let now = self.clock.now();
         let txn = self.db.begin().await?;
+        let next = self
+            .revise_routing_profile_in(
+                &txn,
+                ctx,
+                scope,
+                &actor,
+                profile_id,
+                expected_revision,
+                targets,
+                now,
+            )
+            .await?;
+        txn.commit().await?;
+        Ok(next)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn revise_routing_profile_in(
+        &self,
+        txn: &sea_orm::DatabaseTransaction,
+        ctx: &RequestContext,
+        scope: &OwnerScope,
+        actor: &Actor,
+        profile_id: Uuid,
+        expected_revision: i64,
+        targets: RoutingTargets,
+        now: DateTime<Utc>,
+    ) -> DomainResult<RoutingProfileRow> {
+        targets.validate()?;
         let current = RoutingProfileRow::find_by_statement(stmt(
             "SELECT * FROM number_routing_profiles WHERE profile_id = $1 AND status = 'CURRENT' FOR UPDATE",
             vec![profile_id.into()],
         ))
-        .one(&txn)
+        .one(txn)
         .await?
         .filter(|r| scope_matches(r, scope))
         .ok_or(DomainError::NotFound("routing profile"))?;
@@ -167,27 +208,39 @@ impl NumberDomain {
             return Err(DomainError::VersionConflict("routing profile"));
         }
         sea_orm::ConnectionTrait::execute(
-            &txn,
+            txn,
             stmt(
                 "UPDATE number_routing_profiles SET status = 'SUPERSEDED', superseded_at = $2 WHERE id = $1",
                 vec![current.id.into(), now.into()],
             ),
         )
         .await?;
-        let next = self
-            .insert_revision(
-                &txn,
-                ctx,
-                profile_id,
-                current.revision + 1,
-                scope,
-                targets,
-                &actor,
-                now,
-            )
-            .await?;
-        txn.commit().await?;
-        Ok(next)
+        self.insert_revision(
+            txn,
+            ctx,
+            profile_id,
+            current.revision + 1,
+            scope,
+            targets,
+            actor,
+            now,
+        )
+        .await
+    }
+
+    /// One revision of a profile (any status), internal.
+    pub async fn routing_profile_revision(
+        &self,
+        profile_id: Uuid,
+        revision: i64,
+    ) -> DomainResult<RoutingProfileRow> {
+        RoutingProfileRow::find_by_statement(stmt(
+            "SELECT * FROM number_routing_profiles WHERE profile_id = $1 AND revision = $2",
+            vec![profile_id.into(), revision.into()],
+        ))
+        .one(&self.db)
+        .await?
+        .ok_or(DomainError::NotFound("routing profile"))
     }
 
     /// The CURRENT revision of a profile in `scope`.

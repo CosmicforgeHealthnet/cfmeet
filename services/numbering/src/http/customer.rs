@@ -1,5 +1,5 @@
-//! Customer reads (`numbers.read`): the caller's OWN assignments, their history and
-//! reservations — always filtered by the trusted scope from Platform Access, so another
+//! Customer reads (`numbers.read`): the caller's OWN assignment history and
+//! reservations (assignment workflows: [`super::assignments`]) — always filtered by the trusted scope from Platform Access, so another
 //! tenant's / environment's records are indistinguishable from missing ones. Provider
 //! identifiers never appear.
 
@@ -21,8 +21,6 @@ pub const NUMBERS_READ: &str = "numbers.read";
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/numbers/assignments", get(list_assignments))
-        .route("/numbers/assignments/:assignment_id", get(get_assignment))
         .route(
             "/numbers/assignments/:assignment_id/history",
             get(assignment_history),
@@ -32,6 +30,7 @@ pub fn routes() -> Router<AppState> {
             get(get_reservation),
         )
         .merge(super::numbers::routes())
+        .merge(super::assignments::routes())
         .merge(super::acquisitions::routes())
         .merge(super::catalog::customer_routes())
         .merge(super::catalog::admin_routes())
@@ -61,6 +60,9 @@ pub fn assignment_view(a: &AssignmentRow) -> Value {
         "requestedAt": a.requested_at,
         "activatedAt": a.activated_at,
         "closedAt": a.closed_at,
+        "closeReason": a.close_reason,
+        "predecessorAssignmentId": a.predecessor_assignment_id,
+        "successorAssignmentId": a.successor_assignment_id,
     })
 }
 
@@ -79,28 +81,6 @@ pub fn reservation_view(r: &ReservationRow) -> Value {
         "createdAt": r.created_at,
         "endedAt": r.ended_at,
     })
-}
-
-async fn list_assignments(
-    State(s): State<AppState>,
-    caller: CustomerCaller,
-) -> Result<Json<Value>, ApiError> {
-    let ctx = caller.require_scope(NUMBERS_READ)?;
-    let rows = s.numbers.assignments(&ctx.owner_scope(), 100).await?;
-    Ok(Json(
-        json!({ "data": rows.iter().map(assignment_view).collect::<Vec<_>>() }),
-    ))
-}
-
-async fn get_assignment(
-    State(s): State<AppState>,
-    caller: CustomerCaller,
-    Path(id): Path<Uuid>,
-) -> Result<Json<Value>, ApiError> {
-    let ctx = caller.require_scope(NUMBERS_READ)?;
-    Ok(Json(assignment_view(
-        &s.numbers.assignment(&ctx.owner_scope(), id).await?,
-    )))
 }
 
 async fn assignment_history(

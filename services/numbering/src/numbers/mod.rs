@@ -55,6 +55,8 @@ pub mod inventory;
 pub mod kyc;
 pub mod lifecycle;
 pub mod limitations;
+pub mod ownership;
+pub mod pools;
 pub mod reservations;
 pub mod resolution;
 pub mod resources;

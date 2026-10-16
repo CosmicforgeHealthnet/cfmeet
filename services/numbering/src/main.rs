@@ -132,6 +132,9 @@ async fn main() -> anyhow::Result<()> {
 
     let clock: SharedClock = Arc::new(SystemClock);
     let authority = Arc::new(PlatformAccessAuthority::new(service_auth.client()));
+    let principals = Arc::new(numbering::identity::PlatformAccessPrincipals::new(
+        service_auth.client(),
+    ));
     let state = AppState::new(
         db.clone(),
         clock.clone(),
@@ -176,7 +179,8 @@ async fn main() -> anyhow::Result<()> {
         Some(p) => state.with_providers(p.clone()),
         None => state,
     }
-    .with_acquisition_settings(acquisition_settings);
+    .with_acquisition_settings(acquisition_settings)
+    .with_principals(principals);
     let acquisition = Arc::new(state.acquisition());
 
     // Worker foundation: lease recovery of interrupted jobs (UNKNOWN_OUTCOME parking for

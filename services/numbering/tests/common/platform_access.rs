@@ -128,7 +128,11 @@ impl PlatformAccess {
                         "audience": cf_service_auth::services::PLATFORM_ACCESS,
                         "runtime_environment": ENV,
                         "keys": [numbering_key.public_jwk()],
-                        "permissions": ["platform-credential.authenticate", "platform-identity.read"],
+                        "permissions": [
+                            "platform-credential.authenticate",
+                            "platform-identity.read",
+                            "platform-principal.resolve",
+                        ],
                     },
                     {
                         "issuer": cf_service_auth::services::OPERATOR_CONSOLE,
@@ -351,6 +355,29 @@ impl PlatformAccess {
             environment_id,
             service_account_id,
         }
+    }
+
+    /// Registers a communication principal (an enterprise member) in an environment.
+    pub async fn principal(&self, environment_id: Uuid) -> Uuid {
+        let v = self
+            .created(
+                &format!("/internal/v1/admin/environments/{environment_id}/principals"),
+                json!({
+                    "kind": "ENTERPRISE_MEMBER",
+                    "externalReference": format!("member-{}", Uuid::new_v4().simple()),
+                }),
+            )
+            .await;
+        id(&v["principal"]["id"])
+    }
+
+    /// Sets a principal's status (ACTIVE / SUSPENDED / DEACTIVATED).
+    pub async fn set_principal_status(&self, principal: Uuid, status: &str) {
+        self.created(
+            &format!("/internal/v1/admin/principals/{principal}/status"),
+            json!({ "status": status }),
+        )
+        .await;
     }
 
     pub async fn revoke(&self, credential: Uuid) {

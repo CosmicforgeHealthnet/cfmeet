@@ -258,20 +258,30 @@ text_enum!(
     VoiceTargetKind {
         None = "NONE",
         Principal = "PRINCIPAL",
+        ProfessionalIdentity = "PROFESSIONAL_IDENTITY",
         CallingEndpoint = "CALLING_ENDPOINT",
         EnterpriseExtension = "ENTERPRISE_EXTENSION",
         EnterpriseRingGroup = "ENTERPRISE_RING_GROUP",
         EnterpriseQueue = "ENTERPRISE_QUEUE",
         EnterpriseIvr = "ENTERPRISE_IVR",
         EnterpriseDepartment = "ENTERPRISE_DEPARTMENT",
+        SharedTeam = "SHARED_TEAM",
+        Voicemail = "VOICEMAIL",
+        ApprovedForwarding = "APPROVED_FORWARDING",
     }
 );
 
-text_enum!(SmsTargetKind {
-    None = "NONE",
-    Principal = "PRINCIPAL",
-    Application = "APPLICATION",
-});
+text_enum!(
+    /// SMS routing targets: the owner / inbox that receives a number's messages (opaque
+    /// CF Meet ids; the inbox itself is the SMS workstreams').
+    SmsTargetKind {
+        None = "NONE",
+        Principal = "PRINCIPAL",
+        Application = "APPLICATION",
+        SharedTeam = "SHARED_TEAM",
+        Department = "DEPARTMENT",
+    }
+);
 
 text_enum!(ActorKind {
     Operator = "OPERATOR",

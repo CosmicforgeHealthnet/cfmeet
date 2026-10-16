@@ -54,6 +54,9 @@
     },
     {
       "$ref": "#/$defs/RouteChanged"
+    },
+    {
+      "$ref": "#/$defs/PoolChanged"
     }
   ],
   "$defs": {
@@ -1372,6 +1375,84 @@
               "ownership"
             ]
           }
+        }
+      ]
+    },
+    "PoolChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pool_id",
+        "change",
+        "assignment_id",
+        "revision",
+        "status"
+      ],
+      "properties": {
+        "pool_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "change": {
+          "type": "string",
+          "enum": [
+            "CREATED",
+            "MEMBER_ADDED",
+            "MEMBER_REMOVED"
+          ]
+        },
+        "assignment_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Revision"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "ARCHIVED"
+          ]
+        }
+      }
+    },
+    "PoolChanged": {
+      "description": "An organizational pool of a customer scope changed (created, member added / removed; a transfer carries the membership to the successor).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.pool.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/PoolChangedPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
         }
       ]
     }

@@ -14,6 +14,7 @@
 //! Every operation runs in the TRUSTED scope from Platform Access; a request body never
 //! names a tenant, application or environment. Provider identifiers never leave here.
 
+pub mod assignments;
 pub mod provisioning;
 pub mod reservations;
 pub mod search;
@@ -78,6 +79,7 @@ pub struct Acquisition {
     pub(crate) providers: Option<ProviderCommands>,
     pub(crate) eligibility: Arc<EligibilityPolicy>,
     pub(crate) settings: AcquisitionSettings,
+    pub(crate) principals: Arc<dyn crate::identity::PrincipalDirectory>,
 }
 
 impl Acquisition {
@@ -92,7 +94,17 @@ impl Acquisition {
             providers,
             eligibility,
             settings,
+            principals: Arc::new(crate::identity::UnconfiguredPrincipals),
         }
+    }
+
+    /// Installs the principal directory (Platform Access; unconfigured fails closed).
+    pub fn with_principals(
+        mut self,
+        principals: Arc<dyn crate::identity::PrincipalDirectory>,
+    ) -> Self {
+        self.principals = principals;
+        self
     }
 
     pub fn numbers(&self) -> &NumberDomain {

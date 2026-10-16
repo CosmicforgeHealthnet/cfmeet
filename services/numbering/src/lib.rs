@@ -8,7 +8,8 @@
 //! * [`infra`]: reliability foundations — transactional outbox, leased jobs with bounded
 //!   retry / dead-letter / uncertain-outcome parking, idempotency keys.
 //! * [`identity`]: the trusted request context. Customers are authenticated by Platform
-//!   Access (`platform-credential.authenticate`); services by `packages/service-auth`.
+//!   Access (`platform-credential.authenticate`; owning principals are resolved with
+//!   `platform-principal.resolve`); services by `packages/service-auth`.
 //! * [`http`]: health / readiness, the customer read API and the internal API.
 //!
 //! Numbering owns no logical call, SIP / PSTN execution, relay-session semantics or SMS

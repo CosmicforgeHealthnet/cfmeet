@@ -40,6 +40,8 @@ const DOMAIN: &[&str] = &[
     "number_kyc_requirements",
     "number_kyc_verifications",
     "number_lifecycle_events",
+    "number_pool_members",
+    "number_pools",
     "number_provider_bindings",
     "number_provider_command_attempts",
     "number_provider_commands",

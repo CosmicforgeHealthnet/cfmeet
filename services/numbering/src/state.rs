@@ -33,6 +33,8 @@ pub struct AppState {
     pub providers: Option<crate::providers::commands::ProviderCommands>,
     /// Limits of the acquisition workflows (Workstreams H–K).
     pub acquisition_settings: crate::acquisition::AcquisitionSettings,
+    /// Principal resolution in the trusted scope (Platform Access).
+    pub principals: Arc<dyn crate::identity::PrincipalDirectory>,
 }
 
 impl AppState {
@@ -56,6 +58,7 @@ impl AppState {
             eligibility: Arc::new(EligibilityPolicy::default()),
             providers: None,
             acquisition_settings: Default::default(),
+            principals: Arc::new(crate::identity::UnconfiguredPrincipals),
             numbers,
             db,
             clock,
@@ -80,6 +83,16 @@ impl AppState {
             self.eligibility.clone(),
             self.acquisition_settings.clone(),
         )
+        .with_principals(self.principals.clone())
+    }
+
+    /// Installs the principal directory.
+    pub fn with_principals(
+        mut self,
+        principals: Arc<dyn crate::identity::PrincipalDirectory>,
+    ) -> Self {
+        self.principals = principals;
+        self
     }
 
     /// Replaces the acquisition limits.

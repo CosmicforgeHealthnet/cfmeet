@@ -190,6 +190,104 @@ impl CustomerAuthority for UnconfiguredAuthority {
     }
 }
 
+/// Whether a principal exists, active, in a trusted application environment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrincipalStatus {
+    Active,
+    Inactive,
+    NotFound,
+}
+
+/// Resolves communication principals in the caller's TRUSTED scope (Workstream J): the
+/// owner of a personal / professional number and the employee of a direct line are
+/// principals Platform Access knows in that environment — never just an id a request
+/// supplied.
+#[async_trait::async_trait]
+pub trait PrincipalDirectory: Send + Sync {
+    async fn resolve(
+        &self,
+        scope: &OwnerScope,
+        principal_id: Uuid,
+    ) -> Result<PrincipalStatus, AuthorityUnavailable>;
+}
+
+/// Platform Access (`POST /internal/v1/principals/resolve`, permission
+/// `platform-principal.resolve`, signed delegated context of the trusted scope).
+pub struct PlatformAccessPrincipals {
+    client: Arc<InternalServiceClient>,
+}
+
+impl PlatformAccessPrincipals {
+    pub fn new(client: Arc<InternalServiceClient>) -> Self {
+        Self { client }
+    }
+}
+
+#[async_trait::async_trait]
+impl PrincipalDirectory for PlatformAccessPrincipals {
+    async fn resolve(
+        &self,
+        scope: &OwnerScope,
+        principal_id: Uuid,
+    ) -> Result<PrincipalStatus, AuthorityUnavailable> {
+        use cf_service_auth::{ApplicationEnvironmentKind as K, DelegatedPlatformContext};
+        let kind = match scope.environment_kind {
+            EnvironmentKind::Sandbox => K::Sandbox,
+            EnvironmentKind::Test => K::Test,
+            EnvironmentKind::Production => K::Production,
+        };
+        let request = OutboundServiceRequest::new_operation(platform_access())
+            .with_delegated_context(DelegatedPlatformContext::new(
+                scope.tenant_id,
+                scope.application_id,
+                scope.environment_id,
+                kind,
+                scope.service_account_id,
+            ));
+        let response = self
+            .client
+            .post_json(
+                &request,
+                "/internal/v1/principals/resolve",
+                &json!({ "references": [{ "principalId": principal_id }] }),
+            )
+            .await
+            .map_err(|e: InternalCallError| AuthorityUnavailable(e.to_string()))?;
+        if response.status() != 200 {
+            return Err(AuthorityUnavailable(format!(
+                "HTTP {} {}",
+                response.status(),
+                response.error_code().unwrap_or_default()
+            )));
+        }
+        let body: Value = response
+            .json()
+            .map_err(|_| AuthorityUnavailable("malformed resolution response".into()))?;
+        match body["results"][0]["outcome"].as_str() {
+            Some("RESOLVED") => Ok(PrincipalStatus::Active),
+            Some("INACTIVE") => Ok(PrincipalStatus::Inactive),
+            Some("NOT_FOUND" | "INVALID_REFERENCE") => Ok(PrincipalStatus::NotFound),
+            _ => Err(AuthorityUnavailable("unknown resolution outcome".into())),
+        }
+    }
+}
+
+/// No principal directory configured: every resolution fails closed.
+pub struct UnconfiguredPrincipals;
+
+#[async_trait::async_trait]
+impl PrincipalDirectory for UnconfiguredPrincipals {
+    async fn resolve(
+        &self,
+        _scope: &OwnerScope,
+        _principal_id: Uuid,
+    ) -> Result<PrincipalStatus, AuthorityUnavailable> {
+        Err(AuthorityUnavailable(
+            "no principal directory is configured".into(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

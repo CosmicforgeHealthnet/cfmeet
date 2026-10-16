@@ -18,5 +18,8 @@
   "eligibilityDecisionRef": "9b1d3f5a-7c9e-4a1b-8c2d-5e6f7a8b9c0d",
   "requestedAt": "2031-03-01T10:01:00Z",
   "activatedAt": "2031-03-01T10:05:00Z",
-  "closedAt": null
+  "closedAt": null,
+  "closeReason": null,
+  "predecessorAssignmentId": null,
+  "successorAssignmentId": null
 }

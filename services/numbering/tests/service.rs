@@ -602,6 +602,7 @@ async fn every_implemented_route_is_in_the_contract_and_vice_versa() {
         ("src/http/customer.rs", "/v1"),
         ("src/http/numbers.rs", "/v1"),
         ("src/http/acquisitions.rs", "/v1"),
+        ("src/http/assignments.rs", "/v1"),
         ("src/http/catalog.rs", "/v1"),
         ("src/http/kyc.rs", "/v1"),
         ("src/http/callbacks.rs", "/provider-callbacks/v1"),
