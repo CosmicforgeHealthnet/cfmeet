@@ -759,15 +759,15 @@ mod tests {
         ] {
             assert!(p.definition().grantable_to.contains(&services::SMS_GATEWAY));
         }
-        for d in REGISTRY
+        let receiving: Vec<&str> = REGISTRY
             .iter()
             .filter(|d| d.receiver == services::SMS_GATEWAY)
-        {
-            panic!(
-                "no service may call the SMS Gateway internally yet: {}",
-                d.name
-            );
-        }
+            .map(|d| d.name)
+            .collect();
+        assert!(
+            receiving.is_empty(),
+            "no service may call the SMS Gateway internally yet: {receiving:?}"
+        );
     }
 
     #[test]

@@ -51,6 +51,7 @@ impl Sandbox {
             "numbering",
             "platform-access",
             "privacy-relay",
+            "sms-gateway",
             "telephony",
         ] {
             fs::create_dir_all(repo.join("services").join(service)).unwrap();
