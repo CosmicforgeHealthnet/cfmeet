@@ -18,6 +18,7 @@
 //! no other secret: customer credentials are verified by Platform Access.
 
 pub mod kyc;
+pub mod providers;
 pub mod service_auth;
 
 use std::{fmt, net::SocketAddr, time::Duration};

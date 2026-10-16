@@ -219,14 +219,42 @@ impl NumberDomain {
         ttl: Duration,
         for_principal: Option<Uuid>,
     ) -> DomainResult<ReservationRow> {
+        let now = self.clock.now();
+        let txn = self.db.begin().await?;
+        let out = self
+            .reserve_in(
+                &txn,
+                ctx,
+                scope,
+                actor,
+                resource_id,
+                ttl,
+                for_principal,
+                now,
+            )
+            .await?;
+        txn.commit().await?;
+        Ok(out)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn reserve_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        scope: &OwnerScope,
+        actor: Actor,
+        resource_id: Uuid,
+        ttl: Duration,
+        for_principal: Option<Uuid>,
+        now: DateTime<Utc>,
+    ) -> DomainResult<ReservationRow> {
         if !(MIN_TTL_SECONDS..=MAX_TTL_SECONDS).contains(&ttl.num_seconds()) {
             return Err(DomainError::Validation(
                 "a reservation lasts 1 minute to 24 hours".into(),
             ));
         }
-        let now = self.clock.now();
-        let txn = self.db.begin().await?;
-        let row = lock(&txn, resource_id).await?;
+        let row = lock(txn, resource_id).await?;
         if !scope.may_use(row.inventory()) {
             return Err(DomainError::precondition(
                 "ENVIRONMENT_INVENTORY_MISMATCH",
@@ -261,11 +289,11 @@ impl NumberDomain {
                 now.into(),
             ],
         ))
-        .one(&txn)
+        .one(txn)
         .await?
         .expect("insert returns the row");
         transition_in(
-            &txn,
+            txn,
             ctx,
             resource_id,
             TransitionRequest::new(
@@ -277,8 +305,7 @@ impl NumberDomain {
             now,
         )
         .await?;
-        event(&txn, ctx, &reservation, "RESERVATION_REQUESTED", now).await?;
-        txn.commit().await?;
+        event(txn, ctx, &reservation, "RESERVATION_REQUESTED", now).await?;
         Ok(reservation)
     }
 
@@ -293,8 +320,24 @@ impl NumberDomain {
     ) -> DomainResult<ReservationRow> {
         let now = self.clock.now();
         let txn = self.db.begin().await?;
-        let current = lock_reservation(&txn, reservation_id).await?;
-        let resource = lock(&txn, current.number_resource_id).await?;
+        let out = self
+            .confirm_hold_in(&txn, ctx, actor, reservation_id, hold_ref, now)
+            .await?;
+        txn.commit().await?;
+        Ok(out)
+    }
+
+    pub(crate) async fn confirm_hold_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        actor: Actor,
+        reservation_id: Uuid,
+        hold_ref: Uuid,
+        now: DateTime<Utc>,
+    ) -> DomainResult<ReservationRow> {
+        let current = lock_reservation(txn, reservation_id).await?;
+        let resource = lock(txn, current.number_resource_id).await?;
         if current.status() != ReservationStatus::Pending {
             return Err(DomainError::InvalidTransition {
                 entity: "reservation",
@@ -309,7 +352,7 @@ impl NumberDomain {
             ));
         }
         let held = update_reservation(
-            &txn,
+            txn,
             ctx,
             &current,
             Change {
@@ -323,7 +366,7 @@ impl NumberDomain {
         )
         .await?;
         transition_in(
-            &txn,
+            txn,
             ctx,
             resource.id,
             TransitionRequest::new(
@@ -336,7 +379,6 @@ impl NumberDomain {
             now,
         )
         .await?;
-        txn.commit().await?;
         Ok(held)
     }
 
@@ -350,8 +392,23 @@ impl NumberDomain {
     ) -> DomainResult<ReservationRow> {
         let now = self.clock.now();
         let txn = self.db.begin().await?;
-        let current = lock_reservation(&txn, reservation_id).await?;
-        let resource = lock(&txn, current.number_resource_id).await?;
+        let out = self
+            .mark_reservation_unknown_in(&txn, ctx, actor, reservation_id, now)
+            .await?;
+        txn.commit().await?;
+        Ok(out)
+    }
+
+    pub(crate) async fn mark_reservation_unknown_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        actor: Actor,
+        reservation_id: Uuid,
+        now: DateTime<Utc>,
+    ) -> DomainResult<ReservationRow> {
+        let current = lock_reservation(txn, reservation_id).await?;
+        let resource = lock(txn, current.number_resource_id).await?;
         if current.status() != ReservationStatus::Pending {
             return Err(DomainError::InvalidTransition {
                 entity: "reservation",
@@ -360,7 +417,7 @@ impl NumberDomain {
             });
         }
         let unknown = update_reservation(
-            &txn,
+            txn,
             ctx,
             &current,
             Change {
@@ -374,7 +431,7 @@ impl NumberDomain {
         )
         .await?;
         transition_in(
-            &txn,
+            txn,
             ctx,
             resource.id,
             TransitionRequest::new(
@@ -387,8 +444,53 @@ impl NumberDomain {
             now,
         )
         .await?;
-        txn.commit().await?;
         Ok(unknown)
+    }
+
+    /// Reconciliation's answer for an UNKNOWN reservation (inside `txn`): the hold
+    /// happened (HELD, with the read-back evidence as hold reference) or it did not
+    /// (FAILED, nothing to release). The resource is resolved separately by the caller.
+    pub(crate) async fn resolve_unknown_reservation_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        reservation_id: Uuid,
+        held: bool,
+        evidence_ref: Uuid,
+        now: DateTime<Utc>,
+    ) -> DomainResult<ReservationRow> {
+        let current = lock_reservation(txn, reservation_id).await?;
+        if current.status() != ReservationStatus::Unknown {
+            return Err(DomainError::InvalidTransition {
+                entity: "reservation",
+                from: current.status.clone(),
+                to: if held { "HELD" } else { "FAILED" }.into(),
+            });
+        }
+        update_reservation(
+            txn,
+            ctx,
+            &current,
+            if held {
+                Change {
+                    status: ReservationStatus::Held,
+                    release: Some(ReleaseState::NotStarted),
+                    hold_ref: Some(evidence_ref),
+                    evidence_ref: None,
+                    reason: "RECONCILED_HOLD_CONFIRMED",
+                }
+            } else {
+                Change {
+                    status: ReservationStatus::Failed,
+                    release: Some(ReleaseState::NotRequired),
+                    hold_ref: None,
+                    evidence_ref: None,
+                    reason: "RECONCILED_HOLD_ABSENT",
+                }
+            },
+            now,
+        )
+        .await
     }
 
     /// The provider definitively refused the hold: FAILED, the resource returns to where
@@ -401,8 +503,23 @@ impl NumberDomain {
     ) -> DomainResult<ReservationRow> {
         let now = self.clock.now();
         let txn = self.db.begin().await?;
-        let current = lock_reservation(&txn, reservation_id).await?;
-        let resource = lock(&txn, current.number_resource_id).await?;
+        let out = self
+            .fail_reservation_in(&txn, ctx, actor, reservation_id, now)
+            .await?;
+        txn.commit().await?;
+        Ok(out)
+    }
+
+    pub(crate) async fn fail_reservation_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        actor: Actor,
+        reservation_id: Uuid,
+        now: DateTime<Utc>,
+    ) -> DomainResult<ReservationRow> {
+        let current = lock_reservation(txn, reservation_id).await?;
+        let resource = lock(txn, current.number_resource_id).await?;
         if current.status() != ReservationStatus::Pending {
             return Err(DomainError::InvalidTransition {
                 entity: "reservation",
@@ -411,7 +528,7 @@ impl NumberDomain {
             });
         }
         let failed = update_reservation(
-            &txn,
+            txn,
             ctx,
             &current,
             Change {
@@ -424,16 +541,15 @@ impl NumberDomain {
             now,
         )
         .await?;
-        let origin = origin_state(&txn, resource.id).await?;
+        let origin = origin_state(txn, resource.id).await?;
         transition_in(
-            &txn,
+            txn,
             ctx,
             resource.id,
             TransitionRequest::new(origin, resource.revision, actor, "PROVIDER_HOLD_REFUSED"),
             now,
         )
         .await?;
-        txn.commit().await?;
         Ok(failed)
     }
 

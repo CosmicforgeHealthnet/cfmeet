@@ -183,11 +183,25 @@ impl NumberDomain {
     ) -> DomainResult<BindingRow> {
         let now = self.clock.now();
         let txn = self.db.begin().await?;
-        let row = lock(&txn, resource_id).await?;
-        let caps = validate(&new, row.inventory())?;
-        let binding = insert_active(&txn, Uuid::new_v4(), resource_id, &new, caps, now).await?;
-        event(&txn, ctx, &binding, "ACTIVATED", now).await?;
+        let out = self
+            .activate_binding_in(&txn, ctx, resource_id, new, now)
+            .await?;
         txn.commit().await?;
+        Ok(out)
+    }
+
+    pub(crate) async fn activate_binding_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        resource_id: Uuid,
+        new: NewBinding,
+        now: DateTime<Utc>,
+    ) -> DomainResult<BindingRow> {
+        let row = lock(txn, resource_id).await?;
+        let caps = validate(&new, row.inventory())?;
+        let binding = insert_active(txn, Uuid::new_v4(), resource_id, &new, caps, now).await?;
+        event(txn, ctx, &binding, "ACTIVATED", now).await?;
         Ok(binding)
     }
 
@@ -243,14 +257,26 @@ impl NumberDomain {
     ) -> DomainResult<BindingRow> {
         let now = self.clock.now();
         let txn = self.db.begin().await?;
+        let out = self.end_binding_in(&txn, ctx, binding_id, now).await?;
+        txn.commit().await?;
+        Ok(out)
+    }
+
+    pub(crate) async fn end_binding_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        binding_id: Uuid,
+        now: DateTime<Utc>,
+    ) -> DomainResult<BindingRow> {
         let current = BindingRow::find_by_statement(stmt(
             "SELECT * FROM number_provider_bindings WHERE id = $1",
             vec![binding_id.into()],
         ))
-        .one(&txn)
+        .one(txn)
         .await?
         .ok_or(DomainError::NotFound("provider binding"))?;
-        lock(&txn, current.number_resource_id).await?;
+        lock(txn, current.number_resource_id).await?;
         if current.status != "ACTIVE" {
             return Err(DomainError::precondition(
                 "BINDING_ENDED",
@@ -261,11 +287,10 @@ impl NumberDomain {
             "UPDATE number_provider_bindings SET status = 'ENDED', effective_to = $2 WHERE id = $1 RETURNING *",
             vec![binding_id.into(), now.into()],
         ))
-        .one(&txn)
+        .one(txn)
         .await?
         .expect("locked binding");
-        event(&txn, ctx, &ended, "ENDED", now).await?;
-        txn.commit().await?;
+        event(txn, ctx, &ended, "ENDED", now).await?;
         Ok(ended)
     }
 

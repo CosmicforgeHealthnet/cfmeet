@@ -21,4 +21,5 @@ pub mod identity;
 pub mod infra;
 pub mod metrics;
 pub mod numbers;
+pub mod providers;
 pub mod state;

@@ -62,12 +62,14 @@ Contract `cfmeet.numbering.internal-api` (messages `cfmeet.numbering.common`, ev
 | `POST /v1/numbers/eligibility`, `GET /v1/numbers/eligibility/{id}` | customer, `numbers.kyc.read` | explainable eligibility decision (never reserves) |
 | `POST /v1/admin/kyc/requirements`, `GET /v1/admin/kyc/cases/{id}`, `POST …/decisions`, `…/revoke`, `POST /v1/admin/kyc/evidence/{id}/access` | `numbers.admin` (first-party) + `X-CF-Operator` | requirement publication, manual review, revocation, audited evidence read |
 | `GET /internal/v1/assignments/{id}/kyc-status` | service token, `number-resource.read` | whether an assignment's KYC basis is in force |
+| `POST /provider-callbacks/v1/{providerId}` | provider signature (HMAC, replay window) | authenticated, de-duplicated provider events |
 
 Customer credentials are verified by **Platform Access** on every request; the tenant /
 application / environment come only from its authority chain (a request-supplied id is
 never authority). Platform Access unreachable → 503 (fail closed). Full public search /
 provisioning / assignment-mutation APIs, SMS, portability and real carrier adapters
-are later workstreams; no telecom carrier is contacted.
+are later workstreams (provider operations run through the provider-neutral contract and
+the deterministic synthetic provider, ADR 0036); no telecom carrier is contacted.
 
 ## Running locally (no Docker required)
 
@@ -99,3 +101,4 @@ start the real Platform Access binary with its own database.
 | `contracts` | Rust = contract = database vocabulary, error / rule codes, event types |
 | `capability_catalog` | Workstream E: catalog versioning, verified vs synthetic, combinations / false-mobile prevention, expiry / stale / conflicting evidence, upgrades / downgrades / revocation, binding replacement, normalized errors, HTTP isolation and admin gating, external-verification claims, migration rollback |
 | `kyc_eligibility` | Workstream F: requirement selection / versioning / provider extensions, the case lifecycle and database guards, sealed / typed / retained / access-audited evidence, every deterministic verifier outcome, unknown outcomes across a worker restart, privileged manual review and appeals, expiry / revalidation / revocation, eligibility outcomes and isolation, assignment admission, concurrency and idempotency, sensitive-data leakage, HTTP scopes and contracts, migration rollback |
+| `provider_contract` | Workstream G: the reusable certification suite (and its gating), registry environment restrictions, inventory → canonical resources with provenance and F requirements, the whole lifecycle through durable commands, idempotency / in-flight exclusivity, every scripted fault (not transmitted, unknown after execution, lost, refusals, partial provisioning, release unknown, drift, outage, process interruption), authenticated / de-duplicated / order-safe callbacks, capability downgrades into E, no resurrection, binding replacement, migration rollback |

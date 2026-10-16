@@ -28,6 +28,9 @@ pub struct AppState {
     /// KYC cases, evidence and verification (Workstream F).
     pub kyc: KycService,
     pub eligibility: Arc<EligibilityPolicy>,
+    /// Provider commands, callbacks and reconciliation (Workstream G); `None` when no
+    /// provider adapter is configured.
+    pub providers: Option<crate::providers::commands::ProviderCommands>,
 }
 
 impl AppState {
@@ -49,6 +52,7 @@ impl AppState {
                 KycSettings::default(),
             ),
             eligibility: Arc::new(EligibilityPolicy::default()),
+            providers: None,
             numbers,
             db,
             clock,
@@ -62,6 +66,15 @@ impl AppState {
     pub fn with_kyc(mut self, kyc: KycService, eligibility: EligibilityPolicy) -> Self {
         self.kyc = kyc;
         self.eligibility = Arc::new(eligibility);
+        self
+    }
+
+    /// Installs the provider command layer.
+    pub fn with_providers(
+        mut self,
+        providers: crate::providers::commands::ProviderCommands,
+    ) -> Self {
+        self.providers = Some(providers);
         self
     }
 }

@@ -1,0 +1,16 @@
+{
+  "event_id": "evt_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "event_type": "number.provider-event.received",
+  "schema_version": 1,
+  "occurred_at": "2031-03-01T10:05:00.000000Z",
+  "producer_service": "cfmeet.numbering",
+  "runtime_environment": "staging",
+  "correlation_id": "corr_0123456789abcdef0123456789abcdef",
+  "payload": {
+    "provider_event_ref": "3b5d7f9b-1d3f-4b5d-9f1b-3d5f7b9d1f3b",
+    "event_kind": "HOLD_CONFIRMED",
+    "number_resource_id": "5f0b2c1e-8d3a-4b6f-9e2d-7a1c3b5d9f01",
+    "provider_command_id": "2a4c6e8a-0c2e-4a6c-8e0a-2c4e6a8c0e2a",
+    "disposition": "RECONCILE_REQUESTED"
+  }
+}

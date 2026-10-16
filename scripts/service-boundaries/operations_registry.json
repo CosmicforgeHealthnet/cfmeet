@@ -98,6 +98,14 @@
     {"id": "numbering-kyc-revalidation", "owner": "numbering", "source": "src/numbers/kyc/cases.rs", "entry": "schedule_revalidations",
      "tests": ["tests/kyc_eligibility.rs::the_deterministic_verifier_reproduces_every_outcome"]},
     {"id": "numbering-kyc-evidence-retention", "owner": "numbering", "source": "src/numbers/kyc/cases.rs", "entry": "purge_expired_evidence",
-     "tests": ["tests/kyc_eligibility.rs::evidence_is_sealed_typed_minimal_audited_and_retained"]}
+     "tests": ["tests/kyc_eligibility.rs::evidence_is_sealed_typed_minimal_audited_and_retained"]},
+    {"id": "numbering-provider-dispatch", "owner": "numbering", "source": "src/providers/commands.rs", "entry": "run_dispatch",
+     "tests": ["tests/provider_contract.rs::a_timeout_before_transmission_is_retried_and_succeeds_once"]},
+    {"id": "numbering-provider-reconciliation", "owner": "numbering", "source": "src/providers/reconcile.rs", "entry": "reconcile_command",
+     "tests": ["tests/provider_contract.rs::a_timeout_after_execution_is_unknown_never_resent_and_reconciled_from_read_back"]},
+    {"id": "numbering-provider-recovery", "owner": "numbering", "source": "src/providers/commands.rs", "entry": "recover_interrupted",
+     "tests": ["tests/provider_contract.rs::a_process_interruption_mid_dispatch_is_recovered_by_reconciliation_not_retry"]},
+    {"id": "numbering-provider-callbacks", "owner": "numbering", "source": "src/providers/events.rs", "entry": "ingest_callback",
+     "tests": ["tests/provider_contract.rs::callbacks_are_authenticated_deduplicated_correlated_and_order_safe"]}
   ]
 }

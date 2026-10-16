@@ -6,6 +6,7 @@ use anyhow::anyhow;
 use numbering::{
     config::{
         kyc::{KycConfig, VerifierChoice},
+        providers::ProviderConfig,
         service_auth::ServiceAuthSettings,
         LogFormat, NumberingConfig,
     },
@@ -54,6 +55,16 @@ async fn main() -> anyhow::Result<()> {
         Ok(c) => c,
         Err(err) => {
             eprintln!("numbering: KYC configuration error: {err}");
+            std::process::exit(2);
+        }
+    };
+    let provider_config = match ProviderConfig::from_lookup(
+        |key| std::env::var(key).ok(),
+        settings.runtime_environment,
+    ) {
+        Ok(c) => c,
+        Err(err) => {
+            eprintln!("numbering: provider configuration error: {err}");
             std::process::exit(2);
         }
     };
@@ -139,22 +150,61 @@ async fn main() -> anyhow::Result<()> {
         kyc_config.settings,
     );
     let state = state.with_kyc(kyc.clone(), kyc_config.eligibility.clone());
+    let runtime = state.service_auth.signer().runtime_environment();
+    let providers = match provider_config.registry(runtime, clock.clone()) {
+        Ok(registry) => registry.map(|r| {
+            numbering::providers::commands::ProviderCommands::new(
+                state.numbers.clone(),
+                r,
+                Default::default(),
+            )
+        }),
+        Err(err) => {
+            tracing::error!(error = %err, "provider configuration error");
+            std::process::exit(2);
+        }
+    };
+    let state = match &providers {
+        Some(p) => state.with_providers(p.clone()),
+        None => state,
+    };
 
     // Worker foundation: lease recovery of interrupted jobs (UNKNOWN_OUTCOME parking for
     // provider-affecting ones) and idempotency-key expiry. Business job handlers are
     // registered by later workstreams; the outbox publisher starts once a consumer
     // transport is configured (events stay PENDING and visible in /ready until then).
     {
-        let runner = Arc::new(
-            JobRunner::new(
-                db.clone(),
-                clock.clone(),
-                format!("numbering-{}", std::process::id()),
-                config.workers.lease,
-                config.workers.retry,
-            )
-            .with_handler(Arc::new(VerificationHandler { kyc: kyc.clone() })),
-        );
+        let mut runner = JobRunner::new(
+            db.clone(),
+            clock.clone(),
+            format!("numbering-{}", std::process::id()),
+            config.workers.lease,
+            config.workers.retry,
+        )
+        .with_handler(Arc::new(VerificationHandler { kyc: kyc.clone() }));
+        if let Some(p) = &providers {
+            runner = runner
+                .with_handler(Arc::new(numbering::providers::commands::DispatchHandler {
+                    commands: p.clone(),
+                }))
+                .with_handler(Arc::new(numbering::providers::commands::ReconcileHandler {
+                    commands: p.clone(),
+                }));
+        }
+        let runner = Arc::new(runner);
+        // Provider commands interrupted mid-dispatch become UNKNOWN and are reconciled.
+        if let Some(p) = providers.clone() {
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(Duration::from_secs(60));
+                loop {
+                    ticker.tick().await;
+                    let ctx = numbering::domain::RequestContext::generate();
+                    if let Err(e) = p.recover_interrupted(&ctx, 500).await {
+                        tracing::warn!(error = %e, "provider command recovery failed");
+                    }
+                }
+            });
+        }
         tokio::spawn(runner.run(config.workers.interval));
         let db = db.clone();
         let clock = clock.clone();

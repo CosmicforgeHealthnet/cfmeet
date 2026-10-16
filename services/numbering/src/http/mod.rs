@@ -11,6 +11,7 @@
 //! Every non-probe route runs behind its authentication BY CONSTRUCTION, including
 //! unknown paths; extractor rejections are normalized to the error envelope.
 
+pub mod callbacks;
 pub mod catalog;
 pub mod customer;
 pub mod error;
@@ -58,6 +59,19 @@ pub fn app(state: AppState) -> Router {
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(from_fn_with_state(state.clone(), require_customer))
         .with_state(state.clone());
+    // Provider callbacks: authenticated by the provider adapter's signature, never by a
+    // customer credential or service token.
+    let callbacks = Router::new()
+        .nest(
+            "/provider-callbacks/v1",
+            callbacks::routes()
+                .fallback(not_found)
+                .method_not_allowed_fallback(method_not_allowed),
+        )
+        .layer(map_response(normalize_rejections))
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        .layer(from_fn(request_context))
+        .with_state(state.clone());
     let internal = Router::new()
         .nest(
             "/internal/v1",
@@ -69,7 +83,7 @@ pub fn app(state: AppState) -> Router {
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(from_fn_with_state(state.clone(), require_internal_service))
         .with_state(state);
-    public.merge(customer).merge(internal)
+    public.merge(customer).merge(callbacks).merge(internal)
 }
 
 async fn health() -> impl IntoResponse {

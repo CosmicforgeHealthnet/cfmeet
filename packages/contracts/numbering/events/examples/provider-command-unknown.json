@@ -1,0 +1,17 @@
+{
+  "event_id": "evt_dddddddddddddddddddddddddddddddd",
+  "event_type": "number.provider-command.changed",
+  "schema_version": 1,
+  "occurred_at": "2031-03-01T10:05:00.000000Z",
+  "producer_service": "cfmeet.numbering",
+  "runtime_environment": "staging",
+  "correlation_id": "corr_0123456789abcdef0123456789abcdef",
+  "payload": {
+    "provider_command_id": "2a4c6e8a-0c2e-4a6c-8e0a-2c4e6a8c0e2a",
+    "number_resource_id": "5f0b2c1e-8d3a-4b6f-9e2d-7a1c3b5d9f01",
+    "operation": "PROVISION",
+    "status": "UNKNOWN",
+    "attempts": 1,
+    "failure_code": null
+  }
+}

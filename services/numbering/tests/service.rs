@@ -598,6 +598,7 @@ async fn every_implemented_route_is_in_the_contract_and_vice_versa() {
         ("src/http/customer.rs", "/v1"),
         ("src/http/catalog.rs", "/v1"),
         ("src/http/kyc.rs", "/v1"),
+        ("src/http/callbacks.rs", "/provider-callbacks/v1"),
         ("src/http/internal.rs", "/internal/v1"),
     ] {
         for (method, path) in routes_in(&src(file)) {

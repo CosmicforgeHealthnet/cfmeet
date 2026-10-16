@@ -1251,3 +1251,74 @@ pub mod kyc {
         format!("%PDF-1.7\n% {marker}\n%%EOF\n").into_bytes()
     }
 }
+
+impl Harness {
+    /// The same harness with the provider command layer installed (router rebuilt).
+    pub fn with_providers(
+        mut self,
+        commands: numbering::providers::commands::ProviderCommands,
+    ) -> Self {
+        self.state = self.state.clone().with_providers(commands);
+        self.app = http::app(self.state.clone());
+        self
+    }
+}
+
+/// Workstream G fixtures: the deterministic provider and the command layer.
+pub mod providers {
+    use std::sync::Arc;
+
+    use chrono::Duration;
+    use numbering::{
+        domain::SharedClock,
+        infra::{jobs::JobRunner, RetryPolicy},
+        providers::{
+            commands::{CommandSettings, DispatchHandler, ProviderCommands, ReconcileHandler},
+            deterministic::DeterministicProvider,
+            registry::ProviderRegistry,
+        },
+    };
+
+    use super::Harness;
+
+    /// Test-only callback signing secret.
+    pub const CALLBACK_SECRET: &[u8] = b"synthetic-callback-secret-for-tests-only-7f3a";
+
+    pub struct Providers {
+        pub sim: DeterministicProvider,
+        pub commands: ProviderCommands,
+    }
+
+    pub fn setup(h: &Harness) -> Providers {
+        let clock: SharedClock = Arc::new(h.clock.clone());
+        let sim = DeterministicProvider::new(clock, CALLBACK_SECRET);
+        let mut registry = ProviderRegistry::new(cf_service_auth::RuntimeEnvironment::Test);
+        registry.register(Arc::new(sim.clone())).unwrap();
+        let commands = ProviderCommands::new(
+            h.numbers.clone(),
+            Arc::new(registry),
+            CommandSettings::default(),
+        );
+        Providers { sim, commands }
+    }
+
+    pub fn runner(h: &Harness, commands: &ProviderCommands, name: &str) -> JobRunner {
+        let clock: SharedClock = Arc::new(h.clock.clone());
+        JobRunner::new(
+            h.conn().clone(),
+            clock,
+            name,
+            Duration::seconds(30),
+            RetryPolicy {
+                base: Duration::seconds(2),
+                max: Duration::seconds(30),
+            },
+        )
+        .with_handler(Arc::new(DispatchHandler {
+            commands: commands.clone(),
+        }))
+        .with_handler(Arc::new(ReconcileHandler {
+            commands: commands.clone(),
+        }))
+    }
+}

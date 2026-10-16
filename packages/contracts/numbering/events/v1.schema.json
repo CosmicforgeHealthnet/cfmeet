@@ -42,6 +42,12 @@
     },
     {
       "$ref": "#/$defs/EligibilityEvaluated"
+    },
+    {
+      "$ref": "#/$defs/ProviderCommandChanged"
+    },
+    {
+      "$ref": "#/$defs/ProviderEventReceived"
     }
   ],
   "$defs": {
@@ -1069,6 +1075,146 @@
           "required": [
             "ownership"
           ]
+        }
+      ]
+    },
+    "ProviderCommandChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider_command_id",
+        "number_resource_id",
+        "operation",
+        "status",
+        "attempts",
+        "failure_code"
+      ],
+      "properties": {
+        "provider_command_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResourceId"
+        },
+        "operation": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ProviderCommandOperation"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ProviderCommandStatus"
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failure_code": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ProviderCommandChanged": {
+      "description": "A durable provider command was requested or changed status (platform inventory: no ownership; never the provider id or provider reference).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.provider-command.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/ProviderCommandChangedPayload"
+            }
+          },
+          "not": {
+            "required": [
+              "ownership"
+            ]
+          }
+        }
+      ]
+    },
+    "ProviderEventReceivedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider_event_ref",
+        "event_kind",
+        "number_resource_id",
+        "provider_command_id",
+        "disposition"
+      ],
+      "properties": {
+        "provider_event_ref": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "event_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ProviderEventKind"
+        },
+        "number_resource_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResourceId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider_command_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "disposition": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ProviderEventDisposition"
+        }
+      }
+    },
+    "ProviderEventReceived": {
+      "description": "An authenticated provider event was stored (append-only) with its disposition.",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.provider-event.received"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/ProviderEventReceivedPayload"
+            }
+          },
+          "not": {
+            "required": [
+              "ownership"
+            ]
+          }
         }
       ]
     }

@@ -62,6 +62,9 @@
       "$ref": "#/$defs/AssignmentKycStatus"
     },
     {
+      "$ref": "#/$defs/ProviderCallbackAck"
+    },
+    {
       "$ref": "#/$defs/CapabilityResolution"
     },
     {
@@ -2087,7 +2090,12 @@
         "CASE_NOT_COLLECTING_EVIDENCE",
         "NOT_APPEALABLE",
         "IDEMPOTENCY_IN_PROGRESS",
-        "IDEMPOTENCY_KEY_REUSED"
+        "IDEMPOTENCY_KEY_REUSED",
+        "COMMAND_IN_FLIGHT",
+        "OPERATION_UNSUPPORTED",
+        "PROVIDER_NOT_REGISTERED",
+        "PROVIDER_OBJECT_UNKNOWN",
+        "PROVIDER_UNAVAILABLE"
       ]
     },
     "Error": {
@@ -3983,6 +3991,103 @@
             },
             {
               "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ProviderCommandStatus": {
+      "description": "Durable provider command status. UNKNOWN (the request may have been acted on) leaves only through read-back reconciliation; it is never re-sent blindly.",
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "DISPATCHING",
+        "SUCCEEDED",
+        "FAILED",
+        "UNSUPPORTED",
+        "UNKNOWN",
+        "RECONCILED_SUCCEEDED",
+        "RECONCILED_FAILED"
+      ]
+    },
+    "ProviderCommandOperation": {
+      "description": "Provider-affecting operations executed as durable commands.",
+      "type": "string",
+      "enum": [
+        "RESERVE",
+        "PROVISION",
+        "CONFIGURE_VOICE",
+        "CONFIGURE_SMS",
+        "SUSPEND",
+        "RESTORE",
+        "RELEASE",
+        "PORT_IN"
+      ]
+    },
+    "ProviderEventKind": {
+      "description": "Canonical (provider-neutral) provider event kinds.",
+      "type": "string",
+      "enum": [
+        "HOLD_CONFIRMED",
+        "HOLD_EXPIRED",
+        "PROVISIONED",
+        "ROUTE_CONFIGURED",
+        "SUSPENDED",
+        "RESTORED",
+        "RELEASED",
+        "CAPABILITY_CHANGED",
+        "NUMBER_REVOKED"
+      ]
+    },
+    "ProviderEventDisposition": {
+      "description": "What Numbering did with an authenticated provider event. RECONCILE_REQUESTED: an uncertain command is re-checked by read-back (an event never finalizes a command by itself); STALE: older than the newest version already applied; IGNORED_TERMINAL: never resurrects a released number; CONFLICT: drift, fail closed with an incident.",
+      "type": "string",
+      "enum": [
+        "APPLIED",
+        "RECONCILE_REQUESTED",
+        "CONFIRMED_EXISTING",
+        "STALE",
+        "UNMATCHED",
+        "CONFLICT",
+        "IGNORED_TERMINAL"
+      ]
+    },
+    "IncidentCategory": {
+      "description": "Operational incident categories (operators only).",
+      "type": "string",
+      "enum": [
+        "PROVIDER_STATE_DRIFT",
+        "UNKNOWN_PROVIDER_OUTCOME",
+        "CALLBACK_AUTHENTICATION_FAILED",
+        "UNMATCHED_PROVIDER_EVENT",
+        "PROVIDER_RELEASED_UNEXPECTEDLY",
+        "RECONCILIATION_CONFLICT",
+        "PROVIDER_OUTAGE"
+      ]
+    },
+    "ProviderCallbackAck": {
+      "description": "POST /provider-callbacks/v1/{providerId}: the authenticated callback was stored once (or recognized as a redelivery). Never carries provider data.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accepted",
+        "duplicate",
+        "disposition"
+      ],
+      "properties": {
+        "accepted": {
+          "const": true
+        },
+        "duplicate": {
+          "type": "boolean"
+        },
+        "disposition": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ProviderEventDisposition"
+            },
+            {
+              "const": "DUPLICATE"
             }
           ]
         }

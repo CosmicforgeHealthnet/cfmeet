@@ -16,6 +16,7 @@ use numbering::{
         NumberType, OwnerKind, OwnershipClass, ReleaseState, ReservationStatus, RestrictionFlag,
         RiskTier, SmsTargetKind, UncertainOperation, VoiceTargetKind,
     },
+    providers,
 };
 
 fn set<'a>(values: impl IntoIterator<Item = &'a str>) -> BTreeSet<String> {
@@ -281,6 +282,34 @@ async fn rust_contract_and_database_share_one_vocabulary() {
             set(numbering::numbers::eligibility::reason::ALL.iter().copied()),
             &[],
         ),
+        // Workstream G.
+        (
+            "ProviderCommandStatus",
+            all!(providers::commands::CommandStatus),
+            &["ck_number_provider_commands_status"],
+        ),
+        (
+            "ProviderCommandOperation",
+            all!(providers::CommandOperation),
+            &["ck_number_provider_commands_operation"],
+        ),
+        (
+            "ProviderEventKind",
+            all!(providers::ProviderEventKind),
+            &["ck_number_provider_events_kind"],
+        ),
+        (
+            "ProviderEventDisposition",
+            set(providers::events::DISPOSITIONS.iter().copied()),
+            &["ck_number_provider_events_disposition"],
+        ),
+        (
+            "IncidentCategory",
+            set(providers::incidents::Category::ALL
+                .iter()
+                .map(|c| c.as_str())),
+            &["ck_numbering_incidents_category"],
+        ),
     ];
     for (def, rust, constraints) in cases {
         assert_eq!(contract(def), rust, "contract {def} vs Rust");
@@ -343,6 +372,27 @@ async fn the_kyc_lifecycle_is_one_edge_set_in_rust_and_sql() {
     assert_eq!(edges, 16);
 }
 
+#[tokio::test]
+async fn the_provider_command_states_are_one_edge_set_in_rust_and_sql() {
+    use providers::commands::{command_allowed, CommandStatus};
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let mut edges = 0;
+    for from in CommandStatus::ALL {
+        for to in CommandStatus::ALL {
+            let sql = scalar(
+                h.conn(),
+                &format!("SELECT CASE WHEN number_provider_command_transition_allowed('{from}', '{to}') THEN 1 ELSE 0 END::bigint"),
+            )
+            .await;
+            assert_eq!(sql == 1, command_allowed(*from, *to), "{from} -> {to}");
+            edges += sql;
+        }
+    }
+    assert_eq!(edges, 10);
+}
+
 #[test]
 fn error_and_rule_codes_match_the_contract() {
     assert_eq!(
@@ -351,10 +401,10 @@ fn error_and_rule_codes_match_the_contract() {
     );
     // Every domain rule code the source can produce is declared.
     let rules = contract("DomainRule");
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/numbers");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut used = BTreeSet::new();
     let mut files = Vec::new();
-    let mut stack = vec![dir];
+    let mut stack = vec![root.join("src/numbers"), root.join("src/providers")];
     while let Some(d) = stack.pop() {
         for entry in std::fs::read_dir(d).unwrap() {
             let p = entry.unwrap().path();

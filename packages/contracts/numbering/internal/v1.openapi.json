@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Numbering API",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "description": "HTTP surface of services/numbering (Part IV Workstream C foundation, ADR 0033): GET /health and /ready (public, no data); customer reads of the caller's own DCN assignments and reservations under /v1 (credential verified by Platform Access on every request; normalized 401, 429 when Platform Access throttles, 503 when it is unreachable — fail closed); and the service-authenticated /internal/v1 API (cfmeet.platform.internal-http; permission from Numbering's own trust bundle). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 64 KiB. Full public number search / provisioning / assignment-mutation APIs are later workstreams."
   },
   "components": {
@@ -1886,6 +1886,61 @@
             "$ref": "#/components/responses/Error"
           },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/provider-callbacks/v1/{providerId}": {
+      "post": {
+        "operationId": "receiveProviderCallback",
+        "security": [],
+        "description": "Provider callback ingress. Authenticated by the provider adapter (HMAC signature over the raw body with timestamp and delivery id, replay window) — never by a customer credential or service token. A refused callback is 401 and nothing is stored; a redelivery is 200 with duplicate: true. The body is the provider's own format.",
+        "parameters": [
+          {
+            "name": "providerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,63}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ProviderCallbackAck"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
             "$ref": "#/components/responses/Error"
           },
           "503": {

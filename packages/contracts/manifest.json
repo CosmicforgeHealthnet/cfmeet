@@ -214,29 +214,29 @@
     },
     {
       "id": "cfmeet.numbering.common",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "json-schema",
       "path": "numbering/common/v1.schema.json",
       "owner": "numbering",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "The canonical Numbering vocabulary and messages (Part IV C5, ADR 0033): Number Resource identity (CF Meet ids canonical, provider identifiers never exposed), type, capabilities with provenance, opaque provider binding references, inventory observations, reservations, DCN assignments with ownership and routing references, routing profiles, lifecycle transitions, the trusted context and the error envelope; 1.1.0 the capability and country catalog (E); 1.2.0 KYC requirements, cases, protected evidence metadata, decisions, appeals and eligibility decisions (F)."
+      "description": "The canonical Numbering vocabulary and messages (Part IV C5, ADR 0033): Number Resource identity (CF Meet ids canonical, provider identifiers never exposed), type, capabilities with provenance, opaque provider binding references, inventory observations, reservations, DCN assignments with ownership and routing references, routing profiles, lifecycle transitions, the trusted context and the error envelope; 1.1.0 the capability and country catalog (E); 1.2.0 KYC requirements, cases, protected evidence metadata, decisions, appeals and eligibility decisions (F); 1.3.0 provider command, provider event and incident vocabularies and the provider callback acknowledgement (G)."
     },
     {
       "id": "cfmeet.numbering.event",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "json-schema",
       "path": "numbering/events/v1.schema.json",
       "owner": "numbering",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Numbering domain events in the platform envelope (transactional outbox, at least once, per-aggregate order): resource discovered / lifecycle-changed / classified, binding changed, capability changed, reservation changed, assignment changed, routing profile revised, catalog revised, KYC requirements published, KYC case changed, KYC evidence received, eligibility evaluated. No telephone number, provider identifier, credential or secret."
+      "description": "Numbering domain events in the platform envelope (transactional outbox, at least once, per-aggregate order): resource discovered / lifecycle-changed / classified, binding changed, capability changed, reservation changed, assignment changed, routing profile revised, catalog revised, KYC requirements published, KYC case changed, KYC evidence received, eligibility evaluated, provider command changed, provider event received. No telephone number, provider identifier, credential or secret."
     },
     {
       "id": "cfmeet.numbering.internal-api",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "openapi",
       "path": "numbering/internal/v1.openapi.json",
       "owner": "numbering",

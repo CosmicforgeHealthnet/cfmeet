@@ -39,10 +39,15 @@ const DOMAIN: &[&str] = &[
     "number_kyc_verifications",
     "number_lifecycle_events",
     "number_provider_bindings",
+    "number_provider_command_attempts",
+    "number_provider_commands",
+    "number_provider_events",
+    "number_provider_inventory_refs",
     "number_reservations",
     "number_resources",
     "number_routing_profiles",
     "number_type_catalog",
+    "numbering_incidents",
 ];
 
 async fn tables(conn: &sea_orm::DatabaseConnection) -> BTreeSet<String> {
