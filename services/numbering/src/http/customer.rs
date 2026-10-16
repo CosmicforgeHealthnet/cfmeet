@@ -31,6 +31,8 @@ pub fn routes() -> Router<AppState> {
             "/numbers/reservations/:reservation_id",
             get(get_reservation),
         )
+        .merge(super::catalog::customer_routes())
+        .merge(super::catalog::admin_routes())
 }
 
 /// The customer view of an assignment (contract `cfmeet.numbering.common`

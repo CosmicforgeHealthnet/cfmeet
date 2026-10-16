@@ -15,10 +15,15 @@ use super::{error::ApiError, middleware::InternalCaller};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route(
-        "/number-resources/:number_resource_id",
-        get(number_resource),
-    )
+    Router::new()
+        .route(
+            "/number-resources/:number_resource_id",
+            get(number_resource),
+        )
+        .route(
+            "/number-resources/:number_resource_id/capabilities",
+            get(number_resource_capabilities),
+        )
 }
 
 async fn number_resource(
@@ -52,4 +57,17 @@ async fn number_resource(
         "riskTier": r.risk_tier,
         "restrictionFlags": r.restriction_flags,
     })))
+}
+
+/// The resolved capabilities of a Number Resource (Workstream E), with provenance and
+/// revisions consumers compare to reject stale decisions.
+async fn number_resource_capabilities(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    caller.require_permission(InternalPermission::NumberResourceRead)?;
+    Ok(Json(super::catalog::resolution_view(
+        &s.numbers.resolve_capabilities(id).await?,
+    )))
 }

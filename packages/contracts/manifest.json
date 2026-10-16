@@ -214,7 +214,7 @@
     },
     {
       "id": "cfmeet.numbering.common",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "numbering/common/v1.schema.json",
       "owner": "numbering",
@@ -225,7 +225,7 @@
     },
     {
       "id": "cfmeet.numbering.event",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "numbering/events/v1.schema.json",
       "owner": "numbering",
@@ -236,7 +236,7 @@
     },
     {
       "id": "cfmeet.numbering.internal-api",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "openapi",
       "path": "numbering/internal/v1.openapi.json",
       "owner": "numbering",

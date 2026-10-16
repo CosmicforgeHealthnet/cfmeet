@@ -25,6 +25,11 @@ It owns, in its own PostgreSQL database:
   ownership classes (an organization-owned number routed to an employee stays
   organizational), versioned **routing profiles** with opaque targets, and append-only
   **assignment history** (reassignment is a new record);
+* the **capability and country catalog** (Workstream E, [ADR 0034](../../docs/decisions/0034-numbering-capability-and-country-catalog.md)):
+  versioned country / number-type entries (real and synthetic classes kept apart), one
+  fail-closed **capability resolver** (supported / usable, normalized reasons,
+  provenance, revisions), evidence expiry, revocation, stale-update and source-authority
+  protection; voice / SMS never promise third-party (OTP, WhatsApp, banking) acceptance;
 * the reliability foundation every later workflow reuses: a **transactional outbox**
   (platform envelope, leased multi-instance publication, per-aggregate order, bounded
   backoff, dead-letter), a **leased job queue** (restart recovery by retry safety;
@@ -47,6 +52,10 @@ Contract `cfmeet.numbering.internal-api` (messages `cfmeet.numbering.common`, ev
 | `GET /v1/numbers/assignments[/{id}[/history]]` | customer credential → Platform Access, `numbers.read` | the caller's own DCN assignments |
 | `GET /v1/numbers/reservations/{id}` | customer credential → Platform Access, `numbers.read` | the caller's own reservation |
 | `GET /internal/v1/number-resources/{id}` | service token, `number-resource.read` (Calling, Telephony) | canonical, provider-independent Number Resource |
+| `GET /internal/v1/number-resources/{id}/capabilities` | service token, `number-resource.read` | resolved capabilities with provenance and revisions |
+| `GET /v1/numbers/catalog/countries/{cc}` | customer, `numbers.search` / `numbers.read` | catalog of the caller's inventory class |
+| `GET /v1/numbers/assignments/{id}/capabilities` | customer, `numbers.read` | resolved capabilities of the caller's own number |
+| `POST /v1/admin/catalog/…`, `POST /v1/admin/number-resources/{id}/capabilities/{c}/revoke` | `numbers.admin` (first-party) + `X-CF-Operator` | catalog publication / withdrawal, capability revocation |
 
 Customer credentials are verified by **Platform Access** on every request; the tenant /
 application / environment come only from its authority chain (a request-supplied id is
@@ -82,3 +91,4 @@ start the real Platform Access binary with its own database.
 | `number_resources` | D10.1–D10.7: identity, E.164, lifecycle policy (Rust = SQL), version conflicts, bindings, capabilities, inventory |
 | `allocation` | D10.8–D10.17: reservation contention and expiry, ownership, exclusivity, isolation, history, routing revisions, premature activation, quarantine / uncertainty, rollback |
 | `contracts` | Rust = contract = database vocabulary, error / rule codes, event types |
+| `capability_catalog` | Workstream E: catalog versioning, verified vs synthetic, combinations / false-mobile prevention, expiry / stale / conflicting evidence, upgrades / downgrades / revocation, binding replacement, normalized errors, HTTP isolation and admin gating, external-verification claims, migration rollback |

@@ -5,6 +5,33 @@
   "description": "The canonical vocabulary and messages of services/numbering (Part IV Workstreams C-D, ADR 0033): Number Resource identity (CF Meet ids are canonical; provider identifiers never appear), type, capabilities with provenance, opaque provider binding references, inventory observations, reservations, DCN assignments with ownership and routing references, routing profiles, lifecycle transitions, the trusted context and the error envelope. Values equal the database CHECK constraints and the Rust domain types (a conformance test compares them). Full public number search / provisioning APIs are later workstreams.",
   "anyOf": [
     {
+      "$ref": "#/$defs/CapabilityResolution"
+    },
+    {
+      "$ref": "#/$defs/CatalogCountryView"
+    },
+    {
+      "$ref": "#/$defs/CountryCatalogEntry"
+    },
+    {
+      "$ref": "#/$defs/NumberTypeCatalogEntry"
+    },
+    {
+      "$ref": "#/$defs/PublishCountryRequest"
+    },
+    {
+      "$ref": "#/$defs/PublishNumberTypeRequest"
+    },
+    {
+      "$ref": "#/$defs/ReasonRequest"
+    },
+    {
+      "$ref": "#/$defs/CatalogWithdrawal"
+    },
+    {
+      "$ref": "#/$defs/CapabilityRevocation"
+    },
+    {
       "$ref": "#/$defs/NumberResource"
     },
     {
@@ -125,13 +152,15 @@
       ]
     },
     "CapabilityStatus": {
-      "description": "VERIFIED only with evidence (never for synthetic inventory); RESTRICTED / WITHDRAWN are downgrades.",
+      "description": "VERIFIED only with evidence (never for synthetic inventory); RESTRICTED / WITHDRAWN / EXPIRED / REVOKED do not grant the capability. REVOKED is re-enabled only by an operator or reconciliation.",
       "type": "string",
       "enum": [
         "VERIFIED",
         "DECLARED",
         "RESTRICTED",
-        "WITHDRAWN"
+        "WITHDRAWN",
+        "EXPIRED",
+        "REVOKED"
       ]
     },
     "CapabilitySource": {
@@ -1066,6 +1095,860 @@
         }
       }
     },
+    "InventoryClass": {
+      "description": "Which catalog governs a number: synthetic test inventory has its own catalog, never the real one.",
+      "type": "string",
+      "enum": [
+        "REAL",
+        "SYNTHETIC"
+      ]
+    },
+    "CountrySupport": {
+      "type": "string",
+      "enum": [
+        "SUPPORTED",
+        "RESTRICTED",
+        "UNSUPPORTED"
+      ]
+    },
+    "CatalogSource": {
+      "description": "Where a catalog fact comes from. SYNTHETIC_TEST is test data, never real.",
+      "type": "string",
+      "enum": [
+        "REGULATOR_PUBLICATION",
+        "PROVIDER_DOCUMENTATION",
+        "OPERATOR_ATTESTATION",
+        "SYNTHETIC_TEST"
+      ]
+    },
+    "CatalogVerification": {
+      "description": "VERIFIED only with evidence; SYNTHETIC exactly for the synthetic catalog. Real numbers need VERIFIED catalog facts.",
+      "type": "string",
+      "enum": [
+        "VERIFIED",
+        "UNVERIFIED",
+        "SYNTHETIC"
+      ]
+    },
+    "LocalityClass": {
+      "type": "string",
+      "enum": [
+        "NATIONAL",
+        "REGIONAL",
+        "LOCAL",
+        "NON_GEOGRAPHIC"
+      ]
+    },
+    "CapabilityChangeKind": {
+      "description": "How a capability record changed the effective truth.",
+      "type": "string",
+      "enum": [
+        "INITIAL",
+        "UPGRADE",
+        "DOWNGRADE",
+        "REFRESH",
+        "REVOCATION",
+        "EXPIRY"
+      ]
+    },
+    "CapabilityReason": {
+      "description": "Why a capability is not supported / not usable (fail closed).",
+      "type": "string",
+      "enum": [
+        "RESOURCE_NOT_ACTIVE",
+        "RESOURCE_UNCERTAIN",
+        "CATALOG_COUNTRY_MISSING",
+        "COUNTRY_NOT_SUPPORTED",
+        "CATALOG_UNVERIFIED",
+        "NUMBER_TYPE_UNCLASSIFIED",
+        "CATALOG_TYPE_MISSING",
+        "CAPABILITY_EXCLUDED_BY_CATALOG",
+        "CAPABILITY_NOT_IN_CATALOG",
+        "NUMBER_CLASS_MISMATCH",
+        "EVIDENCE_MISSING",
+        "EVIDENCE_UNVERIFIED",
+        "EVIDENCE_EXPIRED",
+        "EVIDENCE_NOT_YET_EFFECTIVE",
+        "EVIDENCE_BINDING_ENDED",
+        "CAPABILITY_RESTRICTED",
+        "CAPABILITY_WITHDRAWN",
+        "CAPABILITY_REVOKED",
+        "BINDING_MISSING"
+      ]
+    },
+    "ExternalVerificationNotice": {
+      "description": "The fixed wording on every voice / SMS capability. CF Meet never guarantees acceptance by WhatsApp, banks, social platforms or any OTP / third-party verification service.",
+      "const": "Supports voice and SMS where provisioned; third-party verification compatibility varies by service and number type."
+    },
+    "Limitations": {
+      "description": "Closed limitation vocabulary. externalVerification is never a guarantee.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "destinationCountries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CountryCode"
+          },
+          "maxItems": 250
+        },
+        "throughputPerSecond": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "contentRestrictions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReasonCode"
+          },
+          "maxItems": 32
+        },
+        "registrationRequired": {
+          "type": "boolean"
+        },
+        "inboundSenderTypes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "SHORT_CODE",
+              "LONG_CODE",
+              "ALPHANUMERIC"
+            ]
+          }
+        },
+        "externalVerification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "compatibility",
+            "guaranteed"
+          ],
+          "properties": {
+            "compatibility": {
+              "type": "string",
+              "enum": [
+                "VARIES",
+                "NOT_SUPPORTED"
+              ]
+            },
+            "guaranteed": {
+              "const": false
+            }
+          }
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "notice": {
+          "$ref": "#/$defs/ExternalVerificationNotice"
+        }
+      }
+    },
+    "CatalogProvenance": {
+      "description": "Provenance of a catalog fact.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "verificationStatus"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/CatalogSource"
+        },
+        "verificationStatus": {
+          "$ref": "#/$defs/CatalogVerification"
+        },
+        "evidenceRef": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effectiveFrom": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "effectiveTo": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "CountryCatalogEntry": {
+      "description": "The CURRENT country entry of an inventory class.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entryId",
+        "countryCode",
+        "inventoryClass",
+        "callingCode",
+        "supportStatus",
+        "restrictionFlags",
+        "source",
+        "verificationStatus",
+        "effectiveFrom",
+        "effectiveTo",
+        "catalogRevision"
+      ],
+      "properties": {
+        "entryId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "countryCode": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "inventoryClass": {
+          "$ref": "#/$defs/InventoryClass"
+        },
+        "callingCode": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,2}$"
+        },
+        "supportStatus": {
+          "$ref": "#/$defs/CountrySupport"
+        },
+        "restrictionFlags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RestrictionFlag"
+          }
+        },
+        "source": {
+          "$ref": "#/$defs/CatalogSource"
+        },
+        "verificationStatus": {
+          "$ref": "#/$defs/CatalogVerification"
+        },
+        "effectiveFrom": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "effectiveTo": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "catalogRevision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "NumberTypeCatalogEntry": {
+      "description": "A CURRENT number-type entry (generic: provider applicability is internal). Capabilities in neither list are unknown and treated as unsupported.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entryId",
+        "countryCode",
+        "inventoryClass",
+        "numberType",
+        "localityClass",
+        "region",
+        "supportedCapabilities",
+        "unsupportedCapabilities",
+        "limitations",
+        "restrictionFlags",
+        "source",
+        "verificationStatus",
+        "effectiveFrom",
+        "effectiveTo",
+        "catalogRevision"
+      ],
+      "properties": {
+        "entryId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "countryCode": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "inventoryClass": {
+          "$ref": "#/$defs/InventoryClass"
+        },
+        "numberType": {
+          "type": "string",
+          "enum": [
+            "GEOGRAPHIC",
+            "MOBILE",
+            "TOLL_FREE",
+            "NATIONAL"
+          ]
+        },
+        "localityClass": {
+          "$ref": "#/$defs/LocalityClass"
+        },
+        "region": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "supportedCapabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Capability"
+          },
+          "uniqueItems": true
+        },
+        "unsupportedCapabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Capability"
+          },
+          "uniqueItems": true
+        },
+        "limitations": {
+          "$ref": "#/$defs/Limitations"
+        },
+        "restrictionFlags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RestrictionFlag"
+          }
+        },
+        "source": {
+          "$ref": "#/$defs/CatalogSource"
+        },
+        "verificationStatus": {
+          "$ref": "#/$defs/CatalogVerification"
+        },
+        "effectiveFrom": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "effectiveTo": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "catalogRevision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "CatalogCountryView": {
+      "description": "GET /v1/numbers/catalog/countries/{countryCode}: the catalog of the caller's inventory class (SANDBOX / TEST: synthetic; PRODUCTION: real).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "country",
+        "numberTypes",
+        "notice"
+      ],
+      "properties": {
+        "country": {
+          "$ref": "#/$defs/CountryCatalogEntry"
+        },
+        "numberTypes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NumberTypeCatalogEntry"
+          }
+        },
+        "notice": {
+          "$ref": "#/$defs/ExternalVerificationNotice"
+        }
+      }
+    },
+    "CapabilityProvenance": {
+      "description": "Where a resolved capability's truth comes from. carrierConfirmed is never true for synthetic inventory.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidenceStatus",
+        "evidenceSource",
+        "verifiedAt",
+        "expiresAt",
+        "synthetic",
+        "carrierConfirmed",
+        "catalogEntryId",
+        "catalogEntryRevision",
+        "catalogVerification",
+        "bindingRef"
+      ],
+      "properties": {
+        "evidenceStatus": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/CapabilityStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidenceSource": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/CapabilitySource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verifiedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expiresAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "carrierConfirmed": {
+          "type": "boolean"
+        },
+        "catalogEntryId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "catalogEntryRevision": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "catalogVerification": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/CatalogVerification"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bindingRef": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "synthetic": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "carrierConfirmed": {
+                "const": false
+              }
+            }
+          }
+        }
+      ]
+    },
+    "EffectiveCapability": {
+      "description": "One resolved capability: supported (catalog AND this number's valid evidence) and usable now (supported; routable ones also need an ACTIVE number with an active binding serving them).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability",
+        "supported",
+        "usable",
+        "reason",
+        "limitations",
+        "provenance"
+      ],
+      "properties": {
+        "capability": {
+          "$ref": "#/$defs/Capability"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "usable": {
+          "type": "boolean"
+        },
+        "reason": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/CapabilityReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limitations": {
+          "$ref": "#/$defs/Limitations"
+        },
+        "provenance": {
+          "$ref": "#/$defs/CapabilityProvenance"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "usable": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "supported": {
+                "const": true
+              },
+              "reason": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "reason": {
+                "$ref": "#/$defs/CapabilityReason"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "CapabilityResolution": {
+      "description": "GET /internal/v1/number-resources/{id}/capabilities and GET /v1/numbers/assignments/{id}/capabilities: every canonical capability resolved from one consistent snapshot, with the revisions consumers compare to reject stale decisions.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numberResourceId",
+        "state",
+        "inventoryClass",
+        "numberType",
+        "resourceRevision",
+        "capabilityRevision",
+        "bindingRevision",
+        "catalogRevision",
+        "resolvedAt",
+        "restrictionFlags",
+        "capabilities",
+        "notices"
+      ],
+      "properties": {
+        "numberResourceId": {
+          "$ref": "#/$defs/NumberResourceId"
+        },
+        "state": {
+          "$ref": "#/$defs/LifecycleState"
+        },
+        "inventoryClass": {
+          "$ref": "#/$defs/InventoryClass"
+        },
+        "numberType": {
+          "$ref": "#/$defs/NumberType"
+        },
+        "resourceRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "capabilityRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bindingRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "catalogRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resolvedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "restrictionFlags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RestrictionFlag"
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EffectiveCapability"
+          },
+          "minItems": 8,
+          "maxItems": 8
+        },
+        "notices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExternalVerificationNotice"
+          },
+          "maxItems": 1
+        }
+      }
+    },
+    "PublishCountryRequest": {
+      "description": "POST /v1/admin/catalog/countries (numbers.admin, X-CF-Operator).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "countryCode",
+        "inventoryClass",
+        "supportStatus",
+        "provenance",
+        "reasonCode"
+      ],
+      "properties": {
+        "countryCode": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "inventoryClass": {
+          "$ref": "#/$defs/InventoryClass"
+        },
+        "supportStatus": {
+          "$ref": "#/$defs/CountrySupport"
+        },
+        "restrictionFlags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RestrictionFlag"
+          }
+        },
+        "jurisdictionPolicyRef": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provenance": {
+          "$ref": "#/$defs/CatalogProvenance"
+        },
+        "reasonCode": {
+          "$ref": "#/$defs/ReasonCode"
+        }
+      }
+    },
+    "PublishNumberTypeRequest": {
+      "description": "POST /v1/admin/catalog/number-types (numbers.admin, X-CF-Operator). Number-class attributes follow the type.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "countryCode",
+        "inventoryClass",
+        "numberType",
+        "localityClass",
+        "provenance",
+        "reasonCode"
+      ],
+      "properties": {
+        "countryCode": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "inventoryClass": {
+          "$ref": "#/$defs/InventoryClass"
+        },
+        "numberType": {
+          "type": "string",
+          "enum": [
+            "GEOGRAPHIC",
+            "MOBILE",
+            "TOLL_FREE",
+            "NATIONAL"
+          ]
+        },
+        "localityClass": {
+          "$ref": "#/$defs/LocalityClass"
+        },
+        "region": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "providerId": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "supportedCapabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Capability"
+          }
+        },
+        "unsupportedCapabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Capability"
+          }
+        },
+        "limitations": {
+          "$ref": "#/$defs/Limitations"
+        },
+        "restrictionFlags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RestrictionFlag"
+          }
+        },
+        "jurisdictionPolicyRef": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provenance": {
+          "$ref": "#/$defs/CatalogProvenance"
+        },
+        "reasonCode": {
+          "$ref": "#/$defs/ReasonCode"
+        }
+      }
+    },
+    "ReasonRequest": {
+      "description": "An administrative action's reason.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reasonCode"
+      ],
+      "properties": {
+        "reasonCode": {
+          "$ref": "#/$defs/ReasonCode"
+        }
+      }
+    },
+    "CatalogWithdrawal": {
+      "description": "The catalog revision that withdrew an entry.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entryId",
+        "catalogRevision"
+      ],
+      "properties": {
+        "entryId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "catalogRevision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "CapabilityRevocation": {
+      "description": "POST /v1/admin/number-resources/{id}/capabilities/{capability}/revoke: effective immediately.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numberResourceId",
+        "capability",
+        "status",
+        "changeKind",
+        "capabilityRevision",
+        "impactedAssignmentIds"
+      ],
+      "properties": {
+        "numberResourceId": {
+          "$ref": "#/$defs/NumberResourceId"
+        },
+        "capability": {
+          "$ref": "#/$defs/Capability"
+        },
+        "status": {
+          "const": "REVOKED"
+        },
+        "changeKind": {
+          "const": "REVOCATION"
+        },
+        "capabilityRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "impactedAssignmentIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        }
+      }
+    },
     "ErrorCode": {
       "description": "Stable error codes. PRECONDITION_FAILED / CONFLICT carry the domain rule in `reason`.",
       "type": "string",
@@ -1084,6 +1967,8 @@
         "CONFLICT",
         "PRECONDITION_FAILED",
         "IDEMPOTENCY_KEY_REUSED",
+        "CAPABILITY_NOT_SUPPORTED",
+        "OPERATOR_REQUIRED",
         "SERVICE_UNAVAILABLE",
         "INTERNAL_ERROR"
       ]
@@ -1121,7 +2006,18 @@
         "PRIVILEGED_ACCESS_REQUIRED",
         "SCOPE_MISMATCH",
         "RULE_VIOLATION",
-        "CONFLICT"
+        "CONFLICT",
+        "STALE_EVIDENCE",
+        "SOURCE_AUTHORITY_CONFLICT",
+        "REVOCATION_ACTIVE",
+        "ALREADY_REVOKED",
+        "BINDING_MISMATCH",
+        "LIMITATION_NOT_ALLOWED",
+        "NUMBER_CLASS_MISMATCH",
+        "COUNTRY_UNKNOWN",
+        "COUNTRY_NOT_SUPPORTED",
+        "CAPABILITY_NOT_SUPPORTED",
+        "CAPABILITY_NOT_USABLE"
       ]
     },
     "Error": {

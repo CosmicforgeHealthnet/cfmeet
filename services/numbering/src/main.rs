@@ -122,6 +122,19 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         });
+        // Capability evidence past its expiry is already not granting (resolution reads
+        // expiry); the sweep records it durably and emits the change event.
+        let numbers = state.numbers.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(Duration::from_secs(60));
+            loop {
+                ticker.tick().await;
+                let ctx = numbering::domain::RequestContext::generate();
+                if let Err(e) = numbers.expire_capabilities(&ctx, 500).await {
+                    tracing::warn!(error = %e, "capability expiry sweep failed");
+                }
+            }
+        });
     }
 
     if let Some(address) = config.metrics_address {

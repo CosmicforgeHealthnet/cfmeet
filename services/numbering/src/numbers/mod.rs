@@ -46,11 +46,14 @@ macro_rules! text_enum {
 pub mod assignments;
 pub mod bindings;
 pub mod capabilities;
+pub mod catalog;
 pub mod e164;
 pub mod error;
 pub mod inventory;
 pub mod lifecycle;
+pub mod limitations;
 pub mod reservations;
+pub mod resolution;
 pub mod resources;
 pub mod routing;
 pub mod types;

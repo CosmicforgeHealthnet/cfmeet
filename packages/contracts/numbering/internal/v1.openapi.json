@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Numbering API",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "HTTP surface of services/numbering (Part IV Workstream C foundation, ADR 0033): GET /health and /ready (public, no data); customer reads of the caller's own DCN assignments and reservations under /v1 (credential verified by Platform Access on every request; normalized 401, 429 when Platform Access throttles, 503 when it is unreachable — fail closed); and the service-authenticated /internal/v1 API (cfmeet.platform.internal-http; permission from Numbering's own trust bundle). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 64 KiB. Full public number search / provisioning / assignment-mutation APIs are later workstreams."
   },
   "components": {
@@ -34,6 +34,16 @@
         "required": true,
         "schema": {
           "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/CorrelationId"
+        }
+      },
+      "CfOperator": {
+        "name": "X-CF-Operator",
+        "in": "header",
+        "required": true,
+        "description": "The audited human operator (opaque id).",
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
         }
       }
     },
@@ -402,6 +412,434 @@
               "application/json": {
                 "schema": {
                   "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/numbers/catalog/countries/{countryCode}": {
+      "get": {
+        "operationId": "getCatalogCountry",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "The country / number-type catalog of the caller's inventory class (SANDBOX / TEST: synthetic; PRODUCTION: real). Requires scope `numbers.search` or `numbers.read`. Country support never establishes support for an individual number.",
+        "parameters": [
+          {
+            "name": "countryCode",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CountryCode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CatalogCountryView"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/numbers/assignments/{assignmentId}/capabilities": {
+      "get": {
+        "operationId": "getAssignmentCapabilities",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "The resolved capabilities of the caller's own assigned number. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain for the presented credential; other scopes' records are NOT_FOUND.",
+        "parameters": [
+          {
+            "name": "assignmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CapabilityResolution"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/catalog/countries": {
+      "post": {
+        "operationId": "publishCatalogCountry",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Publish a country entry (supersedes the current one of its class; one catalog revision). Requires scope `numbers.admin` on a FIRST_PARTY application (Platform Access grants it only by an explicit operator grant) and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/PublishCountryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CountryCatalogEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/catalog/number-types": {
+      "post": {
+        "operationId": "publishCatalogNumberType",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Publish a number-type entry (supersedes the current one with the same country, class, type, region and provider applicability). Requires scope `numbers.admin` on a FIRST_PARTY application (Platform Access grants it only by an explicit operator grant) and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/PublishNumberTypeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberTypeCatalogEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/catalog/number-types/{entryId}/withdraw": {
+      "post": {
+        "operationId": "withdrawCatalogNumberType",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Withdraw a number-type entry (resolution then falls back to the generic entry, or fails closed). Requires scope `numbers.admin` on a FIRST_PARTY application (Platform Access grants it only by an explicit operator grant) and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "entryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CatalogWithdrawal"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/number-resources/{numberResourceId}/capabilities/{capability}/revoke": {
+      "post": {
+        "operationId": "revokeCapability",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Revoke a capability of a number (effective immediately; re-enabled only by an operator or reconciliation). Requires scope `numbers.admin` on a FIRST_PARTY application (Platform Access grants it only by an explicit operator grant) and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "numberResourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "capability",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Capability"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CapabilityRevocation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/number-resources/{numberResourceId}/capabilities": {
+      "get": {
+        "operationId": "getNumberResourceCapabilities",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "description": "The resolved capabilities of a Number Resource with provenance and revisions. Permission: `number-resource.read`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "numberResourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CapabilityResolution"
                 }
               }
             }

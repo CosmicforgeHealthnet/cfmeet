@@ -921,14 +921,13 @@ async fn capabilities_are_evidence_backed_never_inferred_and_downgrades_are_safe
             .unwrap_err(),
         DomainError::Validation(_)
     ));
+    // (Workstream E: a PROVIDER_CONFIRMATION names its confirming binding; inventory
+    // evidence does not.)
     let verified = NewCapability {
         status: CapabilityStatus::Verified,
         evidence_ref: Some(Uuid::new_v4()),
         verified_at: Some(h.now()),
-        ..NewCapability::declared(
-            Capability::SmsOutbound,
-            CapabilitySource::ProviderConfirmation,
-        )
+        ..NewCapability::declared(Capability::SmsOutbound, CapabilitySource::ProviderInventory)
     };
     h.numbers
         .record_capability(&ctx(), r.id, verified)

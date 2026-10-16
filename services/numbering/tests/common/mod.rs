@@ -837,3 +837,230 @@ pub mod contracts {
         );
     }
 }
+
+/// Workstream E fixtures: catalogs and classified numbers.
+pub mod catalog {
+    use numbering::{
+        domain::RequestContext,
+        numbers::{
+            catalog::{CatalogProvenance, CountryEntry, TypeEntry, TypeEntryRow},
+            Actor, Capability, CatalogSource, ClassificationSource, CountrySupport, InventoryClass,
+            InventorySource, LocalityClass, NumberType,
+        },
+    };
+    use serde_json::json;
+    use uuid::Uuid;
+
+    use super::Harness;
+
+    pub fn operator() -> Actor {
+        Actor::operator("catalog-ops")
+    }
+
+    pub fn type_entry(
+        country: &str,
+        class: InventoryClass,
+        number_type: NumberType,
+        supported: &[Capability],
+        unsupported: &[Capability],
+    ) -> TypeEntry {
+        TypeEntry {
+            country: country.into(),
+            inventory_class: class,
+            number_type,
+            locality: match number_type {
+                NumberType::Geographic => LocalityClass::Local,
+                NumberType::TollFree => LocalityClass::NonGeographic,
+                _ => LocalityClass::National,
+            },
+            region: None,
+            provider_id: None,
+            supported: supported.to_vec(),
+            unsupported: unsupported.to_vec(),
+            limitations: json!({}),
+            restriction_flags: vec![],
+            jurisdiction_policy_ref: None,
+            provenance: match class {
+                InventoryClass::Synthetic => CatalogProvenance::synthetic(),
+                InventoryClass::Real => CatalogProvenance::verified(
+                    CatalogSource::ProviderDocumentation,
+                    Uuid::new_v4(),
+                ),
+            },
+        }
+    }
+
+    use Capability as C;
+
+    /// The synthetic US test catalog: mobile (voice + SMS + mobile class), geographic
+    /// (voice + inbound SMS + local), toll-free (inbound voice + business; SMS excluded).
+    pub async fn synthetic_us(h: &Harness) -> Vec<TypeEntryRow> {
+        let ctx = RequestContext::generate();
+        h.numbers
+            .publish_country(
+                &ctx,
+                operator(),
+                "SYNTHETIC_CATALOG",
+                CountryEntry {
+                    country: "US".into(),
+                    inventory_class: InventoryClass::Synthetic,
+                    support: CountrySupport::Supported,
+                    restriction_flags: vec![],
+                    jurisdiction_policy_ref: None,
+                    provenance: CatalogProvenance::synthetic(),
+                },
+            )
+            .await
+            .unwrap();
+        let mut out = Vec::new();
+        for entry in [
+            type_entry(
+                "US",
+                InventoryClass::Synthetic,
+                NumberType::Mobile,
+                &[
+                    C::VoiceInbound,
+                    C::VoiceOutbound,
+                    C::SmsInbound,
+                    C::SmsOutbound,
+                    C::MobileNumberClass,
+                ],
+                &[C::MmsRich],
+            ),
+            type_entry(
+                "US",
+                InventoryClass::Synthetic,
+                NumberType::Geographic,
+                &[
+                    C::VoiceInbound,
+                    C::VoiceOutbound,
+                    C::SmsInbound,
+                    C::GeographicLocal,
+                ],
+                &[C::SmsOutbound, C::MobileNumberClass],
+            ),
+            type_entry(
+                "US",
+                InventoryClass::Synthetic,
+                NumberType::TollFree,
+                &[C::VoiceInbound, C::TollFreeBusiness],
+                &[C::SmsInbound, C::SmsOutbound, C::VoiceOutbound],
+            ),
+        ] {
+            out.push(
+                h.numbers
+                    .publish_number_type(&ctx, operator(), "SYNTHETIC_CATALOG", entry)
+                    .await
+                    .unwrap(),
+            );
+        }
+        out
+    }
+
+    /// A VERIFIED real NG catalog (evidence refs stand for regulator / provider documents).
+    pub async fn verified_ng(h: &Harness) -> Vec<TypeEntryRow> {
+        let ctx = RequestContext::generate();
+        h.numbers
+            .publish_country(
+                &ctx,
+                operator(),
+                "LAUNCH_COUNTRY",
+                CountryEntry {
+                    country: "NG".into(),
+                    inventory_class: InventoryClass::Real,
+                    support: CountrySupport::Supported,
+                    restriction_flags: vec![],
+                    jurisdiction_policy_ref: None,
+                    provenance: CatalogProvenance::verified(
+                        CatalogSource::RegulatorPublication,
+                        Uuid::new_v4(),
+                    ),
+                },
+            )
+            .await
+            .unwrap();
+        let mut out = Vec::new();
+        for entry in [
+            type_entry(
+                "NG",
+                InventoryClass::Real,
+                NumberType::Mobile,
+                &[
+                    C::VoiceInbound,
+                    C::VoiceOutbound,
+                    C::SmsInbound,
+                    C::SmsOutbound,
+                    C::MobileNumberClass,
+                ],
+                &[],
+            ),
+            type_entry(
+                "NG",
+                InventoryClass::Real,
+                NumberType::Geographic,
+                &[C::VoiceInbound, C::VoiceOutbound, C::GeographicLocal],
+                &[C::SmsOutbound],
+            ),
+        ] {
+            out.push(
+                h.numbers
+                    .publish_number_type(&ctx, operator(), "LAUNCH_COUNTRY", entry)
+                    .await
+                    .unwrap(),
+            );
+        }
+        out
+    }
+
+    /// An AVAILABLE number of `source`, classified as `number_type` from evidence.
+    pub async fn classified(
+        h: &Harness,
+        source: InventorySource,
+        number_type: NumberType,
+    ) -> numbering::numbers::resources::ResourceRow {
+        let r = h.available_number(source).await;
+        let class_source = if source == InventorySource::SyntheticTest {
+            ClassificationSource::Synthetic
+        } else {
+            ClassificationSource::ProviderInventory
+        };
+        h.numbers
+            .classify(
+                &RequestContext::generate(),
+                r.id,
+                r.revision,
+                number_type,
+                class_source,
+            )
+            .await
+            .unwrap()
+    }
+}
+
+impl Harness {
+    /// A customer JSON request (`Authorization: Bearer`, optional `X-CF-Operator`).
+    pub async fn customer_json(
+        &self,
+        token: &str,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        operator: Option<&str>,
+    ) -> Reply {
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("authorization", format!("Bearer {token}"));
+        if let Some(op) = operator {
+            builder = builder.header("x-cf-operator", op);
+        }
+        let body = match body {
+            Some(b) => {
+                builder = builder.header("content-type", "application/json");
+                Body::from(b.to_string())
+            }
+            None => Body::empty(),
+        };
+        self.raw(builder.body(body).unwrap()).await
+    }
+}

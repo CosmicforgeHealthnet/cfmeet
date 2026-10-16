@@ -1,0 +1,24 @@
+{
+  "event_id": "evt_0123456789abcdef0123456789abcdef",
+  "event_type": "number.capability.changed",
+  "schema_version": 1,
+  "occurred_at": "2031-03-01T10:05:00.000000Z",
+  "producer_service": "cfmeet.numbering",
+  "runtime_environment": "staging",
+  "correlation_id": "corr_0123456789abcdef0123456789abcdef",
+  "payload": {
+    "number_resource_id": "5f0b2c1e-8d3a-4b6f-9e2d-7a1c3b5d9f01",
+    "capability": "SMS_OUTBOUND",
+    "status": "WITHDRAWN",
+    "previous_status": "VERIFIED",
+    "source": "PROVIDER_CONFIRMATION",
+    "change_kind": "DOWNGRADE",
+    "capability_revision": 7,
+    "binding_ref": "7f9b1d3e-5a7c-4e9f-8a1b-3c4d5e6f7a8b",
+    "expires_at": null,
+    "reason_code": "PROVIDER_WITHDREW",
+    "impacted_assignment_ids": [
+      "0d6e2a4c-9b1f-4c3d-8e5a-2f7b9c1d3e5a"
+    ]
+  }
+}

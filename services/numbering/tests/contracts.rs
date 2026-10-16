@@ -10,10 +10,11 @@ use numbering::{
     http::error::ErrorCode,
     numbers::{
         assignments::allowed, ActorKind, AssignmentStatus, Availability, BindingChangeReason,
-        Capability, CapabilitySource, CapabilityStatus, ClassificationSource, CostEvidence,
-        EnvironmentKind, FailureCategory, InventorySource, LifecycleState, NumberType, OwnerKind,
-        OwnershipClass, ReleaseState, ReservationStatus, RestrictionFlag, RiskTier, SmsTargetKind,
-        UncertainOperation, VoiceTargetKind,
+        Capability, CapabilityChangeKind, CapabilitySource, CapabilityStatus, CatalogSource,
+        CatalogVerification, ClassificationSource, CostEvidence, CountrySupport, EnvironmentKind,
+        FailureCategory, InventoryClass, InventorySource, LifecycleState, LocalityClass,
+        NumberType, OwnerKind, OwnershipClass, ReleaseState, ReservationStatus, RestrictionFlag,
+        RiskTier, SmsTargetKind, UncertainOperation, VoiceTargetKind,
     },
 };
 
@@ -168,7 +169,60 @@ async fn rust_contract_and_database_share_one_vocabulary() {
             all!(BindingChangeReason),
             &["ck_number_provider_bindings_reason"],
         ),
-        ("RestrictionFlag", all!(RestrictionFlag), &[]),
+        (
+            "RestrictionFlag",
+            all!(RestrictionFlag),
+            &[
+                "ck_number_resources_restrictions",
+                "ck_number_country_catalog_restrictions",
+                "ck_number_type_catalog_restrictions",
+            ],
+        ),
+        // Workstream E.
+        (
+            "InventoryClass",
+            all!(InventoryClass),
+            &[
+                "ck_number_country_catalog_class",
+                "ck_number_type_catalog_class",
+            ],
+        ),
+        (
+            "CountrySupport",
+            all!(CountrySupport),
+            &["ck_number_country_catalog_support"],
+        ),
+        (
+            "CatalogSource",
+            all!(CatalogSource),
+            &[
+                "ck_number_country_catalog_source",
+                "ck_number_type_catalog_source",
+            ],
+        ),
+        (
+            "CatalogVerification",
+            all!(CatalogVerification),
+            &[
+                "ck_number_country_catalog_verification",
+                "ck_number_type_catalog_verification",
+            ],
+        ),
+        (
+            "LocalityClass",
+            all!(LocalityClass),
+            &["ck_number_type_catalog_locality"],
+        ),
+        (
+            "CapabilityChangeKind",
+            all!(CapabilityChangeKind),
+            &["ck_number_capabilities_change_kind"],
+        ),
+        (
+            "CapabilityReason",
+            set(numbering::numbers::resolution::reason::ALL.iter().copied()),
+            &[],
+        ),
     ];
     for (def, rust, constraints) in cases {
         assert_eq!(contract(def), rust, "contract {def} vs Rust");

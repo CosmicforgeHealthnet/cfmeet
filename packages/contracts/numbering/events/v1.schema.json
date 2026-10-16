@@ -20,6 +20,9 @@
       "$ref": "#/$defs/CapabilityChanged"
     },
     {
+      "$ref": "#/$defs/CatalogRevised"
+    },
+    {
       "$ref": "#/$defs/ReservationChanged"
     },
     {
@@ -315,6 +318,11 @@
         "status",
         "previous_status",
         "source",
+        "change_kind",
+        "capability_revision",
+        "binding_ref",
+        "expires_at",
+        "reason_code",
         "impacted_assignment_ids"
       ],
       "properties": {
@@ -340,6 +348,36 @@
         "source": {
           "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CapabilitySource"
         },
+        "change_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CapabilityChangeKind"
+        },
+        "capability_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "binding_ref": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expires_at": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+        },
         "impacted_assignment_ids": {
           "type": "array",
           "items": {
@@ -350,7 +388,7 @@
       }
     },
     "CapabilityChanged": {
-      "description": "The current record of a capability changed; impacted_assignment_ids lists open assignments that relied on a now-unusable capability (downgrade).",
+      "description": "The current record of a capability changed (append-only history). capability_revision is the resource's new capability revision; consumers reject decisions taken at an older one. impacted_assignment_ids lists open assignments that relied on a now-unusable capability.",
       "allOf": [
         {
           "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
@@ -368,6 +406,97 @@
             },
             "payload": {
               "$ref": "#/$defs/CapabilityChangedPayload"
+            }
+          },
+          "not": {
+            "required": [
+              "ownership"
+            ]
+          }
+        }
+      ]
+    },
+    "CatalogRevisedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "catalog_revision",
+        "entry_kind",
+        "entry_id",
+        "country_code",
+        "inventory_class",
+        "number_type",
+        "change",
+        "reason_code"
+      ],
+      "properties": {
+        "catalog_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "entry_kind": {
+          "type": "string",
+          "enum": [
+            "COUNTRY",
+            "NUMBER_TYPE"
+          ]
+        },
+        "entry_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "country_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CountryCode"
+        },
+        "inventory_class": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/InventoryClass"
+        },
+        "number_type": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "GEOGRAPHIC",
+                "MOBILE",
+                "TOLL_FREE",
+                "NATIONAL"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "change": {
+          "type": "string",
+          "enum": [
+            "PUBLISHED",
+            "WITHDRAWN"
+          ]
+        },
+        "reason_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+        }
+      }
+    },
+    "CatalogRevised": {
+      "description": "A catalog revision was published: a country or number-type entry was published or withdrawn. Platform data: no ownership.",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.catalog.revised"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/CatalogRevisedPayload"
             }
           },
           "not": {

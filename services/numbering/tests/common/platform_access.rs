@@ -289,11 +289,23 @@ impl PlatformAccess {
     /// A tenant → application (scopes granted) → environment of `kind` → service account,
     /// and a credential with `scopes`. Returns the raw credential and the true chain.
     pub async fn customer(&self, kind: &str, granted: &[&str], scopes: &[&str]) -> Customer {
+        self.customer_as(kind, "EXTERNAL", granted, scopes).await
+    }
+
+    /// As [`Self::customer`] with a tenant classification; `numbers.admin` is granted by
+    /// Platform Access's explicit privileged operator grant (FIRST_PARTY only).
+    pub async fn customer_as(
+        &self,
+        kind: &str,
+        classification: &str,
+        granted: &[&str],
+        scopes: &[&str],
+    ) -> Customer {
         let slug = format!("t{}", &Uuid::new_v4().simple().to_string()[..12]);
         let tenant = self
             .created(
                 "/internal/v1/admin/tenants",
-                json!({ "slug": slug, "displayName": "numbering test tenant", "classification": "EXTERNAL" }),
+                json!({ "slug": slug, "displayName": "numbering test tenant", "classification": classification }),
             )
             .await;
         let tenant_id = id(&tenant["id"]);
@@ -307,7 +319,7 @@ impl PlatformAccess {
         for scope in granted {
             self.created(
                 &format!("/internal/v1/admin/applications/{application_id}/scopes"),
-                json!({ "scope": scope }),
+                json!({ "scope": scope, "privileged": *scope == "numbers.admin" }),
             )
             .await;
         }

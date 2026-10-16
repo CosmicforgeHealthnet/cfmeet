@@ -89,6 +89,8 @@ text_enum!(
         Declared = "DECLARED",
         Restricted = "RESTRICTED",
         Withdrawn = "WITHDRAWN",
+        Expired = "EXPIRED",
+        Revoked = "REVOKED",
     }
 );
 
@@ -101,6 +103,65 @@ impl CapabilityStatus {
         )
     }
 }
+
+text_enum!(
+    /// Which catalog a resource is governed by: synthetic test inventory has its own
+    /// catalog, never the real one.
+    InventoryClass {
+        Real = "REAL",
+        Synthetic = "SYNTHETIC",
+    }
+);
+
+impl InventoryClass {
+    pub fn of(source: InventorySource) -> Self {
+        match source {
+            InventorySource::SyntheticTest => InventoryClass::Synthetic,
+            _ => InventoryClass::Real,
+        }
+    }
+}
+
+text_enum!(CountrySupport {
+    Supported = "SUPPORTED",
+    Restricted = "RESTRICTED",
+    Unsupported = "UNSUPPORTED",
+});
+
+text_enum!(
+    /// Where a catalog fact comes from. SYNTHETIC_TEST is test data, never real.
+    CatalogSource {
+        RegulatorPublication = "REGULATOR_PUBLICATION",
+        ProviderDocumentation = "PROVIDER_DOCUMENTATION",
+        OperatorAttestation = "OPERATOR_ATTESTATION",
+        SyntheticTest = "SYNTHETIC_TEST",
+    }
+);
+
+text_enum!(CatalogVerification {
+    Verified = "VERIFIED",
+    Unverified = "UNVERIFIED",
+    Synthetic = "SYNTHETIC",
+});
+
+text_enum!(LocalityClass {
+    National = "NATIONAL",
+    Regional = "REGIONAL",
+    Local = "LOCAL",
+    NonGeographic = "NON_GEOGRAPHIC",
+});
+
+text_enum!(
+    /// How a capability record changed the effective truth.
+    CapabilityChangeKind {
+        Initial = "INITIAL",
+        Upgrade = "UPGRADE",
+        Downgrade = "DOWNGRADE",
+        Refresh = "REFRESH",
+        Revocation = "REVOCATION",
+        Expiry = "EXPIRY",
+    }
+);
 
 text_enum!(CapabilitySource {
     ProviderInventory = "PROVIDER_INVENTORY",

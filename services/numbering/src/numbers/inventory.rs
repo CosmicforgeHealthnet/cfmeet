@@ -115,7 +115,7 @@ impl NewObservation {
     }
 }
 
-pub(crate) fn valid_provider(p: &str) -> bool {
+pub fn valid_provider(p: &str) -> bool {
     (2..=64).contains(&p.len())
         && p.as_bytes()[0].is_ascii_lowercase()
         && p.bytes()

@@ -1,0 +1,51 @@
+{
+  "country": {
+    "entryId": "1b3d5f7a-9c1e-4b3d-8f5a-7c9e1b3d5f7a",
+    "countryCode": "NG",
+    "inventoryClass": "REAL",
+    "callingCode": "234",
+    "supportStatus": "SUPPORTED",
+    "restrictionFlags": [],
+    "source": "REGULATOR_PUBLICATION",
+    "verificationStatus": "VERIFIED",
+    "effectiveFrom": "2031-01-01T00:00:00Z",
+    "effectiveTo": null,
+    "catalogRevision": 1
+  },
+  "numberTypes": [
+    {
+      "entryId": "2c4e6a8b-0d2f-4c4e-9a6b-8d0f2c4e6a8b",
+      "countryCode": "NG",
+      "inventoryClass": "REAL",
+      "numberType": "MOBILE",
+      "localityClass": "NATIONAL",
+      "region": null,
+      "supportedCapabilities": [
+        "MOBILE_NUMBER_CLASS",
+        "SMS_INBOUND",
+        "SMS_OUTBOUND",
+        "VOICE_INBOUND",
+        "VOICE_OUTBOUND"
+      ],
+      "unsupportedCapabilities": [
+        "MMS_RICH"
+      ],
+      "limitations": {
+        "registrationRequired": true,
+        "externalVerification": {
+          "compatibility": "VARIES",
+          "guaranteed": false
+        }
+      },
+      "restrictionFlags": [
+        "KYC_REQUIRED"
+      ],
+      "source": "PROVIDER_DOCUMENTATION",
+      "verificationStatus": "VERIFIED",
+      "effectiveFrom": "2031-01-01T00:00:00Z",
+      "effectiveTo": null,
+      "catalogRevision": 2
+    }
+  ],
+  "notice": "Supports voice and SMS where provisioned; third-party verification compatibility varies by service and number type."
+}

@@ -51,6 +51,8 @@ error_codes! {
     InvalidTransition = "INVALID_TRANSITION" => CONFLICT, "The transition is not allowed.";
     Conflict = "CONFLICT" => CONFLICT, "The operation conflicts with existing state.";
     PreconditionFailed = "PRECONDITION_FAILED" => UNPROCESSABLE_ENTITY, "A prerequisite of the operation is not met.";
+    CapabilityNotSupported = "CAPABILITY_NOT_SUPPORTED" => UNPROCESSABLE_ENTITY, "The number does not support the requested capability.";
+    OperatorRequired = "OPERATOR_REQUIRED" => BAD_REQUEST, "Administration names the human operator (X-CF-Operator).";
     IdempotencyKeyReused = "IDEMPOTENCY_KEY_REUSED" => UNPROCESSABLE_ENTITY, "The idempotency key was used for a different request.";
     ServiceUnavailable = "SERVICE_UNAVAILABLE" => SERVICE_UNAVAILABLE, "The service is temporarily unavailable.";
     InternalError = "INTERNAL_ERROR" => INTERNAL_SERVER_ERROR, "An internal error occurred.";
@@ -125,6 +127,13 @@ impl IntoResponse for ApiError {
                     DomainError::NotFound(_) => (ErrorCode::NotFound, None),
                     DomainError::VersionConflict(_) => (ErrorCode::VersionConflict, None),
                     DomainError::InvalidTransition { .. } => (ErrorCode::InvalidTransition, None),
+                    DomainError::Precondition {
+                        code: "CAPABILITY_NOT_SUPPORTED",
+                        ..
+                    } => (
+                        ErrorCode::CapabilityNotSupported,
+                        Some("CAPABILITY_NOT_SUPPORTED"),
+                    ),
                     DomainError::Precondition { code, .. } => {
                         (ErrorCode::PreconditionFailed, Some(*code))
                     }

@@ -88,6 +88,8 @@
                "tests/workers.rs::concurrent_runners_never_run_the_same_claim",
                "tests/workers.rs::retries_back_off_until_exhausted_and_permanent_failures_are_final"]},
     {"id": "numbering-idempotency-expiry", "owner": "numbering", "source": "src/infra/idempotency.rs", "entry": "purge_expired",
-     "tests": ["tests/workers.rs::idempotency_keys_replay_refuse_mismatches_and_are_scoped"]}
+     "tests": ["tests/workers.rs::idempotency_keys_replay_refuse_mismatches_and_are_scoped"]},
+    {"id": "numbering-capability-expiry", "owner": "numbering", "source": "src/numbers/capabilities.rs", "entry": "expire_capabilities",
+     "tests": ["tests/capability_catalog.rs::expired_stale_and_conflicting_evidence_cannot_authorize"]}
   ]
 }

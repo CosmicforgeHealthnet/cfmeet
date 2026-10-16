@@ -26,12 +26,15 @@ const DOMAIN: &[&str] = &[
     "dcn_assignments",
     "number_assignment_history",
     "number_capabilities",
+    "number_catalog_revisions",
+    "number_country_catalog",
     "number_inventory_snapshots",
     "number_lifecycle_events",
     "number_provider_bindings",
     "number_reservations",
     "number_resources",
     "number_routing_profiles",
+    "number_type_catalog",
 ];
 
 async fn tables(conn: &sea_orm::DatabaseConnection) -> BTreeSet<String> {
@@ -67,7 +70,7 @@ async fn fresh_migration_creates_exactly_numbering_tables_and_down_removes_them(
     // Its own migration history table: never shared with another service.
     assert_eq!(
         scalar(&db.conn, "SELECT count(*) FROM numbering_seaql_migrations").await,
-        2
+        Migrator::migrations().len() as i64
     );
     // Nothing that later workstreams own yet (KYC, SMS, portability, fraud, billing),
     // nothing of another service.

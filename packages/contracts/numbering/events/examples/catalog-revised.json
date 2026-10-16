@@ -1,0 +1,19 @@
+{
+  "event_id": "evt_1123456789abcdef0123456789abcdef",
+  "event_type": "number.catalog.revised",
+  "schema_version": 1,
+  "occurred_at": "2031-03-01T10:05:00.000000Z",
+  "producer_service": "cfmeet.numbering",
+  "runtime_environment": "staging",
+  "correlation_id": "corr_0123456789abcdef0123456789abcdef",
+  "payload": {
+    "catalog_revision": 7,
+    "entry_kind": "NUMBER_TYPE",
+    "entry_id": "2c4e6a8b-0d2f-4c4e-9a6b-8d0f2c4e6a8b",
+    "country_code": "NG",
+    "inventory_class": "REAL",
+    "number_type": "MOBILE",
+    "change": "PUBLISHED",
+    "reason_code": "LAUNCH_COUNTRY"
+  }
+}

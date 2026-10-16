@@ -71,6 +71,64 @@ impl CustomerCaller {
     }
 }
 
+/// The privileged scope of Numbering administration (catalog, manual KYC review,
+/// revocations). Platform Access grants it only to FIRST_PARTY applications by an explicit
+/// operator grant.
+pub const NUMBERS_ADMIN: &str = "numbers.admin";
+
+/// The audited human operator acting through a `numbers.admin` credential.
+pub const OPERATOR_HEADER: &str = "x-cf-operator";
+
+/// An authenticated `numbers.admin` caller and the human operator it acts for.
+#[derive(Debug, Clone)]
+pub struct AdminCaller {
+    pub context: TrustedContext,
+    /// `Actor::operator(<X-CF-Operator>)`.
+    pub actor: crate::numbers::Actor,
+}
+
+fn valid_operator(value: &str) -> bool {
+    (1..=100).contains(&value.len())
+        && value.as_bytes()[0].is_ascii_alphanumeric()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'@' | b'-'))
+}
+
+#[axum::async_trait]
+impl<S: Send + Sync> FromRequestParts<S> for AdminCaller {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let caller = parts
+            .extensions
+            .get::<CustomerCaller>()
+            .cloned()
+            .ok_or(ApiError::Code(ErrorCode::AuthenticationFailed))?;
+        if !caller.0.first_party || !caller.0.has_scope(NUMBERS_ADMIN) {
+            crate::metrics::inc("numbering_scope_denied_total", &[]);
+            tracing::warn!(
+                "administration denied (numbers.admin on a first-party application required)"
+            );
+            return Err(ApiError::Code(ErrorCode::InsufficientScope));
+        }
+        let mut values = parts.headers.get_all(OPERATOR_HEADER).iter();
+        let operator = match (values.next(), values.next()) {
+            (Some(v), None) => v
+                .to_str()
+                .ok()
+                .filter(|v| valid_operator(v))
+                .map(str::to_string),
+            _ => None,
+        }
+        .ok_or(ApiError::Code(ErrorCode::OperatorRequired))?;
+        Ok(AdminCaller {
+            actor: crate::numbers::Actor::operator(&operator),
+            context: caller.0,
+        })
+    }
+}
+
 #[axum::async_trait]
 impl<S: Send + Sync> FromRequestParts<S> for CustomerCaller {
     type Rejection = ApiError;

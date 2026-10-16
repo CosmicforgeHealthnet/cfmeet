@@ -59,6 +59,7 @@ pub struct ResourceRow {
     pub voice_route_ref: Option<Uuid>,
     pub sms_route_ref: Option<Uuid>,
     pub routing_revision: i64,
+    pub capability_revision: i64,
     pub monthly_cost_minor: Option<i64>,
     pub setup_cost_minor: Option<i64>,
     pub currency: Option<String>,
