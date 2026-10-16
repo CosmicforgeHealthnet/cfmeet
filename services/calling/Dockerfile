@@ -1,12 +1,12 @@
 # CF Meet Calling service. Build context: the REPOSITORY ROOT (the service depends on
-# the shared packages/service-auth, packages/object-storage and packages/webhooks crates):
+# the shared packages/service-auth, packages/object-storage and packages/webhooks crates,
+# plus packages/contracts for the embedded public OpenAPI documents):
 #
 #   docker build -f services/calling/Dockerfile -t cfmeet-calling .
 #
-# Only packages/service-auth, packages/object-storage, packages/webhooks and
-# services/calling enter the
-# build context (services/calling/Dockerfile.dockerignore); no other service's source is
-# copied.
+# Only packages/service-auth, packages/object-storage, packages/webhooks,
+# packages/contracts and services/calling enter the build context
+# (services/calling/Dockerfile.dockerignore); no other service's source is copied.
 #
 # The image contains the service (`calling`), its migration runner (`calling-migration`)
 # and the operational CLI (`platform_admin`). Configuration — DATABASE_URL,
@@ -18,6 +18,7 @@ WORKDIR /src
 COPY packages/service-auth packages/service-auth
 COPY packages/object-storage packages/object-storage
 COPY packages/webhooks packages/webhooks
+COPY packages/contracts packages/contracts
 COPY services/calling services/calling
 WORKDIR /src/services/calling
 RUN cargo build --release --locked -p calling-migration --bin calling-migration \
