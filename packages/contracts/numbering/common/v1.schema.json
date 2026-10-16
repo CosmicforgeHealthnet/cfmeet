@@ -1,0 +1,1170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/numbering/common/v1.schema.json",
+  "title": "CF Meet Numbering common v1",
+  "description": "The canonical vocabulary and messages of services/numbering (Part IV Workstreams C-D, ADR 0033): Number Resource identity (CF Meet ids are canonical; provider identifiers never appear), type, capabilities with provenance, opaque provider binding references, inventory observations, reservations, DCN assignments with ownership and routing references, routing profiles, lifecycle transitions, the trusted context and the error envelope. Values equal the database CHECK constraints and the Rust domain types (a conformance test compares them). Full public number search / provisioning APIs are later workstreams.",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/NumberResource"
+    },
+    {
+      "$ref": "#/$defs/InventoryObservation"
+    },
+    {
+      "$ref": "#/$defs/Reservation"
+    },
+    {
+      "$ref": "#/$defs/DcnAssignment"
+    },
+    {
+      "$ref": "#/$defs/DcnAssignmentList"
+    },
+    {
+      "$ref": "#/$defs/AssignmentHistory"
+    },
+    {
+      "$ref": "#/$defs/RoutingProfile"
+    },
+    {
+      "$ref": "#/$defs/LifecycleTransition"
+    },
+    {
+      "$ref": "#/$defs/TrustedContext"
+    },
+    {
+      "$ref": "#/$defs/Error"
+    }
+  ],
+  "$defs": {
+    "Timestamp": {
+      "description": "RFC 3339 UTC timestamp.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "Revision": {
+      "description": "Optimistic-concurrency revision: 1 at creation, +1 on every effective change. Writers state the revision they expect; a stale one is VERSION_CONFLICT.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "NumberResourceId": {
+      "description": "The canonical CF Meet identity of a public number (Number Resource). Independent of any provider identifier; never changes across provider replacement or porting.",
+      "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+    },
+    "E164": {
+      "description": "A normalized E.164 number. Exposed only by the internal Number Resource view to authorized services; never in events, logs or errors.",
+      "type": "string",
+      "pattern": "^\\+[1-9][0-9]{6,14}$"
+    },
+    "CountryCode": {
+      "description": "ISO 3166-1 alpha-2 country stated by the inventory source (never inferred).",
+      "type": "string",
+      "pattern": "^[A-Z]{2}$"
+    },
+    "LifecycleState": {
+      "description": "The canonical Number Resource lifecycle (Part IV D2). Transitions follow one centralized policy (database function number_lifecycle_allowed). UNKNOWN_PROVIDER_STATE is left only by reconciliation with evidence; irreversible provider actions are never repeated while a resource is in it.",
+      "type": "string",
+      "enum": [
+        "DISCOVERED",
+        "AVAILABLE",
+        "RESERVING",
+        "RESERVED",
+        "PROVISIONING",
+        "PROVISIONED",
+        "ACTIVE",
+        "SUSPENDED",
+        "RELEASING",
+        "QUARANTINED",
+        "REASSIGNABLE",
+        "RELEASED",
+        "FAILED",
+        "UNKNOWN_PROVIDER_STATE"
+      ]
+    },
+    "InventorySource": {
+      "description": "Origin of a resource. SYNTHETIC_TEST is test inventory, never a real public number, usable only by SANDBOX / TEST environments; PRODUCTION never uses it.",
+      "type": "string",
+      "enum": [
+        "LIVE_PROVIDER",
+        "SYNTHETIC_TEST",
+        "MANUAL_IMPORT"
+      ]
+    },
+    "NumberType": {
+      "description": "Classification, set only from evidence (never inferred from the E.164 format or from SMS support).",
+      "type": "string",
+      "enum": [
+        "UNCLASSIFIED",
+        "GEOGRAPHIC",
+        "MOBILE",
+        "TOLL_FREE",
+        "NATIONAL"
+      ]
+    },
+    "ClassificationSource": {
+      "description": "Evidence behind the classification.",
+      "type": "string",
+      "enum": [
+        "NONE",
+        "PROVIDER_INVENTORY",
+        "MANUAL_IMPORT",
+        "SYNTHETIC"
+      ]
+    },
+    "Capability": {
+      "description": "Canonical capability types (Part IV D4). Voice / SMS / MMS are routable (served by a provider binding); the others are number-class attributes.",
+      "type": "string",
+      "enum": [
+        "VOICE_INBOUND",
+        "VOICE_OUTBOUND",
+        "SMS_INBOUND",
+        "SMS_OUTBOUND",
+        "MMS_RICH",
+        "MOBILE_NUMBER_CLASS",
+        "GEOGRAPHIC_LOCAL",
+        "TOLL_FREE_BUSINESS"
+      ]
+    },
+    "CapabilityStatus": {
+      "description": "VERIFIED only with evidence (never for synthetic inventory); RESTRICTED / WITHDRAWN are downgrades.",
+      "type": "string",
+      "enum": [
+        "VERIFIED",
+        "DECLARED",
+        "RESTRICTED",
+        "WITHDRAWN"
+      ]
+    },
+    "CapabilitySource": {
+      "description": "Provenance of a capability fact.",
+      "type": "string",
+      "enum": [
+        "PROVIDER_INVENTORY",
+        "PROVIDER_CONFIRMATION",
+        "MANUAL_IMPORT",
+        "SYNTHETIC"
+      ]
+    },
+    "Availability": {
+      "description": "What an inventory source reported.",
+      "type": "string",
+      "enum": [
+        "AVAILABLE",
+        "UNAVAILABLE",
+        "UNKNOWN"
+      ]
+    },
+    "ReservationStatus": {
+      "description": "PENDING until a provider hold is confirmed (HELD); UNKNOWN when the hold outcome is uncertain. EXPIRED / CANCELLED / CONVERTED / FAILED are final.",
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "HELD",
+        "UNKNOWN",
+        "EXPIRED",
+        "CANCELLED",
+        "CONVERTED",
+        "FAILED"
+      ]
+    },
+    "ReleaseState": {
+      "description": "Whether a provider hold was given back. An expired or cancelled reservation does NOT imply a provider release: a held live number stays RESERVED with PENDING release until evidence.",
+      "type": "string",
+      "enum": [
+        "NOT_STARTED",
+        "NOT_REQUIRED",
+        "PENDING",
+        "CONFIRMED",
+        "UNKNOWN"
+      ]
+    },
+    "AssignmentStatus": {
+      "description": "DCN assignment states (Part IV D6). ACTIVE is reachable only from ACTIVATING (and back from SUSPENDED); one open (not CLOSED) assignment per number.",
+      "type": "string",
+      "enum": [
+        "REQUESTED",
+        "PENDING_ELIGIBILITY",
+        "ELIGIBLE",
+        "RESERVED",
+        "ACTIVATING",
+        "ACTIVE",
+        "SUSPENDED",
+        "RELEASE_REQUESTED",
+        "ROUTING_REMOVED",
+        "QUARANTINED",
+        "CLOSED"
+      ]
+    },
+    "OwnerKind": {
+      "description": "PRINCIPAL for PERSONAL / PROFESSIONAL numbers; ORGANIZATION for every organizational class.",
+      "type": "string",
+      "enum": [
+        "PRINCIPAL",
+        "ORGANIZATION"
+      ]
+    },
+    "OwnershipClass": {
+      "description": "Provider-independent ownership classes (Part IV D7). An organization-owned number routed to an employee (EMPLOYEE_DIRECT) remains organizational property.",
+      "type": "string",
+      "enum": [
+        "PERSONAL",
+        "PROFESSIONAL",
+        "ORGANIZATION",
+        "EMPLOYEE_DIRECT",
+        "DEPARTMENT",
+        "CAMPAIGN",
+        "SHARED_TEAM"
+      ]
+    },
+    "VoiceTargetKind": {
+      "description": "Voice routing target: opaque CF Meet ids of Calling / enterprise constructs, never SIP or provider data.",
+      "type": "string",
+      "enum": [
+        "NONE",
+        "PRINCIPAL",
+        "CALLING_ENDPOINT",
+        "ENTERPRISE_EXTENSION",
+        "ENTERPRISE_RING_GROUP",
+        "ENTERPRISE_QUEUE",
+        "ENTERPRISE_IVR",
+        "ENTERPRISE_DEPARTMENT"
+      ]
+    },
+    "SmsTargetKind": {
+      "description": "SMS routing target (opaque CF Meet ids).",
+      "type": "string",
+      "enum": [
+        "NONE",
+        "PRINCIPAL",
+        "APPLICATION"
+      ]
+    },
+    "ActorKind": {
+      "description": "Who performed a change.",
+      "type": "string",
+      "enum": [
+        "OPERATOR",
+        "SERVICE",
+        "SYSTEM",
+        "RECONCILIATION",
+        "CUSTOMER"
+      ]
+    },
+    "EnvironmentKind": {
+      "description": "The customer application environment (from Platform Access).",
+      "type": "string",
+      "enum": [
+        "SANDBOX",
+        "TEST",
+        "PRODUCTION"
+      ]
+    },
+    "RiskTier": {
+      "type": "string",
+      "enum": [
+        "UNASSESSED",
+        "STANDARD",
+        "ELEVATED",
+        "HIGH"
+      ]
+    },
+    "CostEvidence": {
+      "description": "Whether a cost is known from a source.",
+      "type": "string",
+      "enum": [
+        "KNOWN",
+        "ESTIMATED",
+        "UNKNOWN"
+      ]
+    },
+    "FailureCategory": {
+      "type": "string",
+      "enum": [
+        "PROVIDER_REJECTED",
+        "PROVIDER_UNAVAILABLE",
+        "NOT_OBTAINABLE",
+        "POLICY_DENIED",
+        "VALIDATION_FAILED",
+        "RECONCILED_FAILED"
+      ]
+    },
+    "UncertainOperation": {
+      "description": "The external operation whose outcome is unknown (UNKNOWN_PROVIDER_STATE).",
+      "type": "string",
+      "enum": [
+        "DISCOVER",
+        "RESERVE",
+        "RELEASE_HOLD",
+        "PROVISION",
+        "ACTIVATE",
+        "RELEASE",
+        "PORT"
+      ]
+    },
+    "BindingChangeReason": {
+      "type": "string",
+      "enum": [
+        "INITIAL",
+        "PROVIDER_REPLACEMENT",
+        "PORT_IN",
+        "PORT_OUT",
+        "CORRECTION",
+        "RELEASE"
+      ]
+    },
+    "RestrictionFlag": {
+      "type": "string",
+      "enum": [
+        "NO_INTERNATIONAL_OUTBOUND",
+        "NO_PREMIUM_DESTINATIONS",
+        "KYC_REQUIRED",
+        "LOCAL_PRESENCE_REQUIRED",
+        "SMS_REGISTRATION_REQUIRED",
+        "EMERGENCY_SERVICES_UNSUPPORTED"
+      ]
+    },
+    "ReasonCode": {
+      "description": "Stable UPPER_SNAKE_CASE reason of a change.",
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+    },
+    "CapabilityFact": {
+      "description": "The current record of one capability, with provenance and effective date (history is kept by Numbering).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability",
+        "status",
+        "source",
+        "effectiveFrom"
+      ],
+      "properties": {
+        "capability": {
+          "$ref": "#/$defs/Capability"
+        },
+        "status": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "source": {
+          "$ref": "#/$defs/CapabilitySource"
+        },
+        "effectiveFrom": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "ProviderBindingRef": {
+      "description": "The provider-independent view of a provider binding: an opaque binding reference. The provider identifier and the provider's own reference never leave Numbering.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bindingRef",
+        "capabilities",
+        "bindingRevision",
+        "active",
+        "effectiveFrom",
+        "effectiveTo"
+      ],
+      "properties": {
+        "bindingRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Capability"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "bindingRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "effectiveFrom": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "effectiveTo": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "NumberResource": {
+      "description": "GET /internal/v1/number-resources/{id} (permission number-resource.read): the canonical Number Resource for Calling / Telephony.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numberResourceId",
+        "e164",
+        "countryCode",
+        "region",
+        "numberType",
+        "inventorySource",
+        "state",
+        "revision",
+        "stateChangedAt",
+        "capabilities",
+        "activeBindings",
+        "bindingRevision",
+        "routingRevision",
+        "riskTier",
+        "restrictionFlags"
+      ],
+      "properties": {
+        "numberResourceId": {
+          "$ref": "#/$defs/NumberResourceId"
+        },
+        "e164": {
+          "$ref": "#/$defs/E164"
+        },
+        "countryCode": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "region": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "numberType": {
+          "$ref": "#/$defs/NumberType"
+        },
+        "inventorySource": {
+          "$ref": "#/$defs/InventorySource"
+        },
+        "state": {
+          "$ref": "#/$defs/LifecycleState"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "stateChangedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CapabilityFact"
+          }
+        },
+        "activeBindings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProviderBindingRef"
+          }
+        },
+        "bindingRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "routingRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "riskTier": {
+          "$ref": "#/$defs/RiskTier"
+        },
+        "restrictionFlags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RestrictionFlag"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "InventoryObservation": {
+      "description": "One inventory observation as Numbering records it (append-only). An observation is evidence that a number was offered; it is never an allocation. The internal provider key is not part of the contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numberResourceId",
+        "source",
+        "observedAt",
+        "freshUntil",
+        "availability"
+      ],
+      "properties": {
+        "numberResourceId": {
+          "$ref": "#/$defs/NumberResourceId"
+        },
+        "source": {
+          "$ref": "#/$defs/InventorySource"
+        },
+        "observedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "freshUntil": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "availability": {
+          "$ref": "#/$defs/Availability"
+        },
+        "offeredCapabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Capability"
+          },
+          "uniqueItems": true
+        },
+        "observedNumberType": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NumberType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "costEvidence": {
+          "$ref": "#/$defs/CostEvidence"
+        }
+      }
+    },
+    "Reservation": {
+      "description": "GET /v1/numbers/reservations/{id}: a reservation of the caller's trusted scope (other scopes: NOT_FOUND).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reservationId",
+        "numberResourceId",
+        "status",
+        "revision",
+        "expiresAt",
+        "providerReleaseState",
+        "createdAt"
+      ],
+      "properties": {
+        "reservationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "numberResourceId": {
+          "$ref": "#/$defs/NumberResourceId"
+        },
+        "status": {
+          "$ref": "#/$defs/ReservationStatus"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "providerReleaseState": {
+          "$ref": "#/$defs/ReleaseState"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "Ownership": {
+      "description": "The owner of a DCN assignment; immutable on the record (a new owner is a new assignment).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ownershipClass",
+        "ownerKind",
+        "ownerRef"
+      ],
+      "properties": {
+        "ownershipClass": {
+          "$ref": "#/$defs/OwnershipClass"
+        },
+        "ownerKind": {
+          "$ref": "#/$defs/OwnerKind"
+        },
+        "ownerRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "ownershipClass": {
+                "enum": [
+                  "PERSONAL",
+                  "PROFESSIONAL"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "ownerKind": {
+                "const": "PRINCIPAL"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "ownerKind": {
+                "const": "ORGANIZATION"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "RoutingRef": {
+      "description": "The pinned routing profile revision of an assignment.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "routingProfileId",
+        "revision"
+      ],
+      "properties": {
+        "routingProfileId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        }
+      }
+    },
+    "DcnAssignment": {
+      "description": "GET /v1/numbers/assignments/{id}: a DCN assignment of the caller's trusted scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignmentId",
+        "numberResourceId",
+        "status",
+        "revision",
+        "ownership",
+        "routing",
+        "capabilitySnapshot",
+        "eligibilityDecisionRef",
+        "requestedAt",
+        "activatedAt",
+        "closedAt"
+      ],
+      "properties": {
+        "assignmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "numberResourceId": {
+          "$ref": "#/$defs/NumberResourceId"
+        },
+        "status": {
+          "$ref": "#/$defs/AssignmentStatus"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "ownership": {
+          "$ref": "#/$defs/Ownership"
+        },
+        "routing": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RoutingRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "capabilitySnapshot": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Capability"
+          },
+          "uniqueItems": true
+        },
+        "eligibilityDecisionRef": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requestedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "activatedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "closedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "DcnAssignmentList": {
+      "description": "GET /v1/numbers/assignments: the caller scope's assignments, newest first (at most 100).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DcnAssignment"
+          },
+          "maxItems": 100
+        }
+      }
+    },
+    "AssignmentHistoryEntry": {
+      "description": "One append-only history row of an assignment.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "eventKind",
+        "fromStatus",
+        "toStatus",
+        "revision",
+        "ownershipClass",
+        "routingProfileId",
+        "routingProfileRevision",
+        "actorKind",
+        "reasonCode",
+        "occurredAt"
+      ],
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "eventKind": {
+          "type": "string",
+          "enum": [
+            "CREATED",
+            "STATUS_CHANGED",
+            "ROUTING_CHANGED",
+            "ELIGIBILITY_RECORDED"
+          ]
+        },
+        "fromStatus": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AssignmentStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "toStatus": {
+          "$ref": "#/$defs/AssignmentStatus"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "ownershipClass": {
+          "$ref": "#/$defs/OwnershipClass"
+        },
+        "routingProfileId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "routingProfileRevision": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Revision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actorKind": {
+          "$ref": "#/$defs/ActorKind"
+        },
+        "reasonCode": {
+          "$ref": "#/$defs/ReasonCode"
+        },
+        "occurredAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "AssignmentHistory": {
+      "description": "GET /v1/numbers/assignments/{id}/history.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AssignmentHistoryEntry"
+          }
+        }
+      }
+    },
+    "RoutingTarget": {
+      "description": "A routing target: a kind and, unless NONE, an opaque CF Meet reference.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "ref"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "ref": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "NONE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "ref": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "ref": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "RoutingProfile": {
+      "description": "One revision of a versioned routing profile (opaque ids; exactly one CURRENT revision per profile; superseded revisions are kept).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "routingProfileId",
+        "revision",
+        "voice",
+        "sms",
+        "status",
+        "createdAt"
+      ],
+      "properties": {
+        "routingProfileId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "voice": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/RoutingTarget"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "$ref": "#/$defs/VoiceTargetKind"
+                }
+              }
+            }
+          ]
+        },
+        "sms": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/RoutingTarget"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "$ref": "#/$defs/SmsTargetKind"
+                }
+              }
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "CURRENT",
+            "SUPERSEDED"
+          ]
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "LifecycleTransition": {
+      "description": "One recorded Number Resource lifecycle transition (append-only audit).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numberResourceId",
+        "fromState",
+        "toState",
+        "revision",
+        "actorKind",
+        "reasonCode",
+        "occurredAt"
+      ],
+      "properties": {
+        "numberResourceId": {
+          "$ref": "#/$defs/NumberResourceId"
+        },
+        "fromState": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LifecycleState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "toState": {
+          "$ref": "#/$defs/LifecycleState"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "actorKind": {
+          "$ref": "#/$defs/ActorKind"
+        },
+        "reasonCode": {
+          "$ref": "#/$defs/ReasonCode"
+        },
+        "failureCategory": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/FailureCategory"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "uncertainOperation": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/UncertainOperation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidenceRef": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "correlationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/CorrelationId"
+        },
+        "occurredAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "TrustedContext": {
+      "description": "The trusted context of a customer request, taken ONLY from the authority chain Platform Access returns for the presented credential (cfmeet.platform-access.identity AuthorityChain). A tenant, application or environment id in a request never becomes authority; a SAFETY_ONLY authority is refused (Numbering has no safety operation).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenantId",
+        "applicationId",
+        "environmentId",
+        "environmentKind",
+        "serviceAccountId",
+        "credentialId",
+        "scopes"
+      ],
+      "properties": {
+        "tenantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "applicationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentKind": {
+          "$ref": "#/$defs/EnvironmentKind"
+        },
+        "serviceAccountId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "credentialId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "ErrorCode": {
+      "description": "Stable error codes. PRECONDITION_FAILED / CONFLICT carry the domain rule in `reason`.",
+      "type": "string",
+      "enum": [
+        "VALIDATION_ERROR",
+        "AUTHENTICATION_FAILED",
+        "INSUFFICIENT_SCOPE",
+        "NOT_FOUND",
+        "METHOD_NOT_ALLOWED",
+        "PAYLOAD_TOO_LARGE",
+        "RATE_LIMITED",
+        "INTERNAL_AUTHENTICATION_FAILED",
+        "INTERNAL_PERMISSION_DENIED",
+        "VERSION_CONFLICT",
+        "INVALID_TRANSITION",
+        "CONFLICT",
+        "PRECONDITION_FAILED",
+        "IDEMPOTENCY_KEY_REUSED",
+        "SERVICE_UNAVAILABLE",
+        "INTERNAL_ERROR"
+      ]
+    },
+    "DomainRule": {
+      "description": "Domain rule codes carried as `reason`.",
+      "type": "string",
+      "enum": [
+        "RECONCILIATION_REQUIRED",
+        "INVENTORY_NOT_FRESH",
+        "RELEASE_EVIDENCE_REQUIRED",
+        "RESERVATION_REQUIRED",
+        "HOLD_REQUIRED",
+        "ASSIGNMENT_REQUIRED",
+        "BINDING_REQUIRED",
+        "ASSIGNMENT_ACTIVE",
+        "QUARANTINE_ACTIVE",
+        "BINDINGS_ACTIVE",
+        "RESERVATION_EXISTS",
+        "ASSIGNMENT_EXISTS",
+        "NUMBER_EXISTS",
+        "BINDING_CONFLICT",
+        "BINDING_ENDED",
+        "NOT_ALLOCATABLE",
+        "NOT_EXPIRED",
+        "RESERVATION_EXPIRED",
+        "RELEASE_NOT_PENDING",
+        "ENVIRONMENT_INVENTORY_MISMATCH",
+        "CAPABILITY_IN_USE",
+        "EVIDENCE_REQUIRED",
+        "ELIGIBILITY_REQUIRED",
+        "PROVISIONING_REQUIRED",
+        "ROUTING_REQUIRED",
+        "ROUTING_NOT_ALLOWED",
+        "PRIVILEGED_ACCESS_REQUIRED",
+        "SCOPE_MISMATCH",
+        "RULE_VIOLATION",
+        "CONFLICT"
+      ]
+    },
+    "Error": {
+      "description": "The error envelope (Cache-Control: no-store). Never contains a number, provider reference, credential or database text.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message",
+            "requestId"
+          ],
+          "properties": {
+            "code": {
+              "$ref": "#/$defs/ErrorCode"
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "requestId": {
+              "oneOf": [
+                {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RequestId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "$ref": "#/$defs/DomainRule"
+            }
+          }
+        }
+      }
+    }
+  }
+}

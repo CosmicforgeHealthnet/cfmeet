@@ -1,12 +1,13 @@
 # CF Meet — root developer commands.
 # Each target delegates to the app/service's own toolchain. services/meeting-service/,
-# services/calling/, services/platform-access/, services/privacy-relay/, services/telephony/ and
-# apps/web/ remain independently buildable and deployable.
+# services/calling/, services/platform-access/, services/numbering/, services/privacy-relay/,
+# services/telephony/ and apps/web/ remain independently buildable and deployable.
 # Shared code lives in packages/ (contracts, service-auth); no service depends on another.
 
 MEETING_SERVICE := services/meeting-service
 CALLING         := services/calling
 PLATFORM_ACCESS := services/platform-access
+NUMBERING       := services/numbering
 PRIVACY_RELAY   := services/privacy-relay
 TELEPHONY       := services/telephony
 WEB             := apps/web
@@ -15,7 +16,8 @@ CONTRACTS       := packages/contracts
 
 # Binaries of a service workspace (honours a shared CARGO_TARGET_DIR).
 bin_dir = $(or $(CARGO_TARGET_DIR),$(CURDIR)/$(1)/target)/debug
-# Calling authenticates every credential through Platform Access: its tests run a real one.
+# Calling and Numbering authenticate every credential through Platform Access: their tests
+# run a real one.
 PLATFORM_ACCESS_TEST_ENV = PLATFORM_ACCESS_BIN=$(call bin_dir,$(PLATFORM_ACCESS))/platform-access \
 	PLATFORM_ACCESS_MIGRATION_BIN=$(call bin_dir,$(PLATFORM_ACCESS))/platform-access-migration
 
@@ -24,6 +26,7 @@ PLATFORM_ACCESS_TEST_ENV = PLATFORM_ACCESS_BIN=$(call bin_dir,$(PLATFORM_ACCESS)
         frontend-install calling calling-migrate calling-test calling-lint calling-build calling-admin \
         platform-access platform-access-migrate platform-access-test platform-access-lint \
         platform-access-build platform-access-admin platform-access-bins \
+        numbering numbering-migrate numbering-test numbering-lint numbering-build \
         privacy-relay privacy-relay-migrate privacy-relay-test privacy-relay-lint privacy-relay-build \
         privacy-relay-integration \
         telephony telephony-migrate telephony-test telephony-lint telephony-build telephony-sip-cert \
@@ -76,7 +79,7 @@ platform-access: ## Run the Platform Access identity authority
 platform-access-admin: ## Platform Access administration CLI, e.g. make platform-access-admin ARGS="tenant list"
 	cd $(PLATFORM_ACCESS) && cargo run --bin platform-access-admin -- $(ARGS)
 
-platform-access-bins: ## Build the Platform Access server + migration binaries (used by Calling's tests)
+platform-access-bins: ## Build the Platform Access server + migration binaries (used by Calling's and Numbering's tests)
 	cd $(PLATFORM_ACCESS) && cargo build --workspace --bins
 
 platform-access-test: ## Run Platform Access tests (requires TEST_DATABASE_URL; no Docker needed)
@@ -88,6 +91,22 @@ platform-access-lint: ## fmt + clippy for Platform Access
 
 platform-access-build: ## Build Platform Access
 	cd $(PLATFORM_ACCESS) && cargo build --workspace
+
+numbering-migrate: ## Apply Numbering database migrations (services/numbering/.env)
+	cd $(NUMBERING) && cargo run -p numbering-migration -- up
+
+numbering: ## Run the Numbering service (number resources, DCN assignments)
+	cd $(NUMBERING) && cargo run --bin numbering
+
+numbering-test: platform-access-bins ## Run Numbering tests against a real Platform Access (requires TEST_DATABASE_URL; no Docker needed)
+	cd $(NUMBERING) && $(PLATFORM_ACCESS_TEST_ENV) cargo test --workspace --no-fail-fast
+
+numbering-lint: ## fmt + clippy for Numbering
+	cd $(NUMBERING) && cargo fmt --all -- --check
+	cd $(NUMBERING) && cargo clippy --workspace --all-targets -- -D warnings
+
+numbering-build: ## Build Numbering
+	cd $(NUMBERING) && cargo build --workspace
 
 privacy-relay-migrate: ## Apply Privacy Relay database migrations (services/privacy-relay/.env)
 	cd $(PRIVACY_RELAY) && cargo run -p privacy-relay-migration -- up
@@ -180,11 +199,11 @@ web: frontend ## Alias for `make frontend`
 dev: ## Start deps, then meeting service + web app together (Ctrl+C stops both)
 	./scripts/dev.sh
 
-test: backend-test calling-test platform-access-test privacy-relay-test telephony-test service-auth-test contracts-test contracts-validate service-boundaries secret-scan frontend-test ## Run all tests
+test: backend-test calling-test platform-access-test numbering-test privacy-relay-test telephony-test service-auth-test contracts-test contracts-validate service-boundaries secret-scan frontend-test ## Run all tests
 
-lint: backend-lint calling-lint platform-access-lint privacy-relay-lint telephony-lint service-auth-lint contracts-lint frontend-lint ## Run all linters
+lint: backend-lint calling-lint platform-access-lint numbering-lint privacy-relay-lint telephony-lint service-auth-lint contracts-lint frontend-lint ## Run all linters
 
-build: backend-build calling-build platform-access-build privacy-relay-build telephony-build frontend-build ## Build all applications and services
+build: backend-build calling-build platform-access-build numbering-build privacy-relay-build telephony-build frontend-build ## Build all applications and services
 
 backend-test:
 	cd $(MEETING_SERVICE) && cargo test --workspace

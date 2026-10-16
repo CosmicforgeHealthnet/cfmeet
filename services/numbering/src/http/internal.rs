@@ -1,0 +1,55 @@
+//! Internal API (service tokens): the canonical, provider-independent view of a Number
+//! Resource for Calling / Telephony (`number-resource.read`). Provider identifiers and
+//! external references never leave Numbering: bindings appear as opaque binding refs.
+
+use axum::{
+    extract::{Path, State},
+    routing::get,
+    Json, Router,
+};
+use cf_service_auth::InternalPermission;
+use serde_json::{json, Value};
+use uuid::Uuid;
+
+use super::{error::ApiError, middleware::InternalCaller};
+use crate::state::AppState;
+
+pub fn routes() -> Router<AppState> {
+    Router::new().route(
+        "/number-resources/:number_resource_id",
+        get(number_resource),
+    )
+}
+
+async fn number_resource(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    caller.require_permission(InternalPermission::NumberResourceRead)?;
+    let r = s.numbers.resource(id).await?;
+    let capabilities = s.numbers.current_capabilities(id).await?;
+    let bindings = s.numbers.bindings(id).await?;
+    Ok(Json(json!({
+        "numberResourceId": r.id,
+        "e164": r.e164,
+        "countryCode": r.country_code,
+        "region": r.region,
+        "numberType": r.number_type,
+        "inventorySource": r.inventory_source,
+        "state": r.state,
+        "revision": r.revision,
+        "stateChangedAt": r.state_changed_at,
+        "capabilities": capabilities.iter().map(|c| json!({
+            "capability": c.capability,
+            "status": c.status,
+            "source": c.source,
+            "effectiveFrom": c.effective_from,
+        })).collect::<Vec<_>>(),
+        "activeBindings": bindings.iter().filter(|b| b.status == "ACTIVE").map(|b| b.public_ref()).collect::<Vec<_>>(),
+        "bindingRevision": r.binding_revision,
+        "routingRevision": r.routing_revision,
+        "riskTier": r.risk_tier,
+        "restrictionFlags": r.restriction_flags,
+    })))
+}

@@ -78,6 +78,16 @@
                "tests/identity_projection.rs::replaying_the_feed_never_regresses_a_newer_state",
                "tests/identity_projection.rs::principal_changes_at_platform_access_reach_calling_through_the_feed"]},
     {"id": "platform-access-failure-window-pruning", "owner": "platform-access", "source": "src/identity/authentication.rs", "entry": "prune_failure_windows",
-     "tests": ["tests/authentication.rs::failure_windows_are_bounded_reset_and_pruned"]}
+     "tests": ["tests/authentication.rs::failure_windows_are_bounded_reset_and_pruned"]},
+    {"id": "numbering-outbox-publication", "owner": "numbering", "source": "src/infra/outbox.rs", "entry": "publish_due",
+     "tests": ["tests/outbox.rs::concurrent_publishers_never_deliver_the_same_claim_and_a_dead_publisher_is_taken_over",
+               "tests/outbox.rs::failures_back_off_and_exhausted_or_refused_events_are_dead_lettered_not_dropped",
+               "tests/outbox.rs::publication_preserves_per_aggregate_order_and_conforms_to_the_platform_envelope"]},
+    {"id": "numbering-job-lease-recovery", "owner": "numbering", "source": "src/infra/jobs.rs", "entry": "recover_expired",
+     "tests": ["tests/workers.rs::a_restarted_worker_retries_idempotent_work_and_parks_provider_affecting_work",
+               "tests/workers.rs::concurrent_runners_never_run_the_same_claim",
+               "tests/workers.rs::retries_back_off_until_exhausted_and_permanent_failures_are_final"]},
+    {"id": "numbering-idempotency-expiry", "owner": "numbering", "source": "src/infra/idempotency.rs", "entry": "purge_expired",
+     "tests": ["tests/workers.rs::idempotency_keys_replay_refuse_mismatches_and_are_scoped"]}
   ]
 }

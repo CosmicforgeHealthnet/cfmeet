@@ -1,0 +1,48 @@
+[workspace]
+members = [".", "migration"]
+
+[package]
+name = "numbering"
+version = "0.1.0"
+edition = "2021"
+publish = false
+default-run = "numbering"
+description = "CF Meet Numbering: the canonical authority for public Number Resources, provider bindings, capabilities, inventory, reservations, DCN assignments, ownership, routing profiles and number lifecycle"
+
+[lib]
+name = "numbering"
+path = "src/lib.rs"
+
+[[bin]]
+name = "numbering"
+path = "src/main.rs"
+
+[dependencies]
+numbering-migration = { path = "migration" }
+# Shared internal service authentication protocol (packages/, never another service).
+cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
+tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync", "net"] }
+sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono", "with-json", "postgres-array"] }
+axum = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio", "query", "matched-path"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+thiserror = "2.0"
+anyhow = "1.0"
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+secrecy = "0.10"
+sha2 = "0.10"
+hex = "0.4"
+rand = "0.8"
+async-trait = "0.1"
+zeroize = "1.8"
+
+[dev-dependencies]
+jsonschema = { version = "0.58", default-features = false }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1.42", features = ["process"] }

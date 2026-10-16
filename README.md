@@ -99,10 +99,11 @@ Phase 2 does not own Calling, Telephony, Privacy Relay, Numbering or Messaging.
 services/
 ├── meeting-service/       current
 ├── calling/               active
+├── platform-access/       active (shared identity authority, ADR 0032)
+├── numbering/             active (public numbers / DCNs, ADR 0033)
 ├── privacy-relay/         active
 ├── messaging/             future
 ├── telephony/             active
-├── numbering/             future
 ├── webhook-delivery/      future if extracted
 └── workers/               future if extracted
 ```

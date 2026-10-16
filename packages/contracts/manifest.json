@@ -213,6 +213,39 @@
       "description": "Internal HTTP surface of services/platform-access: GET /health, GET /ready and the service-authenticated /internal/v1 API — credential authentication, credential status, authorization evaluation, trusted context, identity change feed, import receipts, scope registry, principal resolution / registration / tombstone (Calling, Numbering) and operator administration (operator console, audited)."
     },
     {
+      "id": "cfmeet.numbering.common",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "numbering/common/v1.schema.json",
+      "owner": "numbering",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "The canonical Numbering vocabulary and messages (Part IV C5, ADR 0033): Number Resource identity (CF Meet ids canonical, provider identifiers never exposed), type, capabilities with provenance, opaque provider binding references, inventory observations, reservations, DCN assignments with ownership and routing references, routing profiles, lifecycle transitions, the trusted context and the error envelope."
+    },
+    {
+      "id": "cfmeet.numbering.event",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "numbering/events/v1.schema.json",
+      "owner": "numbering",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Numbering domain events in the platform envelope (transactional outbox, at least once, per-aggregate order): resource discovered / lifecycle-changed / classified, binding changed, capability changed, reservation changed, assignment changed, routing profile revised. No telephone number, provider identifier, credential or secret."
+    },
+    {
+      "id": "cfmeet.numbering.internal-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "numbering/internal/v1.openapi.json",
+      "owner": "numbering",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "HTTP surface of services/numbering: GET /health, GET /ready, customer reads of the caller's own DCN assignments / history / reservations (/v1, authenticated by Platform Access, numbers.read) and the service-authenticated internal Number Resource view (/internal/v1, number-resource.read). Full public search / provisioning APIs are later workstreams."
+    },
+    {
       "id": "cfmeet.privacy-relay.http-api",
       "version": "1.2.0",
       "kind": "openapi",

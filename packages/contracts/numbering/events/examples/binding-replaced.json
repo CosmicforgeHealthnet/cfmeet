@@ -1,0 +1,20 @@
+{
+  "event_id": "evt_0123456789abcdef0123456789abcdef",
+  "event_type": "number.binding.changed",
+  "schema_version": 1,
+  "occurred_at": "2031-03-01T10:05:00.000000Z",
+  "producer_service": "cfmeet.numbering",
+  "runtime_environment": "staging",
+  "correlation_id": "corr_0123456789abcdef0123456789abcdef",
+  "payload": {
+    "number_resource_id": "5f0b2c1e-8d3a-4b6f-9e2d-7a1c3b5d9f01",
+    "binding_ref": "7f9b1d3e-5a7c-4e9f-8a1b-3c4d5e6f7a8b",
+    "change": "ACTIVATED",
+    "capabilities": [
+      "VOICE_INBOUND",
+      "VOICE_OUTBOUND"
+    ],
+    "binding_revision": 2,
+    "change_reason": "PORT_IN"
+  }
+}
