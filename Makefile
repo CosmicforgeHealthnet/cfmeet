@@ -32,7 +32,7 @@ PLATFORM_ACCESS_TEST_ENV = PLATFORM_ACCESS_BIN=$(call bin_dir,$(PLATFORM_ACCESS)
         privacy-relay privacy-relay-migrate privacy-relay-test privacy-relay-lint privacy-relay-build \
         privacy-relay-integration \
         telephony telephony-migrate telephony-test telephony-lint telephony-build telephony-sip-cert \
-        telephony-integration database-isolation \
+        telephony-integration communications-e2e database-isolation \
         sms-gateway sms-gateway-migrate sms-gateway-test sms-gateway-lint sms-gateway-build \
         service-auth-test service-auth-lint contracts-validate contracts-test contracts-lint \
         service-boundaries secret-scan
@@ -178,6 +178,25 @@ telephony-integration: platform-access-bins ## Calling <-> Telephony <-> Privacy
 		TELEPHONY_BIN=$(call bin_dir,$(TELEPHONY))/telephony \
 		TELEPHONY_MIGRATION_BIN=$(call bin_dir,$(TELEPHONY))/telephony-migration \
 		cargo test --test telephony_e2e
+
+# Part IV Step 20: SMS and voice journeys across real processes of Platform Access, Numbering,
+# the SMS Gateway, Calling, Telephony and Privacy Relay. The voice journeys also need
+# asterisk + sipp (the certification SIP edge) and LIVEKIT_SERVER_BIN (Calling's media).
+communications-e2e: platform-access-bins ## Cross-service SMS + voice journeys (requires TEST_DATABASE_URL; voice: asterisk, sipp, LIVEKIT_SERVER_BIN)
+	cd $(SMS_GATEWAY) && cargo build --workspace --bins
+	cd $(CALLING) && cargo build --workspace --bins
+	cd $(PRIVACY_RELAY) && cargo build --workspace --bins
+	cd $(TELEPHONY) && cargo build --workspace --bins
+	cd $(NUMBERING) && $(PLATFORM_ACCESS_TEST_ENV) CFMEET_REQUIRE_E2E=1 \
+		SMS_GATEWAY_BIN=$(call bin_dir,$(SMS_GATEWAY))/sms-gateway \
+		SMS_GATEWAY_MIGRATION_BIN=$(call bin_dir,$(SMS_GATEWAY))/sms-gateway-migration \
+		CALLING_BIN=$(call bin_dir,$(CALLING))/calling \
+		CALLING_MIGRATION_BIN=$(call bin_dir,$(CALLING))/calling-migration \
+		PRIVACY_RELAY_BIN=$(call bin_dir,$(PRIVACY_RELAY))/privacy-relay \
+		PRIVACY_RELAY_MIGRATION_BIN=$(call bin_dir,$(PRIVACY_RELAY))/privacy-relay-migration \
+		TELEPHONY_BIN=$(call bin_dir,$(TELEPHONY))/telephony \
+		TELEPHONY_MIGRATION_BIN=$(call bin_dir,$(TELEPHONY))/telephony-migration \
+		cargo test --test communications_e2e -- --nocapture
 
 service-auth-test: ## Test packages/service-auth (core and client feature sets)
 	cd $(SERVICE_AUTH) && cargo test --no-fail-fast

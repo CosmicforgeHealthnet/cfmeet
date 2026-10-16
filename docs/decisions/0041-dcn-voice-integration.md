@@ -66,3 +66,15 @@ calls.
   can play prompts on a public inbound leg (documented limitation).
 * The full suspend / release orchestration across services remains Workstreams P/Q;
   Workstream L only enforces current state per call.
+* **Sandbox DCNs are not callable for voice.** Numbering assigns synthetic DCNs only to
+  SANDBOX / TEST environments, while Calling carries paid public-network routes
+  (PSTN_TO_APP, APP_TO_PSTN) only in a PRODUCTION environment allowed live telecom
+  (Part E). A routed call to a sandbox DCN therefore travels the whole chain — edge,
+  Telephony's allowlist, Numbering's grant, Privacy Relay's caller protection, Calling's
+  grant verification and routing to the verified target — and is refused by Calling's
+  live-telecom gate (`LIVE_TELECOM_NOT_ALLOWED`); an outbound call presenting one is
+  refused before the presentation check. The Step 20 journeys
+  (`services/numbering/tests/communications_e2e.rs`) prove exactly that chain; ringing an
+  application from a DCN needs a production number from a live carrier. Whether sandbox
+  DCN voice should run against the deterministic interconnect is a Part E policy
+  decision, deliberately not changed here.
