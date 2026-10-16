@@ -13,6 +13,8 @@
 //! * The media connection gateway (`GET /v1/calling/media/rtc…`) is authenticated by the
 //!   edge-sealed media credential and admits every connection against the database
 //!   before the media server is contacted.
+//! * Public Part III developer documentation is served at `GET /swagger-ui/` with
+//!   public-only Calling and Privacy Relay OpenAPI documents under `/api-docs/*`.
 //! * Internal routes are passed as `internal`, are nested under `/internal/v1` and run
 //!   behind internal service authentication BY CONSTRUCTION — including unknown internal
 //!   paths, so internal routes cannot be enumerated without a valid service token.
@@ -84,6 +86,7 @@ pub fn app(state: AppState, protected: Router<AppState>, internal: Router<AppSta
         .merge(crate::signaling::http::routes().route_layer(from_fn(require_object_body)))
         .merge(crate::calls::app::http::callback_routes())
         .merge(crate::media::gateway::routes())
+        .merge(crate::public_docs::routes())
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
         .with_state(state.clone())
