@@ -107,7 +107,8 @@
         "number-route.resolve",
         "number-caller-identity.authorize",
         "number-sms-sender.authorize",
-        "number-grant.verify"
+        "number-grant.verify",
+        "number-sms-route.resolve"
       ]
     }
   }

@@ -311,7 +311,7 @@ pub fn service_auth(
                     vec![sms_gateway.public_jwk()],
                     &[
                         "number-route.acknowledge",
-                        "number-route.resolve",
+                        "number-sms-route.resolve",
                         "number-sms-sender.authorize",
                         "number-grant.verify",
                     ],

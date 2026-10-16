@@ -161,6 +161,11 @@ pub enum InternalPermission {
     /// CURRENT state (assignment, routing revision, capability, single use).
     #[serde(rename = "number-grant.verify")]
     NumberGrantVerify,
+    /// Numbering (Part IV M): resolve the DESTINATION number of a received SMS to its owner
+    /// scope and SMS routing target with an INBOUND_SMS grant — the SMS Gateway only. The
+    /// voice resolver (`number-route.resolve`) is never used for SMS.
+    #[serde(rename = "number-sms-route.resolve")]
+    NumberSmsRouteResolve,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -373,15 +378,15 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::PlatformEventPublish,
         name: "platform-event.publish",
         receiver: services::CALLING,
-        grantable_to: &[services::PRIVACY_RELAY],
+        grantable_to: &[services::PRIVACY_RELAY, services::SMS_GATEWAY],
         sensitive: false,
-        description: "Publish a committed Privacy Relay domain event (platform envelope) for normalized customer webhooks",
+        description: "Publish a committed Privacy Relay or SMS Gateway domain event (platform envelope, the publisher's own events only) for normalized customer webhooks",
     },
     PermissionDefinition {
         permission: InternalPermission::PlatformCredentialAuthenticate,
         name: "platform-credential.authenticate",
         receiver: services::PLATFORM_ACCESS,
-        grantable_to: &[services::CALLING, services::NUMBERING],
+        grantable_to: &[services::CALLING, services::NUMBERING, services::SMS_GATEWAY],
         sensitive: false,
         description: "Verify a presented customer API credential; returns the trusted authority chain and effective scopes (never verifier material)",
     },
@@ -389,7 +394,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::PlatformPrincipalResolve,
         name: "platform-principal.resolve",
         receiver: services::PLATFORM_ACCESS,
-        grantable_to: &[services::CALLING, services::NUMBERING],
+        grantable_to: &[services::CALLING, services::NUMBERING, services::SMS_GATEWAY],
         sensitive: false,
         description: "Resolve communication principals inside the signed delegated scope",
     },
@@ -421,7 +426,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::NumberResourceRead,
         name: "number-resource.read",
         receiver: services::NUMBERING,
-        grantable_to: &[services::CALLING, services::TELEPHONY],
+        grantable_to: &[services::CALLING, services::TELEPHONY, services::SMS_GATEWAY],
         sensitive: false,
         description: "Read canonical Number Resources and DCN assignments (CF Meet ids only, no provider binding identifiers)",
     },
@@ -437,9 +442,9 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::NumberRouteResolve,
         name: "number-route.resolve",
         receiver: services::NUMBERING,
-        grantable_to: &[services::TELEPHONY, services::SMS_GATEWAY],
+        grantable_to: &[services::TELEPHONY],
         sensitive: true,
-        description: "Resolve a received call (Telephony) or message (SMS Gateway) on a public number to its owner scope and routing target, with a short-lived inbound routing grant",
+        description: "Resolve a received call on a public number to its owner scope and voice routing target, with a short-lived INBOUND_VOICE grant (Telephony only; SMS uses number-sms-route.resolve)",
     },
     PermissionDefinition {
         permission: InternalPermission::NumberCallerIdentityAuthorize,
@@ -464,6 +469,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         grantable_to: &[services::CALLING, services::TELEPHONY, services::SMS_GATEWAY],
         sensitive: false,
         description: "Verify (and consume) a number routing grant addressed to the caller against current state",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberSmsRouteResolve,
+        name: "number-sms-route.resolve",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::SMS_GATEWAY],
+        sensitive: true,
+        description: "Resolve the destination number of a received SMS to its owner scope and SMS routing target, with a short-lived INBOUND_SMS grant (the SMS Gateway only)",
     },
 ];
 
@@ -508,6 +521,7 @@ impl InternalPermission {
         InternalPermission::NumberCallerIdentityAuthorize,
         InternalPermission::NumberSmsSenderAuthorize,
         InternalPermission::NumberGrantVerify,
+        InternalPermission::NumberSmsRouteResolve,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -710,6 +724,50 @@ mod tests {
         let d = NumberResourceRead.definition();
         assert_eq!(d.receiver, services::NUMBERING);
         assert!(!d.grantable_to.contains(&services::NUMBERING));
+    }
+
+    #[test]
+    fn sms_gateway_flows_are_least_privilege() {
+        use InternalPermission::*;
+        // The SMS destination resolver is the SMS Gateway's alone; the voice resolver is
+        // Telephony's alone (no family is resolved through the other's permission).
+        let d = NumberSmsRouteResolve.definition();
+        assert_eq!(
+            (d.receiver, d.grantable_to, d.sensitive),
+            (services::NUMBERING, &[services::SMS_GATEWAY][..], true)
+        );
+        assert_eq!(
+            NumberRouteResolve.definition().grantable_to,
+            &[services::TELEPHONY]
+        );
+        // Sender grants: the SMS Gateway only; caller identity never.
+        assert_eq!(
+            NumberSmsSenderAuthorize.definition().grantable_to,
+            &[services::SMS_GATEWAY]
+        );
+        assert!(!NumberCallerIdentityAuthorize
+            .definition()
+            .grantable_to
+            .contains(&services::SMS_GATEWAY));
+        // Customer authentication, principal resolution, number reads (route readiness)
+        // and webhook publication — nothing administrative.
+        for p in [
+            PlatformCredentialAuthenticate,
+            PlatformPrincipalResolve,
+            NumberResourceRead,
+            PlatformEventPublish,
+        ] {
+            assert!(p.definition().grantable_to.contains(&services::SMS_GATEWAY));
+        }
+        for d in REGISTRY
+            .iter()
+            .filter(|d| d.receiver == services::SMS_GATEWAY)
+        {
+            panic!(
+                "no service may call the SMS Gateway internally yet: {}",
+                d.name
+            );
+        }
     }
 
     #[test]

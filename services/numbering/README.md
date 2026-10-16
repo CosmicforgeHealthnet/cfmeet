@@ -37,7 +37,7 @@ It owns, in its own PostgreSQL database:
   blindly repeated) and **scoped idempotency keys**.
 
 It does NOT own logical calls, SIP / PSTN execution, relay sessions or SMS transport
-(Calling, Telephony, Privacy Relay, later SMS), and it never reads another service's
+(Calling, Telephony, Privacy Relay, the SMS Gateway), and it never reads another service's
 database. Sandbox / test environments use synthetic test inventory only; production never
 does (domain and database).
 
@@ -56,7 +56,8 @@ Contract `cfmeet.numbering.internal-api` (messages `cfmeet.numbering.common`, ev
 | `GET /v1/numbers/reservations`, `POST /v1/numbers/reservations/{id}/cancel` | customer, `numbers.read` / `numbers.manage` | the caller's reservations; cancellation with an evidence-only provider release (H) |
 | `POST /v1/numbers/acquisitions`, `GET /v1/numbers/acquisitions[/{id}]` | customer, `numbers.manage` (`Idempotency-Key`) / `numbers.read` | provision a held reservation (eligibility re-evaluated, hold read back, durable PROVISION command); status, served capabilities, route readiness (I) |
 | `POST /v1/numbers/acquisitions/{id}/routes` | customer, `numbers.manage`, `Idempotency-Key` | provider voice / SMS route configuration on the current binding (I) |
-| `POST /internal/v1/routing/inbound-resolutions` | service token, `number-route.resolve` (Telephony: VOICE, SMS Gateway: SMS) | a received call / message resolved from canonical state with a revision-bound inbound grant (K) |
+| `POST /internal/v1/routing/inbound-resolutions` | service token, `number-route.resolve` (Telephony) | a received VOICE call resolved from canonical state with a revision-bound inbound grant (K); any other family is `FAMILY_NOT_SUPPORTED` |
+| `POST /internal/v1/routing/sms-destination-resolutions` | service token, `number-sms-route.resolve` (SMS Gateway only) | the destination of a received SMS resolved from canonical state with a revision-bound INBOUND_SMS grant (Part IV M) |
 | `POST /internal/v1/routing/caller-identity-grants`, `…/sms-sender-grants` | service token + delegated context, `number-caller-identity.authorize` (Calling) / `number-sms-sender.authorize` (SMS Gateway) | single-use outbound grants for the scope's own ACTIVE numbers (K) |
 | `POST /internal/v1/routing/grant-verifications` | service token, `number-grant.verify` | the audience verifies / consumes a grant against current state (K) |
 | `GET /internal/v1/routing/number-assignments/{numberResourceId}` | service token, `number-caller-identity.authorize`, delegated context | Calling's number-free view of the scope's current assignment and routed targets, for its caller-identity entitlement policy (L) |

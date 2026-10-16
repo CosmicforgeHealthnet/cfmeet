@@ -120,13 +120,16 @@ async fn resolve(
     family: &str,
     e164: &str,
 ) -> Reply {
-    h.internal_json(
-        peer,
-        Method::POST,
-        RESOLVE,
-        json!({ "family": family, "e164": e164 }),
-    )
-    .await
+    // Part IV M: SMS has its own resolver (number-sms-route.resolve).
+    let (path, body) = if family == "SMS" {
+        (
+            "/internal/v1/routing/sms-destination-resolutions",
+            json!({ "destination": e164 }),
+        )
+    } else {
+        (RESOLVE, json!({ "family": family, "e164": e164 }))
+    };
+    h.internal_json(peer, Method::POST, path, body).await
 }
 
 async fn verify(

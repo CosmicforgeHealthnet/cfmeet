@@ -1,7 +1,8 @@
 # CF Meet — root developer commands.
 # Each target delegates to the app/service's own toolchain. services/meeting-service/,
 # services/calling/, services/platform-access/, services/numbering/, services/privacy-relay/,
-# services/telephony/ and apps/web/ remain independently buildable and deployable.
+# services/telephony/, services/sms-gateway/ and apps/web/ remain independently buildable
+# and deployable.
 # Shared code lives in packages/ (contracts, service-auth); no service depends on another.
 
 MEETING_SERVICE := services/meeting-service
@@ -10,6 +11,7 @@ PLATFORM_ACCESS := services/platform-access
 NUMBERING       := services/numbering
 PRIVACY_RELAY   := services/privacy-relay
 TELEPHONY       := services/telephony
+SMS_GATEWAY     := services/sms-gateway
 WEB             := apps/web
 SERVICE_AUTH    := packages/service-auth
 CONTRACTS       := packages/contracts
@@ -31,6 +33,7 @@ PLATFORM_ACCESS_TEST_ENV = PLATFORM_ACCESS_BIN=$(call bin_dir,$(PLATFORM_ACCESS)
         privacy-relay-integration \
         telephony telephony-migrate telephony-test telephony-lint telephony-build telephony-sip-cert \
         telephony-integration database-isolation \
+        sms-gateway sms-gateway-migrate sms-gateway-test sms-gateway-lint sms-gateway-build \
         service-auth-test service-auth-lint contracts-validate contracts-test contracts-lint \
         service-boundaries secret-scan
 
@@ -131,6 +134,22 @@ privacy-relay-integration: platform-access-bins ## Calling <-> Privacy Relay e2e
 		PRIVACY_RELAY_MIGRATION_BIN=$(call bin_dir,$(PRIVACY_RELAY))/privacy-relay-migration \
 		cargo test --test privacy_relay_e2e
 
+sms-gateway-migrate: ## Apply SMS Gateway database migrations (services/sms-gateway/.env)
+	cd $(SMS_GATEWAY) && cargo run -p sms-gateway-migration -- up
+
+sms-gateway: ## Run the SMS Gateway (SMS transport; deterministic provider for local use)
+	cd $(SMS_GATEWAY) && cargo run --bin sms-gateway
+
+sms-gateway-test: ## Run SMS Gateway tests (requires TEST_DATABASE_URL; no Docker needed)
+	cd $(SMS_GATEWAY) && cargo test --workspace --no-fail-fast
+
+sms-gateway-lint: ## fmt + clippy for the SMS Gateway
+	cd $(SMS_GATEWAY) && cargo fmt --all -- --check
+	cd $(SMS_GATEWAY) && cargo clippy --workspace --all-targets -- -D warnings
+
+sms-gateway-build: ## Build the SMS Gateway
+	cd $(SMS_GATEWAY) && cargo build --workspace
+
 telephony-migrate: ## Apply Telephony database migrations (services/telephony/.env)
 	cd $(TELEPHONY) && cargo run -p telephony-migration -- up
 
@@ -199,11 +218,11 @@ web: frontend ## Alias for `make frontend`
 dev: ## Start deps, then meeting service + web app together (Ctrl+C stops both)
 	./scripts/dev.sh
 
-test: backend-test calling-test platform-access-test numbering-test privacy-relay-test telephony-test service-auth-test contracts-test contracts-validate service-boundaries secret-scan frontend-test ## Run all tests
+test: backend-test calling-test platform-access-test numbering-test privacy-relay-test telephony-test sms-gateway-test service-auth-test contracts-test contracts-validate service-boundaries secret-scan frontend-test ## Run all tests
 
-lint: backend-lint calling-lint platform-access-lint numbering-lint privacy-relay-lint telephony-lint service-auth-lint contracts-lint frontend-lint ## Run all linters
+lint: backend-lint calling-lint platform-access-lint numbering-lint privacy-relay-lint telephony-lint sms-gateway-lint service-auth-lint contracts-lint frontend-lint ## Run all linters
 
-build: backend-build calling-build platform-access-build numbering-build privacy-relay-build telephony-build frontend-build ## Build all applications and services
+build: backend-build calling-build platform-access-build numbering-build privacy-relay-build telephony-build sms-gateway-build frontend-build ## Build all applications and services
 
 backend-test:
 	cd $(MEETING_SERVICE) && cargo test --workspace

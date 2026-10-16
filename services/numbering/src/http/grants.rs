@@ -1,8 +1,10 @@
 //! Routing grants (Workstream K), service-authenticated (`/internal/v1`):
 //!
-//! * `POST /routing/inbound-resolutions` (`number-route.resolve`; Telephony for VOICE,
-//!   the SMS Gateway for SMS) — the routing of a received call / message with an inbound
-//!   grant;
+//! * `POST /routing/inbound-resolutions` (`number-route.resolve`, Telephony, VOICE only)
+//!   — the routing of a received call with an INBOUND_VOICE grant;
+//! * `POST /routing/sms-destination-resolutions` (`number-sms-route.resolve`, the SMS
+//!   Gateway only; Part IV M) — the routing of a received message's destination number
+//!   with an INBOUND_SMS grant. The voice resolver never serves SMS;
 //! * `POST /routing/caller-identity-grants` (`number-caller-identity.authorize`, Calling,
 //!   signed delegated customer context) — a single-use CALLER_IDENTITY grant for Telephony;
 //! * `POST /routing/sms-sender-grants` (`number-sms-sender.authorize`, SMS Gateway,
@@ -33,6 +35,7 @@ use crate::{
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/routing/inbound-resolutions", post(resolve_inbound))
+        .route("/routing/sms-destination-resolutions", post(resolve_sms_destination))
         .route("/routing/caller-identity-grants", post(caller_identity))
         .route("/routing/sms-sender-grants", post(sms_sender))
         .route("/routing/grant-verifications", post(verify))
@@ -123,10 +126,42 @@ async fn resolve_inbound(
     Json(body): Json<InboundBody>,
 ) -> Result<Json<Value>, ApiError> {
     caller.require_permission(InternalPermission::NumberRouteResolve)?;
+    if body.family != RouteFamily::Voice {
+        // SMS has its own resolver and permission (number-sms-route.resolve).
+        return Err(ApiError::Domain(crate::numbers::DomainError::precondition(
+            "FAMILY_NOT_SUPPORTED",
+            "inbound-resolutions resolves voice only; SMS uses sms-destination-resolutions",
+        )));
+    }
     let g = grants(&s)?;
     let out = g
         .resolve_inbound(&ctx(), &caller_id(&caller), body.family, &body.e164)
         .await?;
+    Ok(Json(resolution_view(body.family, out)))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SmsDestinationBody {
+    /// The destination number the message was received on, E.164.
+    pub destination: String,
+}
+
+/// Part IV M: the SMS Gateway resolves the destination of a received message.
+async fn resolve_sms_destination(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    Json(body): Json<SmsDestinationBody>,
+) -> Result<Json<Value>, ApiError> {
+    caller.require_permission(InternalPermission::NumberSmsRouteResolve)?;
+    let g = grants(&s)?;
+    let out = g
+        .resolve_inbound(&ctx(), &caller_id(&caller), RouteFamily::Sms, &body.destination)
+        .await?;
+    Ok(Json(resolution_view(RouteFamily::Sms, out)))
+}
+
+fn resolution_view(family: RouteFamily, out: InboundResolution) -> Value {
     let scope = |a: &crate::numbers::assignments::AssignmentRow| {
         json!({
             "tenantId": a.tenant_id,
@@ -134,7 +169,7 @@ async fn resolve_inbound(
             "environmentId": a.environment_id,
         })
     };
-    Ok(Json(match out {
+    match out {
         InboundResolution::Routed {
             assignment,
             target,
@@ -142,7 +177,7 @@ async fn resolve_inbound(
             grant,
         } => json!({
             "outcome": "ROUTED",
-            "family": body.family,
+            "family": family,
             "numberResourceId": assignment.number_resource_id,
             "assignmentId": assignment.id,
             "scope": scope(&assignment),
@@ -157,7 +192,7 @@ async fn resolve_inbound(
             routing_revision,
         } => json!({
             "outcome": "NOT_ROUTED",
-            "family": body.family,
+            "family": family,
             "numberResourceId": assignment.number_resource_id,
             "assignmentId": assignment.id,
             "scope": scope(&assignment),
@@ -169,7 +204,7 @@ async fn resolve_inbound(
         }),
         InboundResolution::Unavailable { reason } => json!({
             "outcome": "UNAVAILABLE",
-            "family": body.family,
+            "family": family,
             "numberResourceId": null,
             "assignmentId": null,
             "scope": null,
@@ -179,7 +214,7 @@ async fn resolve_inbound(
             "grant": null,
             "reason": reason,
         }),
-    }))
+    }
 }
 
 #[derive(Debug, Deserialize)]

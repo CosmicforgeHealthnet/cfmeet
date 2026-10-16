@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Numbering API",
-    "version": "1.8.0",
+    "version": "1.9.0",
     "description": "HTTP surface of services/numbering: GET /health, /ready and /openapi.json (public, no data); the customer API under /v1 (credential verified by Platform Access on every request; normalized 401, 429 when Platform Access throttles or a quota is exhausted, 503 when it is unreachable — fail closed): assignment / reservation reads, the catalog, KYC and eligibility (F), provider-neutral inventory search and reservations (H); provider callbacks (G); and the service-authenticated /internal/v1 API (cfmeet.platform.internal-http; permission from Numbering's own trust bundle). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 64 KiB."
   },
   "components": {
@@ -3583,7 +3583,7 @@
             "cfServiceAuth": []
           }
         ],
-        "description": "The routing of a received call (Telephony, VOICE) or message (SMS Gateway, SMS) from the number's ACTIVE assignment, with a signed INBOUND grant bound to the routing revision. Only the family's carrier resolves it (CONSUMER_MISMATCH otherwise). Permission `number-route.resolve`. 503 without a configured grant key.",
+        "description": "The routing of a received CALL (Telephony) from the number's ACTIVE assignment, with a signed INBOUND_VOICE grant (audience Calling) bound to the routing revision. VOICE only: family SMS is FAMILY_NOT_SUPPORTED (Part IV M — SMS has its own resolver). Permission `number-route.resolve` (Telephony). 503 without a configured grant key.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -3869,6 +3869,71 @@
             "$ref": "#/components/responses/Error"
           },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/routing/sms-destination-resolutions": {
+      "post": {
+        "operationId": "resolveSmsDestination",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "description": "Part IV M: the routing of a received MESSAGE's destination number from the number's ACTIVE assignment, with a signed INBOUND_SMS grant (audience the SMS Gateway) bound to the routing revision; NOT_ROUTED / UNAVAILABLE with a stable reason otherwise (unknown, not active / assigned, SMS inbound not usable, route not ready, synthetic in a protected runtime). Permission `number-sms-route.resolve` (the SMS Gateway only). No telephone number is returned.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/routing-grant/v1.schema.json#/$defs/SmsDestinationResolutionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/routing-grant/v1.schema.json#/$defs/InboundResolution"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
             "$ref": "#/components/responses/Error"
           },
           "503": {

@@ -102,7 +102,8 @@ services/
 ├── platform-access/       active (shared identity authority, ADR 0032)
 ├── numbering/             active (public numbers / DCNs, ADR 0033)
 ├── privacy-relay/         active
-├── messaging/             future
+├── sms-gateway/           active (SMS transport, ADR 0042)
+├── messaging/             future (Part V conversations)
 ├── telephony/             active
 ├── webhook-delivery/      future if extracted
 └── workers/               future if extracted

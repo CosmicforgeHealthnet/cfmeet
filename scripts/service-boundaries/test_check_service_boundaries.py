@@ -575,6 +575,17 @@ class RealRepository(unittest.TestCase):
             lambda r: write(r, "services/privacy-relay/migration/src/m_dcn.rs", 'const UP: &str = "CREATE TABLE dcn_assignments (id UUID)";\n'),
         )
 
+    # Part IV M: the SMS Gateway is the only SMS transport authority.
+    def test_sms_tables_outside_the_sms_gateway(self):
+        self.assertMutationFails(
+            "SMS_DOMAIN_ELSEWHERE",
+            lambda r: write(r, "services/numbering/migration/src/m_sms.rs", 'const UP: &str = "CREATE TABLE sms_messages (id UUID)";\n'),
+        )
+        self.assertMutationFails(
+            "SMS_DOMAIN_ELSEWHERE",
+            lambda r: write(r, "services/calling/migration/src/m_sms.rs", 'const UP: &str = "CREATE TABLE sms_transports (id UUID)";\n'),
+        )
+
     def test_credential_verification_outside_platform_access(self):
         self.assertMutationFails(
             "IDENTITY_AUTHORITY_ELSEWHERE",

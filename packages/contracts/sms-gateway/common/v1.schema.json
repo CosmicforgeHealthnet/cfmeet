@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json",
+  "title": "CF Meet SMS Gateway common v1",
+  "description": "SMS Gateway vocabulary and messages (Part IV M–O): transport status / direction / encoding, control reasons, the error envelope. Never a full telephone number in a response, never a provider identifier.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Error"
+    }
+  ],
+  "$defs": {
+    "Status": {
+      "description": "Transport status. UNKNOWN: the provider may hold the message; it is never resubmitted, only provider evidence resolves it.",
+      "type": "string",
+      "enum": [
+        "REQUESTED",
+        "AUTHORIZED",
+        "SUBMITTING",
+        "SUBMITTED",
+        "DELIVERED",
+        "RECEIVED",
+        "FAILED",
+        "UNKNOWN",
+        "EXPIRED"
+      ]
+    },
+    "Direction": {
+      "type": "string",
+      "enum": [
+        "OUTBOUND",
+        "INBOUND"
+      ]
+    },
+    "Encoding": {
+      "description": "GSM-7 (160 / 153 septets per segment; extension characters count two) or UCS-2 (70 / 67 UTF-16 units).",
+      "type": "string",
+      "enum": [
+        "GSM7",
+        "UCS2"
+      ]
+    },
+    "ControlReason": {
+      "description": "Stable reason codes of the safety controls and conflicts.",
+      "type": "string",
+      "enum": [
+        "RATE_LIMITED",
+        "DESTINATION_RATE_LIMITED",
+        "DESTINATION_NOT_ALLOWED",
+        "RECIPIENT_OPTED_OUT",
+        "SPEND_LIMIT_EXCEEDED",
+        "ABUSE_SUSPECTED",
+        "SENDER_NOT_AUTHORIZED",
+        "INVALID_TRANSITION",
+        "VERSION_CONFLICT"
+      ]
+    },
+    "Error": {
+      "description": "The SMS Gateway error envelope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "description": "One error.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message",
+            "requestId"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "VALIDATION_ERROR",
+                "AUTHENTICATION_FAILED",
+                "INSUFFICIENT_SCOPE",
+                "NOT_FOUND",
+                "METHOD_NOT_ALLOWED",
+                "PAYLOAD_TOO_LARGE",
+                "RATE_LIMITED",
+                "INTERNAL_AUTHENTICATION_FAILED",
+                "INTERNAL_PERMISSION_DENIED",
+                "CALLBACK_REJECTED",
+                "IDEMPOTENCY_KEY_REQUIRED",
+                "IDEMPOTENCY_KEY_REUSED",
+                "CONTENT_TOO_LONG",
+                "SMS_BLOCKED",
+                "CONFLICT",
+                "NUMBERING_UNAVAILABLE",
+                "PROVIDER_UNAVAILABLE",
+                "SERVICE_UNAVAILABLE",
+                "INTERNAL_ERROR"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "requestId": {
+              "oneOf": [
+                {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RequestId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            },
+            "messageId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -47,6 +47,7 @@ const COMMON: &str = "numbering/common/v1.schema.json#/$defs/";
 const GRANT: &str = "numbering/routing-grant/v1.schema.json#/$defs/";
 const GEO: [C; 3] = [C::VoiceInbound, C::VoiceOutbound, C::SmsInbound];
 const RESOLVE: &str = "/internal/v1/routing/inbound-resolutions";
+const RESOLVE_SMS: &str = "/internal/v1/routing/sms-destination-resolutions";
 const CALLER: &str = "/internal/v1/routing/caller-identity-grants";
 const SENDER: &str = "/internal/v1/routing/sms-sender-grants";
 const VERIFY: &str = "/internal/v1/routing/grant-verifications";
@@ -319,14 +320,13 @@ impl K {
         family: &str,
         e164: &str,
     ) -> Reply {
-        self.h
-            .internal_json(
-                peer,
-                Method::POST,
-                RESOLVE,
-                json!({ "family": family, "e164": e164 }),
-            )
-            .await
+        // Part IV M: SMS has its own resolver (number-sms-route.resolve).
+        let (path, body) = if family == "SMS" {
+            (RESOLVE_SMS, json!({ "destination": e164 }))
+        } else {
+            (RESOLVE, json!({ "family": family, "e164": e164 }))
+        };
+        self.h.internal_json(peer, Method::POST, path, body).await
     }
 
     async fn verify(
@@ -440,11 +440,29 @@ async fn an_inbound_call_resolves_from_canonical_state_with_a_grant_for_calling(
         .verify(&t.h.peers.sms_gateway, &grant_of(&r), false, None)
         .await;
     assert_eq!(v.body["valid"], true);
-    // Only the carrier of a family resolves it; Calling resolves nothing.
+    // Only the carrier of a family resolves it, each through its OWN resolver and
+    // permission; Calling resolves nothing.
     let r = t.resolve(&t.h.peers.telephony, "SMS", &e164).await;
-    assert_eq!(r.body["error"]["reason"], "CONSUMER_MISMATCH");
+    assert_eq!(
+        (r.status, r.code()),
+        (StatusCode::FORBIDDEN, "INTERNAL_PERMISSION_DENIED")
+    );
     let r = t.resolve(&t.h.peers.sms_gateway, "VOICE", &e164).await;
-    assert_eq!(r.body["error"]["reason"], "CONSUMER_MISMATCH");
+    assert_eq!(
+        (r.status, r.code()),
+        (StatusCode::FORBIDDEN, "INTERNAL_PERMISSION_DENIED")
+    );
+    // The voice resolver never serves SMS, even for its own caller.
+    let r = t
+        .h
+        .internal_json(
+            &t.h.peers.telephony,
+            Method::POST,
+            RESOLVE,
+            json!({ "family": "SMS", "e164": e164 }),
+        )
+        .await;
+    assert_eq!(r.body["error"]["reason"], "FAMILY_NOT_SUPPORTED", "{:?}", r.body);
     let r = t.resolve(&t.h.peers.calling, "VOICE", &e164).await;
     assert_eq!(
         (r.status, r.code()),

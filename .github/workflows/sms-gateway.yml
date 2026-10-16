@@ -1,0 +1,185 @@
+name: SMS Gateway service
+
+# services/sms-gateway — the authoritative SMS transport service (Part IV Workstreams M-O,
+# ADR 0042): message transports and their state machine, provider submission and
+# callbacks, delivery receipts, inbound routing through Numbering, transport threads,
+# usage and opt-out controls. It owns its own PostgreSQL database and depends only on
+# packages/service-auth, packages/webhooks and its contracts (packages/contracts/sms-gateway).
+# Numbering, Platform Access and Calling are reached over authenticated internal HTTP only.
+#
+# CI builds carry no debug info and no incremental state; debug assertions stay on.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/sms-gateway/**"
+      - "packages/service-auth/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
+      - ".github/workflows/sms-gateway.yml"
+  pull_request:
+    paths:
+      - "services/sms-gateway/**"
+      - "packages/service-auth/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
+      - ".github/workflows/sms-gateway.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: sms-gateway-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: services/sms-gateway
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  lint:
+    name: fmt / check / clippy / boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/sms-gateway -> target
+          key: lint
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo check
+        run: cargo check --workspace --locked
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Repository guards (no other service's source or tables)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if grep -n -E 'services/(calling|platform-access|numbering|privacy-relay|telephony|meeting-service)|\.\./(calling|platform-access|numbering|privacy-relay|telephony|meeting-service)|(calling|numbering|platform-access|telephony)-migration' \
+               services/sms-gateway/Cargo.toml services/sms-gateway/migration/Cargo.toml; then
+            echo "::error::services/sms-gateway depends on another service"; exit 1
+          fi
+          # Every table is sms_: no Number Resource, assignment, KYC, call or webhook table.
+          if grep -rn -i -P 'CREATE TABLE (?!sms_)' services/sms-gateway/migration/src; then
+            echo "::error::services/sms-gateway creates a table outside its domain"; exit 1
+          fi
+
+  test:
+    name: test (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      # Each test creates its own database from a migrated template.
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/sms-gateway -> target
+          key: test
+
+      # Named Part IV gates first (each a separate step so a failure names the gate),
+      # then the whole workspace.
+      - name: Foundation (M) — schema guards, protection, outbox, auth, served OpenAPI, provider contract
+        run: cargo test --locked --test foundation --test startup --test architecture
+      - name: cargo test (whole workspace)
+        run: cargo test --workspace --no-fail-fast --locked
+
+  build:
+    name: build / migration smoke / isolation
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/sms-gateway -> target
+          key: build
+
+      - name: cargo build
+        run: cargo build --workspace --locked
+
+      - name: Migration smoke (up / reset / up)
+        env:
+          PGPASSWORD: postgres
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/sms_gateway_migration_smoke
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE sms_gateway_migration_smoke"
+          ./target/debug/sms-gateway-migration up
+          ./target/debug/sms-gateway-migration status
+          ./target/debug/sms-gateway-migration reset
+          ./target/debug/sms-gateway-migration up
+          q() { psql -h 127.0.0.1 -U postgres -d sms_gateway_migration_smoke -tAc "$1"; }
+          test "$(q "SELECT count(*) FROM sms_gateway_seaql_migrations")" = "$(grep -c 'Box::new(m20' migration/src/lib.rs)"
+          # Only sms_ tables, and no plaintext number / content column.
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'sms_gateway_seaql_migrations' AND tablename !~ '^sms_'")" = "0"
+          test "$(q "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name IN ('e164', 'phone_number', 'msisdn', 'content', 'body', 'text', 'from_number', 'to_number')")" = "0"
+
+      - name: Per-service database roles with the real migrations
+        env:
+          SMS_GATEWAY_MIGRATION_BIN: ${{ github.workspace }}/services/sms-gateway/target/debug/sms-gateway-migration
+        run: |
+          set -euo pipefail
+          test -x "$SMS_GATEWAY_MIGRATION_BIN"
+          "$GITHUB_WORKSPACE/infra/deployment/postgres/verify-service-isolation.sh" \
+            --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres
+
+  docker:
+    name: Docker image (repository-root context)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The context is filtered by services/sms-gateway/Dockerfile.dockerignore to the shared
+      # packages the gateway builds from (service-auth, webhooks, its own contracts) and
+      # services/sms-gateway only.
+      - name: docker build
+        working-directory: .
+        run: docker build -f services/sms-gateway/Dockerfile -t cfmeet-sms-gateway:ci .
+      - name: image contains only the SMS Gateway binaries and no key material
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint /bin/ls cfmeet-sms-gateway:ci /app | tr '\n' ' ')" = "sms-gateway sms-gateway-migration "
+          if docker run --rm --entrypoint /bin/sh cfmeet-sms-gateway:ci -c 'grep -rlI --exclude-dir=proc --exclude-dir=sys -- "PRIVATE KEY-----" / 2>/dev/null'; then
+            echo "::error::private key material in the image"; exit 1
+          fi

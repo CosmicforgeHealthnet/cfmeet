@@ -1,0 +1,19 @@
+# Build-context filter for services/sms-gateway/Dockerfile (context: repository root).
+# Everything is excluded except the directories the image is built from.
+*
+!packages/service-auth
+!packages/webhooks
+!packages/contracts/sms-gateway
+!services/sms-gateway
+
+# Never send build output, local configuration or key material.
+**/target
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.secret
+**/*.log
+**/*.rs.bk
+services/sms-gateway/Dockerfile
+services/sms-gateway/Dockerfile.dockerignore

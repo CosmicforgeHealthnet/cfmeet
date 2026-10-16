@@ -93,14 +93,14 @@
     },
     {
       "id": "cfmeet.platform.common",
-      "version": "1.7.0",
+      "version": "1.8.0",
       "kind": "json-schema",
       "path": "platform/common/v1.schema.json",
       "owner": "platform",
       "visibility": "internal",
       "lifecycle": "stable",
       "authority": "contract-first",
-      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify)."
+      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M)."
     },
     {
       "id": "cfmeet.platform.service-token-header",
@@ -236,25 +236,25 @@
     },
     {
       "id": "cfmeet.numbering.internal-api",
-      "version": "1.8.0",
+      "version": "1.9.0",
       "kind": "openapi",
       "path": "numbering/internal/v1.openapi.json",
       "owner": "numbering",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface of services/numbering: GET /health, /ready, /openapi.json (the served contract); customer reads of the caller's own DCN assignments / history / reservations, the catalog, KYC / eligibility (F); 1.4.0 provider-neutral inventory search, countries and number types, reservations (create with Idempotency-Key, list, cancel) (H); 1.5.0 acquisitions (provisioning with eligibility re-evaluation and hold read-back) and provider route configuration (I); provider callbacks (G); and the service-authenticated internal Number Resource view (/internal/v1, number-resource.read). 1.5.0 internal route view and consumer route readiness (number-route.acknowledge). 1.6.0 ownership and assignment: assignment creation / activation on proven readiness, routing revisions, employee offboarding, same-owner transfers, organizational pools and the operator assignment history (J). 1.7.0 routing grants: inbound resolution (number-route.resolve), caller-identity / SMS-sender grants (delegated scope) and authoritative verification (number-grant.verify) (K). 1.8.0 delegated current-assignment view for Calling's caller-identity policy (L)."
+      "description": "HTTP surface of services/numbering: GET /health, /ready, /openapi.json (the served contract); customer reads of the caller's own DCN assignments / history / reservations, the catalog, KYC / eligibility (F); 1.4.0 provider-neutral inventory search, countries and number types, reservations (create with Idempotency-Key, list, cancel) (H); 1.5.0 acquisitions (provisioning with eligibility re-evaluation and hold read-back) and provider route configuration (I); provider callbacks (G); and the service-authenticated internal Number Resource view (/internal/v1, number-resource.read). 1.5.0 internal route view and consumer route readiness (number-route.acknowledge). 1.6.0 ownership and assignment: assignment creation / activation on proven readiness, routing revisions, employee offboarding, same-owner transfers, organizational pools and the operator assignment history (J). 1.7.0 routing grants: inbound resolution (number-route.resolve), caller-identity / SMS-sender grants (delegated scope) and authoritative verification (number-grant.verify) (K). 1.8.0 delegated current-assignment view for Calling's caller-identity policy (L). 1.9.0 dedicated SMS destination resolver (number-sms-route.resolve); inbound-resolutions is voice only (M)."
     },
     {
       "id": "cfmeet.numbering.routing-grant",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "numbering/routing-grant/v1.schema.json",
       "owner": "numbering",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Number routing grants (Part IV Workstream K): inbound resolution, caller-identity / SMS-sender grant requests and verification bodies, the grant claims (typ cf-number-grant+jwt, Numbering's dedicated grant key, no telephone number, revision-bound) and the receiver-authoritative grant trust bundle. 1.1.0 CurrentAssignment (L)."
+      "description": "Number routing grants (Part IV Workstream K): inbound resolution, caller-identity / SMS-sender grant requests and verification bodies, the grant claims (typ cf-number-grant+jwt, Numbering's dedicated grant key, no telephone number, revision-bound) and the receiver-authoritative grant trust bundle. 1.1.0 CurrentAssignment (L). 1.2.0 SmsDestinationResolutionRequest (M)."
     },
     {
       "id": "cfmeet.privacy-relay.http-api",
@@ -508,6 +508,28 @@
       "lifecycle": "beta",
       "authority": "contract-first",
       "description": "HTTP surface of services/telephony: health and the provider callback ingress (provider-authenticated before parsing, 16 KiB limit, dedupe), and the service-authenticated /internal/v1 API for Calling (legs originate / get / terminate / hold / resume, bridges create / get / end, route availability, readiness). Metrics live on a separate listener. Part F: ENTERPRISE_INTERNAL legs of enterprise SIP devices; ANSWER / PROMPT (built-in prompts) on them. Part F: CAPTURE (edge voicemail capture into a transient spool) on them."
+    },
+    {
+      "id": "cfmeet.sms-gateway.common",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "sms-gateway/common/v1.schema.json",
+      "owner": "sms-gateway",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "SMS Gateway vocabulary and messages (Part IV M–O): transport status, direction, encoding, control reasons, the error envelope. Remote parties are masked; no provider identifier."
+    },
+    {
+      "id": "cfmeet.sms-gateway.http-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "sms-gateway/http/v1.openapi.json",
+      "owner": "sms-gateway",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "HTTP surface of services/sms-gateway, served at /openapi.json: health, readiness."
     }
   ]
 }

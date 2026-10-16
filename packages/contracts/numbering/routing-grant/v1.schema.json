@@ -30,6 +30,9 @@
     },
     {
       "$ref": "#/$defs/CurrentAssignment"
+    },
+    {
+      "$ref": "#/$defs/SmsDestinationResolutionRequest"
     }
   ],
   "$defs": {
@@ -319,7 +322,7 @@
       }
     },
     "InboundResolutionRequest": {
-      "description": "POST /internal/v1/routing/inbound-resolutions (number-route.resolve): the received number of a family; only the family's carrier resolves it (Telephony: VOICE, SMS Gateway: SMS).",
+      "description": "POST /internal/v1/routing/inbound-resolutions (number-route.resolve, Telephony): the received number of a call. VOICE only — SMS is resolved by sms-destination-resolutions (FAMILY_NOT_SUPPORTED otherwise).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -915,6 +918,20 @@
               "type": "boolean"
             }
           }
+        }
+      }
+    },
+    "SmsDestinationResolutionRequest": {
+      "description": "POST /internal/v1/routing/sms-destination-resolutions (number-sms-route.resolve, the SMS Gateway only; Part IV M): the destination number a message was received on. The answer is an InboundResolution of family SMS with an INBOUND_SMS grant addressed to the SMS Gateway.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "destination"
+      ],
+      "properties": {
+        "destination": {
+          "type": "string",
+          "pattern": "^\\+[1-9][0-9]{6,14}$"
         }
       }
     }

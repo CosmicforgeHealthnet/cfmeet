@@ -31,6 +31,9 @@ crosses another service's boundary:
   NUMBERING_DOMAIN_ELSEWHERE      another service's migrations create a Number Resource /
                                   DCN table (`number_*`, `dcn_*`): Numbering (Part IV) is
                                   the only number authority
+  SMS_DOMAIN_ELSEWHERE            another service's migrations create an SMS transport
+                                  table (`sms_*`): the SMS Gateway (Part IV M) is the only
+                                  SMS transport authority
   IDENTITY_AUTHORITY_ELSEWHERE    credential verifier machinery (keyring, pepper, verifier
                                   message) in production code outside Platform Access: it
                                   is the only credential authority (Part IV Workstream B)
@@ -229,6 +232,8 @@ IDENTITY_AUTHORITY_MARKER_RE = re.compile(
 )
 NUMBERING_OWNER = "numbering"
 NUMBERING_TABLE_PREFIXES = ("number_", "dcn_")
+SMS_OWNER = "sms-gateway"
+SMS_TABLE_PREFIXES = ("sms_",)
 # Secret material each service alone may read (environment variable names, `_FILE`
 # variants included). Shared service-auth signing keys are per-service values of the same
 # variable and are not listed. Test code may start another service's binary with that
@@ -532,6 +537,11 @@ def check(root: Path) -> list[Violation]:
             continue
         for table in sorted(t for t in tables if t.startswith(NUMBERING_TABLE_PREFIXES)):
             out.append(Violation("NUMBERING_DOMAIN_ELSEWHERE", f"services/{service}", 1, f"table `{table}` belongs to services/{NUMBERING_OWNER} (Number Resources / DCN assignments); no other service stores it"))
+    for service, tables in sorted(repo.tables.items()):
+        if service == SMS_OWNER:
+            continue
+        for table in sorted(t for t in tables if t.startswith(SMS_TABLE_PREFIXES)):
+            out.append(Violation("SMS_DOMAIN_ELSEWHERE", f"services/{service}", 1, f"table `{table}` belongs to services/{SMS_OWNER} (SMS transports); no other service stores it"))
     for top in ("services", "packages"):
         for path in repo.files(repo.root / top):
             if path.name == "Cargo.toml":
