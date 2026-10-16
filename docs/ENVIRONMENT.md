@@ -300,7 +300,7 @@ Create `.env` files in each component directory:
 RUST_LOG=info,meeting_service=debug
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/cfmeet
 REDIS_URL=redis://localhost:6379
-JWT_SECRET=dev-secret-key-change-in-production-at-least-64-characters-long!!
+JWT_SECRET=<dev-jwt-secret>
 LIVEKIT_URL=ws://localhost:7880
 LIVEKIT_API_KEY=devkey
 LIVEKIT_API_SECRET=devsecret
@@ -332,7 +332,7 @@ Create `.env.prod` or use environment variable injection:
 RUST_LOG=info,meeting_service=info
 DATABASE_URL=postgres://cfmeet:SECURE_PASSWORD@db.cfmeet.com:5432/cfmeet?sslmode=require
 REDIS_URL=redis://:REDIS_PASSWORD@redis.cfmeet.com:6379
-JWT_SECRET=YOUR_PRODUCTION_JWT_SECRET_AT_LEAST_64_CHARACTERS
+JWT_SECRET=<production-jwt-secret>
 LIVEKIT_URL=wss://livekit.cfmeet.com
 LIVEKIT_API_KEY=YOUR_LIVEKIT_API_KEY
 LIVEKIT_API_SECRET=YOUR_LIVEKIT_API_SECRET
