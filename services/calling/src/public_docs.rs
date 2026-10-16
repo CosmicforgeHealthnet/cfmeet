@@ -356,7 +356,7 @@ mod tests {
             .map(|item| {
                 METHODS
                     .iter()
-                    .filter(|method| item.contains_key(*method))
+                    .filter(|method| item.contains_key(**method))
                     .count()
             })
             .sum()
