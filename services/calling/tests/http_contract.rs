@@ -207,6 +207,12 @@ fn contract_paths_equal_the_registered_routes() {
             );
             continue;
         }
+        // Public Swagger/OpenAPI delivery is documentation infrastructure, not a Calling
+        // business API. Its routes are tested in public_docs itself and deliberately do
+        // not become operations in cfmeet.calling.http-api.
+        if path.ends_with("src/public_docs.rs") {
+            continue;
+        }
         let is_ingress = path.ends_with("src/privacy_relay/http.rs");
         // Internal routers are nested under /internal/v1 by routes::app.
         let prefix = if path.ends_with("src/privacy_relay/enforcement.rs")
