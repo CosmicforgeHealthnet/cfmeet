@@ -598,8 +598,7 @@ async fn every_implemented_route_is_in_the_contract_and_vice_versa() {
         ("src/http/customer.rs", "/v1"),
         ("src/http/internal.rs", "/internal/v1"),
     ] {
-        for line in src(file).lines().filter(|l| l.contains(".route(\"")) {
-            let path = line.split('"').nth(1).unwrap();
+        for (method, path) in routes_in(&src(file)) {
             let path: String = path
                 .split('/')
                 .map(|seg| match seg.strip_prefix(':') {
@@ -608,19 +607,48 @@ async fn every_implemented_route_is_in_the_contract_and_vice_versa() {
                 })
                 .collect::<Vec<_>>()
                 .join("/");
-            let method = line
-                .split(", ")
-                .nth(1)
-                .unwrap()
-                .split('(')
-                .next()
-                .unwrap()
-                .to_uppercase();
             implemented.push(format!("{method} {prefix}{path}"));
         }
     }
     implemented.sort();
     assert_eq!(implemented, contract);
+}
+
+/// Every `(METHOD, path)` of the `.route("path", get(..).post(..))` calls in `source`,
+/// whatever the layout rustfmt chose.
+fn routes_in(source: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for part in source.split(".route(").skip(1) {
+        let Some(rest) = part.trim_start().strip_prefix('"') else {
+            continue;
+        };
+        let (path, rest) = rest.split_once('"').unwrap();
+        // The route's arguments: up to the parenthesis closing `.route(`.
+        let mut depth = 1;
+        let mut ident = String::new();
+        for c in rest.chars() {
+            match c {
+                '(' => {
+                    if depth == 1
+                        && ["get", "post", "put", "patch", "delete"].contains(&ident.as_str())
+                    {
+                        out.push((ident.to_uppercase(), path.to_string()));
+                    }
+                    depth += 1;
+                    ident.clear();
+                }
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                c if c.is_ascii_alphanumeric() || c == '_' => ident.push(c),
+                _ => ident.clear(),
+            }
+        }
+    }
+    out
 }
 
 fn to_camel(s: &str) -> String {

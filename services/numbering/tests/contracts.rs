@@ -223,13 +223,13 @@ fn error_and_rule_codes_match_the_contract() {
     let mut used = BTreeSet::new();
     for entry in std::fs::read_dir(dir).unwrap() {
         let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
-        for marker in [
-            "precondition(\"",
-            "conflict(\"",
-            "precondition(\n                \"",
-        ] {
+        // `precondition(` / `conflict(` followed (after any whitespace, as rustfmt lays
+        // it out) by the code literal.
+        for marker in ["precondition(", "conflict("] {
             for part in text.split(marker).skip(1) {
-                used.insert(part.split('"').next().unwrap().to_string());
+                if let Some(rest) = part.trim_start().strip_prefix('"') {
+                    used.insert(rest.split('"').next().unwrap().to_string());
+                }
             }
         }
     }
