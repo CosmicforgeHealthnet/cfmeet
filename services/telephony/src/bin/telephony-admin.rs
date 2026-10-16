@@ -58,6 +58,10 @@ enum Command {
     /// Part F: enterprise SIP devices on the own edge (internal; never paid).
     #[command(subcommand)]
     EnterpriseDevice(EnterpriseDeviceCmd),
+    /// Part IV Workstream L: Numbering DCNs carried for voice (needs the service
+    /// authentication settings and `NUMBERING_INTERNAL_BASE_URL` for bind / acknowledge).
+    #[command(subcommand)]
+    Dcn(DcnCmd),
     /// Incidents (restricted operational view; never numbers). Without a subcommand:
     /// the open incidents.
     Incidents {
@@ -243,6 +247,30 @@ enum SipPeerCmd {
 }
 
 #[derive(Subcommand)]
+enum DcnCmd {
+    /// Binds the DCN (canonical number read from Numbering) to a local route.
+    Bind {
+        #[arg(long)]
+        number_resource: uuid::Uuid,
+        #[arg(long)]
+        route: String,
+        #[arg(long, default_value = "VOICE_OUTBOUND,VOICE_INBOUND")]
+        capabilities: String,
+    },
+    /// Acknowledges Numbering's current VOICE route (only when routable locally).
+    Acknowledge {
+        #[arg(long)]
+        number_resource: uuid::Uuid,
+    },
+    /// Stops carrying the DCN (disables its local bindings).
+    Disable {
+        #[arg(long)]
+        number_resource: uuid::Uuid,
+    },
+    List,
+}
+
+#[derive(Subcommand)]
 enum NumberCmd {
     /// Binds a platform-owned PUBLIC relay number to the route that serves it.
     Bind {
@@ -390,6 +418,21 @@ fn audit(
     .map_err(|e| e.to_string())
 }
 
+/// The authenticated Numbering client (service-auth settings from the environment, as the
+/// service itself loads them). Fails closed when Numbering is not configured.
+fn numbering_port() -> Result<std::sync::Arc<dyn telephony::ports::NumberingPort>, String> {
+    let settings = telephony::config::ServiceAuthSettings::from_env().map_err(|e| e.to_string())?;
+    if settings.numbering_base_url.is_none() {
+        return Err("NUMBERING_INTERNAL_BASE_URL is required for this command".into());
+    }
+    let runtime = settings
+        .load(std::sync::Arc::new(cf_service_auth::SystemClock))
+        .map_err(|e| e.to_string())?;
+    Ok(std::sync::Arc::new(telephony::ports::HttpNumbering::new(
+        runtime,
+    )))
+}
+
 async fn run(
     db: &DatabaseConnection,
     command: Command,
@@ -457,6 +500,30 @@ async fn run(
             }
             SipPeerCmd::List => Ok(json!(rows(db, "SELECT id, provider_id, secret_ref, transport, allowed_source_cidrs::text[] AS allowed_source_cidrs, max_concurrent_dialogs FROM sip_peer_config_refs ORDER BY id").await?)),
         },
+        Command::Dcn(cmd) => {
+            let err = |e: telephony::dcn::DcnActivationError| e.to_string();
+            match cmd {
+                DcnCmd::Bind { number_resource, route, capabilities } => {
+                    let numbering = numbering_port()?;
+                    telephony::dcn::bind(db, numbering.as_ref(), operator.unwrap_or(""), number_resource, &route, &list(&capabilities)).await.map_err(err)
+                }
+                DcnCmd::Acknowledge { number_resource } => {
+                    let numbering = numbering_port()?;
+                    telephony::dcn::acknowledge(db, numbering.as_ref(), Some(operator.unwrap_or("")), number_resource).await.map_err(err)
+                }
+                DcnCmd::Disable { number_resource } => {
+                    telephony::dcn::disable(db, operator.unwrap_or(""), number_resource).await.map_err(err)
+                }
+                DcnCmd::List => {
+                    let list = rows(db, "SELECT number_resource_id::text AS number_resource_id, public_e164, route_id, capabilities, status FROM telecom_number_bindings WHERE number_kind = 'DCN' ORDER BY number_resource_id, route_id").await?;
+                    Ok(json!(list.into_iter().map(|mut r| {
+                        let n = r["public_e164"].as_str().unwrap_or("").to_string();
+                        r["public_e164"] = json!(masked(&n));
+                        r
+                    }).collect::<Vec<_>>()))
+                }
+            }
+        }
         Command::Number(cmd) => match cmd {
             NumberCmd::Bind { number, route, capabilities } => {
                 let a = audit(operator, "NUMBER_BIND", "NUMBER_BINDING", &route, json!({ "number": masked(&number), "route": route, "capabilities": list(&capabilities) }))?;

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Privacy Relay internal API",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "description": "Internal HTTP surface of services/privacy-relay: GET /health (public) and the service-authenticated /internal/v1 API used by the authenticated platform ingress (Calling) and by Calling's protected-call authorization. Every /internal/v1 path — including unknown ones — requires a valid service token; customer credentials are refused. Scope comes only from the signed delegated platform context; bodies refuse unknown members (tenantId, applicationId, environmentId, status, version, authorization results). Commands carry {idempotencyKey, request}."
   },
   "paths": {
@@ -1739,6 +1739,78 @@
               "application/json": {
                 "schema": {
                   "$ref": "https://schemas.cfmeet.com/privacy-relay/relay-routing/v1.schema.json#/$defs/InboundCallerResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/relay-routing/protect-dcn-caller": {
+      "post": {
+        "operationId": "protectDcnCaller",
+        "description": "Part IV L — Telephony only, no delegated context: the caller of an inbound call to a Digital Communications Number goes straight into the Contact Vault in the scope proven by Numbering's signed INBOUND_VOICE grant (verified against Privacy Relay's dedicated routing-grant trust bundle, NUMBER_GRANT_TRUST_BUNDLE_FILE; kind INBOUND_VOICE, issuer Numbering, audience Calling). 201 new / 200 existing contact. An invalid grant is 409 RELAY_MAPPING_NOT_ACTIVE; no configured trust 503.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "protected-contact.protect-inbound"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "protected-contact.protect-inbound",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/privacy-relay/relay-routing/v1.schema.json#/$defs/ProtectDcnCallerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "A new protected contact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/relay-routing/v1.schema.json#/$defs/DcnCallerResult"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "An existing protected contact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/privacy-relay/relay-routing/v1.schema.json#/$defs/DcnCallerResult"
                 }
               }
             }

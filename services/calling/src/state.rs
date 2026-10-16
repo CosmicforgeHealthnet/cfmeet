@@ -42,6 +42,8 @@ pub struct CallingRuntime {
     /// Privacy Relay authority (unconfigured: protected calls and the ingress fail closed;
     /// ordinary application calling never depends on it).
     pub privacy_relay: Arc<dyn PrivacyRelayAuthority>,
+    /// Numbering (Part IV L; unconfigured: DCN calls fail closed, nothing else needs it).
+    pub numbering: Arc<dyn crate::numbering::NumberingPort>,
     /// Contact Vault access-token minting (§31; none: contact access grants are 503).
     pub contact_delegation: Option<Arc<cf_service_auth::ContactDelegationSigner>>,
     /// Public-network execution (Part E; default: unconfigured — no public route).
@@ -146,6 +148,7 @@ impl AppState {
             )
             .with_push(runtime.push)
             .with_privacy_relay(runtime.privacy_relay.clone())
+            .with_numbering(runtime.numbering)
             .with_public_network(runtime.public_network)
             .with_enterprise_flags(runtime.enterprise_flags)
             .with_artifacts(runtime.artifacts)

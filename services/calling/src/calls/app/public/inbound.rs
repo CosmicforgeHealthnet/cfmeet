@@ -1035,6 +1035,7 @@ impl AppCallService {
                 candidate_routes: &candidate_routes,
                 correlation_id: correlation.as_str(),
                 generation: 1,
+                presented_number_resource_id: None,
             },
             now,
         )

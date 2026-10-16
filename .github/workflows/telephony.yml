@@ -176,6 +176,8 @@ jobs:
         run: cargo test --locked --test sip_edge_outage
       - name: Migration upgrade (previous head with data -> head -> down one -> head)
         run: cargo test --locked --test migration_upgrade
+      - name: DCN voice (Part IV L; Numbering resolution, single-use caller identity, activation)
+        run: cargo test --locked --test dcn_voice
       - name: Disaster recovery (backup / restore, resumed workers, worker backlog)
         env:
           DISASTER_RECOVERY_CERT_REQUIRED: "1"

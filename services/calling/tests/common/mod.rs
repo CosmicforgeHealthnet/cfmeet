@@ -492,6 +492,7 @@ pub fn test_runtime(
         app_config: AppCallingConfig::default(),
         call_config: CallServiceConfig::default(),
         privacy_relay: Arc::new(calling::privacy_relay::UnconfiguredPrivacyRelay),
+        numbering: Arc::new(calling::numbering::UnconfiguredNumbering),
         contact_delegation: None,
         public_network: Default::default(),
         enterprise_flags: calling::enterprise::EnterpriseFlags::ALL_ON,

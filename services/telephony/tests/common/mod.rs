@@ -36,8 +36,9 @@ use telephony::{
     config::{ServiceAuthRuntime, TelecomFlags},
     internal,
     ports::{
-        CallingPort, InboundCaller, InboundMapping, PortError, PrivacyRelayPort,
-        ResolveForExecution, ResolvedExecution,
+        CallingPort, DcnInbound, DcnRouting, DcnScope, DcnVoiceRoute, InboundCaller,
+        InboundMapping, NumberingPort, PortError, PrivacyRelayPort, ResolveForExecution,
+        ResolvedExecution, VerifiedDcnIdentity,
     },
     providers::{deterministic::DeterministicProvider, ExecutionNumber, ProviderRegistry},
     routes,
@@ -230,6 +231,8 @@ pub struct FakePrivacyRelay {
     pub mappings: StdMutex<HashMap<String, InboundMapping>>,
     pub protected: StdMutex<Vec<Uuid>>,
     pub allowed_targets: StdMutex<Vec<Value>>,
+    /// Part IV L: the Numbering grants DCN callers were protected under.
+    pub dcn_protected: StdMutex<Vec<String>>,
 }
 
 impl FakePrivacyRelay {
@@ -243,6 +246,7 @@ impl FakePrivacyRelay {
             mappings: StdMutex::default(),
             protected: StdMutex::default(),
             allowed_targets: StdMutex::default(),
+            dcn_protected: StdMutex::default(),
         }
     }
 
@@ -332,6 +336,204 @@ impl PrivacyRelayPort for FakePrivacyRelay {
             allowed_targets: self.allowed_targets.lock().unwrap().clone(),
         })
     }
+
+    async fn protect_dcn_caller(
+        &self,
+        number_grant: &str,
+        _: &ExecutionNumber,
+        _: &str,
+    ) -> Result<Uuid, PortError> {
+        match *self.mode.lock().unwrap() {
+            PrMode::Unavailable => return Err(PortError::Unavailable),
+            PrMode::Deny => return Err(PortError::Denied("RELAY_MAPPING_NOT_ACTIVE".into())),
+            PrMode::Normal => {}
+        }
+        self.dcn_protected
+            .lock()
+            .unwrap()
+            .push(number_grant.to_string());
+        Ok(Uuid::new_v4())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fake Numbering (Part IV L): DCN inbound resolution, caller-identity grants, voice
+// route readiness. Grants are opaque strings here; single use per operation.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+pub struct FakeDcn {
+    pub number_resource_id: Uuid,
+    pub assignment_id: Uuid,
+    pub routing_revision: i64,
+    pub scope: DcnScope,
+    /// `None`: assigned but routed nowhere (NOT_ROUTED).
+    pub target: Option<(String, Uuid)>,
+    /// `Some(reason)`: Numbering answers UNAVAILABLE.
+    pub unavailable: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct FakeGrant {
+    pub e164: String,
+    pub dcn: FakeDcn,
+    pub operation_ref: String,
+    pub consumed: bool,
+    pub revoked: bool,
+}
+
+pub struct FakeNumbering {
+    pub available: StdMutex<bool>,
+    /// called E.164 -> the DCN
+    pub dcns: StdMutex<HashMap<String, FakeDcn>>,
+    /// grant token -> grant
+    pub grants: StdMutex<HashMap<String, FakeGrant>>,
+    pub voice_routes: StdMutex<HashMap<Uuid, (String, Option<DcnVoiceRoute>)>>,
+    pub acknowledged: StdMutex<Vec<(Uuid, Uuid, i64)>>,
+    pub verifications: StdMutex<Vec<String>>,
+}
+
+impl FakeNumbering {
+    pub fn new() -> Self {
+        Self {
+            available: StdMutex::new(true),
+            dcns: StdMutex::default(),
+            grants: StdMutex::default(),
+            voice_routes: StdMutex::default(),
+            acknowledged: StdMutex::default(),
+            verifications: StdMutex::default(),
+        }
+    }
+
+    pub fn set_available(&self, up: bool) {
+        *self.available.lock().unwrap() = up;
+    }
+
+    pub fn add_dcn(&self, e164: &str, dcn: FakeDcn) {
+        self.dcns.lock().unwrap().insert(e164.to_string(), dcn);
+    }
+
+    /// Issues a CALLER_IDENTITY grant for `operation_ref`; returns the token.
+    pub fn issue_caller_identity(&self, e164: &str, dcn: FakeDcn, operation_ref: &str) -> String {
+        let token = format!("eyJhbGciOiJFZERTQSJ9.{}.c2ln", Uuid::new_v4().simple());
+        self.grants.lock().unwrap().insert(
+            token.clone(),
+            FakeGrant {
+                e164: e164.to_string(),
+                dcn,
+                operation_ref: operation_ref.to_string(),
+                consumed: false,
+                revoked: false,
+            },
+        );
+        token
+    }
+}
+
+#[async_trait::async_trait]
+impl NumberingPort for FakeNumbering {
+    async fn resolve_inbound_voice(
+        &self,
+        called: &ExecutionNumber,
+        _: &str,
+    ) -> Result<DcnInbound, PortError> {
+        if !*self.available.lock().unwrap() {
+            return Err(PortError::Unavailable);
+        }
+        let Some(dcn) = self.dcns.lock().unwrap().get(called.expose()).cloned() else {
+            return Ok(DcnInbound::Unavailable("NUMBER_NOT_ASSIGNED".into()));
+        };
+        if let Some(reason) = dcn.unavailable {
+            return Ok(DcnInbound::Unavailable(reason));
+        }
+        let Some((kind, target)) = dcn.target else {
+            return Ok(DcnInbound::NotRouted);
+        };
+        Ok(DcnInbound::Routed(Box::new(DcnRouting {
+            number_resource_id: dcn.number_resource_id,
+            assignment_id: dcn.assignment_id,
+            routing_revision: dcn.routing_revision,
+            ownership_class: "ENTERPRISE".into(),
+            scope: dcn.scope,
+            target_kind: kind,
+            target_ref: target,
+            grant: format!(
+                "eyJhbGciOiJFZERTQSJ9.inbound{}.c2ln",
+                Uuid::new_v4().simple()
+            ),
+            grant_id: Uuid::new_v4(),
+        })))
+    }
+
+    async fn verify_caller_identity(
+        &self,
+        grant: &str,
+        operation_ref: &str,
+        _: &str,
+    ) -> Result<Result<VerifiedDcnIdentity, String>, PortError> {
+        if !*self.available.lock().unwrap() {
+            return Err(PortError::Unavailable);
+        }
+        self.verifications
+            .lock()
+            .unwrap()
+            .push(operation_ref.to_string());
+        let mut grants = self.grants.lock().unwrap();
+        let Some(g) = grants.get_mut(grant) else {
+            return Ok(Err("GRANT_INVALID".into()));
+        };
+        if g.revoked {
+            return Ok(Err("GRANT_REVOKED".into()));
+        }
+        if g.consumed {
+            return Ok(Err("GRANT_ALREADY_USED".into()));
+        }
+        if g.operation_ref != operation_ref {
+            return Ok(Err("OPERATION_MISMATCH".into()));
+        }
+        g.consumed = true;
+        Ok(Ok(VerifiedDcnIdentity {
+            identity: ExecutionNumber::parse(&g.e164).unwrap(),
+            number_resource_id: g.dcn.number_resource_id,
+            assignment_id: g.dcn.assignment_id,
+            routing_revision: g.dcn.routing_revision,
+            grant_id: Uuid::new_v4(),
+            scope: g.dcn.scope,
+        }))
+    }
+
+    async fn voice_route(
+        &self,
+        number_resource_id: Uuid,
+    ) -> Result<(ExecutionNumber, Option<DcnVoiceRoute>), PortError> {
+        if !*self.available.lock().unwrap() {
+            return Err(PortError::Unavailable);
+        }
+        let (e164, route) = self
+            .voice_routes
+            .lock()
+            .unwrap()
+            .get(&number_resource_id)
+            .cloned()
+            .ok_or(PortError::NotFound)?;
+        Ok((ExecutionNumber::parse(&e164).unwrap(), route))
+    }
+
+    async fn acknowledge_voice_route(
+        &self,
+        number_resource_id: Uuid,
+        route: &DcnVoiceRoute,
+    ) -> Result<(), PortError> {
+        if !*self.available.lock().unwrap() {
+            return Err(PortError::Unavailable);
+        }
+        self.acknowledged.lock().unwrap().push((
+            number_resource_id,
+            route.route_ref,
+            route.route_revision,
+        ));
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -343,6 +545,9 @@ pub struct FakeCalling {
     pub events: StdMutex<Vec<Value>>,
     pub offers: StdMutex<Vec<Value>>,
     pub offer_route_class: StdMutex<String>,
+    /// Part IV L: DCN inbound offers; `dcn_refusal` makes Calling refuse them.
+    pub dcn_offers: StdMutex<Vec<Value>>,
+    pub dcn_refusal: StdMutex<Option<&'static str>>,
     /// Part F: enterprise dialog offers and capture reports received.
     pub enterprise_offers: StdMutex<Vec<Value>>,
     pub captures: StdMutex<Vec<Value>>,
@@ -365,6 +570,8 @@ impl FakeCalling {
             events: StdMutex::default(),
             offers: StdMutex::default(),
             offer_route_class: StdMutex::new("PSTN_TO_APP".into()),
+            dcn_offers: StdMutex::default(),
+            dcn_refusal: StdMutex::new(None),
             enterprise_offers: StdMutex::default(),
             captures: StdMutex::default(),
             capture_mode: StdMutex::new("OK"),
@@ -466,6 +673,21 @@ impl CallingPort for FakeCalling {
             "callId": Uuid::new_v4(),
             "callLegId": Uuid::new_v4(),
             "routeClass": *self.offer_route_class.lock().unwrap(),
+        }))
+    }
+
+    async fn offer_dcn_inbound(&self, offer: &Value) -> Result<Value, PortError> {
+        if !*self.available.lock().unwrap() {
+            return Err(PortError::Unavailable);
+        }
+        if let Some(code) = *self.dcn_refusal.lock().unwrap() {
+            return Err(PortError::Denied(code.into()));
+        }
+        self.dcn_offers.lock().unwrap().push(offer.clone());
+        Ok(json!({
+            "callId": Uuid::new_v4(),
+            "callLegId": Uuid::new_v4(),
+            "routeClass": "PSTN_TO_APP",
         }))
     }
 
@@ -671,6 +893,7 @@ pub struct Harness {
     pub provider_b: DeterministicProvider,
     pub privacy: Arc<FakePrivacyRelay>,
     pub calling: Arc<FakeCalling>,
+    pub numbering: Arc<FakeNumbering>,
     pub ids: Identities,
     pub svc: TelephonyService,
     pub app: Router,
@@ -727,6 +950,7 @@ impl Harness {
         let provider_b = DeterministicProvider::new("dp-b", CALLBACK_SECRET);
         let privacy = Arc::new(FakePrivacyRelay::new());
         let calling = Arc::new(FakeCalling::new());
+        let numbering = Arc::new(FakeNumbering::new());
         let ids = identities(calling_permissions);
         let registry = match &edge {
             None => ProviderRegistry::new()
@@ -764,6 +988,7 @@ impl Harness {
                 .with_providers(registry)
                 .with_privacy_relay(privacy.clone())
                 .with_calling(calling.clone())
+                .with_numbering(numbering.clone())
                 .with_settings(fast_settings());
         if let Some(edge) = &edge {
             svc = svc.with_edge(edge.clone());
@@ -781,6 +1006,7 @@ impl Harness {
             provider_b,
             privacy,
             calling,
+            numbering,
             ids,
             svc,
             app,

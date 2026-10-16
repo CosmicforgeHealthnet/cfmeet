@@ -1,6 +1,6 @@
-//! Upgrade path of the newest Telephony migration (Part I §94): a database at the
-//! PREVIOUS head (every migration but the newest, computed from the migrator) holding
-//! live data is migrated to head; the data survives, the new schema works on the old
+//! Upgrade paths of the newest Telephony migrations (Part I §94). Migration 15 (outbox
+//! correlations / dead letters): a database at its previous head holding live data is
+//! migrated one step; the data survives, the new schema works on the old
 //! rows (an outbox row written before correlations existed is still delivered), the
 //! migrator has nothing pending; one step down keeps the data (and the append-only
 //! operator audit), and up again restores head.
@@ -54,11 +54,12 @@ async fn previous_head_with_data_upgrades_rolls_back_one_step_and_upgrades_again
     let conn = &db.conn;
     let total = Migrator::migrations().len();
     assert!(total >= 2);
-    let previous_head = (total - 1) as u32;
+    // Migration 15 is the second newest (16 is Workstream L, tested below).
+    let previous_head = (total - 2) as u32;
     Migrator::up(conn, Some(previous_head)).await.unwrap();
     assert_eq!(
         Migrator::get_pending_migrations(conn).await.unwrap().len(),
-        1
+        2
     );
     assert!(!has_column(conn, "telephony_outbox", "correlation_id").await);
 
@@ -119,15 +120,15 @@ async fn previous_head_with_data_upgrades_rolls_back_one_step_and_upgrades_again
     )
     .await;
 
-    // --- Up to head ---------------------------------------------------------------------
-    Migrator::up(conn, None).await.unwrap();
-    assert!(Migrator::get_pending_migrations(conn)
-        .await
-        .unwrap()
-        .is_empty());
+    // --- Up one step -----------------------------------------------------------------------
+    Migrator::up(conn, Some(1)).await.unwrap();
+    assert_eq!(
+        Migrator::get_pending_migrations(conn).await.unwrap().len(),
+        1
+    );
     assert_eq!(
         Migrator::get_applied_migrations(conn).await.unwrap().len(),
-        total
+        total - 1
     );
     assert!(has_column(conn, "telephony_outbox", "correlation_id").await);
     assert!(has_column(conn, "telephony_outbox", "dead_lettered_at").await);
@@ -200,7 +201,7 @@ async fn previous_head_with_data_upgrades_rolls_back_one_step_and_upgrades_again
     Migrator::down(conn, Some(1)).await.unwrap();
     assert_eq!(
         Migrator::get_pending_migrations(conn).await.unwrap().len(),
-        1
+        2
     );
     assert!(!has_column(conn, "telephony_outbox", "correlation_id").await);
     assert!(!has_column(conn, "telephony_outbox", "dead_lettered_at").await);
@@ -244,11 +245,11 @@ async fn previous_head_with_data_upgrades_rolls_back_one_step_and_upgrades_again
         .is_err());
 
     // --- Up again -------------------------------------------------------------------------
-    Migrator::up(conn, None).await.unwrap();
-    assert!(Migrator::get_pending_migrations(conn)
-        .await
-        .unwrap()
-        .is_empty());
+    Migrator::up(conn, Some(1)).await.unwrap();
+    assert_eq!(
+        Migrator::get_pending_migrations(conn).await.unwrap().len(),
+        1
+    );
     assert!(has_column(conn, "telephony_outbox", "correlation_id").await);
     assert_eq!(
         scalar(
@@ -262,4 +263,100 @@ async fn previous_head_with_data_upgrades_rolls_back_one_step_and_upgrades_again
         1
     );
     assert_eq!(scalar(conn, "SELECT count(*) FROM telephony_legs").await, 1);
+}
+
+/// Migration 16 (Part IV Workstream L, DCNs on the voice path): existing relay bindings
+/// become `RELAY`, legs and commands without DCN evidence are untouched, the new
+/// guards hold; a rollback with no DCN data keeps every row, a rollback with DCN data is
+/// refused (it cannot be represented before L).
+#[tokio::test]
+async fn the_dcn_voice_migration_upgrades_live_data_and_refuses_a_lossy_rollback() {
+    let Some(db) = TestDb::empty().await else {
+        return;
+    };
+    let conn = &db.conn;
+    let total = Migrator::migrations().len();
+    Migrator::up(conn, Some((total - 1) as u32)).await.unwrap();
+    assert!(!has_column(conn, "telecom_number_bindings", "number_kind").await);
+    let ts = Utc::now().to_rfc3339();
+    exec(
+        conn,
+        &format!(
+            "INSERT INTO telecom_providers (id, adapter, capabilities, status, credential_ref, max_concurrent_legs, created_at, updated_at) \
+             VALUES ('dp-a', 'DETERMINISTIC_TEST', ARRAY['OUTBOUND_VOICE','INBOUND_VOICE'], 'ENABLED', 'x', 10, '{ts}', '{ts}'); \
+             INSERT INTO telecom_routes (id, provider_id, countries, capabilities, priority, status, max_concurrent_legs, \
+               max_call_seconds, created_at, updated_at) \
+             VALUES ('ng-a', 'dp-a', ARRAY['NG'], ARRAY['VOICE_OUTBOUND','VOICE_INBOUND'], 10, 'ENABLED', 5, 3600, '{ts}', '{ts}'); \
+             INSERT INTO telecom_number_bindings (public_e164, route_id, capabilities, status, created_at, updated_at) \
+             VALUES ('+2342010000001', 'ng-a', ARRAY['VOICE_OUTBOUND'], 'ENABLED', '{ts}', '{ts}')"
+        ),
+    )
+    .await;
+    Migrator::up(conn, None).await.unwrap();
+    assert!(Migrator::get_pending_migrations(conn)
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        scalar(
+            conn,
+            "SELECT count(*) FROM telecom_number_bindings WHERE number_kind = 'RELAY' AND number_resource_id IS NULL"
+        )
+        .await,
+        1
+    );
+    // A DCN needs its Number Resource; a relay number has none; one kind per number.
+    for bad in [
+        "('+2342010000777', 'ng-a', ARRAY['VOICE_INBOUND'], 'ENABLED', 'DCN', NULL",
+        "('+2342010000778', 'ng-a', ARRAY['VOICE_INBOUND'], 'ENABLED', 'RELAY', gen_random_uuid()",
+        "('+2342010000001', 'ng-a', ARRAY['VOICE_INBOUND'], 'ENABLED', 'DCN', gen_random_uuid()",
+    ] {
+        assert!(
+            conn.execute_unprepared(&format!(
+                "INSERT INTO telecom_number_bindings (public_e164, route_id, capabilities, status, number_kind, \
+                   number_resource_id, created_at, updated_at) VALUES {bad}, '{ts}', '{ts}')"
+            ))
+            .await
+            .is_err(),
+            "{bad}"
+        );
+    }
+    // The audit accepts the DCN vocabulary.
+    exec(
+        conn,
+        &format!(
+            "INSERT INTO telephony_operator_audit (id, actor, correlation_id, action, target_kind, target_id, detail, occurred_at) \
+             VALUES (gen_random_uuid(), 'ops.upgrade', 'op-dcn-1', 'DCN_BIND', 'NUMBER_BINDING', 'n1', '{{}}', '{ts}')"
+        ),
+    )
+    .await;
+    // Rollback without DCN data keeps every row.
+    Migrator::down(conn, Some(1)).await.unwrap();
+    assert!(!has_column(conn, "telecom_number_bindings", "number_kind").await);
+    assert_eq!(
+        scalar(conn, "SELECT count(*) FROM telecom_number_bindings").await,
+        1
+    );
+    assert_eq!(
+        scalar(conn, "SELECT count(*) FROM telephony_operator_audit").await,
+        1,
+        "append-only across the rollback"
+    );
+    // Up again, record a DCN binding: the rollback is refused and nothing changes.
+    Migrator::up(conn, None).await.unwrap();
+    exec(
+        conn,
+        &format!(
+            "INSERT INTO telecom_number_bindings (public_e164, route_id, capabilities, status, number_kind, \
+               number_resource_id, created_at, updated_at) \
+             VALUES ('+2342010000777', 'ng-a', ARRAY['VOICE_INBOUND'], 'ENABLED', 'DCN', gen_random_uuid(), '{ts}', '{ts}')"
+        ),
+    )
+    .await;
+    assert!(Migrator::down(conn, Some(1)).await.is_err());
+    assert!(has_column(conn, "telecom_number_bindings", "number_kind").await);
+    assert_eq!(
+        scalar(conn, "SELECT count(*) FROM telecom_number_bindings").await,
+        2
+    );
 }

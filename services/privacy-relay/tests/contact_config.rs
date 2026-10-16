@@ -123,6 +123,7 @@ fn key_material_is_validated_and_kept_separate() {
                 f,
             )),
             delegation_trust_file: Some(file(&dir, &format!("t-{}.json", uuid::Uuid::new_v4()), t)),
+            number_grant_trust_file: None,
         };
         settings
             .load(
@@ -168,6 +169,7 @@ fn key_material_is_validated_and_kept_separate() {
         keyring_file: Some(PathBuf::from("/nonexistent/e.json")),
         fingerprint_keyring_file: Some(PathBuf::from("/nonexistent/f.json")),
         delegation_trust_file: None,
+        number_grant_trust_file: None,
     };
     assert!(settings
         .load(

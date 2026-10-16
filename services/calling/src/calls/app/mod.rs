@@ -227,6 +227,9 @@ pub struct AppCallService {
     bus: Arc<dyn RealtimeSignalBus>,
     push: Arc<dyn PushDispatcher>,
     privacy: Arc<dyn PrivacyRelayAuthority>,
+    /// Numbering (Part IV L): DCN inbound grants and caller identity (default:
+    /// unconfigured — DCN calls fail closed; nothing else depends on it).
+    pub(crate) numbering: Arc<dyn crate::numbering::NumberingPort>,
     public: public::PublicNetwork,
     config: AppCallingConfig,
     /// Enterprise kill switches (Part F).
@@ -261,6 +264,7 @@ impl AppCallService {
             bus,
             push: Arc::new(NoPushTransport),
             privacy: Arc::new(UnconfiguredPrivacyRelay),
+            numbering: Arc::new(crate::numbering::UnconfiguredNumbering),
             public: public::PublicNetwork::default(),
             config,
             enterprise_flags: crate::enterprise::EnterpriseFlags::default(),
@@ -308,6 +312,13 @@ impl AppCallService {
     /// unconfigured — protected calls fail closed; ordinary calls are unaffected).
     pub fn with_privacy_relay(mut self, privacy: Arc<dyn PrivacyRelayAuthority>) -> Self {
         self.privacy = privacy;
+        self
+    }
+
+    /// Uses `numbering` as the DCN authority (default: unconfigured — DCN calls fail
+    /// closed; application, relay-number and enterprise calls are unaffected).
+    pub fn with_numbering(mut self, numbering: Arc<dyn crate::numbering::NumberingPort>) -> Self {
+        self.numbering = numbering;
         self
     }
 

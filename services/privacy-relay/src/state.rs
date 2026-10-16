@@ -20,6 +20,9 @@ pub struct AppState {
     /// Contact Vault access-token verification (the only way into the contact routes);
     /// None = not configured, every contact route fails closed.
     pub contact_delegation: Option<Arc<ContactDelegationVerifier>>,
+    /// Numbering's routing grant verification (DCN inbound caller protection); None = not
+    /// configured, the DCN protection route fails closed.
+    pub number_grants: Option<Arc<cf_service_auth::number_grant::NumberGrantVerifier>>,
 }
 
 impl AppState {
@@ -37,6 +40,7 @@ impl AppState {
             service_auth,
             contacts: Arc::new(contacts),
             contact_delegation: None,
+            number_grants: None,
         }
     }
 
@@ -47,6 +51,15 @@ impl AppState {
     ) -> Self {
         self.contacts = Arc::new(contacts);
         self.contact_delegation = delegation.map(Arc::new);
+        self
+    }
+
+    /// Installs Numbering's routing grant verification (DCN inbound callers).
+    pub fn with_number_grants(
+        mut self,
+        verifier: Option<cf_service_auth::number_grant::NumberGrantVerifier>,
+    ) -> Self {
+        self.number_grants = verifier.map(Arc::new);
         self
     }
 }

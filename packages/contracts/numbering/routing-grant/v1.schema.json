@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/numbering/routing-grant/v1.schema.json",
   "title": "CF Meet number routing grants v1",
-  "description": "Number routing grants (Part IV Workstream K): inbound resolution, caller-identity / SMS-sender grant requests, verification, the grant claims (typ cf-number-grant+jwt, dedicated key) and the receiver trust bundle. The root accepts exactly one of them (fixtures).",
+  "description": "Number routing grants (Part IV Workstream K): inbound resolution, caller-identity / SMS-sender grant requests, verification, the grant claims (typ cf-number-grant+jwt, dedicated key) and the receiver trust bundle. Part IV L: the delegated current-assignment view. The root accepts exactly one of them (fixtures).",
   "oneOf": [
     {
       "$ref": "#/$defs/RoutingGrantClaims"
@@ -27,6 +27,9 @@
     },
     {
       "$ref": "#/$defs/GrantVerification"
+    },
+    {
+      "$ref": "#/$defs/CurrentAssignment"
     }
   ],
   "$defs": {
@@ -791,6 +794,129 @@
           }
         }
       ]
+    },
+    "CurrentAssignment": {
+      "description": "GET /internal/v1/routing/number-assignments/{numberResourceId} (number-caller-identity.authorize, Calling, signed DELEGATED context; Part IV L): the delegated scope's CURRENT assignment of a number and its routed targets, so Calling applies its enterprise membership policy before asking for a caller-identity grant. Another scope's number is NOT_FOUND. No telephone number, no provider reference.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numberResourceId",
+        "assignmentId",
+        "assignmentStatus",
+        "ownershipClass",
+        "ownerKind",
+        "ownerRef",
+        "voice",
+        "sms",
+        "routingRevision",
+        "numberActive",
+        "outbound"
+      ],
+      "properties": {
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "assignmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "assignmentStatus": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,31}$"
+        },
+        "ownershipClass": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/OwnershipClass"
+        },
+        "ownerKind": {
+          "type": "string",
+          "enum": [
+            "PRINCIPAL",
+            "ORGANIZATION"
+          ]
+        },
+        "ownerRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "voice": {
+          "oneOf": [
+            {
+              "description": "An opaque CF Meet routing target.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "ref"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z_]{1,39}$",
+                  "not": {
+                    "const": "NONE"
+                  }
+                },
+                "ref": {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sms": {
+          "oneOf": [
+            {
+              "description": "An opaque CF Meet routing target.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "ref"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z_]{1,39}$",
+                  "not": {
+                    "const": "NONE"
+                  }
+                },
+                "ref": {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "routingRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "numberActive": {
+          "type": "boolean"
+        },
+        "outbound": {
+          "description": "Whether outbound voice / SMS is usable on the number now.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "voice",
+            "sms"
+          ],
+          "properties": {
+            "voice": {
+              "type": "boolean"
+            },
+            "sms": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
     }
   }
 }

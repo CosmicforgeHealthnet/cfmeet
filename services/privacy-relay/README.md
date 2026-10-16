@@ -58,6 +58,7 @@ authenticated); scope comes only from it. Commands take
 | `POST /internal/v1/sessions/{id}/relay-number-assignment`, `GET` it, `POST …/release` | `relay-number.assign` (Calling) |
 | `POST /internal/v1/relay-routing/resolve-inbound` | `relay-number.resolve-inbound` (Telephony only, no delegated context) |
 | `POST /internal/v1/relay-routing/protect-inbound-caller` | `protected-contact.protect-inbound` (Telephony only, no delegated context) |
+| `POST /internal/v1/relay-routing/protect-dcn-caller` | `protected-contact.protect-inbound` (Telephony only; Part IV L: the scope of Numbering's signed INBOUND_VOICE grant, verified with `NUMBER_GRANT_TRUST_BUNDLE_FILE`) |
 | `GET /health` | none |
 
 Contact Vault customer routes are served **by Privacy Relay itself** with a Contact

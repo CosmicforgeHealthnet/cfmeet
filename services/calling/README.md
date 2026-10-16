@@ -35,12 +35,13 @@ Provider room / dialog / carrier / request identifiers are never Call identities
 | **Part D §26–§30** Privacy Relay ingress (`/v1/privacy-relay/...`), `PRIVACY_RELAY_V1` protected calls and transfers (fail closed), `POST /internal/v1/privacy-relay/enforcement` | **Implemented** (ADR 0010; the business authority is `services/privacy-relay`) |
 | **Part E §37–§51** Routing Engine and route plans, public-network calls executed by `services/telephony` (ContactReference parties, durable command outbox, normalized events, bridges, spend reservations, failover) | **Implemented** (ADRs 0013–0017). **Real lawful telecom interconnect certification remains an external blocker (ADR 0016): no PSTN result is claimed** |
 | **Part F §52–§62** Enterprise calling and continuity on the ONE canonical Call | **Implemented** (ADRs 0018–0027; summary below) |
+| **Part IV Workstream L** Calls to and from Digital Communications Numbers (DCNs) owned by `services/numbering` (inbound DCN offers verified against Numbering, outbound DCN presentation with enterprise membership policy and single-use caller-identity grants) | **Implemented** (ADR 0041; summary below) |
 | **Part G §63–§70** Durable event publication, customer webhooks, `call.route_changed`, usage facts and `GET /v1/usage`, tenant → application → service account → credential limits and the principal axis, `GET /v1/limits`, limit notices | **Implemented** (ADR 0028; summary below) |
 
 **Deferred (later sections / services):** push delivery through a push vendor (a
 transport-neutral push-ready payload is produced), a message-broker transport for
-platform events, quality metrics from providers that do not offer them, Numbering,
-billing / invoicing / pricing, and the Part F items listed below.
+platform events, quality metrics from providers that do not offer them, Numbering's own
+lifecycle and number administration (it is a separate service), billing / invoicing / pricing, and the Part F items listed below.
 
 HTTP surface (contract:
 [`packages/contracts/calling/http/v1.openapi.json`](../../packages/contracts/calling/http/v1.openapi.json),
@@ -390,6 +391,35 @@ closed with 503).
   superseded by a received enforcement is refused.
 
 Migration 000015 adds the two evidence tables.
+
+## Digital Communications Numbers (Part IV Workstream L, ADR 0041)
+
+Numbering owns DCNs (assignments, lifecycle, routing revision, grants); Calling holds
+references only and never a number. `CF_NUMBERING_BASE_URL` configures the port
+(`src/numbering`); unset or unreachable, every DCN operation fails closed while
+application, relay-number and enterprise calls are unaffected.
+
+* **Inbound** `POST /internal/v1/telephony/dcn-inbound-calls` (`telephony-inbound.offer`):
+  Calling verifies Numbering's INBOUND_VOICE grant against Numbering's CURRENT state
+  (`grant-verifications`, audience Calling); the relayed scope, number, assignment,
+  routing revision and target must equal the verified ones (otherwise
+  `CALL_NOT_AUTHORIZED`, never corrected). Routing follows the VERIFIED target only:
+  `PRINCIPAL` → PSTN_TO_APP (no Privacy Relay session; authorization
+  `DCN_ROUTING_V1` with the number-free DCN evidence); `ENTERPRISE_EXTENSION` /
+  `ENTERPRISE_RING_GROUP` / `ENTERPRISE_QUEUE` → the enterprise router entered through
+  the extension (for a group / queue: the scope's ACTIVE extension publishing it);
+  anything else → `PUBLIC_ROUTE_DENIED` (`DCN_TARGET_UNSUPPORTED`). Entry destinations
+  needing prompts / capture on the caller's leg (IVR, voicemail, schedules) are refused
+  for DCN calls.
+* **Outbound** `presentedNumberResourceId` on a `targetContactReference` call: Numbering's
+  delegated current-assignment view, then Calling's presentation policy — a personal /
+  professional number only for its owner; an organization number only for an ACTIVE
+  principal reached through its voice target (the extension's principal, a ring group's
+  member, a queue's ACTIVE member, a department member). Organizational scope alone never
+  suffices. The policy is re-checked at dispatch, where Numbering issues the single-use
+  CALLER_IDENTITY grant for exactly that origination (`leg:{callLegId}:{commandId}`);
+  Telephony receives it as `presentedIdentity` and consumes it before transmission. No
+  relay identity is lent for such a call and none is ever substituted for a refused DCN.
 
 ## Internal service authentication
 

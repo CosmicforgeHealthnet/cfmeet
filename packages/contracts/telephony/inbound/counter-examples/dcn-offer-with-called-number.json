@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1",
+  "telephonyLegId": "1f2e3d4c-5b6a-4798-8a9b-0c1d2e3f4a5b",
+  "correlationId": "corr_7a1c2d3e4a5b4c6d8e7f90a1b2c3d4e5",
+  "scope": {
+    "tenantId": "6d7e8f90-1a2b-4c3d-9e4f-5a6b7c8d9e0f",
+    "applicationId": "7e8f9a0b-1c2d-4e3f-8a4b-5c6d7e8f9a0b",
+    "environmentId": "8f9a0b1c-2d3e-4f5a-9b6c-7d8e9f0a1b2c"
+  },
+  "dcnResolution": {
+    "numberResourceId": "0b2c8f5e-7a41-4d3e-9b6c-1f2e3d4c5b6a",
+    "assignmentId": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+    "routingRevision": 4,
+    "ownershipClass": "ORGANIZATION",
+    "target": {
+      "kind": "ENTERPRISE_EXTENSION",
+      "ref": "9a0b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d"
+    },
+    "grant": "eyJhbGciOiJFZERTQSIsInR5cCI6ImNmLW51bWJlci1ncmFudCtqd3QifQ.eyJ2ZXIiOjF9.c2lnbmF0dXJl",
+    "e164": "+15550100123"
+  },
+  "callerContactReference": "5a7c2e10-3b4d-4f6e-8a9b-0c1d2e3f4a5b",
+  "maxDurationSeconds": 3600
+}

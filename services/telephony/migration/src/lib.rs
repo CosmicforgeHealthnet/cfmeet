@@ -22,6 +22,7 @@ mod m20261010_000012_destination_classes;
 mod m20261010_000013_leg_relay_assignment;
 mod m20261010_000014_retention;
 mod m20261015_000015_outbox_dead_letter;
+mod m20261024_000016_dcn_voice;
 
 /// Name of the table recording which Telephony migrations have been applied.
 pub const MIGRATION_TABLE: &str = "telephony_seaql_migrations";
@@ -47,6 +48,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261010_000013_leg_relay_assignment::Migration),
             Box::new(m20261010_000014_retention::Migration),
             Box::new(m20261015_000015_outbox_dead_letter::Migration),
+            Box::new(m20261024_000016_dcn_voice::Migration),
         ]
     }
 

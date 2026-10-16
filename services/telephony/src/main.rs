@@ -129,6 +129,11 @@ async fn main() -> anyhow::Result<()> {
         .with_edge(edge.clone())
         .with_privacy_relay(Arc::new(HttpPrivacyRelay::new(service_auth.clone())))
         .with_calling(Arc::new(HttpCalling::new(service_auth.clone())))
+        .with_numbering(if settings.numbering_base_url.is_some() {
+            Arc::new(telephony::ports::HttpNumbering::new(service_auth.clone()))
+        } else {
+            Arc::new(telephony::ports::UnconfiguredNumbering)
+        })
         .with_settings(execution);
     // Edge events (inbound dialogs, call progress, application media joins).
     tokio::spawn(telephony.clone().run_edge_events());

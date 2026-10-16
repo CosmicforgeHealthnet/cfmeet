@@ -31,7 +31,7 @@ const TABLES: &[&str] = &[
     "telephony_retention_holds",
     "telephony_usage_records",
 ];
-const MIGRATIONS: usize = 15;
+const MIGRATIONS: usize = 16;
 
 async fn tables(conn: &DatabaseConnection) -> Vec<String> {
     let rows = conn

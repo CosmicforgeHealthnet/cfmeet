@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Numbering API",
-    "version": "1.7.0",
+    "version": "1.8.0",
     "description": "HTTP surface of services/numbering: GET /health, /ready and /openapi.json (public, no data); the customer API under /v1 (credential verified by Platform Access on every request; normalized 401, 429 when Platform Access throttles or a quota is exhausted, 503 when it is unreachable — fail closed): assignment / reservation reads, the catalog, KYC and eligibility (F), provider-neutral inventory search and reservations (H); provider callbacks (G); and the service-authenticated /internal/v1 API (cfmeet.platform.internal-http; permission from Numbering's own trust bundle). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 64 KiB."
   },
   "components": {
@@ -3818,6 +3818,57 @@
             "$ref": "#/components/responses/Error"
           },
           "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/routing/number-assignments/{numberResourceId}": {
+      "get": {
+        "operationId": "readCurrentAssignment",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "description": "Part IV L: the DELEGATED scope's current assignment of a number, its routed voice / SMS targets, routing revision and outbound usability — no number, no provider reference — so Calling can apply its enterprise membership policy (an organization number is presented only by an ACTIVE principal reached through its voice target) before requesting a caller-identity grant. Another scope's number is NOT_FOUND. Permission `number-caller-identity.authorize` (Calling) and a signed delegated context. 503 without a configured grant key.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "numberResourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/routing-grant/v1.schema.json#/$defs/CurrentAssignment"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
             "$ref": "#/components/responses/Error"
           },
           "503": {

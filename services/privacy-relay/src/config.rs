@@ -22,6 +22,7 @@
 //! | `CONTACT_VAULT_KEYRING_FILE` | with the vault | AES-256-GCM encryption keyring (secret file) |
 //! | `CONTACT_FINGERPRINT_KEYRING_FILE` | with the vault | HMAC fingerprint keyring (separate secret file) |
 //! | `CONTACT_DELEGATION_TRUST_BUNDLE_FILE` | with the vault | which issuers' Contact Vault access tokens are accepted |
+//! | `NUMBER_GRANT_TRUST_BUNDLE_FILE` | no | Numbering's routing grant key (DCN inbound caller protection); unset: refused |
 //!
 //! Without `CALLING_INTERNAL_BASE_URL` enforcement jobs and outbox events stay durably
 //! PENDING (authority is still revoked locally; nothing is falsely reported as applied or
@@ -480,12 +481,16 @@ pub struct ContactVaultSettings {
     pub keyring_file: Option<PathBuf>,
     pub fingerprint_keyring_file: Option<PathBuf>,
     pub delegation_trust_file: Option<PathBuf>,
+    /// Numbering's routing grant trust (`NUMBER_GRANT_TRUST_BUNDLE_FILE`).
+    pub number_grant_trust_file: Option<PathBuf>,
 }
 
 /// Loaded Contact Vault material.
 pub struct ContactVaultMaterial {
     pub keys: Option<crate::contact_vault::VaultKeys>,
     pub delegation: Option<cf_service_auth::ContactDelegationVerifier>,
+    /// Numbering's routing grant verification (the DCN inbound caller's scope proof).
+    pub number_grants: Option<cf_service_auth::number_grant::NumberGrantVerifier>,
 }
 
 impl ContactVaultSettings {
@@ -509,6 +514,7 @@ impl ContactVaultSettings {
             keyring_file: value("CONTACT_VAULT_KEYRING_FILE").map(PathBuf::from),
             fingerprint_keyring_file: value("CONTACT_FINGERPRINT_KEYRING_FILE").map(PathBuf::from),
             delegation_trust_file: value("CONTACT_DELEGATION_TRUST_BUNDLE_FILE").map(PathBuf::from),
+            number_grant_trust_file: value("NUMBER_GRANT_TRUST_BUNDLE_FILE").map(PathBuf::from),
         };
         if settings.enabled {
             for (var, v) in [
@@ -580,10 +586,38 @@ impl ContactVaultSettings {
                     ));
                 }
                 Some(cf_service_auth::ContactDelegationVerifier::new(
-                    trust, clock,
+                    trust,
+                    clock.clone(),
                 ))
             }
         };
-        Ok(ContactVaultMaterial { keys, delegation })
+        let number_grants = match &self.number_grant_trust_file {
+            None => None,
+            Some(path) => {
+                let trust = cf_service_auth::number_grant::NumberGrantTrust::from_file(
+                    path,
+                    &privacy_relay_service_id(),
+                    runtime_environment,
+                )
+                .map_err(|err| invalid("NUMBER_GRANT_TRUST_BUNDLE_FILE", err.to_string()))?;
+                let service_keys: std::collections::BTreeSet<&str> =
+                    service_trust.public_keys().collect();
+                if trust.public_keys().any(|k| service_keys.contains(k)) {
+                    return Err(invalid(
+                        "NUMBER_GRANT_TRUST_BUNDLE_FILE",
+                        "a key trusted for service tokens may not be trusted for routing grants",
+                    ));
+                }
+                Some(cf_service_auth::number_grant::NumberGrantVerifier::new(
+                    trust,
+                    clock.clone(),
+                ))
+            }
+        };
+        Ok(ContactVaultMaterial {
+            keys,
+            delegation,
+            number_grants,
+        })
     }
 }

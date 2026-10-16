@@ -17,6 +17,7 @@
 
 mod bridge;
 mod callback;
+pub(crate) mod dcn;
 mod dispatch;
 mod events;
 mod failover;
@@ -32,6 +33,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 pub use callback::CreateCallbackRelay;
+pub use dcn::DcnInboundOffer;
 pub use events::EventDisposition;
 pub use inbound::InboundOffer;
 pub use outbound::CreatePublicCall;

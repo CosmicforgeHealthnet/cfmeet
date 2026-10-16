@@ -163,6 +163,17 @@ impl Verification {
     }
 }
 
+/// The current assignment of a number in the caller's delegated scope (no number).
+#[derive(Debug, Clone)]
+pub struct CurrentAssignment {
+    pub assignment: AssignmentRow,
+    pub targets: Option<RoutingTargets>,
+    pub routing_revision: i64,
+    pub number_active: bool,
+    pub voice_outbound: bool,
+    pub sms_outbound: bool,
+}
+
 /// The scope a delegated outbound request acts in.
 #[derive(Debug, Clone, Copy)]
 pub struct DelegatedScope {
@@ -315,6 +326,53 @@ impl RoutingGrants {
             voice: (voice, row.voice_target_ref),
             sms: (sms, row.sms_target_ref),
         }))
+    }
+
+    /// The delegated scope's CURRENT assignment of a number, for the consumer that must
+    /// apply its own membership policy before requesting an outbound grant (Workstream L:
+    /// Calling checks the routed employee / extension / queue / ring group). A number of
+    /// another scope, or without an ACTIVE assignment, is indistinguishable from a missing
+    /// one. Never the telephone number.
+    pub async fn current_assignment(
+        &self,
+        scope: DelegatedScope,
+        number_resource_id: Uuid,
+    ) -> DomainResult<CurrentAssignment> {
+        let not_found = || DomainError::NotFound("number");
+        let resource = self
+            .numbers
+            .resource(number_resource_id)
+            .await
+            .map_err(|_| not_found())?;
+        let assignment = self
+            .active_assignment(resource.id)
+            .await?
+            .filter(|a| {
+                a.tenant_id == scope.tenant_id
+                    && a.application_id == scope.application_id
+                    && a.environment_id == scope.environment_id
+            })
+            .ok_or_else(not_found)?;
+        let targets = self.current_targets(&assignment).await?;
+        let protected =
+            resource.inventory() == InventorySource::SyntheticTest && self.protected_runtime();
+        let active = resource.lifecycle_state() == LifecycleState::Active && !protected;
+        let voice_outbound = active
+            && self
+                .usable(resource.id, &assignment, Capability::VoiceOutbound)
+                .await?;
+        let sms_outbound = active
+            && self
+                .usable(resource.id, &assignment, Capability::SmsOutbound)
+                .await?;
+        Ok(CurrentAssignment {
+            routing_revision: resource.routing_revision,
+            number_active: active,
+            voice_outbound,
+            sms_outbound,
+            targets,
+            assignment,
+        })
     }
 
     /// Resolves a received call / message (see the module rules). `consumer` is the

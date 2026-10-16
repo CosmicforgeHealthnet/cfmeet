@@ -549,14 +549,35 @@ impl TelephonyService {
                     .collect()
             })
             .unwrap_or_default();
-        let Some(caller_identity) = resolved.caller_identity.clone() else {
-            return self
-                .fail_before_send(
-                    &command,
-                    FailureCategory::Routing,
-                    "CALLER_IDENTITY_UNAVAILABLE",
-                )
-                .await;
+        // The caller identity: a DCN presented under a Numbering CALLER_IDENTITY grant
+        // (Workstream L), else the relay number Privacy Relay lent to the session.
+        let presented: Option<Uuid> = command.payload["presentedNumberResourceId"]
+            .as_str()
+            .and_then(|s| s.parse().ok());
+        let dcn = match presented {
+            Some(number_resource_id) => match self
+                .verify_dcn_identity(&command, &leg, number_resource_id, grant_expires_at, now)
+                .await?
+            {
+                Ok(identity) => Some(identity),
+                Err(done) => return Ok(done),
+            },
+            None => None,
+        };
+        let caller_identity = match &dcn {
+            Some(identity) => identity.identity.clone(),
+            None => match resolved.caller_identity.clone() {
+                Some(identity) => identity,
+                None => {
+                    return self
+                        .fail_before_send(
+                            &command,
+                            FailureCategory::Routing,
+                            "CALLER_IDENTITY_UNAVAILABLE",
+                        )
+                        .await
+                }
+            },
         };
         // Choose the interconnect: eligible route, caller identity bound to its
         // provider, capacity reserved — and the correlation key persisted — atomically.
@@ -601,12 +622,20 @@ impl TelephonyService {
             {
                 continue;
             }
+            // A DCN must be bound locally AS that DCN (number kind and Numbering resource
+            // id); a relay identity as a relay number.
             let bound = db::scalar_i64(
                 &txn,
                 "SELECT count(*) FROM telecom_number_bindings b JOIN telecom_routes r ON r.id = b.route_id \
                  WHERE b.public_e164 = $1 AND b.status = 'ENABLED' AND 'VOICE_OUTBOUND' = ANY(b.capabilities) \
-                   AND r.provider_id = $2",
-                vec![caller_identity.expose().into(), route.provider_id.clone().into()],
+                   AND r.provider_id = $2 AND b.number_kind = $3 \
+                   AND b.number_resource_id IS NOT DISTINCT FROM $4",
+                vec![
+                    caller_identity.expose().into(),
+                    route.provider_id.clone().into(),
+                    if dcn.is_some() { "DCN" } else { "RELAY" }.into(),
+                    dcn.as_ref().map(|d| d.number_resource_id).into(),
+                ],
             )
             .await?;
             if bound == 0 {
@@ -659,7 +688,9 @@ impl TelephonyService {
         db::exec(
             &txn,
             "UPDATE telephony_legs SET route_id = $2, provider_id = $3, destination_country = $4, \
-               relay_assignment_ref = $6, updated_at = GREATEST(updated_at, $5), version = version + 1 \
+               relay_assignment_ref = $6, dcn_number_resource_id = $7, dcn_assignment_id = $8, \
+               dcn_routing_revision = $9, dcn_grant_id = $10, \
+               updated_at = GREATEST(updated_at, $5), version = version + 1 \
              WHERE id = $1",
             vec![
                 leg_id.into(),
@@ -667,7 +698,16 @@ impl TelephonyService {
                 route.provider_id.clone().into(),
                 country.clone().into(),
                 now.into(),
-                resolved.relay_assignment_ref.into(),
+                if dcn.is_some() {
+                    None
+                } else {
+                    resolved.relay_assignment_ref
+                }
+                .into(),
+                dcn.as_ref().map(|d| d.number_resource_id).into(),
+                dcn.as_ref().map(|d| d.assignment_id).into(),
+                dcn.as_ref().map(|d| d.routing_revision).into(),
+                dcn.as_ref().map(|d| d.grant_id).into(),
             ],
         )
         .await?;
@@ -800,6 +840,94 @@ impl TelephonyService {
             tokio::time::sleep(std::time::Duration::from_millis(100 << attempt)).await;
         }
         last
+    }
+
+    /// Verifies and CONSUMES the Numbering CALLER_IDENTITY grant Calling obtained for this
+    /// origination (Workstream L): signature, audience, expiry, current assignment and
+    /// routing revision are checked by Numbering against current state, single use for
+    /// exactly this operation. The verified scope and number must be the command's. A
+    /// Numbering outage reschedules (or fails) the attempt — never a fallback identity.
+    /// `Err(executed)` is the attempt's terminal handling.
+    async fn verify_dcn_identity(
+        &self,
+        command: &CommandRow,
+        leg: &LegRow,
+        number_resource_id: Uuid,
+        grant_expires_at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> TelephonyResult<Result<crate::ports::VerifiedDcnIdentity, Executed>> {
+        let Some(grant) = command.dcn_identity_grant.clone() else {
+            return Ok(Err(self
+                .fail_before_send(command, FailureCategory::Policy, "CALLER_IDENTITY_DENIED")
+                .await?));
+        };
+        let operation_ref =
+            super::originate::dcn_operation_ref(leg.calling_call_leg_id, command.id);
+        match self
+            .numbering
+            .verify_caller_identity(&grant, &operation_ref, &command.correlation_id)
+            .await
+        {
+            Ok(Ok(identity)) => {
+                self.numbering_available().await?;
+                let scope_matches = identity.scope.tenant_id == leg.tenant_id
+                    && identity.scope.application_id == leg.application_id
+                    && identity.scope.environment_id == leg.environment_id;
+                if !scope_matches || identity.number_resource_id != number_resource_id {
+                    tracing::warn!(command_id = %command.id, "caller-identity grant does not match the origination");
+                    return Ok(Err(self
+                        .fail_before_send(
+                            command,
+                            FailureCategory::Policy,
+                            "CALLER_IDENTITY_DENIED",
+                        )
+                        .await?));
+                }
+                crate::metrics::inc(
+                    "telephony_dcn_caller_identity_total",
+                    &[("outcome", "VERIFIED")],
+                );
+                Ok(Ok(identity))
+            }
+            Ok(Err(reason)) => {
+                self.numbering_available().await?;
+                tracing::info!(command_id = %command.id, reason = %reason, "caller-identity grant refused");
+                crate::metrics::inc(
+                    "telephony_dcn_caller_identity_total",
+                    &[("outcome", "REFUSED")],
+                );
+                Ok(Err(self
+                    .fail_before_send(command, FailureCategory::Policy, "CALLER_IDENTITY_DENIED")
+                    .await?))
+            }
+            Err(PortError::NotFound) | Err(PortError::Denied(_)) => {
+                self.numbering_available().await?;
+                crate::metrics::inc(
+                    "telephony_dcn_caller_identity_total",
+                    &[("outcome", "REFUSED")],
+                );
+                Ok(Err(self
+                    .fail_before_send(command, FailureCategory::Policy, "CALLER_IDENTITY_DENIED")
+                    .await?))
+            }
+            Err(PortError::Unavailable) => {
+                self.numbering_unavailable().await?;
+                crate::metrics::inc(
+                    "telephony_dcn_caller_identity_total",
+                    &[("outcome", "UNAVAILABLE")],
+                );
+                if command.attempts < command.max_attempts
+                    && grant_expires_at > now + Duration::seconds(2)
+                {
+                    return Ok(Err(self
+                        .reschedule(command, "NUMBERING_UNAVAILABLE")
+                        .await?));
+                }
+                Ok(Err(self
+                    .fail_before_send(command, FailureCategory::Network, "NUMBERING_UNAVAILABLE")
+                    .await?))
+            }
+        }
     }
 
     /// Refuses a destination whose class may not be called (pre-toll, Part H §66):

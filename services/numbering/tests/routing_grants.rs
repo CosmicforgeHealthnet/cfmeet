@@ -741,6 +741,60 @@ async fn personal_and_employee_numbers_are_presented_only_by_their_person() {
     );
 }
 
+/// Part IV L: Calling's view of a number before asking for a caller-identity grant —
+/// the delegated scope's own ACTIVE assignment and voice target (no number, no provider
+/// reference); another scope's number is NOT_FOUND; only Calling, only delegated.
+#[tokio::test]
+async fn calling_reads_the_scopes_current_assignment_and_voice_target_only() {
+    let Some(t) = setup().await else {
+        return;
+    };
+    let s = sandbox();
+    let bob = t.dir.add(P::Active);
+    let (line, a) = t
+        .active(
+            &s,
+            "syn-voice-only",
+            NumberType::Geographic,
+            &[C::VoiceInbound, C::VoiceOutbound],
+            O::EmployeeDirect,
+            None,
+            targets((V::Principal, Some(bob)), (Sms::None, None)),
+        )
+        .await;
+    let path = format!("/internal/v1/routing/number-assignments/{line}");
+    let r =
+        t.h.internal_get_delegated(&t.h.peers.calling, &path, delegated(&s, Some(bob)))
+            .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["assignmentId"], json!(a.id));
+    assert_eq!(r.body["ownerKind"], "ORGANIZATION");
+    assert_eq!(r.body["voice"]["kind"], "PRINCIPAL");
+    assert_eq!(r.body["voice"]["ref"], json!(bob));
+    assert_eq!(r.body["outbound"]["voice"], true);
+    assert_eq!(r.body["outbound"]["sms"], false);
+    assert_eq!(r.body["numberActive"], true);
+    let e164 = t.e164(line).await;
+    assert!(
+        !r.body.to_string().contains(&e164[1..]),
+        "no number in the view"
+    );
+    conforms(&format!("{GRANT}CurrentAssignment"), &r.body);
+    // Another scope's view of the same number: NOT_FOUND (no existence oracle).
+    let other = scope(EnvironmentKind::Test);
+    let r =
+        t.h.internal_get_delegated(&t.h.peers.calling, &path, delegated(&other, Some(bob)))
+            .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{:?}", r.body);
+    // Without a delegated context, or as another service: refused.
+    let r = t.h.internal(&t.h.peers.calling, Method::GET, &path).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{:?}", r.body);
+    let r =
+        t.h.internal_get_delegated(&t.h.peers.telephony, &path, delegated(&s, Some(bob)))
+            .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{:?}", r.body);
+}
+
 #[tokio::test]
 async fn an_sms_sender_grant_needs_outbound_sms_and_is_consumed_by_the_gateway() {
     let Some(t) = setup().await else {

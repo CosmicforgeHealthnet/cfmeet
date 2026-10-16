@@ -72,6 +72,7 @@ const CLASSIFIED: &[(&str, Probe)] = &[
     ("POST /internal/v1/privacy-relay/enforcement", Probe::Body),
     ("POST /internal/v1/telephony/events", Probe::Body),
     ("POST /internal/v1/telephony/inbound-calls", Probe::Body),
+    ("POST /internal/v1/telephony/dcn-inbound-calls", Probe::Body),
     ("POST /v1/calls", Probe::Body),
     ("POST /v1/calls/{call_id}/accept", Probe::Body),
     ("POST /v1/calls/{call_id}/decline", Probe::Body),

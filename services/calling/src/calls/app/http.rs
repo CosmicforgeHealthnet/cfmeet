@@ -173,6 +173,12 @@ struct CreateCallBody {
     /// `enterprise.calls.use`; excludes every other target.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     target_extension: Option<String>,
+    /// Part IV L: a Digital Communications Number (CF Meet Number Resource id — never the
+    /// number) to present as the caller identity of a protected-contact call. Numbering
+    /// must hold it ACTIVE for this scope and the initiator must be entitled to present
+    /// it; refused otherwise (never another identity substituted).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    presented_number_resource_id: Option<Uuid>,
 }
 
 /// The bounded request kind of a create-call body (metrics label).
@@ -231,6 +237,13 @@ async fn create_call_inner(
         .map(DisplayName::parse)
         .transpose()
         .map_err(|_| CallingError::Validation("initiatorDisplayName is invalid."))?;
+    if body.presented_number_resource_id.is_some() && body.target_contact_reference.is_none()
+        || body.presented_number_resource_id.is_some() && body.callback_requested
+    {
+        return Err(CallingError::Validation(
+            "presentedNumberResourceId is only valid for a targetContactReference call.",
+        ));
+    }
     if let Some(extension) = &body.target_extension {
         ctx.require_scope(names::ENTERPRISE_CALLS_USE)?;
         let (true, false, None, None, None, Some(endpoint)) = (
@@ -326,6 +339,7 @@ async fn create_call_inner(
                     target_contact: contact,
                     initiator_display_name: display,
                     privacy_relay_session: session,
+                    presented_number_resource_id: body.presented_number_resource_id,
                     key,
                 },
             )

@@ -539,6 +539,26 @@ impl Harness {
     }
 
     /// A signed internal request from `signer`.
+    /// A body-less internal GET carrying a signed delegated context.
+    pub async fn internal_get_delegated(
+        &self,
+        signer: &ServiceTokenSigner,
+        path: &str,
+        delegated: cf_service_auth::DelegatedPlatformContext,
+    ) -> Reply {
+        let signed = signer
+            .sign(
+                &OutboundServiceRequest::new_operation(ServiceId::numbering())
+                    .with_delegated_context(delegated),
+            )
+            .unwrap();
+        let mut builder = Request::builder().method(Method::GET).uri(path);
+        for (name, value) in signed.headers().iter() {
+            builder = builder.header(name, value);
+        }
+        self.raw(builder.body(Body::empty()).unwrap()).await
+    }
+
     pub async fn internal(&self, signer: &ServiceTokenSigner, method: Method, path: &str) -> Reply {
         let signed = signer
             .sign(&OutboundServiceRequest::new_operation(

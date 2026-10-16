@@ -140,6 +140,8 @@ jobs:
         run: cargo test --locked --test relay_numbers
       - name: Inbound mapping, delayed callbacks and inbound caller protection
         run: cargo test --locked --test relay_inbound
+      - name: DCN inbound caller protection (Part IV L; scope from Numbering's grant only)
+        run: cargo test --locked --test dcn_caller
       - name: Part D certification (flows, cross-tenant, failure injection, rotations)
         run: cargo test --locked --test part_d_certification
       - name: Outbox / enforcement retries, dead letters and lease-expiry recovery

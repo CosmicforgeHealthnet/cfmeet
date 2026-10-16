@@ -54,6 +54,8 @@ pub struct CreatePublicCall {
     pub target_contact: Uuid,
     pub initiator_display_name: Option<DisplayName>,
     pub privacy_relay_session: Uuid,
+    /// Part IV L: the DCN to present instead of the session's relay identity.
+    pub presented_number_resource_id: Option<Uuid>,
     pub key: CommandKey,
 }
 
@@ -355,13 +357,32 @@ impl AppCallService {
             }
         };
         plan.policy_version = policy.version_label();
-        self.ensure_relay_identity(
-            ctx,
-            &initiator,
-            decision.relay_session_id,
-            fact.country.as_deref(),
-        )
-        .await?;
+        match request.presented_number_resource_id {
+            // Part IV L: a DCN the initiator is entitled to present (checked again at
+            // dispatch, when Numbering issues the single-use caller-identity grant). No
+            // relay identity is lent: the called party sees the customer's own number.
+            Some(number_resource_id) => {
+                let delegated =
+                    delegated_context(ctx, Some(&initiator)).map_err(|_| CallError::NotFound)?;
+                self.dcn_presentation(
+                    &delegated,
+                    ctx.correlation_id(),
+                    scope,
+                    initiator.id().as_uuid(),
+                    number_resource_id,
+                )
+                .await?;
+            }
+            None => {
+                self.ensure_relay_identity(
+                    ctx,
+                    &initiator,
+                    decision.relay_session_id,
+                    fact.country.as_deref(),
+                )
+                .await?
+            }
+        }
 
         let cmd = CallCommandContext::customer(ctx);
         let txn = self.db().begin().await?;
@@ -605,6 +626,7 @@ impl AppCallService {
                 candidate_routes: &candidate_routes,
                 correlation_id: cmd.correlation_id().as_str(),
                 generation: 1,
+                presented_number_resource_id: request.presented_number_resource_id,
             },
             now,
         )
@@ -648,6 +670,9 @@ pub(crate) struct OriginateSpec<'a> {
     pub candidate_routes: &'a [String],
     pub correlation_id: &'a str,
     pub generation: i32,
+    /// Part IV L: the DCN presented as caller identity (Calling-internal; replaced by
+    /// Telephony's `presentedIdentity` with a fresh grant at every submission).
+    pub presented_number_resource_id: Option<Uuid>,
 }
 
 /// Writes the durable ORIGINATE command of one public leg (inside the caller's
@@ -713,6 +738,10 @@ pub(crate) async fn enqueue_originate_in<C: ConnectionTrait>(
         "media": spec.media,
         "candidateRoutes": spec.candidate_routes,
     });
+    let mut payload = payload;
+    if let Some(id) = spec.presented_number_resource_id {
+        payload["presentedNumberResourceId"] = json!(id);
+    }
     enqueue_in(
         txn,
         call,

@@ -201,8 +201,9 @@ async fn main() -> anyhow::Result<()> {
             }
         });
     }
-    let state =
-        AppState::new(relay, service_auth).with_contact_vault(contacts, vault_material.delegation);
+    let state = AppState::new(relay, service_auth)
+        .with_contact_vault(contacts, vault_material.delegation)
+        .with_number_grants(vault_material.number_grants);
     let app = routes::app(state, internal::routes());
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "privacy relay service listening");

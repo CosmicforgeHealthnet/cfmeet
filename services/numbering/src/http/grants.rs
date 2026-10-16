@@ -36,6 +36,53 @@ pub fn routes() -> Router<AppState> {
         .route("/routing/caller-identity-grants", post(caller_identity))
         .route("/routing/sms-sender-grants", post(sms_sender))
         .route("/routing/grant-verifications", post(verify))
+        .route(
+            "/routing/number-assignments/:number_resource_id",
+            axum::routing::get(current_assignment),
+        )
+}
+
+/// `GET /routing/number-assignments/{numberResourceId}` (`number-caller-identity.authorize`,
+/// signed delegated context): the delegated scope's current assignment and routed targets,
+/// so Calling can apply its enterprise membership policy BEFORE requesting a
+/// caller-identity grant. Another scope's number is NOT_FOUND.
+async fn current_assignment(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    caller.require_permission(InternalPermission::NumberCallerIdentityAuthorize)?;
+    let g = grants(&s)?;
+    let delegated = caller
+        .context()
+        .delegated_platform_context()
+        .ok_or(ApiError::Code(ErrorCode::InternalPermissionDenied))?;
+    let scope = DelegatedScope {
+        tenant_id: delegated.tenant_id(),
+        application_id: delegated.application_id(),
+        environment_id: delegated.application_environment_id(),
+        principal_id: delegated.initiating_principal().map(|p| p.principal_id),
+    };
+    let c = g.current_assignment(scope, id).await?;
+    let a = &c.assignment;
+    // A family routed nowhere (NONE) has no target.
+    let target = |kind: String, r: Option<Uuid>| match r {
+        Some(r) if kind != "NONE" => json!({ "kind": kind, "ref": r }),
+        _ => Value::Null,
+    };
+    Ok(Json(json!({
+        "numberResourceId": a.number_resource_id,
+        "assignmentId": a.id,
+        "assignmentStatus": a.status,
+        "ownershipClass": a.ownership_class,
+        "ownerKind": a.owner_kind,
+        "ownerRef": a.owner_ref,
+        "voice": c.targets.as_ref().map(|t| target(t.voice.0.as_str().to_string(), t.voice.1)).unwrap_or(Value::Null),
+        "sms": c.targets.as_ref().map(|t| target(t.sms.0.as_str().to_string(), t.sms.1)).unwrap_or(Value::Null),
+        "routingRevision": c.routing_revision,
+        "numberActive": c.number_active,
+        "outbound": { "voice": c.voice_outbound, "sms": c.sms_outbound },
+    })))
 }
 
 fn grants(s: &AppState) -> Result<&RoutingGrants, ApiError> {

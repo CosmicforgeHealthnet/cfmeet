@@ -147,6 +147,19 @@ async fn main() -> anyhow::Result<()> {
         "privacy relay authority configured"
     );
 
+    // Numbering (Part IV L): DCN inbound grants and caller identity. Without
+    // CF_NUMBERING_BASE_URL every DCN call fails closed; nothing else depends on it.
+    let numbering_configured = service_auth_settings
+        .targets
+        .iter()
+        .any(|(service, _)| service.as_str() == cf_service_auth::services::NUMBERING);
+    let numbering: Arc<dyn calling::numbering::NumberingPort> = if numbering_configured {
+        Arc::new(calling::numbering::HttpNumbering::new(service_auth.clone()))
+    } else {
+        Arc::new(calling::numbering::UnconfiguredNumbering)
+    };
+    tracing::info!(numbering_configured, "numbering (DCN) authority configured");
+
     // Contact Vault delegated access (§31): a dedicated key, never the service-auth key.
     let contact_delegation =
         match calling::privacy_relay::contacts::ContactDelegationSettings::from_lookup(&lookup)
@@ -368,6 +381,7 @@ async fn main() -> anyhow::Result<()> {
             app_config,
             call_config: CallServiceConfig::default(),
             privacy_relay,
+            numbering,
             contact_delegation,
             public_network,
             enterprise_flags,

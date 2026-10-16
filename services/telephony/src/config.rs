@@ -21,6 +21,7 @@
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | 100–30000 (default 5000) |
 //! | `CALLING_INTERNAL_BASE_URL` | no | Calling's internal API (normalized events, inbound offers) |
 //! | `PRIVACY_RELAY_INTERNAL_BASE_URL` | no | Privacy Relay's internal API (contact resolution, inbound mapping) |
+//! | `NUMBERING_INTERNAL_BASE_URL` | no | Numbering's internal API (DCN inbound resolution, caller-identity grants, voice route readiness); unset: every DCN call fails closed |
 //!
 //! Disabling Telephony or public calling never affects application RTC (Calling serves it
 //! without Telephony). Without `PRIVACY_RELAY_INTERNAL_BASE_URL` every protected
@@ -301,6 +302,8 @@ pub struct ServiceAuthSettings {
     pub http_timeout: Duration,
     pub calling_base_url: Option<String>,
     pub privacy_relay_base_url: Option<String>,
+    /// Part IV L: Numbering (DCNs). Relay-number and enterprise paths never need it.
+    pub numbering_base_url: Option<String>,
 }
 
 impl ServiceAuthSettings {
@@ -368,6 +371,7 @@ impl ServiceAuthSettings {
             http_timeout,
             calling_base_url: value("CALLING_INTERNAL_BASE_URL"),
             privacy_relay_base_url: value("PRIVACY_RELAY_INTERNAL_BASE_URL"),
+            numbering_base_url: value("NUMBERING_INTERNAL_BASE_URL"),
         })
     }
 
@@ -397,6 +401,11 @@ impl ServiceAuthSettings {
             targets
                 .insert(ServiceId::privacy_relay(), url)
                 .map_err(|e| invalid("PRIVACY_RELAY_INTERNAL_BASE_URL", e.to_string()))?;
+        }
+        if let Some(url) = &self.numbering_base_url {
+            targets
+                .insert(ServiceId::numbering(), url)
+                .map_err(|e| invalid("NUMBERING_INTERNAL_BASE_URL", e.to_string()))?;
         }
         let client = Arc::new(
             InternalServiceClient::new(signer.clone(), targets, self.http_timeout)

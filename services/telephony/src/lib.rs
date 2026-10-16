@@ -18,6 +18,7 @@ pub mod clock;
 pub mod commands;
 pub mod config;
 pub mod db;
+pub mod dcn;
 pub mod destinations;
 pub mod domain;
 pub mod edge_events;

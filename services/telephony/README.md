@@ -84,6 +84,15 @@ See `src/config.rs` for the full table. Highlights:
 * `CALLING_INTERNAL_BASE_URL`, `PRIVACY_RELAY_INTERNAL_BASE_URL`: peers. Without Privacy
   Relay, every protected origination fails closed before a destination exists. Without
   Calling, events stay durably in the outbox.
+* `NUMBERING_INTERNAL_BASE_URL` (Part IV L): Numbering, the authority over Digital
+  Communications Numbers. A dialled number bound locally as a DCN (`telephony-admin dcn
+  bind`) is resolved by Numbering per call; an outbound DCN caller identity is presented
+  only after Telephony consumed Numbering's single-use CALLER_IDENTITY grant for that
+  origination, and only on an interconnect the DCN is bound to. Unset or unreachable:
+  DCN calls fail closed (one `NUMBERING_UNAVAILABLE` incident); relay-number and
+  enterprise calls never depend on it. `telephony-admin dcn acknowledge` (and the
+  worker's reconciliation) confirms Numbering's VOICE route only while the DCN is
+  routable locally.
 * The SIP / media edge: ARI URL and a credentials FILE (`infra/telephony/README.md`).
   Trunk usernames and passwords live in the edge's secret store. Database rows hold
   references only.
