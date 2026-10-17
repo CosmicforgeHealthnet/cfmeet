@@ -1,6 +1,7 @@
 name: Deploy Backend
 
-# Deploy meeting-service to production VPS on push to main.
+# Deploy Meeting Service only after an explicit workflow_dispatch approval.
+# Pushes to main run the pre-deploy checks but never initiate a VPS cutover.
 # Requires GitHub Secrets:
 #   - VPS_HOST: VPS IP or hostname (e.g., 173.249.30.55)
 #   - VPS_USER: SSH user (e.g., root)
@@ -80,6 +81,7 @@ jobs:
         run: cargo test --workspace --no-fail-fast
 
   deploy:
+    if: github.event_name == 'workflow_dispatch'
     name: Deploy to VPS
     needs: test
     runs-on: ubuntu-latest
@@ -124,8 +126,7 @@ jobs:
 
             # Build new Docker image
             echo "Building Docker image..."
-            cd services/meeting-service
-            docker build -t cfmeet-meeting-service:prod-$COMMIT -t cfmeet-meeting-service:prod-latest .
+            docker build -f services/meeting-service/Dockerfile -t cfmeet-meeting-service:prod-$COMMIT -t cfmeet-meeting-service:prod-latest .
 
             # Run migrations
             echo "Running migrations..."
