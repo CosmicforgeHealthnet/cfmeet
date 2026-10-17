@@ -167,10 +167,9 @@ async fn upgrade_from_the_previous_head_keeps_data_adds_objects_and_reverts_clea
     assert_eq!(digest(&db.conn, &shape).await, before, "data intact");
     let after_tables = tables(&db.conn).await;
     // The newest migration (Part IV Part P): the Numbering lease ledger.
-    for new in ["relay_number_leases"] {
-        assert!(!before_tables.contains(&new.to_string()));
-        assert!(after_tables.contains(&new.to_string()), "{new}");
-    }
+    let new = "relay_number_leases".to_string();
+    assert!(!before_tables.contains(&new));
+    assert!(after_tables.contains(&new), "{new}");
     assert_eq!(
         scalar(&db.conn, "SELECT count(*) FROM relay_number_leases").await,
         0,

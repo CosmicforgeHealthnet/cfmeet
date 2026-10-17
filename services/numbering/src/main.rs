@@ -310,7 +310,7 @@ async fn main() -> anyhow::Result<()> {
                         tracing::warn!(error = %e, "stewardship workers failed");
                     }
                     sweeps += 1;
-                    if sweeps % 10 == 0 {
+                    if sweeps.is_multiple_of(10) {
                         if let Err(e) = stewardship.reconcile_lifecycle(&ctx, 200).await {
                             tracing::warn!(error = %e, "lifecycle reconciliation failed");
                         }

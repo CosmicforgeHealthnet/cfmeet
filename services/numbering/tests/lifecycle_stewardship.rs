@@ -137,8 +137,10 @@ async fn build(h: Harness, settings: StewardshipSettings) -> Option<L> {
     catalog::synthetic_us(&h).await;
     fx::synthetic_us(&h).await;
     let dir = Arc::new(ax::Principals::default());
-    let mut acq = AcquisitionSettings::default();
-    acq.risk = settings.risk.clone();
+    let acq = AcquisitionSettings {
+        risk: settings.risk.clone(),
+        ..AcquisitionSettings::default()
+    };
     let a = ax::of(&h, &p, acq).with_principals(dir.clone());
     let runner =
         ax::runner(&h, &p, &a).with_handler(Arc::new(VerificationHandler { kyc: kyc.clone() }));
@@ -577,7 +579,6 @@ async fn p_a_grant_racing_a_suspension_never_verifies_afterwards() {
     let mut grants = Vec::new();
     let suspender = {
         let t = t.clone();
-        let s = s;
         tokio::spawn(async move {
             t.st.suspend(
                 &ctx(),
@@ -749,8 +750,9 @@ async fn q_pool_return_release_quarantine_and_safe_reassignment() {
         (q.disposition.as_str(), q.cooldown_days),
         ("POOL_RETURN", 7)
     );
-    assert!(matches!(
-        t.a.reassign(
+    assert!(t
+        .a
+        .reassign(
             &ctx(),
             &other,
             standing(),
@@ -765,9 +767,8 @@ async fn q_pool_return_release_quarantine_and_safe_reassignment() {
             },
             &key()
         )
-        .await,
-        Err(_)
-    ));
+        .await
+        .is_err());
     // Two workers race the completion: exactly one completes it.
     t.advance(Duration::days(8));
     let (c1, c2) = (ctx(), ctx());

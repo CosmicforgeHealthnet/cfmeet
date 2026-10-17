@@ -43,7 +43,73 @@ gates, `2416ed6` docs / runbook / capacity, and the final certification commit.
 
 ## C. Consolidated verification (local)
 
-__RESULTS__
+Environment: 4 vCPU Xeon 2.8 GHz, 15 GB RAM, PostgreSQL 16 on loopback, debug builds, no
+Docker. Failures found during the pass were fixed and their suites re-run (C.4).
+
+### C.1 Suites
+
+| Gate | Result |
+|---|---|
+| Contracts (`make contracts-validate contracts-test`) | OK — 49 contracts, 228 examples, 310 counter-examples, 589 JSON files; 17 / 17 validator mutation tests |
+| Service boundaries + operations registry + secret scan | 69 + 12 unit tests OK; boundary guard OK; `secret scan: clean` |
+| Database isolation (`make database-isolation`) | `service database isolation: OK` (runtime / migrator roles cannot connect across services) |
+| fmt + strict clippy (`-D warnings`) | Numbering, Privacy Relay, SMS Gateway, service-auth: clean |
+| service-auth | 128 passed, 0 failed |
+| Numbering (whole workspace, real Platform Access) | 206 passed after fix (one race-test assertion corrected, C.4); `lifecycle_stewardship` 14 / 14 incl. backup / restore with `DISASTER_RECOVERY_CERT_REQUIRED=1` |
+| Privacy Relay (whole workspace) | 172 passed after fix (lease ledger declared platform-owned in the migration test, C.4); incl. `numbering_authority`, `disaster_recovery`, `migration_upgrade`, `relay_load` |
+| SMS Gateway (whole workspace) | 69 passed, 0 failed; incl. `disaster_recovery` |
+| Telephony (whole workspace) | 165 passed, 0 failed; incl. the real SIP / media edge certification (Asterisk + SIPp) |
+| Calling (whole workspace, real Platform Access) | 680 passed, 0 failed |
+| Platform Access (whole workspace) | 103 passed, 0 failed |
+| Calling ↔ Privacy Relay / Telephony integration (real binaries) | `privacy_relay_e2e` 3 / 3, `telephony_e2e` 2 / 2 |
+| Dependency audit (`cargo audit`, Numbering / Privacy Relay / SMS Gateway) | only RUSTSEC-2023-0071 (`rsa`, no fixed release; already ignored with justification in `dependency-security.yml`); no lockfile changed on this branch. Container image scans: not executed locally (no Docker) |
+
+### C.2 Synthetic lifecycle certification (§128), real service boundaries
+
+`make communications-e2e` — Numbering served on a real port, real processes of Platform
+Access, SMS Gateway, Calling, Privacy Relay, Telephony, each with its own database:
+
+* `sms_journeys…`, `sms_lifecycle_safety…` — pass;
+* `sms_suspend_restore_release_quarantine_and_reassignment_across_real_boundaries` — pass:
+  Search → KYC → Reserve → Provision → Assign → Activate → inbound / outbound SMS →
+  Suspend → Restore → Release → Quarantine → Reassignment to another tenant, previous
+  owner isolated (cooldown elapse simulated in Numbering's database);
+* `relay_numbers_move_to_numbering_leases_with_identical_routing_and_a_safe_rollback` — pass;
+* `voice_journeys…` — **SKIPPED here** (LiveKit server / SIP binaries and the RTC Python
+  client are not installed in this environment); the voice path is covered locally by
+  Telephony's SIP edge certification and the Calling integration journeys, and in full
+  by `communications-e2e.yml` when it runs in CI.
+
+Unknown outcomes, duplicate callbacks and prior-owner isolation: `provider_contract`,
+`provisioning_activation`, `lifecycle_stewardship::q_relinquished…`, `q_pool_return…`.
+
+### C.3 Capacity (local, in-process, debug build — not carrier capacity)
+
+| Workload | n | Concurrency | Throughput | p50 / p95 |
+|---|---|---|---|---|
+| Inbound voice resolution with grant issuance | 400 | 16 | 137 / s | 104 / 194 ms |
+| Relay-lease contention (20 numbers × 5 holders) | 100 | 16 | 1257 / s | 12 / 19 ms (exactly 20 granted) |
+| Carrier usage ingestion (1000 keys, each twice) | 2000 | 16 | 1409 / s | 12 / 20 ms (1000 rows) |
+
+Privacy Relay `relay_load` and Calling `control_plane_load` / `enterprise_load` passed in
+their suites (correctness assertions). Search / reservation, KYC and SMS-event
+concurrency are exercised for correctness (`inventory_reservations`, `kyc_eligibility`,
+SMS `outbound` with four concurrent dispatchers), not benchmarked.
+
+### C.4 Defects found and fixed in the pass
+
+1. Numbering clippy (doc indentation, argument count, `is_multiple_of`, test style) — fixed.
+2. `p_a_grant_racing_a_suspension…`: a racing grant request can be refused
+   `CAPABILITY_NOT_USABLE` (422) as well as 404 — test accepted both refusals (no grant
+   issued either way); 10 / 10 re-runs pass.
+3. Privacy Relay `migrations`: `relay_number_leases` declared platform-owned — fixed.
+4. New cross-process journey: cooldown simulation needed the number's own
+   `quarantine_until` (with its revision) — fixed; journey passes.
+
+### C.5 Remote CI
+
+Recorded in the final commit of this register (see §C.5 update below).
+
 
 ## D. §§161–166
 
