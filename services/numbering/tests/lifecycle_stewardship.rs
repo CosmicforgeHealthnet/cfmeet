@@ -602,7 +602,15 @@ async fn p_a_grant_racing_a_suspension_never_verifies_afterwards() {
             let v = t.verify(&t.h.peers.telephony, &grant_of(&r)).await;
             assert_eq!(v.body["valid"], false, "{:?}", v.body);
         } else {
-            assert_eq!(r.status, StatusCode::NOT_FOUND);
+            // Refused either way: not found once the assignment is suspended, or the
+            // capability unusable while the number is already SUSPENDED mid-transition.
+            assert!(
+                r.status == StatusCode::NOT_FOUND
+                    || (r.status == StatusCode::UNPROCESSABLE_ENTITY
+                        && r.body["error"]["reason"] == "CAPABILITY_NOT_USABLE"),
+                "{:?}",
+                r.body
+            );
         }
     }
 }
