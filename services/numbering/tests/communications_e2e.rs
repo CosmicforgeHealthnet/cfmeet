@@ -1646,11 +1646,13 @@ async fn sms_suspend_restore_release_quarantine_and_reassignment_across_real_bou
         .h
         .conn()
         .execute_unprepared(&format!(
-            "UPDATE number_quarantines SET quarantine_until = started_at + interval '1 second' \
+            "UPDATE number_quarantines SET quarantine_until = started_at + interval '1 millisecond' \
              WHERE number_resource_id = '{dcn}'"
         ))
         .await
         .unwrap();
+    // Numbering's domain clock follows the system clock every 50 ms.
+    tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(steward.complete_quarantines(&ctx(), 10).await.unwrap(), 1);
 
     // Reassignment to another tenant: new reservation, assignment and routes.
