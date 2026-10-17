@@ -28,7 +28,7 @@ use common::{
 };
 use numbering::{
     acquisition::{
-        assignments::{AssignmentBasis, AssignmentRequest, TransferRequest},
+        assignments::{AssignmentBasis, AssignmentRequest, ReassignmentRequest, TransferRequest},
         provisioning::ProvisionRequest,
         reservations::{customer_actor, ReservationRequest},
         search::{SearchOutcome, SearchRequest},
@@ -42,6 +42,10 @@ use numbering::{
         routing::RoutingTargets,
         Capability as C, EnvironmentKind, NumberType, OwnerScope, OwnershipClass as O,
         SmsTargetKind as Sms, VoiceTargetKind as V,
+    },
+    stewardship::{
+        release::{NewRelease, ReleasePolicy},
+        suspension::{SuspendRequest, SuspensionSource},
     },
 };
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, Statement};
@@ -1498,6 +1502,206 @@ async fn sms_lifecycle_safety_across_the_real_service_boundaries() {
         )
         .await
     );
+}
+
+/// Part IV §128 across the real SMS Gateway process: an ACTIVE SMS DCN is suspended
+/// (local-first: nothing in, nothing out), restored once the provider confirms, released
+/// into quarantine (the previous owner receives nothing more), and — once its cooldown has
+/// elapsed — reassigned to ANOTHER tenant, whose sends and inbound messages work while the
+/// previous owner's stay refused. The cooldown's elapse is simulated in Numbering's
+/// database (the peer processes run on the system clock).
+#[tokio::test]
+async fn sms_suspend_restore_release_quarantine_and_reassignment_across_real_boundaries() {
+    let Some(st) = SmsStack::start(100_000).await else {
+        return;
+    };
+    let steward = st.numbers.h.state.stewardship();
+    let me = st.customer().await;
+    let s = scope_of(&me);
+    let caps = [C::SmsInbound, C::SmsOutbound];
+    let (dcn, a) = st
+        .numbers
+        .active(
+            &s,
+            "syn-voice-sms-mobile",
+            NumberType::Mobile,
+            &caps,
+            O::SharedTeam,
+            None,
+            RoutingTargets {
+                voice: (V::None, None),
+                sms: (Sms::SharedTeam, Some(Uuid::new_v4())),
+            },
+        )
+        .await;
+    let e164 = st.numbers.e164(dcn).await;
+    let send = |token: String| {
+        let st = &st;
+        async move {
+            st.sms(
+                &token,
+                Method::POST,
+                "/v1/sms/messages",
+                Some(json!({ "from": { "numberResourceId": dcn }, "to": REMOTE, "text": "lifecycle" })),
+                Some(&key()),
+            )
+            .await
+        }
+    };
+    let inbound = |text: &'static str| {
+        let st = &st;
+        let e164 = e164.clone();
+        async move {
+            st.inbound(&evt("lc"), REMOTE, &e164, text).await.1["disposition"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        }
+    };
+    let inbox = |token: String| {
+        let st = &st;
+        async move {
+            st.sms(
+                &token,
+                Method::GET,
+                "/v1/sms/messages?direction=INBOUND&limit=100",
+                None,
+                None,
+            )
+            .await
+            .1["messages"]
+                .as_array()
+                .unwrap()
+                .len()
+        }
+    };
+    assert_eq!(send(me.secret.clone()).await.0, StatusCode::ACCEPTED);
+    assert_eq!(inbound("active").await, "APPLIED");
+
+    // Suspend (organization): refused at once, before the provider confirms.
+    let susp = steward
+        .suspend(
+            &ctx(),
+            Some(&s),
+            customer_actor(&s),
+            SuspendRequest {
+                assignment_id: a.id,
+                reason_code: "CUSTOMER_REQUEST".into(),
+                source: SuspensionSource::Organization,
+                evidence_ref: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(susp.status, "SUSPENDED");
+    let (_, r) = send(me.secret.clone()).await;
+    assert_eq!(r["error"]["reason"], "SENDER_NOT_AUTHORIZED", "{r}");
+    assert_eq!(inbound("while suspended").await, "QUARANTINED");
+    // Restore once the provider suspension settled; RESTORING until it confirms.
+    st.numbers.drain().await;
+    steward.advance_suspension(&ctx(), susp.id).await.unwrap();
+    steward
+        .restore(&ctx(), Some(&s), customer_actor(&s), a.id, standing())
+        .await
+        .unwrap();
+    st.numbers.drain().await;
+    let restored = steward.advance_suspension(&ctx(), susp.id).await.unwrap();
+    assert_eq!(restored.status, "RESTORED", "{restored:?}");
+    assert_eq!(send(me.secret.clone()).await.0, StatusCode::ACCEPTED);
+    assert_eq!(inbound("restored").await, "APPLIED");
+
+    // Release into quarantine: the previous owner receives nothing more.
+    let (release, _) = steward
+        .request_release(
+            &ctx(),
+            Some(&s),
+            customer_actor(&s),
+            NewRelease {
+                assignment_id: a.id,
+                reason_code: "CUSTOMER_RELEASE".into(),
+                policy: ReleasePolicy::PoolReturn,
+                effective_at: None,
+            },
+            &key(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(release.status, "QUARANTINED");
+    let before = inbox(me.secret.clone()).await;
+    assert_eq!(inbound("late").await, "QUARANTINED");
+    assert_eq!(inbox(me.secret.clone()).await, before);
+    let (_, r) = send(me.secret.clone()).await;
+    assert_eq!(r["error"]["reason"], "SENDER_NOT_AUTHORIZED", "{r}");
+    assert!(
+        one(
+            st.numbers.h.conn(),
+            &format!("SELECT count(*)::text FROM number_late_activity WHERE number_resource_id = '{dcn}'")
+        )
+        .await
+            != "0"
+    );
+
+    // The cooldown elapses; one worker pass completes the quarantine.
+    st.numbers
+        .h
+        .conn()
+        .execute_unprepared(&format!(
+            "UPDATE number_quarantines SET quarantine_until = started_at + interval '1 second' \
+             WHERE number_resource_id = '{dcn}'"
+        ))
+        .await
+        .unwrap();
+    assert_eq!(steward.complete_quarantines(&ctx(), 10).await.unwrap(), 1);
+
+    // Reassignment to another tenant: new reservation, assignment and routes.
+    let next = st.customer().await;
+    let n = scope_of(&next);
+    let decision = st
+        .numbers
+        .decide(
+            &n,
+            (SubjectKind::Organization, n.tenant_id),
+            O::SharedTeam,
+            NumberType::Mobile,
+            &caps,
+            dcn,
+        )
+        .await;
+    let b = st
+        .numbers
+        .a
+        .reassign(
+            &ctx(),
+            &n,
+            standing(),
+            ReassignmentRequest {
+                number_resource_id: dcn,
+                ownership_class: O::SharedTeam,
+                owner_principal_id: None,
+                targets: RoutingTargets {
+                    voice: (V::None, None),
+                    sms: (Sms::SharedTeam, Some(Uuid::new_v4())),
+                },
+                capabilities: caps.to_vec(),
+                eligibility_decision_id: decision,
+                pool_id: None,
+            },
+            &key(),
+        )
+        .await
+        .unwrap()
+        .assignment;
+    assert_ne!(b.id, a.id);
+    st.numbers.drain().await;
+    st.numbers.acknowledge(dcn, &["SMS"]).await;
+    st.numbers.activate(&n, &b).await;
+    assert_eq!(send(next.secret.clone()).await.0, StatusCode::ACCEPTED);
+    assert_eq!(inbound("new owner").await, "APPLIED");
+    assert_eq!(inbox(next.secret.clone()).await, 1);
+    // The previous owner: still refused, and nothing new in its inbox.
+    let (_, r) = send(me.secret.clone()).await;
+    assert_eq!(r["error"]["reason"], "SENDER_NOT_AUTHORIZED", "{r}");
+    assert_eq!(inbox(me.secret.clone()).await, before);
 }
 
 // ---------------------------------------------------------------------------------------
