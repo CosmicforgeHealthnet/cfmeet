@@ -686,7 +686,10 @@ pub fn swagger_router(server_addr: &str) -> Router {
         .config(Config::new([
             Url::with_primary("Meetings", "/api-docs/openapi.json", true),
             Url::new("Calling", "/api-docs/calling.json"),
-            Url::new("Platform Access (internal)", "/api-docs/platform-access.json"),
+            Url::new(
+                "Platform Access (internal)",
+                "/api-docs/platform-access.json",
+            ),
             Url::new("Numbering / DCNs", "/api-docs/numbering.json"),
             Url::new("Privacy Relay", "/api-docs/privacy-relay.json"),
             Url::new(
@@ -751,7 +754,8 @@ mod tests {
             let paths = doc["paths"].as_object().expect("OpenAPI paths");
             assert!(
                 paths.keys().any(|path| path.starts_with(expected_prefix)),
-                "missing {expected_prefix} in {}", doc["info"]["title"]
+                "missing {expected_prefix} in {}",
+                doc["info"]["title"]
             );
         }
     }
