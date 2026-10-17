@@ -645,13 +645,20 @@ fn public_server_url(configured: Option<&str>) -> String {
 /// Contract-first OpenAPI documents for peer services. These are deliberately served by
 /// the documentation host only; they do NOT proxy APIs or weaken the peer services' auth.
 /// Swagger's dropdown can render the full platform without adding cross-service DB/code deps.
-const CALLING_API: &str = include_str!("../../../../packages/contracts/calling/http/v1.openapi.json");
-const PLATFORM_ACCESS_API: &str = include_str!("../../../../packages/contracts/platform-access/internal/v1.openapi.json");
-const NUMBERING_API: &str = include_str!("../../../../packages/contracts/numbering/internal/v1.openapi.json");
-const PRIVACY_RELAY_API: &str = include_str!("../../../../packages/contracts/privacy-relay/http/v1.openapi.json");
-const PRIVACY_RELAY_INTERNAL_API: &str = include_str!("../../../../packages/contracts/privacy-relay/internal/v1.openapi.json");
-const TELEPHONY_API: &str = include_str!("../../../../packages/contracts/telephony/internal/v1.openapi.json");
-const SMS_GATEWAY_API: &str = include_str!("../../../../packages/contracts/sms-gateway/http/v1.openapi.json");
+const CALLING_API: &str =
+    include_str!("../../../../packages/contracts/calling/http/v1.openapi.json");
+const PLATFORM_ACCESS_API: &str =
+    include_str!("../../../../packages/contracts/platform-access/internal/v1.openapi.json");
+const NUMBERING_API: &str =
+    include_str!("../../../../packages/contracts/numbering/internal/v1.openapi.json");
+const PRIVACY_RELAY_API: &str =
+    include_str!("../../../../packages/contracts/privacy-relay/http/v1.openapi.json");
+const PRIVACY_RELAY_INTERNAL_API: &str =
+    include_str!("../../../../packages/contracts/privacy-relay/internal/v1.openapi.json");
+const TELEPHONY_API: &str =
+    include_str!("../../../../packages/contracts/telephony/internal/v1.openapi.json");
+const SMS_GATEWAY_API: &str =
+    include_str!("../../../../packages/contracts/sms-gateway/http/v1.openapi.json");
 
 fn contract_doc(body: &'static str) -> impl IntoResponse {
     ([(CONTENT_TYPE, "application/json")], body)
@@ -678,23 +685,47 @@ pub fn swagger_router(server_addr: &str) -> Router {
         .url("/api-docs/openapi.json", openapi)
         .config(Config::new([
             Url::with_primary("Meetings", "/api-docs/openapi.json", true),
-        Url::new("Calling", "/api-docs/calling.json"),
-        Url::new("Platform Access (internal)", "/api-docs/platform-access.json"),
-        Url::new("Numbering / DCNs", "/api-docs/numbering.json"),
-        Url::new("Privacy Relay", "/api-docs/privacy-relay.json"),
-        Url::new("Privacy Relay (internal)", "/api-docs/privacy-relay-internal.json"),
-        Url::new("Telephony (internal)", "/api-docs/telephony.json"),
-        Url::new("SMS Gateway", "/api-docs/sms-gateway.json"),
+            Url::new("Calling", "/api-docs/calling.json"),
+            Url::new("Platform Access (internal)", "/api-docs/platform-access.json"),
+            Url::new("Numbering / DCNs", "/api-docs/numbering.json"),
+            Url::new("Privacy Relay", "/api-docs/privacy-relay.json"),
+            Url::new(
+                "Privacy Relay (internal)",
+                "/api-docs/privacy-relay-internal.json",
+            ),
+            Url::new("Telephony (internal)", "/api-docs/telephony.json"),
+            Url::new("SMS Gateway", "/api-docs/sms-gateway.json"),
         ]));
 
     let docs = Router::new()
-        .route("/api-docs/calling.json", get(|| async { contract_doc(CALLING_API) }))
-        .route("/api-docs/platform-access.json", get(|| async { contract_doc(PLATFORM_ACCESS_API) }))
-        .route("/api-docs/numbering.json", get(|| async { contract_doc(NUMBERING_API) }))
-        .route("/api-docs/privacy-relay.json", get(|| async { contract_doc(PRIVACY_RELAY_API) }))
-        .route("/api-docs/privacy-relay-internal.json", get(|| async { contract_doc(PRIVACY_RELAY_INTERNAL_API) }))
-        .route("/api-docs/telephony.json", get(|| async { contract_doc(TELEPHONY_API) }))
-        .route("/api-docs/sms-gateway.json", get(|| async { contract_doc(SMS_GATEWAY_API) }));
+        .route(
+            "/api-docs/calling.json",
+            get(|| async { contract_doc(CALLING_API) }),
+        )
+        .route(
+            "/api-docs/platform-access.json",
+            get(|| async { contract_doc(PLATFORM_ACCESS_API) }),
+        )
+        .route(
+            "/api-docs/numbering.json",
+            get(|| async { contract_doc(NUMBERING_API) }),
+        )
+        .route(
+            "/api-docs/privacy-relay.json",
+            get(|| async { contract_doc(PRIVACY_RELAY_API) }),
+        )
+        .route(
+            "/api-docs/privacy-relay-internal.json",
+            get(|| async { contract_doc(PRIVACY_RELAY_INTERNAL_API) }),
+        )
+        .route(
+            "/api-docs/telephony.json",
+            get(|| async { contract_doc(TELEPHONY_API) }),
+        )
+        .route(
+            "/api-docs/sms-gateway.json",
+            get(|| async { contract_doc(SMS_GATEWAY_API) }),
+        );
     docs.merge(ui.into())
 }
 
@@ -726,7 +757,10 @@ mod tests {
 
     #[tokio::test]
     async fn swagger_serves_all_peer_contracts_from_the_doc_host() {
-        use axum::{body::Body, http::{Request, StatusCode}};
+        use axum::{
+            body::Body,
+            http::{Request, StatusCode},
+        };
         use tower::ServiceExt;
 
         let router = swagger_router("127.0.0.1:18081");
@@ -740,7 +774,11 @@ mod tests {
             "/api-docs/telephony.json",
             "/api-docs/sms-gateway.json",
         ] {
-            let response = router.clone().oneshot(Request::builder().uri(path).body(Body::empty()).unwrap()).await.unwrap();
+            let response = router
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
             assert_eq!(response.status(), StatusCode::OK, "{path}");
         }
     }
