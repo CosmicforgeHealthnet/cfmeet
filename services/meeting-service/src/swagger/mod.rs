@@ -681,7 +681,7 @@ pub fn swagger_router(server_addr: &str) -> Router {
     // Internal specifications are *documentation*, not new externally executable routes.
     // Trying another service's operations requires that service's own reachable ingress,
     // authentication and environment-specific server configuration.
-    let ui = SwaggerUi::new("/swagger-ui")
+    let ui: Router = SwaggerUi::new("/swagger-ui")
         .url("/api-docs/openapi.json", openapi)
         .config(Config::new([
             Url::with_primary("Meetings", "/api-docs/openapi.json", true),
@@ -695,7 +695,8 @@ pub fn swagger_router(server_addr: &str) -> Router {
             ),
             Url::new("Telephony (internal)", "/api-docs/telephony.json"),
             Url::new("SMS Gateway", "/api-docs/sms-gateway.json"),
-        ]));
+        ]))
+        .into();
 
     let docs = Router::new()
         .route(
@@ -726,7 +727,7 @@ pub fn swagger_router(server_addr: &str) -> Router {
             "/api-docs/sms-gateway.json",
             get(|| async { contract_doc(SMS_GATEWAY_API) }),
         );
-    docs.merge(ui.into())
+    docs.merge(ui)
 }
 
 #[cfg(test)]
