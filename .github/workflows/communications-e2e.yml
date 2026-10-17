@@ -97,6 +97,9 @@ jobs:
           sudo systemctl stop asterisk 2>/dev/null || true
           sudo systemctl disable asterisk 2>/dev/null || true
           sudo pkill -x asterisk || true
+          # SIPp plays the carrier's RTP from a pcap (play_pcap_audio): raw sockets.
+          sudo setcap cap_net_raw+ep "$(command -v sipp)"
+          getcap "$(command -v sipp)" | grep -q cap_net_raw
 
       - name: LiveKit server binary (the pinned certification image)
         run: |

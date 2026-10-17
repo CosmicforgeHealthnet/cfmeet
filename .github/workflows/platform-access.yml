@@ -165,7 +165,12 @@ jobs:
           test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'platform_access_seaql_migrations'")" = "13"
           test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'platform_access_seaql_migrations' AND tablename NOT LIKE 'platform\_%'")" = "0"
           # Verifier material lives only in the credential table (never in the change feed).
-          test "$(q "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name ~* 'verifier' AND table_name <> 'platform_api_credentials'")" = "0"
+          # The one exception is the Part III import receipt's integrity checksum
+          # (`platform_identity_imports.verifier_digest`): a SHA-256 over the whole imported
+          # verifier set, constrained to 64 hex characters — never a usable verifier.
+          test "$(q "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name ~* 'verifier' AND table_name <> 'platform_api_credentials' AND (table_name, column_name) <> ('platform_identity_imports', 'verifier_digest')")" = "0"
+          test "$(q "SELECT data_type || ':' || character_maximum_length FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'platform_identity_imports' AND column_name = 'verifier_digest'")" = "character:64"
+          test "$(q "SELECT count(*) FROM pg_constraint WHERE conname = 'ck_platform_identity_imports_digests' AND pg_get_constraintdef(oid) LIKE '%verifier_digest ~ ''^[0-9a-f]{64}\$''%'")" = "1"
 
       - name: Per-service database roles with the real migrations
         env:

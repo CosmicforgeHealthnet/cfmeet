@@ -985,7 +985,9 @@ async fn sms_journeys_across_platform_access_numbering_the_sms_gateway_and_calli
     )
     .await;
     assert!(
-        !body.contains("3pm") && !body.contains("4242") && !body.contains(&e164[1..]),
+        // The remote party's whole national number (a 4-digit tail can occur inside a
+        // random UUID of the payload).
+        !body.contains("3pm") && !body.contains(&REMOTE[2..]) && !body.contains(&e164[1..]),
         "{body}"
     );
     eventually(
