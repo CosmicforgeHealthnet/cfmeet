@@ -117,7 +117,15 @@ async fn a_dcn_caller_is_protected_only_in_the_scope_numbering_signed() {
         .unwrap()
         .to_string();
     assert_eq!(r.json["inboundCaller"]["numberResourceId"], json!(number));
-    assert!(!r.text.contains("7946"), "no number in the answer");
+    // The caller's digits, in any formatting, never appear (a random UUID may contain a
+    // short digit run, so the check uses the whole subscriber number).
+    let digits: String = r.text.chars().filter(char::is_ascii_digit).collect();
+    assert!(
+        !r.text.contains("20 7946 0777")
+            && !r.text.contains("2079460777")
+            && !digits.contains("442079460777"),
+        "no number in the answer"
+    );
     // Stored in the grant's scope (and only there); the same caller again is the same
     // contact.
     assert_eq!(

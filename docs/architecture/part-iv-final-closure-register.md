@@ -105,10 +105,27 @@ SMS `outbound` with four concurrent dispatchers), not benchmarked.
 3. Privacy Relay `migrations`: `relay_number_leases` declared platform-owned — fixed.
 4. New cross-process journey: cooldown simulation needed the number's own
    `quarantine_until` (with its revision) — fixed; journey passes.
+5. CI configuration: Numbering / Privacy Relay smoke table counts (36 → 50, 26 → 27), the
+   port request's internal provider id in Numbering's provider-column allowlist, and
+   Platform Access binaries for the Calling e2e jobs of the Privacy Relay and Telephony
+   workflows.
+6. `privacy-relay/tests/dcn_caller.rs`: the "no number in the answer" check matched the
+   4-digit run `7946`, which a random UUID can contain — now checks the whole subscriber
+   number; 5 / 5 re-runs pass.
 
 ### C.5 Remote CI
 
-Recorded in the final commit of this register (see §C.5 update below).
+Dispatched with `workflow_dispatch` on this branch (no pull request was opened):
+
+| Workflow | Result |
+|---|---|
+| Contracts and service auth | success (`448d6a2`) |
+| Service boundaries | success (`448d6a2`) |
+| Dependency and image security | success (`448d6a2`) |
+| Calling service | success (`448d6a2`) |
+| Telephony service | failure on `448d6a2` (Calling e2e job without Platform Access binaries — a CI wiring gap since Workstream B); success on `97c201a` after the fix |
+| Privacy Relay service | failure on `448d6a2` (smoke table count 26 → 27; same Calling e2e wiring gap); on `97c201a` everything passed except one intermittent pre-existing assertion in `dcn_caller` (a random UUID can contain the digits `7946`), fixed in the following commit and re-dispatched |
+| Numbering, SMS Gateway, Communications e2e, Platform Access | **not executed remotely**: `workflow_dispatch` returns 404 for them (these workflow files are not on the default branch, which GitHub requires for dispatch); they run on push to main / staging or on a pull request. Their table-count smoke steps were run locally against the real migrations (Numbering 50 tables, Privacy Relay 27, SMS Gateway checks pass) |
 
 
 ## D. §§161–166
