@@ -2301,3 +2301,160 @@ async fn w_a_restored_database_resumes_release_and_quarantine_without_duplicate_
     );
     assert_eq!(releases(), 1);
 }
+
+// ---------------------------------------------------------------------------------------
+// Capacity measurement (in-process, local PostgreSQL). Prints one `LOAD …` line per
+// scenario and asserts correctness only; the numbers are this machine's, not a
+// production capacity claim.
+// ---------------------------------------------------------------------------------------
+
+fn percentile(sorted: &[f64], p: f64) -> f64 {
+    sorted[((sorted.len() as f64 - 1.0) * p).round() as usize]
+}
+
+fn report(scenario: &str, concurrency: usize, mut ms: Vec<f64>, total: std::time::Duration) {
+    ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    println!(
+        "LOAD numbering {scenario} n={} concurrency={concurrency} elapsed_ms={:.0} throughput_per_s={:.0} p50_ms={:.1} p95_ms={:.1} max_ms={:.1}",
+        ms.len(),
+        total.as_secs_f64() * 1000.0,
+        ms.len() as f64 / total.as_secs_f64(),
+        percentile(&ms, 0.50),
+        percentile(&ms, 0.95),
+        ms.last().unwrap()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn w_load_inbound_resolution_relay_lease_contention_and_usage_ingestion() {
+    let Some(t) = setup().await else { return };
+    let s = scope(EnvironmentKind::Sandbox);
+    let (number, a) = t.active(&s).await;
+    let e164 = t.e164(number).await;
+    let t = Arc::new(t);
+    const CONCURRENCY: usize = 16;
+
+    // 1. Inbound voice resolutions of one ACTIVE DCN (each issues a revision-bound grant).
+    let gate = Arc::new(tokio::sync::Semaphore::new(CONCURRENCY));
+    let started = std::time::Instant::now();
+    let mut set = tokio::task::JoinSet::new();
+    for _ in 0..400 {
+        let (t, gate, e164) = (t.clone(), gate.clone(), e164.clone());
+        set.spawn(async move {
+            let _p = gate.acquire_owned().await.unwrap();
+            let at = std::time::Instant::now();
+            let r = t.resolve(&e164).await;
+            assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+            at.elapsed().as_secs_f64() * 1000.0
+        });
+    }
+    let mut ms = Vec::new();
+    while let Some(v) = set.join_next().await {
+        ms.push(v.unwrap());
+    }
+    report("inbound_resolution", CONCURRENCY, ms, started.elapsed());
+
+    // 2. Relay-lease contention: 20 relay numbers, 5 holders racing for each.
+    let mut refs = Vec::new();
+    for i in 0..20 {
+        let m =
+            t.st.import_relay_number(
+                &ctx(),
+                "cfmeet.privacy-relay",
+                numbering::stewardship::relay::RelayImport {
+                    relay_inventory_ref: Uuid::new_v4(),
+                    e164: format!("+120255501{:02}", 50 + i),
+                    country: "US".into(),
+                    region: None,
+                    capabilities: vec![C::VoiceInbound, C::VoiceOutbound],
+                    binding_ref: format!("relay-binding-load-{i}"),
+                    synthetic: true,
+                },
+            )
+            .await
+            .unwrap()
+            .0;
+        refs.push(m.relay_inventory_ref);
+    }
+    let started = std::time::Instant::now();
+    let mut set = tokio::task::JoinSet::new();
+    for r in &refs {
+        for _ in 0..5 {
+            let (t, gate, r) = (t.clone(), gate.clone(), *r);
+            set.spawn(async move {
+                let _p = gate.acquire_owned().await.unwrap();
+                let at = std::time::Instant::now();
+                let granted =
+                    t.st.lease_relay_number(
+                        &ctx(),
+                        "cfmeet.privacy-relay",
+                        numbering::stewardship::relay::LeaseRequest {
+                            relay_inventory_ref: r,
+                            holder_ref: Uuid::new_v4(),
+                            generation: 1,
+                            expires_at: t.h.now() + Duration::days(1),
+                            idempotency_key: format!("lease-{}", Uuid::new_v4().simple()),
+                        },
+                    )
+                    .await
+                    .is_ok();
+                (granted, at.elapsed().as_secs_f64() * 1000.0)
+            });
+        }
+    }
+    let (mut ms, mut granted) = (Vec::new(), 0);
+    while let Some(v) = set.join_next().await {
+        let (g, m) = v.unwrap();
+        granted += usize::from(g);
+        ms.push(m);
+    }
+    report("relay_lease_contention", CONCURRENCY, ms, started.elapsed());
+    assert_eq!(granted, 20, "exactly one lease per relay number");
+    assert_eq!(
+        t.h.scalar("SELECT count(*) FROM number_relay_leases WHERE status = 'ACTIVE'")
+            .await,
+        20
+    );
+
+    // 3. Carrier usage ingestion: 1000 reports, every one sent twice (duplicates collapse).
+    let started = std::time::Instant::now();
+    let mut set = tokio::task::JoinSet::new();
+    for i in 0..2000 {
+        let (t, gate, a) = (t.clone(), gate.clone(), a.id);
+        set.spawn(async move {
+            let _p = gate.acquire_owned().await.unwrap();
+            let at = std::time::Instant::now();
+            let now = t.h.now();
+            t.st.report_usage(
+                &ctx(),
+                "cfmeet.sms-gateway",
+                NewUsage {
+                    source_key: format!("sms-load-{:04}", i % 1000),
+                    number_resource_id: number,
+                    assignment_id: Some(a),
+                    kind: UsageKind::SmsInboundSegments,
+                    quantity: 1,
+                    provider_cost_minor: Some(1),
+                    currency: Some("USD".into()),
+                    period_start: now,
+                    period_end: now,
+                },
+            )
+            .await
+            .unwrap();
+            at.elapsed().as_secs_f64() * 1000.0
+        });
+    }
+    let mut ms = Vec::new();
+    while let Some(v) = set.join_next().await {
+        ms.push(v.unwrap());
+    }
+    report("usage_ingestion", CONCURRENCY, ms, started.elapsed());
+    assert_eq!(
+        t.h.scalar(
+            "SELECT count(*) FROM number_usage_records WHERE source_key LIKE 'cfmeet.sms-gateway:sms-load-%'"
+        )
+        .await,
+        1000
+    );
+}
