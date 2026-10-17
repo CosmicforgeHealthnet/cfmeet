@@ -18,6 +18,8 @@ const OUTBOX_LEASE_SECONDS: i64 = 60;
 
 pub const PRODUCER_CALLING: &str = "cfmeet.calling";
 pub const PRODUCER_PRIVACY_RELAY: &str = "cfmeet.privacy-relay";
+/// Part IV N / O: the SMS Gateway's message events (`sms.*`).
+pub const PRODUCER_SMS_GATEWAY: &str = "cfmeet.sms-gateway";
 
 /// The neutral event publisher boundary: the event schema (the platform envelope) is
 /// broker-independent; a deployment may add a broker transport without changing it.
@@ -56,6 +58,7 @@ impl EventTransport for LocalWebhookTransport {
         let projected = match producer {
             PRODUCER_CALLING => catalog::project_calling(envelope),
             PRODUCER_PRIVACY_RELAY => catalog::project_privacy_relay(envelope),
+            PRODUCER_SMS_GATEWAY => catalog::project_sms_gateway(envelope),
             _ => return Err("UNKNOWN_PRODUCER"),
         };
         // Internal-only facts are acknowledged and never become public events.

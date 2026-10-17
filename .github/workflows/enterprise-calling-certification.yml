@@ -99,7 +99,17 @@ jobs:
           workspaces: |
             services/telephony -> target
             services/calling -> target
+            services/platform-access -> target
           key: enterprise-sip
+
+      # Calling verifies every customer credential through Platform Access: its tests start
+      # the real server (and migrate its own database) per test database.
+      - name: Build Platform Access
+        working-directory: services/platform-access
+        run: |
+          cargo build --workspace --bins --locked
+          echo "PLATFORM_ACCESS_BIN=$GITHUB_WORKSPACE/services/platform-access/target/debug/platform-access" >> "$GITHUB_ENV"
+          echo "PLATFORM_ACCESS_MIGRATION_BIN=$GITHUB_WORKSPACE/services/platform-access/target/debug/platform-access-migration" >> "$GITHUB_ENV"
 
       - name: Build telephony binaries (service, migration, admin)
         working-directory: services/telephony
@@ -164,8 +174,19 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: services/calling -> target
+          workspaces: |
+            services/calling -> target
+            services/platform-access -> target
           key: enterprise-races
+
+      # Calling verifies every customer credential through Platform Access: its tests start
+      # the real server (and migrate its own database) per test database.
+      - name: Build Platform Access
+        working-directory: services/platform-access
+        run: |
+          cargo build --workspace --bins --locked
+          echo "PLATFORM_ACCESS_BIN=$GITHUB_WORKSPACE/services/platform-access/target/debug/platform-access" >> "$GITHUB_ENV"
+          echo "PLATFORM_ACCESS_MIGRATION_BIN=$GITHUB_WORKSPACE/services/platform-access/target/debug/platform-access-migration" >> "$GITHUB_ENV"
 
       - name: Build the test binaries
         run: cargo test --locked --no-run --test enterprise_ring_groups --test enterprise_queues --test enterprise_transfer --test enterprise_voicemail --test enterprise_recording --test enterprise_hours_forwarding --test call_history --test enterprise_load

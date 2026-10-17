@@ -213,7 +213,7 @@ async fn extension_namespace_format_and_destinations() {
         .platform
         .register_principal(
             other.env(e.a.w.kind).id,
-            calling::platform::principals::NewPrincipal::External {
+            crate::common::NewPrincipal::External {
                 kind: calling::domain::PrincipalKind::EnterpriseMember,
                 external_reference: "carol".into(),
             },
@@ -534,7 +534,7 @@ async fn extension_calls_are_scoped_and_policy_gated() {
         .platform
         .register_principal(
             other.env(e.a.w.kind).id,
-            calling::platform::principals::NewPrincipal::External {
+            crate::common::NewPrincipal::External {
                 kind: calling::domain::PrincipalKind::EnterpriseMember,
                 external_reference: "eve".into(),
             },

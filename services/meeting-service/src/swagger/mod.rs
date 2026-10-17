@@ -1,6 +1,6 @@
-use axum::Router;
+use axum::{http::header::CONTENT_TYPE, response::IntoResponse, routing::get, Router};
 use utoipa::OpenApi;
-use utoipa_swagger_ui::SwaggerUi;
+use utoipa_swagger_ui::{Config, SwaggerUi, Url};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -642,37 +642,151 @@ fn public_server_url(configured: Option<&str>) -> String {
         .to_string()
 }
 
-/// Creates the Swagger UI router with dynamic server URL from environment
+/// Contract-first OpenAPI documents for peer services. These are deliberately served by
+/// the documentation host only; they do NOT proxy APIs or weaken the peer services' auth.
+/// Swagger's dropdown can render the full platform without adding cross-service DB/code deps.
+const CALLING_API: &str =
+    include_str!("../../../../packages/contracts/calling/http/v1.openapi.json");
+const PLATFORM_ACCESS_API: &str =
+    include_str!("../../../../packages/contracts/platform-access/internal/v1.openapi.json");
+const NUMBERING_API: &str =
+    include_str!("../../../../packages/contracts/numbering/internal/v1.openapi.json");
+const PRIVACY_RELAY_API: &str =
+    include_str!("../../../../packages/contracts/privacy-relay/http/v1.openapi.json");
+const PRIVACY_RELAY_INTERNAL_API: &str =
+    include_str!("../../../../packages/contracts/privacy-relay/internal/v1.openapi.json");
+const TELEPHONY_API: &str =
+    include_str!("../../../../packages/contracts/telephony/internal/v1.openapi.json");
+const SMS_GATEWAY_API: &str =
+    include_str!("../../../../packages/contracts/sms-gateway/http/v1.openapi.json");
+
+fn contract_doc(body: &'static str) -> impl IntoResponse {
+    ([(CONTENT_TYPE, "application/json")], body)
+}
+
+/// Creates the CF Meet Swagger UI with a service selector. The Meeting Service remains
+/// the default and keeps its original /api-docs/openapi.json contract unchanged.
+/// Peer service documents come from the authoritative, checked-in shared contracts.
 pub fn swagger_router(server_addr: &str) -> Router {
     let mut openapi = ApiDoc::openapi();
 
-    // Set servers dynamically from environment
+    // Meeting Service Try It Out continues to use its configured deployment URL.
     let mut current_server = utoipa::openapi::Server::new(format!("http://{}", server_addr));
-    current_server.description = Some("Current server".to_string());
-
-    // Externally advertised server: `SWAGGER_SERVER_URL` per environment (e.g. staging),
-    // otherwise production.
+    current_server.description = Some("Current Meeting Service".to_string());
     let configured = std::env::var("SWAGGER_SERVER_URL").ok();
     let mut public_server = utoipa::openapi::Server::new(public_server_url(configured.as_deref()));
-    public_server.description = Some(
-        if configured.as_deref().is_some_and(|v| !v.trim().is_empty()) {
-            "Public server"
-        } else {
-            "Production server"
-        }
-        .to_string(),
-    );
-
+    public_server.description = Some("Meeting Service deployment".to_string());
     openapi.servers = Some(vec![current_server, public_server]);
 
-    SwaggerUi::new("/swagger-ui")
+    // Internal specifications are *documentation*, not new externally executable routes.
+    // Trying another service's operations requires that service's own reachable ingress,
+    // authentication and environment-specific server configuration.
+    let ui: Router = SwaggerUi::new("/swagger-ui")
         .url("/api-docs/openapi.json", openapi)
-        .into()
+        .config(Config::new([
+            Url::with_primary("Meetings", "/api-docs/openapi.json", true),
+            Url::new("Calling", "/api-docs/calling.json"),
+            Url::new(
+                "Platform Access (internal)",
+                "/api-docs/platform-access.json",
+            ),
+            Url::new("Numbering / DCNs", "/api-docs/numbering.json"),
+            Url::new("Privacy Relay", "/api-docs/privacy-relay.json"),
+            Url::new(
+                "Privacy Relay (internal)",
+                "/api-docs/privacy-relay-internal.json",
+            ),
+            Url::new("Telephony (internal)", "/api-docs/telephony.json"),
+            Url::new("SMS Gateway", "/api-docs/sms-gateway.json"),
+        ]))
+        .into();
+
+    let docs = Router::new()
+        .route(
+            "/api-docs/calling.json",
+            get(|| async { contract_doc(CALLING_API) }),
+        )
+        .route(
+            "/api-docs/platform-access.json",
+            get(|| async { contract_doc(PLATFORM_ACCESS_API) }),
+        )
+        .route(
+            "/api-docs/numbering.json",
+            get(|| async { contract_doc(NUMBERING_API) }),
+        )
+        .route(
+            "/api-docs/privacy-relay.json",
+            get(|| async { contract_doc(PRIVACY_RELAY_API) }),
+        )
+        .route(
+            "/api-docs/privacy-relay-internal.json",
+            get(|| async { contract_doc(PRIVACY_RELAY_INTERNAL_API) }),
+        )
+        .route(
+            "/api-docs/telephony.json",
+            get(|| async { contract_doc(TELEPHONY_API) }),
+        )
+        .route(
+            "/api-docs/sms-gateway.json",
+            get(|| async { contract_doc(SMS_GATEWAY_API) }),
+        );
+    docs.merge(ui)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn peer_openapi_specs_are_valid_and_expose_expected_operations() {
+        let specs = [
+            (CALLING_API, "/v1/calls"),
+            (PLATFORM_ACCESS_API, "/internal/v1"),
+            (NUMBERING_API, "/v1/numbers/assignments"),
+            (PRIVACY_RELAY_API, "/v1/privacy-relay/contexts"),
+            (PRIVACY_RELAY_INTERNAL_API, "/internal/v1"),
+            (TELEPHONY_API, "/internal/v1"),
+            (SMS_GATEWAY_API, "/v1/sms/messages"),
+        ];
+        for (raw, expected_prefix) in specs {
+            let doc: serde_json::Value = serde_json::from_str(raw).expect("valid OpenAPI JSON");
+            assert_eq!(doc["openapi"], "3.1.0");
+            let paths = doc["paths"].as_object().expect("OpenAPI paths");
+            assert!(
+                paths.keys().any(|path| path.starts_with(expected_prefix)),
+                "missing {expected_prefix} in {}",
+                doc["info"]["title"]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn swagger_serves_all_peer_contracts_from_the_doc_host() {
+        use axum::{
+            body::Body,
+            http::{Request, StatusCode},
+        };
+        use tower::ServiceExt;
+
+        let router = swagger_router("127.0.0.1:18081");
+        for path in [
+            "/api-docs/openapi.json",
+            "/api-docs/calling.json",
+            "/api-docs/platform-access.json",
+            "/api-docs/numbering.json",
+            "/api-docs/privacy-relay.json",
+            "/api-docs/privacy-relay-internal.json",
+            "/api-docs/telephony.json",
+            "/api-docs/sms-gateway.json",
+        ] {
+            let response = router
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+        }
+    }
 
     #[test]
     fn public_server_url_defaults_to_production() {

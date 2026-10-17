@@ -95,8 +95,8 @@ struct Vm {
     e: EnterpriseWorld,
     store: Arc<MemoryObjectStore>,
     capture: Arc<RecordingCapture>,
-    vm_admin: calling::platform::credentials::IssuedCredential,
-    vm_reader: calling::platform::credentials::IssuedCredential,
+    vm_admin: crate::common::IssuedCredential,
+    vm_reader: crate::common::IssuedCredential,
 }
 
 impl Vm {

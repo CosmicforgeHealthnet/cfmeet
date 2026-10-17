@@ -1,0 +1,49 @@
+{
+  "acquisitionId": "00000002-1c3e-4a5b-8c7d-9e0f1a2b3c4d",
+  "reservationId": "00000003-1c3e-4a5b-8c7d-9e0f1a2b3c4d",
+  "numberResourceId": "00000001-1c3e-4a5b-8c7d-9e0f1a2b3c4d",
+  "status": "PROVISIONED",
+  "revision": 4,
+  "requestedCapabilities": [
+    "SMS_OUTBOUND",
+    "VOICE_INBOUND"
+  ],
+  "eligibilityDecisionId": "00000004-1c3e-4a5b-8c7d-9e0f1a2b3c4d",
+  "failureCode": null,
+  "provisioning": {
+    "status": "SUCCEEDED",
+    "attempts": 1,
+    "failureCode": null
+  },
+  "servedCapabilities": [
+    "SMS_OUTBOUND",
+    "VOICE_INBOUND"
+  ],
+  "routes": [
+    {
+      "family": "SMS",
+      "routeRevision": 1,
+      "routeStatus": "CONFIGURED",
+      "acknowledgedBy": [],
+      "ready": false,
+      "reason": "CONSUMER_NOT_READY",
+      "routeRef": "00000009-1c3e-4a5b-8c7d-9e0f1a2b3c4d"
+    },
+    {
+      "family": "VOICE",
+      "routeRevision": 1,
+      "routeStatus": "CONFIGURED",
+      "acknowledgedBy": [
+        "cfmeet.telephony"
+      ],
+      "ready": true,
+      "reason": null
+    }
+  ],
+  "activationReady": false,
+  "liveRouting": false,
+  "createdAt": "2031-03-01T10:01:00Z",
+  "updatedAt": "2031-03-01T10:02:00Z",
+  "completedAt": "2031-03-01T10:01:30Z",
+  "externalRef": "syn-voice-sms-mobile"
+}

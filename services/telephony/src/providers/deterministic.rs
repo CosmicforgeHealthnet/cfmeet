@@ -87,6 +87,9 @@ struct State {
     by_idempotency_key: HashMap<String, String>,
     terminate_outcome: Option<ControlOutcome>,
     next_event: u64,
+    /// The caller identity presented on each request that reached the provider, by
+    /// correlation key (a carrier sees the presented number; tests assert it).
+    presented: Vec<(String, String)>,
 }
 
 /// The deterministic provider.
@@ -174,6 +177,12 @@ impl DeterministicProvider {
     /// Requests that reached the provider (with or without a call).
     pub fn requests(&self) -> Vec<String> {
         self.lock().seen.clone()
+    }
+
+    /// (correlation key, presented caller identity) of every request that reached the
+    /// provider.
+    pub fn presented_identities(&self) -> Vec<(String, String)> {
+        self.lock().presented.clone()
     }
 
     pub fn terminated(&self) -> Vec<String> {
@@ -326,7 +335,11 @@ impl TelecomInterconnectProvider for DeterministicProvider {
 
     async fn originate(&self, request: OriginateRequest) -> OriginateOutcome {
         let step = {
-            let s = self.lock();
+            let mut s = self.lock();
+            s.presented.push((
+                request.correlation_key.clone(),
+                request.caller_identity.expose().to_string(),
+            ));
             if s.native_idempotency {
                 if let Some(existing) = s.by_idempotency_key.get(&request.idempotency_key) {
                     // Same key: the same provider call, no second effect.

@@ -21,7 +21,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
-    domain::{MediaAttachment, PublicRouteClass},
+    domain::{InterconnectClass, MediaAttachment, PublicRouteClass},
     error::{ErrorCode, TelephonyError, TelephonyResult},
 };
 
@@ -111,6 +111,40 @@ pub struct OriginateCommand {
     /// Telephony chooses among eligible routes).
     #[serde(default)]
     pub candidate_routes: Vec<String>,
+    /// Part IV L: the DCN this call presents — Numbering's single-use CALLER_IDENTITY
+    /// grant (audience Telephony) for exactly this execution. Never a number: Telephony
+    /// learns the identity only from Numbering's verification at execution time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presented_identity: Option<PresentedIdentity>,
+    /// Part IV L closure: the interconnect class Calling's route policy selected. PUBLIC
+    /// (default) never uses a synthetic test route; SYNTHETIC_TEST uses ONLY synthetic test
+    /// routes, presents a synthetic DCN and needs the synthetic interconnect enabled.
+    #[serde(default)]
+    pub interconnect_class: InterconnectClass,
+}
+
+/// A DCN presented as the caller identity (Part IV L).
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PresentedIdentity {
+    pub number_resource_id: Uuid,
+    /// The compact routing grant (bearer; never logged, never echoed).
+    pub grant: String,
+}
+
+impl std::fmt::Debug for PresentedIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PresentedIdentity")
+            .field("number_resource_id", &self.number_resource_id)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The single operation a CALLER_IDENTITY grant is bound to: this Calling leg's
+/// origination command (`call.callLegId`, `commandId`). Calling requests the grant with
+/// exactly this reference.
+pub fn dcn_operation_ref(call_leg_id: Uuid, command_id: Uuid) -> String {
+    format!("leg:{}:{}", call_leg_id.simple(), command_id.simple())
 }
 
 fn safe_token(s: &str, max: usize) -> bool {
@@ -184,6 +218,27 @@ impl OriginateCommand {
         if g.grant_expires_at <= now {
             return Err(refuse(ErrorCode::AuthorizationProofExpired));
         }
+        // A synthetic test interconnect carries a synthetic DCN only (Numbering decides
+        // whether the number is synthetic at execution time).
+        if self.interconnect_class == InterconnectClass::SyntheticTest
+            && self.presented_identity.is_none()
+        {
+            return Err(TelephonyError::Validation(
+                "a SYNTHETIC_TEST interconnect needs a presented DCN",
+            ));
+        }
+        if let Some(p) = &self.presented_identity {
+            if p.grant.is_empty()
+                || p.grant.len() > 4096
+                || p.grant.split('.').count() != 3
+                || !p
+                    .grant
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+            {
+                return Err(refuse(ErrorCode::AuthorizationProofInvalid));
+            }
+        }
         // Spend: a real reservation with a positive allowance and a duration cap.
         let s = &self.spend;
         if s.reserved_amount_minor <= 0
@@ -203,6 +258,10 @@ impl OriginateCommand {
         copy.destination.grant_secret = String::new();
         copy.destination.grant_expires_at = DateTime::<Utc>::UNIX_EPOCH;
         copy.destination.grant_id = Uuid::nil();
+        if let Some(p) = copy.presented_identity.as_mut() {
+            // The grant is re-issued per dispatch; the DCN itself is part of the request.
+            p.grant = String::new();
+        }
         hex::encode(Sha256::digest(
             serde_json::to_vec(&copy).unwrap_or_default(),
         ))
@@ -222,6 +281,8 @@ impl OriginateCommand {
             "authorityValidUntil": self.authorization.valid_until,
             "media": self.media.as_str(),
             "destinationCountry": self.destination.country,
+            "presentedNumberResourceId": self.presented_identity.as_ref().map(|p| p.number_resource_id),
+            "interconnectClass": self.interconnect_class.as_str(),
         })
     }
 }
@@ -232,6 +293,8 @@ mod tests {
 
     pub(crate) fn command(now: DateTime<Utc>) -> OriginateCommand {
         OriginateCommand {
+            presented_identity: None,
+            interconnect_class: InterconnectClass::Public,
             schema_version: "1".into(),
             command_id: Uuid::new_v4(),
             idempotency_key: "leg-1-attempt-1".into(),

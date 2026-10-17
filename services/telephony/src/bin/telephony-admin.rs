@@ -28,6 +28,7 @@ use sea_orm::{
 };
 use serde_json::{json, Value};
 use telephony::{
+    domain::InterconnectClass,
     operator_audit::{self, OperatorAction},
     retention::{self, DataClass, HoldReason},
 };
@@ -58,6 +59,10 @@ enum Command {
     /// Part F: enterprise SIP devices on the own edge (internal; never paid).
     #[command(subcommand)]
     EnterpriseDevice(EnterpriseDeviceCmd),
+    /// Part IV Workstream L: Numbering DCNs carried for voice (needs the service
+    /// authentication settings and `NUMBERING_INTERNAL_BASE_URL` for bind / acknowledge).
+    #[command(subcommand)]
+    Dcn(DcnCmd),
     /// Incidents (restricted operational view; never numbers). Without a subcommand:
     /// the open incidents.
     Incidents {
@@ -207,6 +212,11 @@ enum RouteCmd {
         cost_currency: Option<String>,
         #[arg(long, default_value_t = 3600)]
         max_call_seconds: i32,
+        /// PUBLIC (a real interconnect) or SYNTHETIC_TEST (Part IV L: the loopback SIP
+        /// edge with a simulated carrier; local / test runtimes only, a SIP_TRUNK provider,
+        /// a loopback-only SIP peer, zero cost).
+        #[arg(long, default_value = "PUBLIC")]
+        interconnect_class: String,
     },
     Enable {
         id: String,
@@ -238,6 +248,30 @@ enum SipPeerCmd {
         allowed_cidrs: String,
         #[arg(long, default_value_t = 100)]
         max_concurrent_dialogs: i32,
+    },
+    List,
+}
+
+#[derive(Subcommand)]
+enum DcnCmd {
+    /// Binds the DCN (canonical number read from Numbering) to a local route.
+    Bind {
+        #[arg(long)]
+        number_resource: uuid::Uuid,
+        #[arg(long)]
+        route: String,
+        #[arg(long, default_value = "VOICE_OUTBOUND,VOICE_INBOUND")]
+        capabilities: String,
+    },
+    /// Acknowledges Numbering's current VOICE route (only when routable locally).
+    Acknowledge {
+        #[arg(long)]
+        number_resource: uuid::Uuid,
+    },
+    /// Stops carrying the DCN (disables its local bindings).
+    Disable {
+        #[arg(long)]
+        number_resource: uuid::Uuid,
     },
     List,
 }
@@ -390,6 +424,86 @@ fn audit(
     .map_err(|e| e.to_string())
 }
 
+/// Part IV L: a SYNTHETIC_TEST route is the loopback SIP edge with a simulated carrier:
+/// a local / test runtime (`CF_RUNTIME_ENVIRONMENT`), a SIP_TRUNK provider, a SIP peer
+/// whose every allowed source network is loopback, and zero cost. Anything else could
+/// reach a real carrier, so it is refused.
+async fn synthetic_route_allowed(
+    db: &DatabaseConnection,
+    provider: &str,
+    sip_peer: Option<&str>,
+    estimated_leg_cost_minor: Option<i64>,
+) -> Result<(), String> {
+    let runtime = std::env::var("CF_RUNTIME_ENVIRONMENT")
+        .ok()
+        .and_then(|r| cf_service_auth::RuntimeEnvironment::parse(r.trim()).ok());
+    if !runtime.is_some_and(|r| r.allows_insecure_transport()) {
+        return Err(
+            "SYNTHETIC_TEST routes exist in local / test runtimes only (CF_RUNTIME_ENVIRONMENT)"
+                .into(),
+        );
+    }
+    if estimated_leg_cost_minor != Some(0) {
+        return Err("a SYNTHETIC_TEST route costs nothing: --estimated-leg-cost-minor 0".into());
+    }
+    let adapter = rows_in(
+        db,
+        "SELECT adapter FROM telecom_providers WHERE id = $1",
+        vec![provider.into()],
+    )
+    .await?
+    .first()
+    .and_then(|r| r["adapter"].as_str().map(str::to_string));
+    if adapter.as_deref() != Some("SIP_TRUNK") {
+        return Err(
+            "a SYNTHETIC_TEST route runs on a SIP_TRUNK provider (the local SIP edge)".into(),
+        );
+    }
+    let peer = sip_peer.ok_or("a SYNTHETIC_TEST route needs its loopback SIP peer (--sip-peer)")?;
+    let cidrs = rows_in(
+        db,
+        "SELECT allowed_source_cidrs::text[] AS cidrs FROM sip_peer_config_refs WHERE id = $1",
+        vec![peer.into()],
+    )
+    .await?
+    .first()
+    .and_then(|r| r["cidrs"].as_array().cloned())
+    .ok_or("unknown SIP peer")?;
+    // Every allowed network lies inside loopback: 127.0.0.0/8 (prefix >= 8) or ::1/128.
+    let loopback = |c: &serde_json::Value| {
+        let Some((ip, bits)) = c.as_str().map(|c| match c.split_once('/') {
+            Some((ip, bits)) => (ip, bits.parse::<u8>().ok()),
+            None => (c, None),
+        }) else {
+            return false;
+        };
+        match ip.parse::<std::net::IpAddr>() {
+            Ok(std::net::IpAddr::V4(v4)) => v4.is_loopback() && bits.unwrap_or(32) >= 8,
+            Ok(std::net::IpAddr::V6(v6)) => v6.is_loopback() && bits.unwrap_or(128) == 128,
+            Err(_) => false,
+        }
+    };
+    if cidrs.is_empty() || !cidrs.iter().all(loopback) {
+        return Err("a SYNTHETIC_TEST route's SIP peer accepts loopback sources only".into());
+    }
+    Ok(())
+}
+
+/// The authenticated Numbering client (service-auth settings from the environment, as the
+/// service itself loads them). Fails closed when Numbering is not configured.
+fn numbering_port() -> Result<std::sync::Arc<dyn telephony::ports::NumberingPort>, String> {
+    let settings = telephony::config::ServiceAuthSettings::from_env().map_err(|e| e.to_string())?;
+    if settings.numbering_base_url.is_none() {
+        return Err("NUMBERING_INTERNAL_BASE_URL is required for this command".into());
+    }
+    let runtime = settings
+        .load(std::sync::Arc::new(cf_service_auth::SystemClock))
+        .map_err(|e| e.to_string())?;
+    Ok(std::sync::Arc::new(telephony::ports::HttpNumbering::new(
+        runtime,
+    )))
+}
+
 async fn run(
     db: &DatabaseConnection,
     command: Command,
@@ -423,10 +537,14 @@ async fn run(
             ProviderCmd::List => Ok(json!(rows(db, "SELECT id, adapter, capabilities, status, circuit_state, health, max_concurrent_legs FROM telecom_providers ORDER BY id").await?)),
         },
         Command::Route(cmd) => match cmd {
-            RouteCmd::Add { id, provider, countries, capabilities, priority, sip_peer, max_concurrent_legs, estimated_leg_cost_minor, cost_currency, max_call_seconds } => {
-                let a = audit(operator, "ROUTE_ADD", "ROUTE", &id, json!({ "provider": provider, "countries": list(&countries), "capabilities": list(&capabilities), "priority": priority, "sipPeer": sip_peer, "maxConcurrentLegs": max_concurrent_legs, "maxCallSeconds": max_call_seconds }))?;
-                mutate(db, a, "INSERT INTO telecom_routes (id, provider_id, countries, capabilities, priority, status, sip_peer_config_ref_id, max_concurrent_legs, estimated_leg_cost_minor, cost_currency, max_call_seconds, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, 'DISABLED', $6, $7, $8, $9, $10, $11, $11)",
-                    vec![id.clone().into(), provider.into(), list(&countries).into(), list(&capabilities).into(), priority.into(), sip_peer.into(), max_concurrent_legs.into(), estimated_leg_cost_minor.into(), cost_currency.into(), max_call_seconds.into(), now.into()]).await?;
+            RouteCmd::Add { id, provider, countries, capabilities, priority, sip_peer, max_concurrent_legs, estimated_leg_cost_minor, cost_currency, max_call_seconds, interconnect_class } => {
+                let class = InterconnectClass::parse(&interconnect_class).ok_or("interconnect-class must be PUBLIC or SYNTHETIC_TEST")?;
+                if class == InterconnectClass::SyntheticTest {
+                    synthetic_route_allowed(db, &provider, sip_peer.as_deref(), estimated_leg_cost_minor).await?;
+                }
+                let a = audit(operator, "ROUTE_ADD", "ROUTE", &id, json!({ "provider": provider, "countries": list(&countries), "capabilities": list(&capabilities), "priority": priority, "sipPeer": sip_peer, "maxConcurrentLegs": max_concurrent_legs, "maxCallSeconds": max_call_seconds, "interconnectClass": class.as_str() }))?;
+                mutate(db, a, "INSERT INTO telecom_routes (id, provider_id, countries, capabilities, priority, status, sip_peer_config_ref_id, max_concurrent_legs, estimated_leg_cost_minor, cost_currency, max_call_seconds, created_at, updated_at, interconnect_class) VALUES ($1, $2, $3, $4, $5, 'DISABLED', $6, $7, $8, $9, $10, $11, $11, $12)",
+                    vec![id.clone().into(), provider.into(), list(&countries).into(), list(&capabilities).into(), priority.into(), sip_peer.into(), max_concurrent_legs.into(), estimated_leg_cost_minor.into(), cost_currency.into(), max_call_seconds.into(), now.into(), class.as_str().into()]).await?;
                 Ok(json!({ "route": id, "status": "DISABLED" }))
             }
             RouteCmd::Enable { id } => {
@@ -445,7 +563,7 @@ async fn run(
                     vec![id.clone().into(), state.clone().into(), now.into()]).await?;
                 Ok(json!({ "route": id, "circuit": state }))
             }
-            RouteCmd::List => Ok(json!(rows(db, "SELECT id, provider_id, countries, capabilities, priority, status, circuit_state, health, max_concurrent_legs, max_call_seconds FROM telecom_routes ORDER BY priority, id").await?)),
+            RouteCmd::List => Ok(json!(rows(db, "SELECT id, provider_id, countries, capabilities, priority, status, circuit_state, health, max_concurrent_legs, max_call_seconds, interconnect_class FROM telecom_routes ORDER BY priority, id").await?)),
         },
         Command::SipPeer(cmd) => match cmd {
             SipPeerCmd::Add { id, provider, secret_ref, transport, allowed_cidrs, max_concurrent_dialogs } => {
@@ -457,6 +575,30 @@ async fn run(
             }
             SipPeerCmd::List => Ok(json!(rows(db, "SELECT id, provider_id, secret_ref, transport, allowed_source_cidrs::text[] AS allowed_source_cidrs, max_concurrent_dialogs FROM sip_peer_config_refs ORDER BY id").await?)),
         },
+        Command::Dcn(cmd) => {
+            let err = |e: telephony::dcn::DcnActivationError| e.to_string();
+            match cmd {
+                DcnCmd::Bind { number_resource, route, capabilities } => {
+                    let numbering = numbering_port()?;
+                    telephony::dcn::bind(db, numbering.as_ref(), operator.unwrap_or(""), number_resource, &route, &list(&capabilities)).await.map_err(err)
+                }
+                DcnCmd::Acknowledge { number_resource } => {
+                    let numbering = numbering_port()?;
+                    telephony::dcn::acknowledge(db, numbering.as_ref(), Some(operator.unwrap_or("")), number_resource).await.map_err(err)
+                }
+                DcnCmd::Disable { number_resource } => {
+                    telephony::dcn::disable(db, operator.unwrap_or(""), number_resource).await.map_err(err)
+                }
+                DcnCmd::List => {
+                    let list = rows(db, "SELECT number_resource_id::text AS number_resource_id, public_e164, route_id, capabilities, status FROM telecom_number_bindings WHERE number_kind = 'DCN' ORDER BY number_resource_id, route_id").await?;
+                    Ok(json!(list.into_iter().map(|mut r| {
+                        let n = r["public_e164"].as_str().unwrap_or("").to_string();
+                        r["public_e164"] = json!(masked(&n));
+                        r
+                    }).collect::<Vec<_>>()))
+                }
+            }
+        }
         Command::Number(cmd) => match cmd {
             NumberCmd::Bind { number, route, capabilities } => {
                 let a = audit(operator, "NUMBER_BIND", "NUMBER_BINDING", &route, json!({ "number": masked(&number), "route": route, "capabilities": list(&capabilities) }))?;

@@ -247,6 +247,22 @@ vocab!(RouteCapability {
     VoiceInbound = "VOICE_INBOUND",
 });
 
+// Part IV L closure: what a route connects to. PUBLIC is a real interconnect;
+// SYNTHETIC_TEST is a local test interconnect (loopback SIP edge, simulated carrier, zero
+// cost) carrying synthetic DCNs only, in local / test runtimes only.
+vocab!(InterconnectClass {
+    Public = "PUBLIC",
+    SyntheticTest = "SYNTHETIC_TEST",
+});
+
+// The vocabulary macro cannot carry a `#[default]` variant attribute.
+#[allow(clippy::derivable_impls)]
+impl Default for InterconnectClass {
+    fn default() -> Self {
+        InterconnectClass::Public
+    }
+}
+
 vocab!(Health {
     Healthy = "HEALTHY",
     Degraded = "DEGRADED",

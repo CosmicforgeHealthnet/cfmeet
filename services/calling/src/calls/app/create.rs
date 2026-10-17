@@ -370,6 +370,7 @@ impl AppCallService {
                 relay_session_id: privacy.as_ref().map(|d| d.relay_session_id),
                 context_id: privacy.as_ref().map(|d| d.context_id),
                 live_telecom_allowed: false,
+                interconnect: crate::routing::engine::InterconnectClass::Public,
                 flags: TelecomFlags::default(),
                 routes: Evidence::Unknown,
                 spend_headroom_minor: Evidence::Unknown,

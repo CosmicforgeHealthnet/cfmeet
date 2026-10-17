@@ -1,0 +1,151 @@
+name: Communications end-to-end journeys
+
+# Part IV Step 20: synthetic SMS and voice journeys across the ACTUAL service boundaries —
+# real processes of Platform Access, the SMS Gateway, Calling, Telephony and Privacy Relay
+# (each with its own database) around Numbering's real router on a real port
+# (services/numbering/tests/communications_e2e.rs). The voice journeys run real SIP:
+# SIPp as the carrier into the certification Asterisk edge (infra/telephony/certification)
+# and Calling's media on a real LiveKit server, whose SIP service (LiveKit SIP) bridges the
+# accepting application into the edge; the application itself joins media with the real
+# WebRTC client of the RTC certification. The DCN voice journeys run over Telephony's
+# synthetic TEST interconnect (loopback SIPp carrier, zero cost, sandbox / test runtimes
+# only). Providers are the deterministic adapters and SIP simulators: this establishes
+# software integration, never carrier certification.
+#
+# Path-filtered to the services the journeys cross, so unrelated changes never rerun the
+# SIP edge or LiveKit.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/numbering/**"
+      - "services/sms-gateway/**"
+      - "services/calling/**"
+      - "services/telephony/**"
+      - "services/privacy-relay/**"
+      - "services/platform-access/**"
+      - "infra/telephony/certification/**"
+      - "packages/service-auth/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
+      - ".github/workflows/communications-e2e.yml"
+  pull_request:
+    paths:
+      - "services/numbering/**"
+      - "services/sms-gateway/**"
+      - "services/calling/**"
+      - "services/telephony/**"
+      - "services/privacy-relay/**"
+      - "services/platform-access/**"
+      - "infra/telephony/certification/**"
+      - "packages/service-auth/**"
+      - "packages/webhooks/**"
+      - "packages/contracts/**"
+      - ".github/workflows/communications-e2e.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: communications-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  # One target directory: every service's binaries next to each other.
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target
+
+jobs:
+  journeys:
+    name: SMS + voice journeys (real processes, SIP edge, LiveKit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      # Missing binaries or tools FAIL here (they only skip on a developer machine).
+      CFMEET_REQUIRE_E2E: "1"
+      CFMEET_REQUIRE_VOICE_E2E: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: communications-e2e
+
+      - name: Install the SIP edge and the SIP simulator
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          # redis-server: LiveKit SIP's coordination; libopus / libsoxr: LiveKit SIP's codecs.
+          sudo apt-get install -y -qq --no-install-recommends asterisk sip-tester \
+            redis-server libopus0 libopusfile0 libsoxr0
+          sudo systemctl stop redis-server 2>/dev/null || true
+          # The packaged daemon is not used: the journeys boot their own loopback edge.
+          sudo systemctl stop asterisk 2>/dev/null || true
+          sudo systemctl disable asterisk 2>/dev/null || true
+          sudo pkill -x asterisk || true
+          # SIPp plays the carrier's RTP from a pcap (play_pcap_audio): raw sockets.
+          sudo setcap cap_net_raw+ep "$(command -v sipp)"
+          getcap "$(command -v sipp)" | grep -q cap_net_raw
+
+      - name: LiveKit server binary (the pinned certification image)
+        run: |
+          set -euo pipefail
+          id=$(docker create livekit/livekit-server:v1.13.9)
+          docker cp "$id:/livekit-server" "$RUNNER_TEMP/livekit-server" \
+            || docker cp "$id:/usr/local/bin/livekit-server" "$RUNNER_TEMP/livekit-server"
+          docker rm "$id" >/dev/null
+          echo "LIVEKIT_SERVER_BIN=$RUNNER_TEMP/livekit-server" >> "$GITHUB_ENV"
+
+      - name: LiveKit SIP binary (the pinned image; run natively against the loopback edge)
+        run: |
+          set -euo pipefail
+          id=$(docker create livekit/sip:v1.18.0)
+          docker cp "$id:/usr/bin/livekit-sip" "$RUNNER_TEMP/livekit-sip"
+          docker rm "$id" >/dev/null
+          echo "LIVEKIT_SIP_BIN=$RUNNER_TEMP/livekit-sip" >> "$GITHUB_ENV"
+          echo "REDIS_SERVER_BIN=$(command -v redis-server)" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: The application's WebRTC client (RTC certification client)
+        run: python -m pip install -r services/calling/tests/rtc/requirements.txt
+
+      - name: Build the service binaries
+        run: |
+          set -euo pipefail
+          for s in platform-access sms-gateway calling privacy-relay telephony; do
+            (cd "services/$s" && cargo build --workspace --bins --locked)
+          done
+
+      - name: Journeys (Scenarios A, B, C, D, E, F, G)
+        working-directory: services/numbering
+        env:
+          PLATFORM_ACCESS_BIN: ${{ github.workspace }}/target/debug/platform-access
+          PLATFORM_ACCESS_MIGRATION_BIN: ${{ github.workspace }}/target/debug/platform-access-migration
+          SMS_GATEWAY_BIN: ${{ github.workspace }}/target/debug/sms-gateway
+          SMS_GATEWAY_MIGRATION_BIN: ${{ github.workspace }}/target/debug/sms-gateway-migration
+          CALLING_BIN: ${{ github.workspace }}/target/debug/calling
+          CALLING_MIGRATION_BIN: ${{ github.workspace }}/target/debug/calling-migration
+          PRIVACY_RELAY_BIN: ${{ github.workspace }}/target/debug/privacy-relay
+          PRIVACY_RELAY_MIGRATION_BIN: ${{ github.workspace }}/target/debug/privacy-relay-migration
+          TELEPHONY_BIN: ${{ github.workspace }}/target/debug/telephony
+          TELEPHONY_MIGRATION_BIN: ${{ github.workspace }}/target/debug/telephony-migration
+          CALLING_RTC_CERT_PYTHON: python
+          CALLING_RTC_CLIENT: ${{ github.workspace }}/services/calling/tests/rtc/rtc_client.py
+        run: cargo test --locked --test communications_e2e --test relay_cutover_e2e -- --nocapture

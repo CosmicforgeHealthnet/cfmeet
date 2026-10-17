@@ -19,6 +19,11 @@ if [[ -n "$new" ]]; then
   echo "NEW rustfmt drift outside the documented baseline:"
   echo "$new"
   echo "Run: rustfmt --edition 2021 <file>"
+  # Show the exact diff for new files without altering the documented legacy baseline.
+  while IFS= read -r file; do
+    [[ -z "$file" ]] && continue
+    rustfmt --edition 2021 --check "$file" 2>&1 || true
+  done <<< "$new"
   exit 1
 fi
 echo "rustfmt: ${count} documented baseline file(s) with pre-existing drift; no new drift."

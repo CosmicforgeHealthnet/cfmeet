@@ -1,0 +1,22 @@
+{
+  "countryCode": "NG",
+  "inventoryClass": "REAL",
+  "numberType": "GEOGRAPHIC",
+  "localityClass": "LOCAL",
+  "region": "Lagos",
+  "supportedCapabilities": [
+    "VOICE_INBOUND",
+    "VOICE_OUTBOUND",
+    "GEOGRAPHIC_LOCAL"
+  ],
+  "unsupportedCapabilities": [
+    "SMS_OUTBOUND"
+  ],
+  "limitations": {},
+  "provenance": {
+    "source": "PROVIDER_DOCUMENTATION",
+    "verificationStatus": "VERIFIED",
+    "evidenceRef": "3d5f7b9c-1e3a-4d5f-8b7c-9e1a3d5f7b9c"
+  },
+  "reasonCode": "LAUNCH_COUNTRY"
+}

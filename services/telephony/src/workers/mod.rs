@@ -140,6 +140,12 @@ impl TelephonyService {
         Ok(report)
     }
 
+    /// Acknowledges Numbering's configured VOICE route of every locally routable DCN
+    /// (see [`crate::dcn::reconcile`]).
+    pub async fn reconcile_dcn_routes(&self, limit: u64) -> TelephonyResult<u64> {
+        crate::dcn::reconcile(&self.db, self.numbering.as_ref(), limit).await
+    }
+
     /// Runs the workers forever on `interval`.
     pub async fn run_workers(self, interval: Duration) {
         let mut ticker = tokio::time::interval(interval);
@@ -154,6 +160,10 @@ impl TelephonyService {
             if health_tick.is_multiple_of(20) {
                 if let Err(e) = self.refresh_provider_health().await {
                     tracing::warn!(error = %e, "provider health refresh failed");
+                }
+                // DCN voice activation continuity (Workstream L).
+                if let Err(e) = self.reconcile_dcn_routes(100).await {
+                    tracing::warn!(error = %e, "DCN voice route reconciliation failed");
                 }
             }
         }

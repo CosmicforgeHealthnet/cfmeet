@@ -24,7 +24,10 @@ pub const PUBLIC_ID_BYTES: usize = 12;
 pub const SECRET_BYTES: usize = 32;
 /// Presented values longer than this are rejected before any parsing or lookup.
 pub const MAX_PRESENTED_LEN: usize = 128;
-/// Domain-separation label of the verifier message.
+/// Domain-separation label of the verifier message. It still names Calling — the
+/// original issuing authority — and MUST NOT change: every credential issued before the
+/// extraction to Platform Access was verified under this label, and changing it would
+/// invalidate them all (Part IV §B2 credential continuity).
 const VERIFIER_CONTEXT: &[u8] = b"cfmeet.calling.api-credential.v1";
 
 /// A freshly generated credential. The raw secret exists only inside `token` (redacted,

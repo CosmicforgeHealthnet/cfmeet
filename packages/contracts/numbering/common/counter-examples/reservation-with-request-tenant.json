@@ -1,0 +1,10 @@
+{
+  "reservationId": "1a3c5e7b-9d1f-4b3c-8d4e-6f7a8b9c0d1e",
+  "numberResourceId": "5f0b2c1e-8d3a-4b6f-9e2d-7a1c3b5d9f01",
+  "status": "EXPIRED",
+  "revision": 3,
+  "expiresAt": "2031-03-01T10:10:30Z",
+  "providerReleaseState": "PENDING",
+  "createdAt": "2031-03-01T10:00:30Z",
+  "tenantId": "2b4d6f8a-1c3e-4a5b-8c7d-9e0f1a2b3c4d"
+}

@@ -7,6 +7,8 @@
 
 mod common;
 
+use common::NewPrincipal;
+
 use std::sync::Arc;
 
 use axum::http::{Method, StatusCode};
@@ -14,7 +16,7 @@ use calling::{
     calls::app::enterprise::CapturedMedia,
     domain::{PrincipalKind, TenantClassification},
     enterprise::policy::AdminCapability,
-    platform::{principals::NewPrincipal, scopes::names},
+    platform::scopes::names,
 };
 use cf_object_storage::MemoryObjectStore;
 use common::{

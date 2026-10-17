@@ -58,6 +58,7 @@ authenticated); scope comes only from it. Commands take
 | `POST /internal/v1/sessions/{id}/relay-number-assignment`, `GET` it, `POST …/release` | `relay-number.assign` (Calling) |
 | `POST /internal/v1/relay-routing/resolve-inbound` | `relay-number.resolve-inbound` (Telephony only, no delegated context) |
 | `POST /internal/v1/relay-routing/protect-inbound-caller` | `protected-contact.protect-inbound` (Telephony only, no delegated context) |
+| `POST /internal/v1/relay-routing/protect-dcn-caller` | `protected-contact.protect-inbound` (Telephony only; Part IV L: the scope of Numbering's signed INBOUND_VOICE grant, verified with `NUMBER_GRANT_TRUST_BUNDLE_FILE`) |
 | `GET /health` | none |
 
 Contact Vault customer routes are served **by Privacy Relay itself** with a Contact
@@ -163,7 +164,18 @@ unset = none), `PRIVACY_RELAY_ENABLED` (default `false`),
 `CONTACT_VAULT_ENABLED` with `CONTACT_VAULT_KEYRING_FILE`, `CONTACT_FINGERPRINT_KEYRING_FILE`
 and `CONTACT_DELEGATION_TRUST_BUNDLE_FILE` (all three required when enabled — no plaintext
 fallback, no generated key), `RELAY_NUMBER_POOL_ENABLED`, `RELAY_NUMBER_COOLDOWN_SECONDS`
-(3600–7776000, default 259200 = 72 h).
+(3600–7776000, default 259200 = 72 h), `RELAY_NUMBER_AUTHORITY` (`LOCAL` default — the
+rollback position — or `NUMBERING`) with `NUMBERING_INTERNAL_BASE_URL` (required in `NUMBERING`
+mode).
+
+**Relay-number authority (Part IV Part P, [ADR 0044](../../docs/decisions/0044-relay-number-authority-migration.md)).**
+In `NUMBERING` mode Numbering is the single inventory authority: the sweep backfills the local
+pool into Numbering (idempotent), verifies compatibility (every local number resolves to the
+same binding and is not leased elsewhere) and only then enables the cutover; until it is
+verified, assignments are refused. Each assignment takes a temporary Numbering lease (bounded
+by the context's final expiry, recorded in `relay_number_leases`), and ending an assignment
+releases its lease. Numbering unreachable → `SERVICE_UNAVAILABLE`, never a local fallback.
+Rollback is switching back to `LOCAL`: the local pool was never deleted.
 Invalid configuration stops the service at startup (exit 2); it also refuses to start
 with pending migrations.
 
@@ -197,6 +209,7 @@ Calling mock), `internal_auth`, `migrations`, `contracts`, `contact_safety`,
 (verification, grants, Telephony-only resolution), `contact_logging` (TRACE log canary),
 `relay_numbers` (allocation races, cooldown, drain, containment, kill switch),
 `relay_inbound` (inbound mapping, delayed callbacks, inbound caller protection),
+`numbering_authority` (backfill, compatibility, cutover gating, leases, Numbering outage, rollback),
 `part_d_certification` (flows, cross-tenant, failure injection, rotations),
 `outbox_publication` (classification, dead letter, lease expiry), `incidents`,
 `metric_safety`, `correlation_propagation`, `migration_upgrade` (previous head → head →

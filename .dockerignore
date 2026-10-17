@@ -1,0 +1,19 @@
+# Repository-root Docker context for the Meeting Service image.
+# Send only the Meeting Service and canonical OpenAPI contracts to Docker.
+*
+!services/
+!services/meeting-service/
+!services/meeting-service/**
+!packages/
+!packages/contracts/
+!packages/contracts/**
+
+# Never send local data or secrets, including inside included directories.
+**/target/
+**/node_modules/
+**/.git/
+**/.env
+**/.env.*
+!**/.env.example
+**/*.log
+**/*~

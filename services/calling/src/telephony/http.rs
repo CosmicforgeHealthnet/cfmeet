@@ -7,6 +7,9 @@
 //! * `POST /telephony/inbound-calls` — an inbound public call to a relay number
 //!   (`telephony-inbound.offer`): Calling creates the canonical Call (PSTN_TO_APP) or
 //!   refuses it (Telephony then rejects the dialog, revealing nothing to the caller).
+//! * `POST /telephony/dcn-inbound-calls` — Part IV L: an inbound call to a Digital
+//!   Communications Number (`telephony-inbound.offer`) with Numbering's INBOUND_VOICE
+//!   grant, verified by Calling against Numbering's current state before any Call exists.
 //! * `POST /telephony/captures` — Part F: an edge media capture's audio (base64 WAV with
 //!   size / duration / SHA-256) or its failure (`telephony-capture.deliver`). 200 = stored
 //!   or acknowledged (Telephony may drop its transient spool); 503 = artifact storage
@@ -34,6 +37,7 @@ pub fn internal_routes() -> Router<AppState> {
     Router::new()
         .route("/telephony/events", post(apply_event))
         .route("/telephony/inbound-calls", post(inbound_call))
+        .route("/telephony/dcn-inbound-calls", post(dcn_inbound_call))
         .route("/telephony/enterprise-calls", post(enterprise_call))
         .route("/telephony/enterprise-keypad", post(enterprise_keypad))
         .layer(DefaultBodyLimit::max(MAX_EVENT_BYTES))
@@ -159,6 +163,21 @@ async fn inbound_call(
     let offer: crate::calls::app::public::InboundOffer = serde_json::from_value(body)
         .map_err(|_| CallingError::Validation("The offer is invalid."))?;
     let answer = state.app.accept_inbound_offer(&offer).await?;
+    Ok((StatusCode::OK, Json(answer)))
+}
+
+/// Part IV L: an inbound call to a Digital Communications Number
+/// (`telephony-inbound.offer`): Numbering's grant and the protected caller reference only.
+async fn dcn_inbound_call(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    body: Result<Json<Value>, JsonRejection>,
+) -> Result<(StatusCode, Json<Value>), CallingError> {
+    caller.require_permission(InternalPermission::CallsTelephonyInboundOffer)?;
+    let Json(body) = body.map_err(|_| CallingError::Validation("The offer is invalid."))?;
+    let offer: crate::calls::app::public::DcnInboundOffer = serde_json::from_value(body)
+        .map_err(|_| CallingError::Validation("The offer is invalid."))?;
+    let answer = state.app.accept_dcn_offer(&offer).await?;
     Ok((StatusCode::OK, Json(answer)))
 }
 

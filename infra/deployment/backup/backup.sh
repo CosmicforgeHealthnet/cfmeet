@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Logical backup of ONE service-owned PostgreSQL database (Calling, Privacy Relay or
-# Telephony). Each service is backed up on its own; there is no shared platform dump.
+# Logical backup of ONE service-owned PostgreSQL database (Calling, Platform Access,
+# Numbering, Privacy Relay, Telephony or the SMS Gateway). Each service is backed up on its own; there is no shared platform dump.
 #
-#   backup.sh --service <calling|privacy-relay|telephony> --database-url <url> --out <file.dump>
+#   backup.sh --service <calling|platform-access|numbering|privacy-relay|telephony|sms-gateway> --database-url <url> --out <file.dump>
 #
 # Writes <file.dump> (pg_dump custom format, no owner / privilege statements so it restores
 # into a role-separated target) and <file.dump.sha256>. Key material is never part of a
@@ -20,8 +20,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$service" in
-  calling|privacy-relay|telephony) ;;
-  *) echo "backup.sh: --service must be calling, privacy-relay or telephony" >&2; exit 2 ;;
+  calling|platform-access|numbering|privacy-relay|telephony|sms-gateway) ;;
+  *) echo "backup.sh: --service must be calling, platform-access, numbering, privacy-relay, telephony or sms-gateway" >&2; exit 2 ;;
 esac
 [ -n "$url" ] && [ -n "$out" ] || { echo "backup.sh: --database-url and --out are required" >&2; exit 2; }
 command -v pg_dump >/dev/null || { echo "backup.sh: pg_dump not found" >&2; exit 3; }

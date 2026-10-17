@@ -1,0 +1,199 @@
+{
+  "numberResourceId": "5f0b2c1e-8d3a-4b6f-9e2d-7a1c3b5d9f01",
+  "state": "ACTIVE",
+  "inventoryClass": "SYNTHETIC",
+  "numberType": "GEOGRAPHIC",
+  "resourceRevision": 12,
+  "capabilityRevision": 3,
+  "bindingRevision": 1,
+  "catalogRevision": 4,
+  "resolvedAt": "2031-03-01T10:05:00Z",
+  "restrictionFlags": [],
+  "capabilities": [
+    {
+      "capability": "VOICE_INBOUND",
+      "supported": true,
+      "usable": true,
+      "reason": null,
+      "limitations": {
+        "externalVerification": {
+          "compatibility": "VARIES",
+          "guaranteed": false
+        },
+        "notice": "Supports voice and SMS where provisioned; third-party verification compatibility varies by service and number type."
+      },
+      "provenance": {
+        "evidenceStatus": "DECLARED",
+        "evidenceSource": "SYNTHETIC",
+        "verifiedAt": null,
+        "expiresAt": null,
+        "synthetic": true,
+        "carrierConfirmed": false,
+        "catalogEntryId": "6b8d0f2a-4c6e-4a8b-9c0d-2e4f6a8b0c1d",
+        "catalogEntryRevision": 3,
+        "catalogVerification": "SYNTHETIC",
+        "bindingRef": "7f9b1d3e-5a7c-4e9f-8a1b-3c4d5e6f7a8b"
+      }
+    },
+    {
+      "capability": "VOICE_OUTBOUND",
+      "supported": false,
+      "usable": false,
+      "reason": "EVIDENCE_MISSING",
+      "limitations": {
+        "externalVerification": {
+          "compatibility": "VARIES",
+          "guaranteed": false
+        },
+        "notice": "Supports voice and SMS where provisioned; third-party verification compatibility varies by service and number type."
+      },
+      "provenance": {
+        "evidenceStatus": null,
+        "evidenceSource": null,
+        "verifiedAt": null,
+        "expiresAt": null,
+        "synthetic": true,
+        "carrierConfirmed": false,
+        "catalogEntryId": "6b8d0f2a-4c6e-4a8b-9c0d-2e4f6a8b0c1d",
+        "catalogEntryRevision": 3,
+        "catalogVerification": "SYNTHETIC",
+        "bindingRef": null
+      }
+    },
+    {
+      "capability": "SMS_INBOUND",
+      "supported": true,
+      "usable": true,
+      "reason": null,
+      "limitations": {
+        "externalVerification": {
+          "compatibility": "VARIES",
+          "guaranteed": true
+        },
+        "notice": "Supports voice and SMS where provisioned; third-party verification compatibility varies by service and number type."
+      },
+      "provenance": {
+        "evidenceStatus": "DECLARED",
+        "evidenceSource": "SYNTHETIC",
+        "verifiedAt": null,
+        "expiresAt": null,
+        "synthetic": true,
+        "carrierConfirmed": false,
+        "catalogEntryId": "6b8d0f2a-4c6e-4a8b-9c0d-2e4f6a8b0c1d",
+        "catalogEntryRevision": 3,
+        "catalogVerification": "SYNTHETIC",
+        "bindingRef": "7f9b1d3e-5a7c-4e9f-8a1b-3c4d5e6f7a8b"
+      }
+    },
+    {
+      "capability": "SMS_OUTBOUND",
+      "supported": false,
+      "usable": false,
+      "reason": "CAPABILITY_EXCLUDED_BY_CATALOG",
+      "limitations": {
+        "externalVerification": {
+          "compatibility": "VARIES",
+          "guaranteed": false
+        },
+        "notice": "Supports voice and SMS where provisioned; third-party verification compatibility varies by service and number type."
+      },
+      "provenance": {
+        "evidenceStatus": null,
+        "evidenceSource": null,
+        "verifiedAt": null,
+        "expiresAt": null,
+        "synthetic": true,
+        "carrierConfirmed": false,
+        "catalogEntryId": "6b8d0f2a-4c6e-4a8b-9c0d-2e4f6a8b0c1d",
+        "catalogEntryRevision": 3,
+        "catalogVerification": "SYNTHETIC",
+        "bindingRef": null
+      }
+    },
+    {
+      "capability": "MMS_RICH",
+      "supported": false,
+      "usable": false,
+      "reason": "CAPABILITY_NOT_IN_CATALOG",
+      "limitations": {
+        "externalVerification": {
+          "compatibility": "VARIES",
+          "guaranteed": false
+        },
+        "notice": "Supports voice and SMS where provisioned; third-party verification compatibility varies by service and number type."
+      },
+      "provenance": {
+        "evidenceStatus": null,
+        "evidenceSource": null,
+        "verifiedAt": null,
+        "expiresAt": null,
+        "synthetic": true,
+        "carrierConfirmed": false,
+        "catalogEntryId": "6b8d0f2a-4c6e-4a8b-9c0d-2e4f6a8b0c1d",
+        "catalogEntryRevision": 3,
+        "catalogVerification": "SYNTHETIC",
+        "bindingRef": null
+      }
+    },
+    {
+      "capability": "MOBILE_NUMBER_CLASS",
+      "supported": false,
+      "usable": false,
+      "reason": "NUMBER_CLASS_MISMATCH",
+      "limitations": {},
+      "provenance": {
+        "evidenceStatus": null,
+        "evidenceSource": null,
+        "verifiedAt": null,
+        "expiresAt": null,
+        "synthetic": true,
+        "carrierConfirmed": false,
+        "catalogEntryId": "6b8d0f2a-4c6e-4a8b-9c0d-2e4f6a8b0c1d",
+        "catalogEntryRevision": 3,
+        "catalogVerification": "SYNTHETIC",
+        "bindingRef": null
+      }
+    },
+    {
+      "capability": "GEOGRAPHIC_LOCAL",
+      "supported": true,
+      "usable": true,
+      "reason": null,
+      "limitations": {},
+      "provenance": {
+        "evidenceStatus": "DECLARED",
+        "evidenceSource": "SYNTHETIC",
+        "verifiedAt": null,
+        "expiresAt": null,
+        "synthetic": true,
+        "carrierConfirmed": false,
+        "catalogEntryId": "6b8d0f2a-4c6e-4a8b-9c0d-2e4f6a8b0c1d",
+        "catalogEntryRevision": 3,
+        "catalogVerification": "SYNTHETIC",
+        "bindingRef": null
+      }
+    },
+    {
+      "capability": "TOLL_FREE_BUSINESS",
+      "supported": false,
+      "usable": false,
+      "reason": "NUMBER_CLASS_MISMATCH",
+      "limitations": {},
+      "provenance": {
+        "evidenceStatus": null,
+        "evidenceSource": null,
+        "verifiedAt": null,
+        "expiresAt": null,
+        "synthetic": true,
+        "carrierConfirmed": false,
+        "catalogEntryId": "6b8d0f2a-4c6e-4a8b-9c0d-2e4f6a8b0c1d",
+        "catalogEntryRevision": 3,
+        "catalogVerification": "SYNTHETIC",
+        "bindingRef": null
+      }
+    }
+  ],
+  "notices": [
+    "Supports voice and SMS where provisioned; third-party verification compatibility varies by service and number type."
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "numberResourceId": "0b2c8f5e-7a41-4d3e-9b6c-1f2e3d4c5b6a",
+  "assignmentId": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+  "assignmentStatus": "ACTIVE",
+  "ownershipClass": "ORGANIZATION",
+  "ownerKind": "ORGANIZATION",
+  "ownerRef": "6d7e8f90-1a2b-4c3d-9e4f-5a6b7c8d9e0f",
+  "voice": null,
+  "sms": null,
+  "routingRevision": 4,
+  "numberActive": true,
+  "outbound": {
+    "voice": true,
+    "sms": false
+  },
+  "e164": "+15550100123",
+  "inventoryClass": "REAL"
+}

@@ -41,6 +41,13 @@ pub struct RelayService {
     pub(crate) relay_numbers: crate::relay_numbers::RelayNumberPoolSettings,
     /// Durable event publication transport (Part G §67).
     pub(crate) events: Arc<dyn crate::events::EventPublisher>,
+    /// `RELAY_NUMBER_AUTHORITY` (Part IV Part P): LOCAL (default / rollback) or NUMBERING.
+    pub(crate) authority_mode: crate::relay_numbers::authority::AuthorityMode,
+    /// Numbering's relay-number authority (leases); None = not configured.
+    pub(crate) number_authority: Option<Arc<dyn crate::relay_numbers::authority::NumberAuthority>>,
+    /// NUMBERING mode lends numbers only once the backfill and the compatibility check
+    /// passed (every ACTIVE mapping leased to exactly its assignment and generation).
+    pub(crate) numbering_cutover: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Result of a mutation: HTTP status, body and whether it replays an earlier execution.
@@ -69,7 +76,32 @@ impl RelayService {
             contact_feature: FeatureFlag::new(false),
             relay_numbers: Default::default(),
             events: Arc::new(crate::events::NoEventPublisher),
+            authority_mode: Default::default(),
+            number_authority: None,
+            numbering_cutover: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
+    }
+
+    /// Installs the relay-number authority (Part IV Part P).
+    pub fn with_number_authority(
+        mut self,
+        mode: crate::relay_numbers::authority::AuthorityMode,
+        authority: Option<Arc<dyn crate::relay_numbers::authority::NumberAuthority>>,
+    ) -> Self {
+        self.authority_mode = mode;
+        self.number_authority = authority;
+        self
+    }
+
+    /// The relay-number authority mode.
+    pub fn authority_mode(&self) -> crate::relay_numbers::authority::AuthorityMode {
+        self.authority_mode
+    }
+
+    /// Whether NUMBERING mode completed its verified cutover.
+    pub fn numbering_cutover_verified(&self) -> bool {
+        self.numbering_cutover
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// The transport committed outbox events are published through (Part G §67).

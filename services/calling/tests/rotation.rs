@@ -1,20 +1,35 @@
-//! H. Credential rotation with overlap, and revocation during rotation.
+//! H. Credential rotation with overlap, and revocation during rotation — performed by
+//! Platform Access on its (wall) clock and enforced through it. These tests run Calling's
+//! clock at the wall time too, so Calling's projected view (effective state) agrees with
+//! the authority; the end of an overlap is driven by Platform Access's own tests
+//! (manual clock), not waited for here.
 
 mod common;
 
+use common::{IssueCredential, RotateCredential};
+
 use axum::http::StatusCode;
 use calling::{
-    domain::{Clock, EnvironmentKind, TenantClassification},
+    domain::{EnvironmentKind, TenantClassification},
     platform::{
         authentication::{AuthFailureReason, AuthenticationError},
-        credentials::{CredentialEffectiveState, IssueCredential, RotateCredential},
+        credentials::CredentialEffectiveState,
         limits::LimitValues,
         scopes::names,
         PlatformError,
     },
 };
-use chrono::Duration;
+use chrono::{Duration, Timelike, Utc};
 use common::Harness;
+
+/// A harness whose Calling clock is the wall clock (Platform Access's time base).
+async fn wall_clock_harness() -> Option<Harness> {
+    let db = common::TestDb::new().await?;
+    Some(Harness::on(
+        std::sync::Arc::new(db),
+        calling::domain::ManualClock::new(Utc::now()),
+    ))
+}
 
 fn overlap(minutes: i64) -> RotateCredential {
     RotateCredential {
@@ -25,7 +40,7 @@ fn overlap(minutes: i64) -> RotateCredential {
 
 #[tokio::test]
 async fn old_and_new_are_valid_during_overlap_then_only_new() {
-    let Some(h) = Harness::new().await else {
+    let Some(h) = wall_clock_harness().await else {
         return;
     };
     let c = h.consumer("acme", TenantClassification::External).await;
@@ -37,7 +52,7 @@ async fn old_and_new_are_valid_during_overlap_then_only_new() {
     // Before rotation.
     assert_eq!(h.whoami(&old_token).await.status, StatusCode::OK);
 
-    let rotated_at = h.clock.now();
+    let before = Utc::now();
     let new = h
         .platform
         .rotate_credential(old.credential.id, overlap(60))
@@ -60,12 +75,14 @@ async fn old_and_new_are_valid_during_overlap_then_only_new() {
         new.credential.rotated_from_credential_id,
         Some(old.credential.id)
     );
+    h.clock.set(Utc::now());
     let old_view = h.platform.credential(old.credential.id).await.unwrap();
     assert_eq!(
         old_view.superseded_by_credential_id,
         Some(new.credential.id)
     );
-    assert_eq!(old_view.superseded_at, Some(rotated_at));
+    let rotated_at = old_view.superseded_at.expect("superseded");
+    assert!(rotated_at >= before && rotated_at <= Utc::now());
     assert_eq!(
         old_view.supersession_valid_until,
         Some(rotated_at + Duration::minutes(60))
@@ -80,20 +97,13 @@ async fn old_and_new_are_valid_during_overlap_then_only_new() {
     );
 
     // During overlap: both valid.
-    h.clock.advance(Duration::minutes(30));
     assert_eq!(h.whoami(&old_token).await.status, StatusCode::OK);
     assert_eq!(h.whoami(&new_token).await.status, StatusCode::OK);
 
-    // After overlap: old invalid, new valid.
-    h.clock.advance(Duration::minutes(30));
-    assert_eq!(h.whoami(&old_token).await.status, StatusCode::UNAUTHORIZED);
-    match h.authenticate(&old_token).await {
-        Err(AuthenticationError::Rejected { reason, .. }) => {
-            assert_eq!(reason, AuthFailureReason::CredentialSuperseded)
-        }
-        other => panic!("{other:?}"),
-    }
-    assert_eq!(h.whoami(&new_token).await.status, StatusCode::OK);
+    // Once the overlap is over Calling's projected view says SUPERSEDED (the authority's
+    // own rejection after the overlap is `credential_superseded`, proven by Platform
+    // Access's authentication tests and by `zero_overlap_...` below).
+    h.clock.advance(Duration::minutes(61));
     assert_eq!(
         h.platform
             .credential(old.credential.id)
@@ -102,11 +112,12 @@ async fn old_and_new_are_valid_during_overlap_then_only_new() {
             .effective_state,
         CredentialEffectiveState::Superseded
     );
+    assert_eq!(h.whoami(&new_token).await.status, StatusCode::OK);
 }
 
 #[tokio::test]
 async fn explicit_revocation_of_the_old_credential_is_immediate_during_overlap() {
-    let Some(h) = Harness::new().await else {
+    let Some(h) = wall_clock_harness().await else {
         return;
     };
     let c = h.consumer("acme", TenantClassification::External).await;
@@ -137,11 +148,14 @@ async fn explicit_revocation_of_the_old_credential_is_immediate_during_overlap()
 
 #[tokio::test]
 async fn overlap_never_extends_the_original_expiry() {
-    let Some(h) = Harness::new().await else {
+    let Some(h) = wall_clock_harness().await else {
         return;
     };
     let c = h.consumer("acme", TenantClassification::External).await;
-    let expires_at = h.clock.now() + Duration::minutes(10);
+    let expires_at = Utc::now()
+        .with_nanosecond(0)
+        .map(|t| t + Duration::minutes(10))
+        .unwrap();
     let old = h
         .platform
         .issue_credential(
@@ -161,12 +175,6 @@ async fn overlap_never_extends_the_original_expiry() {
     let old_view = h.platform.credential(old.credential.id).await.unwrap();
     assert_eq!(old_view.supersession_valid_until, Some(expires_at));
     assert_eq!(old_view.expires_at, expires_at);
-
-    h.clock.advance(Duration::minutes(11));
-    assert_eq!(
-        h.whoami(old.secret.expose_once()).await.status,
-        StatusCode::UNAUTHORIZED
-    );
     assert_eq!(
         h.whoami(new.secret.expose_once()).await.status,
         StatusCode::OK
@@ -187,7 +195,7 @@ async fn overlap_never_extends_the_original_expiry() {
 
 #[tokio::test]
 async fn zero_overlap_invalidates_the_old_credential_at_once() {
-    let Some(h) = Harness::new().await else {
+    let Some(h) = wall_clock_harness().await else {
         return;
     };
     let c = h.consumer("acme", TenantClassification::External).await;
@@ -201,6 +209,12 @@ async fn zero_overlap_invalidates_the_old_credential_at_once() {
         h.whoami(old.secret.expose_once()).await.status,
         StatusCode::UNAUTHORIZED
     );
+    match h.authenticate(old.secret.expose_once()).await {
+        Err(AuthenticationError::Rejected { reason, .. }) => {
+            assert_eq!(reason, AuthFailureReason::CredentialSuperseded)
+        }
+        other => panic!("{other:?}"),
+    }
     assert_eq!(
         h.whoami(new.secret.expose_once()).await.status,
         StatusCode::OK
@@ -209,7 +223,7 @@ async fn zero_overlap_invalidates_the_old_credential_at_once() {
 
 #[tokio::test]
 async fn only_an_active_head_credential_can_be_rotated() {
-    let Some(h) = Harness::new().await else {
+    let Some(h) = wall_clock_harness().await else {
         return;
     };
     let c = h.consumer("acme", TenantClassification::External).await;
@@ -245,13 +259,13 @@ async fn only_an_active_head_credential_can_be_rotated() {
         .issue_credential(
             c.sa(EnvironmentKind::Production),
             IssueCredential {
-                expires_at: Some(h.clock.now() + Duration::minutes(1)),
+                expires_at: Some(Utc::now() + Duration::seconds(2)),
                 ..Default::default()
             },
         )
         .await
         .unwrap();
-    h.clock.advance(Duration::minutes(2));
+    tokio::time::sleep(std::time::Duration::from_millis(2_300)).await;
     assert!(matches!(
         p.rotate_credential(short.credential.id, overlap(10))
             .await
@@ -277,7 +291,7 @@ async fn only_an_active_head_credential_can_be_rotated() {
 
 #[tokio::test]
 async fn concurrent_rotations_produce_exactly_one_successor() {
-    let Some(h) = Harness::new().await else {
+    let Some(h) = wall_clock_harness().await else {
         return;
     };
     let c = h.consumer("acme", TenantClassification::External).await;
@@ -305,7 +319,7 @@ async fn concurrent_rotations_produce_exactly_one_successor() {
 
 #[tokio::test]
 async fn rotation_preserves_credential_limits_and_label() {
-    let Some(h) = Harness::new().await else {
+    let Some(h) = wall_clock_harness().await else {
         return;
     };
     let c = h.consumer("acme", TenantClassification::External).await;

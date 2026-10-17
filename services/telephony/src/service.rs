@@ -165,6 +165,8 @@ pub struct TelephonyService {
     pub(crate) edge: Arc<dyn SipMediaEdge>,
     pub(crate) privacy: Arc<dyn PrivacyRelayPort>,
     pub(crate) calling: Arc<dyn CallingPort>,
+    /// Part IV L: Numbering (DCN resolution and caller-identity verification).
+    pub(crate) numbering: Arc<dyn crate::ports::NumberingPort>,
     pub(crate) worker_id: String,
     pub settings: ExecutionSettings,
     /// When this instance last read back the interconnects' call inventory.
@@ -185,6 +187,7 @@ impl TelephonyService {
             edge: NoEdge::shared(),
             privacy: Arc::new(Unconfigured),
             calling: Arc::new(Unconfigured),
+            numbering: Arc::new(crate::ports::UnconfiguredNumbering),
             worker_id: format!("w-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]),
             settings: ExecutionSettings::default(),
             last_inventory: Arc::default(),
@@ -213,6 +216,11 @@ impl TelephonyService {
         self
     }
 
+    pub fn with_numbering(mut self, port: Arc<dyn crate::ports::NumberingPort>) -> Self {
+        self.numbering = port;
+        self
+    }
+
     pub fn with_settings(mut self, settings: ExecutionSettings) -> Self {
         self.settings = settings;
         self
@@ -222,6 +230,11 @@ impl TelephonyService {
     pub fn as_instance(mut self, worker_id: &str) -> Self {
         self.worker_id = worker_id.to_string();
         self
+    }
+
+    /// The Numbering port (DCN voice activation).
+    pub fn numbering(&self) -> &Arc<dyn crate::ports::NumberingPort> {
+        &self.numbering
     }
 
     pub fn db(&self) -> &DatabaseConnection {

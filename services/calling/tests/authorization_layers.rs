@@ -9,6 +9,8 @@
 
 mod common;
 
+use common::NewPrincipal;
+
 use std::sync::Arc;
 
 use axum::http::{Method, StatusCode};
@@ -20,7 +22,7 @@ use calling::{
     },
     enterprise::{policy::AdminCapability, EnterpriseFlags},
     media::provider::ProviderParticipant,
-    platform::{principals::NewPrincipal, scopes::names},
+    platform::scopes::names,
     telephony::spend::SpendPolicy,
 };
 use common::{

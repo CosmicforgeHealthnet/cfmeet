@@ -6,7 +6,11 @@
 //! `TEST_DATABASE_URL` the tests FAIL, unless `CFMEET_SKIP_DB_TESTS=1` is set — then they
 //! print an explicit SKIPPED line (never a silent pass).
 //!
-//! The harness uses a deterministic, test-only pepper and a manually driven clock.
+//! Identity (tenants … credentials, principals) is owned by Platform Access: every
+//! migrated test database comes with its own real Platform Access process
+//! ([`identity::PlatformAccess`]), Calling authenticates through it exactly as in
+//! production, and `Harness::platform` administers identity through it. Calling's own
+//! state runs on a manually driven clock.
 #![allow(dead_code)]
 
 pub mod app;
@@ -16,6 +20,7 @@ pub mod deployment;
 pub mod enterprise;
 pub mod fake_media;
 pub mod gates;
+pub mod identity;
 pub mod load;
 pub mod privacy;
 pub mod provider_contract;
@@ -33,7 +38,6 @@ use axum::{
 };
 use calling::{
     calls::{app::AppCallingConfig, CallServiceConfig},
-    config::CredentialPolicy,
     domain::{
         EnvironmentKind, ManualClock, PrincipalId, PrincipalKind, RequestContext, ServiceAccountId,
         TenantClassification,
@@ -42,17 +46,15 @@ use calling::{
     internal_auth::{middleware::InternalCaller, ServiceAuthRuntime},
     media::{CallMediaProvider, MediaCredentialPolicy},
     platform::{
-        applications::{ApplicationView, NewApplication},
+        applications::ApplicationView,
         authentication::AuthenticationError,
         context::PlatformAuthContext,
-        credentials::{IssueCredential, IssuedCredential},
         environments::EnvironmentView,
         limits::LimitDefaults,
         principals::{PrincipalReference, PrincipalResolutionError},
-        scopes::{names, ScopeRegistry},
-        service_accounts::{NewServiceAccount, ServiceAccountView},
-        tenants::{NewTenant, TenantView},
-        verifier::{CredentialPepper, VerifierKeyring},
+        scopes::names,
+        service_accounts::ServiceAccountView,
+        tenants::TenantView,
         PlatformService,
     },
     routes,
@@ -73,11 +75,14 @@ use tokio::sync::{Mutex, OnceCell};
 use tower::ServiceExt;
 use uuid::Uuid;
 
-/// Deterministic test-only pepper (never used outside tests).
-pub const TEST_PEPPER: &str = "calling-integration-test-pepper-6c1f0e9b2d8a4f7e93b5d02a";
+#[allow(unused_imports)]
+pub use identity::{
+    IssueCredential, IssuedCredential, NewApplication, NewPrincipal, NewServiceAccount, NewTenant,
+    RotateCredential, TestPlatform, TEST_PEPPER,
+};
 
 static TEMPLATE: OnceCell<String> = OnceCell::const_new();
-static CREATE_LOCK: Mutex<()> = Mutex::const_new(());
+pub(crate) static CREATE_LOCK: Mutex<()> = Mutex::const_new(());
 
 pub fn admin_url() -> Option<String> {
     match std::env::var("TEST_DATABASE_URL") {
@@ -97,7 +102,7 @@ pub fn admin_url() -> Option<String> {
     }
 }
 
-fn with_db(admin: &str, db: &str) -> String {
+pub(crate) fn with_db(admin: &str, db: &str) -> String {
     let (base, _) = admin
         .rsplit_once('/')
         .expect("TEST_DATABASE_URL must include a database name");
@@ -168,6 +173,8 @@ async fn template(admin: &str) -> String {
 pub struct TestDb {
     pub conn: DatabaseConnection,
     pub url: String,
+    /// The identity authority of this database's deployments (migrated databases only).
+    pub platform_access: Option<Arc<identity::PlatformAccess>>,
     name: String,
     admin: String,
 }
@@ -175,6 +182,11 @@ pub struct TestDb {
 impl TestDb {
     /// Migrated database.
     pub async fn new() -> Option<Self> {
+        Self::with_platform_access_env(&[]).await
+    }
+
+    /// Migrated database whose Platform Access runs with extra environment.
+    pub async fn with_platform_access_env(pa_env: &[(&str, &str)]) -> Option<Self> {
         let admin = admin_url()?;
         let tmpl = template(&admin).await;
         let name = format!("clg_t_{}_{}", std::process::id(), Uuid::new_v4().simple());
@@ -186,7 +198,17 @@ impl TestDb {
                 .unwrap();
             conn.close().await.ok();
         }
-        Self::connect(admin, name).await
+        let platform_access = Arc::new(identity::PlatformAccess::start_with(&admin, pa_env).await?);
+        let mut db = Self::connect(admin, name).await?;
+        db.platform_access = Some(platform_access);
+        Some(db)
+    }
+
+    /// The Platform Access of this database (migrated databases only).
+    pub fn pa(&self) -> Arc<identity::PlatformAccess> {
+        self.platform_access
+            .clone()
+            .expect("an empty (unmigrated) test database has no Platform Access")
     }
 
     /// Empty database (no migrations), for migration tests.
@@ -209,6 +231,7 @@ impl TestDb {
         Some(Self {
             conn,
             url,
+            platform_access: None,
             name,
             admin,
         })
@@ -244,15 +267,6 @@ pub fn t0() -> DateTime<Utc> {
         .with_timezone(&Utc)
 }
 
-pub fn test_keyring(pepper: &str) -> VerifierKeyring {
-    VerifierKeyring::new(
-        1,
-        CredentialPepper::parse("API_CREDENTIAL_PEPPER", pepper).unwrap(),
-        None,
-    )
-    .unwrap()
-}
-
 /// Fixed service-auth time (seconds), 2031-03-01T10:00:00Z.
 pub const SERVICE_T0: i64 = 1_930_212_000;
 
@@ -262,6 +276,8 @@ pub struct Peers {
     pub clock: cf_service_auth::ManualClock,
     pub privacy_relay: Arc<ServiceTokenSigner>,
     pub telephony: Arc<ServiceTokenSigner>,
+    /// The SMS Gateway: `platform-event.publish` only (Part IV N / O).
+    pub sms_gateway: Arc<ServiceTokenSigner>,
     /// A correctly signing service that Calling does NOT trust.
     pub untrusted: Arc<ServiceTokenSigner>,
     /// A verifier for a privacy-relay identity that trusts Calling (outbound tests).
@@ -308,6 +324,7 @@ pub fn service_auth_fixture_targeting(
     let relay_key = service_key("privacy-relay-test-1");
     let telephony_key = service_key("telephony-test-1");
     let untrusted_key = service_key("untrusted-test-1");
+    let sms_gateway_key = service_key("sms-gateway-test-1");
     let calling_jwk = calling_key.public_jwk();
 
     let calling_policy = TrustPolicy::from_json(
@@ -335,6 +352,11 @@ pub fn service_auth_fixture_targeting(
                         "telephony-enterprise.offer",
                         "telephony-capture.deliver",
                     ],
+                ),
+                (
+                    cf_service_auth::services::SMS_GATEWAY,
+                    vec![sms_gateway_key.public_jwk()],
+                    &["platform-event.publish"],
                 ),
             ],
         ),
@@ -401,6 +423,13 @@ pub fn service_auth_fixture_targeting(
             TokenTtl::default(),
             shared.clone(),
         )),
+        sms_gateway: Arc::new(ServiceTokenSigner::new(
+            ServiceId::sms_gateway(),
+            env,
+            sms_gateway_key,
+            TokenTtl::default(),
+            shared.clone(),
+        )),
         untrusted: Arc::new(ServiceTokenSigner::new(
             ServiceId::parse("cfmeet.numbering").unwrap(),
             env,
@@ -418,7 +447,9 @@ pub fn service_auth_fixture_targeting(
 pub struct Harness {
     pub db: Arc<TestDb>,
     pub clock: ManualClock,
-    pub platform: PlatformService,
+    /// Identity administration (through Platform Access) and Calling-owned platform
+    /// reads/limits (`Deref` to Calling's [`PlatformService`]).
+    pub platform: TestPlatform,
     pub state: AppState,
     pub peers: Arc<Peers>,
     /// The in-memory media provider wired into `state` (unless a test chose another).
@@ -476,6 +507,7 @@ pub fn test_runtime(
         app_config: AppCallingConfig::default(),
         call_config: CallServiceConfig::default(),
         privacy_relay: Arc::new(calling::privacy_relay::UnconfiguredPrivacyRelay),
+        numbering: Arc::new(calling::numbering::UnconfiguredNumbering),
         contact_delegation: None,
         public_network: Default::default(),
         enterprise_flags: calling::enterprise::EnterpriseFlags::ALL_ON,
@@ -523,25 +555,20 @@ pub const STANDARD_TEST_SCOPES: &[&str] = &[
 
 impl Harness {
     pub async fn new() -> Option<Self> {
-        Self::with_pepper(TEST_PEPPER).await
-    }
-
-    pub async fn with_pepper(pepper: &str) -> Option<Self> {
         let db = TestDb::new().await?;
-        Some(Self::on(Arc::new(db), pepper, ManualClock::new(t0())))
+        Some(Self::on(Arc::new(db), ManualClock::new(t0())))
     }
 
-    /// Another deployment over the same database (e.g. a different pepper).
-    pub fn sibling(&self, pepper: &str) -> Self {
-        Self::on(self.db.clone(), pepper, self.clock.clone())
+    /// Another Calling deployment over the same database and Platform Access.
+    pub fn sibling(&self) -> Self {
+        Self::on(self.db.clone(), self.clock.clone())
     }
 
-    pub fn on(db: Arc<TestDb>, pepper: &str, clock: ManualClock) -> Self {
+    pub fn on(db: Arc<TestDb>, clock: ManualClock) -> Self {
         let media = Arc::new(fake_media::FakeMediaProvider::default());
         let bus = Arc::new(InMemorySignalBus::new());
         Self::with_runtime(
             db,
-            pepper,
             clock,
             media.clone(),
             bus.clone(),
@@ -552,7 +579,6 @@ impl Harness {
     /// A deployment with an explicit Calling runtime (real provider, other bus, config).
     pub fn with_runtime(
         db: Arc<TestDb>,
-        pepper: &str,
         clock: ManualClock,
         media: Arc<fake_media::FakeMediaProvider>,
         bus: Arc<InMemorySignalBus>,
@@ -561,24 +587,13 @@ impl Harness {
         let push = Arc::new(RecordingPush::default());
         runtime.push = push.clone();
         let (service_auth, peers) = service_auth_fixture();
-        Self::with_service_auth(
-            db,
-            pepper,
-            clock,
-            media,
-            bus,
-            runtime,
-            push,
-            service_auth,
-            peers,
-        )
+        Self::with_service_auth(db, clock, media, bus, runtime, push, service_auth, peers)
     }
 
     /// A deployment with an explicit service-auth runtime (cross-service tests).
     #[allow(clippy::too_many_arguments)]
     pub fn with_service_auth(
         db: Arc<TestDb>,
-        pepper: &str,
         clock: ManualClock,
         media: Arc<fake_media::FakeMediaProvider>,
         bus: Arc<InMemorySignalBus>,
@@ -587,24 +602,23 @@ impl Harness {
         service_auth: ServiceAuthRuntime,
         peers: Peers,
     ) -> Self {
-        let keyring = Arc::new(test_keyring(pepper));
-        let registry = Arc::new(ScopeRegistry::standard());
-        let platform = PlatformService::new(
-            db.conn.clone(),
-            Arc::new(clock.clone()),
-            keyring.clone(),
-            registry.clone(),
-            CredentialPolicy::default(),
-            LimitDefaults::default(),
-        );
+        let pa = db.pa();
         let state = AppState::new(
             db.conn.clone(),
             Arc::new(clock.clone()),
-            keyring,
-            registry,
+            pa.authority(),
             LimitDefaults::default(),
             service_auth,
             runtime,
+        );
+        let platform = TestPlatform::new(
+            pa,
+            PlatformService::new(
+                db.conn.clone(),
+                Arc::new(clock.clone()),
+                LimitDefaults::default(),
+            ),
+            state.identity.clone(),
         );
         Self {
             db,

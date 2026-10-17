@@ -116,6 +116,68 @@ pub enum InternalPermission {
     /// (Part G §67 / §68). Calling projects it; nothing is forwarded verbatim.
     #[serde(rename = "platform-event.publish")]
     PlatformEventPublish,
+    /// Platform Access: verify a presented customer API credential and return its trusted
+    /// authority chain and effective scopes (Part IV §B3). Never returns a verifier.
+    #[serde(rename = "platform-credential.authenticate")]
+    PlatformCredentialAuthenticate,
+    /// Platform Access: resolve communication principals inside the signed delegated
+    /// scope (never a request-supplied tenant).
+    #[serde(rename = "platform-principal.resolve")]
+    PlatformPrincipalResolve,
+    /// Platform Access: register the TELEPHONE_ENDPOINT principal of a protected public
+    /// party and tombstone principals on an operator retention decision.
+    #[serde(rename = "platform-principal.register")]
+    PlatformPrincipalRegister,
+    /// Platform Access: read the identity change feed, trusted context, effective scopes,
+    /// credential status and identity-import receipts (no verifier material).
+    #[serde(rename = "platform-identity.read")]
+    PlatformIdentityRead,
+    /// Platform Access: administer the identity hierarchy (operator tooling only).
+    #[serde(rename = "platform-identity.administer")]
+    PlatformIdentityAdminister,
+    /// Numbering: read canonical Number Resources and DCN assignments (CF Meet ids,
+    /// provider-independent; no provider binding identifiers).
+    #[serde(rename = "number-resource.read")]
+    NumberResourceRead,
+    /// Numbering: acknowledge that a configured number route is ready in the consumer that
+    /// carries its traffic (Telephony for voice, the SMS Gateway for SMS) — an activation
+    /// prerequisite, never fabricated by Numbering.
+    #[serde(rename = "number-route.acknowledge")]
+    NumberRouteAcknowledge,
+    /// Numbering: resolve a received call / message on a public number to the owner scope
+    /// and routing target of its ACTIVE assignment, with an inbound routing grant (the
+    /// carrier of the family's traffic only: Telephony voice, SMS Gateway SMS).
+    #[serde(rename = "number-route.resolve")]
+    NumberRouteResolve,
+    /// Numbering: obtain a single-use CALLER_IDENTITY grant for a number the delegated
+    /// customer scope actively owns (never an arbitrary caller id).
+    #[serde(rename = "number-caller-identity.authorize")]
+    NumberCallerIdentityAuthorize,
+    /// Numbering: obtain a single-use SMS_SENDER grant for a number the delegated customer
+    /// scope actively owns.
+    #[serde(rename = "number-sms-sender.authorize")]
+    NumberSmsSenderAuthorize,
+    /// Numbering: verify (and consume) a routing grant addressed to the caller against
+    /// CURRENT state (assignment, routing revision, capability, single use).
+    #[serde(rename = "number-grant.verify")]
+    NumberGrantVerify,
+    /// Numbering (Part IV M): resolve the DESTINATION number of a received SMS to its owner
+    /// scope and SMS routing target with an INBOUND_SMS grant — the SMS Gateway only. The
+    /// voice resolver (`number-route.resolve`) is never used for SMS.
+    #[serde(rename = "number-sms-route.resolve")]
+    NumberSmsRouteResolve,
+    /// Numbering (Part IV S): report the per-number usage a carrier metered (voice seconds:
+    /// Telephony; SMS segments: the SMS Gateway) — internal cost evidence, idempotent.
+    #[serde(rename = "number-usage.report")]
+    NumberUsageReport,
+    /// Numbering (Part IV T): report an abuse / fraud signal about a number (SMS pumping,
+    /// spam calls, premium destinations, cost spikes) for number-level risk decisions.
+    #[serde(rename = "number-risk.report")]
+    NumberRiskReport,
+    /// Numbering (Part IV P §§119–120): import the relay-number inventory, lease a relay
+    /// number for a relay session and resolve its lease — Privacy Relay only.
+    #[serde(rename = "number-relay.lease")]
+    NumberRelayLease,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -328,9 +390,129 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::PlatformEventPublish,
         name: "platform-event.publish",
         receiver: services::CALLING,
-        grantable_to: &[services::PRIVACY_RELAY],
+        grantable_to: &[services::PRIVACY_RELAY, services::SMS_GATEWAY],
         sensitive: false,
-        description: "Publish a committed Privacy Relay domain event (platform envelope) for normalized customer webhooks",
+        description: "Publish a committed Privacy Relay or SMS Gateway domain event (platform envelope, the publisher's own events only) for normalized customer webhooks",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformCredentialAuthenticate,
+        name: "platform-credential.authenticate",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::CALLING, services::NUMBERING, services::SMS_GATEWAY],
+        sensitive: false,
+        description: "Verify a presented customer API credential; returns the trusted authority chain and effective scopes (never verifier material)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformPrincipalResolve,
+        name: "platform-principal.resolve",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::CALLING, services::NUMBERING, services::SMS_GATEWAY],
+        sensitive: false,
+        description: "Resolve communication principals inside the signed delegated scope",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformPrincipalRegister,
+        name: "platform-principal.register",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Register the TELEPHONE_ENDPOINT principal of a protected public party (opaque ContactReference only) and tombstone principals on an operator retention decision",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformIdentityRead,
+        name: "platform-identity.read",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::CALLING, services::NUMBERING],
+        sensitive: false,
+        description: "Read the identity change feed, trusted tenant / application / environment context, effective scopes, credential status and import receipts (no verifier material)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformIdentityAdminister,
+        name: "platform-identity.administer",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::OPERATOR_CONSOLE],
+        sensitive: true,
+        description: "Administer the platform identity hierarchy (tenants, applications, environments, service accounts, credentials, scopes, principals); operator tooling only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberResourceRead,
+        name: "number-resource.read",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::CALLING, services::TELEPHONY, services::SMS_GATEWAY],
+        sensitive: false,
+        description: "Read canonical Number Resources and DCN assignments (CF Meet ids only, no provider binding identifiers)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberRouteAcknowledge,
+        name: "number-route.acknowledge",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::TELEPHONY, services::SMS_GATEWAY],
+        sensitive: false,
+        description: "Acknowledge that a configured number route (voice: Telephony, SMS: SMS Gateway) is ready to carry traffic; an activation prerequisite",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberRouteResolve,
+        name: "number-route.resolve",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::TELEPHONY],
+        sensitive: true,
+        description: "Resolve a received call on a public number to its owner scope and voice routing target, with a short-lived INBOUND_VOICE grant (Telephony only; SMS uses number-sms-route.resolve)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberCallerIdentityAuthorize,
+        name: "number-caller-identity.authorize",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Obtain a single-use caller-identity grant (audience Telephony) for a number the delegated customer scope actively owns",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberSmsSenderAuthorize,
+        name: "number-sms-sender.authorize",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::SMS_GATEWAY],
+        sensitive: false,
+        description: "Obtain a single-use SMS sender grant for a number the delegated customer scope actively owns",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberGrantVerify,
+        name: "number-grant.verify",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::CALLING, services::TELEPHONY, services::SMS_GATEWAY],
+        sensitive: false,
+        description: "Verify (and consume) a number routing grant addressed to the caller against current state",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberSmsRouteResolve,
+        name: "number-sms-route.resolve",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::SMS_GATEWAY],
+        sensitive: true,
+        description: "Resolve the destination number of a received SMS to its owner scope and SMS routing target, with a short-lived INBOUND_SMS grant (the SMS Gateway only)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberUsageReport,
+        name: "number-usage.report",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::TELEPHONY, services::SMS_GATEWAY],
+        sensitive: false,
+        description: "Report the usage a carrier metered for a number (voice seconds / SMS segments) as idempotent internal cost evidence",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberRiskReport,
+        name: "number-risk.report",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::CALLING, services::TELEPHONY, services::SMS_GATEWAY],
+        sensitive: false,
+        description: "Report an abuse, fraud or cost signal about a number for number-level risk decisions (restrictive only)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberRelayLease,
+        name: "number-relay.lease",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::PRIVACY_RELAY],
+        sensitive: true,
+        description: "Import Privacy Relay's relay-number inventory into Numbering, lease a relay number for a relay session and resolve its lease (Privacy Relay only)",
     },
 ];
 
@@ -364,6 +546,21 @@ impl InternalPermission {
         InternalPermission::CallsTelephonyEnterpriseOffer,
         InternalPermission::CallsTelephonyCaptureDeliver,
         InternalPermission::PlatformEventPublish,
+        InternalPermission::PlatformCredentialAuthenticate,
+        InternalPermission::PlatformPrincipalResolve,
+        InternalPermission::PlatformPrincipalRegister,
+        InternalPermission::PlatformIdentityRead,
+        InternalPermission::PlatformIdentityAdminister,
+        InternalPermission::NumberResourceRead,
+        InternalPermission::NumberRouteAcknowledge,
+        InternalPermission::NumberRouteResolve,
+        InternalPermission::NumberCallerIdentityAuthorize,
+        InternalPermission::NumberSmsSenderAuthorize,
+        InternalPermission::NumberGrantVerify,
+        InternalPermission::NumberSmsRouteResolve,
+        InternalPermission::NumberUsageReport,
+        InternalPermission::NumberRiskReport,
+        InternalPermission::NumberRelayLease,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -539,6 +736,77 @@ mod tests {
                 d.name
             );
         }
+    }
+
+    #[test]
+    fn platform_access_flows_are_least_privilege() {
+        use InternalPermission::*;
+        for p in [
+            PlatformCredentialAuthenticate,
+            PlatformPrincipalResolve,
+            PlatformPrincipalRegister,
+            PlatformIdentityRead,
+            PlatformIdentityAdminister,
+        ] {
+            assert_eq!(p.definition().receiver, services::PLATFORM_ACCESS);
+        }
+        // Identity administration is operator tooling only, never a service.
+        let d = PlatformIdentityAdminister.definition();
+        assert_eq!(d.grantable_to, &[services::OPERATOR_CONSOLE]);
+        assert!(d.sensitive);
+        // Principal registration (public parties, tombstones) is Calling's only.
+        assert_eq!(
+            PlatformPrincipalRegister.definition().grantable_to,
+            &[services::CALLING]
+        );
+        // Numbering reads; it never administers identity.
+        let d = NumberResourceRead.definition();
+        assert_eq!(d.receiver, services::NUMBERING);
+        assert!(!d.grantable_to.contains(&services::NUMBERING));
+    }
+
+    #[test]
+    fn sms_gateway_flows_are_least_privilege() {
+        use InternalPermission::*;
+        // The SMS destination resolver is the SMS Gateway's alone; the voice resolver is
+        // Telephony's alone (no family is resolved through the other's permission).
+        let d = NumberSmsRouteResolve.definition();
+        assert_eq!(
+            (d.receiver, d.grantable_to, d.sensitive),
+            (services::NUMBERING, &[services::SMS_GATEWAY][..], true)
+        );
+        assert_eq!(
+            NumberRouteResolve.definition().grantable_to,
+            &[services::TELEPHONY]
+        );
+        // Sender grants: the SMS Gateway only; caller identity never.
+        assert_eq!(
+            NumberSmsSenderAuthorize.definition().grantable_to,
+            &[services::SMS_GATEWAY]
+        );
+        assert!(!NumberCallerIdentityAuthorize
+            .definition()
+            .grantable_to
+            .contains(&services::SMS_GATEWAY));
+        // Customer authentication, principal resolution, number reads (route readiness)
+        // and webhook publication — nothing administrative.
+        for p in [
+            PlatformCredentialAuthenticate,
+            PlatformPrincipalResolve,
+            NumberResourceRead,
+            PlatformEventPublish,
+        ] {
+            assert!(p.definition().grantable_to.contains(&services::SMS_GATEWAY));
+        }
+        let receiving: Vec<&str> = REGISTRY
+            .iter()
+            .filter(|d| d.receiver == services::SMS_GATEWAY)
+            .map(|d| d.name)
+            .collect();
+        assert!(
+            receiving.is_empty(),
+            "no service may call the SMS Gateway internally yet: {receiving:?}"
+        );
     }
 
     #[test]

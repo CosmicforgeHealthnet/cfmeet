@@ -1,0 +1,35 @@
+{
+  "numberResourceId": "5f0b2c1e-8d3a-4b6f-9e2d-7a1c3b5d9f01",
+  "e164": "+15550100123",
+  "countryCode": "US",
+  "region": null,
+  "numberType": "MOBILE_BECAUSE_SMS",
+  "inventorySource": "SYNTHETIC_TEST",
+  "state": "ACTIVE",
+  "revision": 9,
+  "stateChangedAt": "2031-03-01T10:05:00Z",
+  "capabilities": [
+    {
+      "capability": "VOICE_INBOUND",
+      "status": "DECLARED",
+      "source": "SYNTHETIC",
+      "effectiveFrom": "2031-03-01T10:00:30Z"
+    }
+  ],
+  "activeBindings": [
+    {
+      "bindingRef": "7f9b1d3e-5a7c-4e9f-8a1b-3c4d5e6f7a8b",
+      "capabilities": [
+        "VOICE_INBOUND"
+      ],
+      "bindingRevision": 1,
+      "active": true,
+      "effectiveFrom": "2031-03-01T10:04:00Z",
+      "effectiveTo": null
+    }
+  ],
+  "bindingRevision": 1,
+  "routingRevision": 1,
+  "riskTier": "UNASSESSED",
+  "restrictionFlags": []
+}

@@ -159,6 +159,7 @@ impl AppCallService {
             relay_session_id: Some(decision.relay_session_id),
             context_id: Some(decision.context_id),
             live_telecom_allowed: live,
+            interconnect: crate::routing::engine::InterconnectClass::Public,
             flags: self.public.flags,
             routes,
             spend_headroom_minor: headroom,
@@ -196,6 +197,7 @@ impl AppCallService {
                 scope.tenant_id(),
                 scope.application_id(),
                 scope.environment_id(),
+                ctx.service_account_id(),
                 request.initiator_contact,
             )
             .await
@@ -206,6 +208,7 @@ impl AppCallService {
                 scope.tenant_id(),
                 scope.application_id(),
                 scope.environment_id(),
+                ctx.service_account_id(),
                 request.target_contact,
             )
             .await
@@ -420,6 +423,8 @@ impl AppCallService {
                 candidate_routes: &candidate_routes,
                 correlation_id: cmd.correlation_id().as_str(),
                 generation: 1,
+                presented_number_resource_id: None,
+                interconnect: crate::routing::engine::InterconnectClass::Public,
             },
             now,
         )
@@ -577,6 +582,8 @@ impl AppCallService {
                 candidate_routes: &plan_routes,
                 correlation_id: cmd.correlation_id().as_str(),
                 generation: 1,
+                presented_number_resource_id: None,
+                interconnect: crate::routing::engine::InterconnectClass::Public,
             },
             now,
         )

@@ -9,8 +9,8 @@
 # copied.
 #
 # The image contains the service (`calling`), its migration runner (`calling-migration`)
-# and the operational CLI (`platform_admin`). Configuration — DATABASE_URL,
-# API_CREDENTIAL_PEPPER, the service signing key FILE and the trust bundle FILE — is
+# and the operational CLI (`platform_admin`). Configuration — DATABASE_URL, the Platform
+# Access base URL, the service signing key FILE and the trust bundle FILE — is
 # supplied at runtime only; nothing secret is baked in.
 
 FROM rust:1-bookworm AS builder

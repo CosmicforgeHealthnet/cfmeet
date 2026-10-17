@@ -1,11 +1,17 @@
-//! `platform_admin` — operational administration of the Calling platform trust
-//! foundation (tenants, applications, environments, service accounts, scopes, API
-//! credentials, principals and limit policy).
+//! `platform_admin` — operational administration of Calling-owned platform policy
+//! (limits, routing / spend policy, inbound owners, enterprise capabilities, compliance,
+//! abuse, retention, incidents) and of Calling's side of the identity hand-off.
 //!
-//! Uses the same `PlatformService` domain operations as future administration APIs and
-//! connects directly to the Calling database (`DATABASE_URL`, `API_CREDENTIAL_PEPPER`).
-//! Output is JSON on stdout; operator audit lines go to stderr. `credential create` and
-//! `credential rotate` print the raw credential exactly once; no command can recover it.
+//! The identity hierarchy itself (tenants, applications, environments, service accounts,
+//! scopes, API credentials, principals) is administered in Platform Access
+//! (`platform-access-admin`, ADR 0032); here it is read-only (the projection), except a
+//! principal tombstone, which Calling coordinates (its retention holds and its own
+//! participation minimization) through Platform Access.
+//!
+//! Connects directly to the Calling database (`DATABASE_URL`); commands that reach
+//! Platform Access use Calling's internal service authentication (`CF_*`,
+//! `CF_PLATFORM_ACCESS_BASE_URL`). Output is JSON on stdout; operator audit lines go to
+//! stderr.
 //!
 //! Operator audit (Part H §72.8): every mutating command requires the acting operator —
 //! `--operator <id>` or `CF_OPERATOR_ID` — and is refused (exit 2, nothing changed)
@@ -22,21 +28,22 @@ use std::{process::ExitCode, sync::Arc, time::Duration as StdDuration};
 use calling::{
     config::CallingConfig,
     domain::{
-        ApplicationStatus, Clock, CredentialId, EnvironmentKind, EnvironmentStatus, PrincipalId,
-        PrincipalKind, PrincipalStatus, ServiceAccountStatus, SystemClock, TenantClassification,
-        TenantStatus,
+        Clock, CredentialId, EnvironmentKind, PrincipalId, PrincipalKind, SystemClock,
+        TenantClassification,
     },
+    internal_auth::config::ServiceAuthSettings,
     platform::{
-        applications::{ApplicationView, NewApplication},
-        credentials::{CredentialFilter, IssueCredential, IssuedCredential, RotateCredential},
+        access::{HttpIdentityAuthority, IdentityAuthority},
+        applications::ApplicationView,
+        credentials::CredentialFilter,
         environments::EnvironmentView,
         error::summarize_db_error,
+        handoff,
         limits::LimitValues,
         operator::{audited, AuditEntry, AuditTargetKind, OperatorAction, OperatorContext},
-        principals::NewPrincipal,
-        scopes::ScopeRegistry,
-        service_accounts::{NewServiceAccount, ServiceAccountView},
-        tenants::{NewTenant, TenantView},
+        projection::IdentityProjection,
+        service_accounts::ServiceAccountView,
+        tenants::TenantView,
         PlatformError, PlatformService,
     },
     retention::{
@@ -46,7 +53,6 @@ use calling::{
     },
     telemetry,
 };
-use chrono::Duration;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use sea_orm::{ConnectOptions, Database};
 use serde::Serialize;
@@ -70,27 +76,27 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Tenants (platform customers).
+    /// Tenants (read-only projection of Platform Access).
     #[command(subcommand)]
     Tenant(TenantCmd),
-    /// Applications / projects of a tenant.
+    /// Applications of a tenant (read-only projection).
     #[command(subcommand)]
     Application(ApplicationCmd),
-    /// SANDBOX / TEST / PRODUCTION environments of an application.
+    /// Environments of an application (read-only projection).
     #[command(subcommand)]
     Environment(EnvironmentCmd),
-    /// Service accounts (machine identities) of an environment.
+    /// Service accounts of an environment (read-only projection).
     #[command(subcommand)]
     ServiceAccount(ServiceAccountCmd),
-    /// Scope registry and application allowed scopes.
-    #[command(subcommand)]
-    Scope(ScopeCmd),
-    /// API credentials.
+    /// API credentials (read-only projection).
     #[command(subcommand)]
     Credential(CredentialCmd),
-    /// Communication principals.
+    /// Communication principals (read-only projection; tombstone).
     #[command(subcommand)]
     Principal(PrincipalCmd),
+    /// Identity projection and the controlled hand-off to Platform Access.
+    #[command(subcommand)]
+    Identity(IdentityCmd),
     /// Application / credential limit policy.
     #[command(subcommand)]
     Limits(LimitsCmd),
@@ -299,15 +305,13 @@ impl Command {
     /// Whether the command changes state (and therefore needs an operator).
     fn is_mutating(&self) -> bool {
         match self {
-            Command::Tenant(c) => !matches!(c, TenantCmd::List | TenantCmd::Show(_)),
-            Command::Application(c) => !matches!(c, ApplicationCmd::List(_)),
-            Command::Environment(c) => !matches!(c, EnvironmentCmd::List(_)),
-            Command::ServiceAccount(c) => !matches!(c, ServiceAccountCmd::List(_)),
-            Command::Scope(c) => !matches!(c, ScopeCmd::Registry | ScopeCmd::List(_)),
-            Command::Credential(c) => {
-                !matches!(c, CredentialCmd::Show(_) | CredentialCmd::List { .. })
-            }
-            Command::Principal(c) => !matches!(c, PrincipalCmd::List(_) | PrincipalCmd::Show(_)),
+            Command::Tenant(_)
+            | Command::Application(_)
+            | Command::Environment(_)
+            | Command::ServiceAccount(_)
+            | Command::Credential(_) => false,
+            Command::Principal(c) => matches!(c, PrincipalCmd::Tombstone(_)),
+            Command::Identity(c) => !matches!(c, IdentityCmd::Status { .. }),
             Command::Limits(c) => !matches!(c, LimitsCmd::Effective(_)),
             Command::RoutingPolicy(c) => !matches!(c, RoutingPolicyCmd::Show(_)),
             Command::SpendPolicy(c) => !matches!(c, SpendPolicyCmd::Show(_)),
@@ -549,122 +553,27 @@ struct PrincipalRef {
 
 #[derive(Subcommand)]
 enum TenantCmd {
-    Create {
-        #[arg(long)]
-        slug: String,
-        #[arg(long)]
-        name: String,
-        #[arg(long, value_enum)]
-        classification: ClassificationArg,
-        /// ISO 4217 currency of telecom-spend limits (default USD; immutable).
-        #[arg(long)]
-        billing_currency: Option<String>,
-    },
     List,
     Show(TenantPath),
-    Suspend(TenantPath),
-    Reactivate(TenantPath),
 }
 
 #[derive(Subcommand)]
 enum ApplicationCmd {
-    Create {
-        #[command(flatten)]
-        tenant: TenantPath,
-        #[arg(long)]
-        slug: String,
-        #[arg(long)]
-        name: String,
-    },
     List(TenantPath),
-    Suspend(ApplicationPath),
-    Reactivate(ApplicationPath),
 }
 
 #[derive(Subcommand)]
 enum EnvironmentCmd {
-    Create(EnvironmentPath),
     List(ApplicationPath),
-    Suspend(EnvironmentPath),
-    Reactivate(EnvironmentPath),
-    /// Allow / forbid real public-network telecom effects (PRODUCTION only).
-    SetLiveTelecom {
-        #[command(flatten)]
-        environment: EnvironmentPath,
-        #[arg(long, action = clap::ArgAction::Set)]
-        allowed: bool,
-    },
 }
 
 #[derive(Subcommand)]
 enum ServiceAccountCmd {
-    Create {
-        #[command(flatten)]
-        environment: EnvironmentPath,
-        #[arg(long)]
-        name: String,
-        #[arg(long)]
-        description: Option<String>,
-    },
     List(EnvironmentPath),
-    Suspend(ServiceAccountPath),
-    Reactivate(ServiceAccountPath),
-    /// Permanently revoke (terminal; all its credentials stop authenticating).
-    Revoke(ServiceAccountPath),
-}
-
-#[derive(Subcommand)]
-enum ScopeCmd {
-    /// Show the server-authoritative scope registry.
-    Registry,
-    /// Allow an application to grant `scope` to its credentials.
-    Grant {
-        #[command(flatten)]
-        application: ApplicationPath,
-        #[arg(long)]
-        scope: String,
-    },
-    /// Withdraw `scope` from the application and every credential of it.
-    Revoke {
-        #[command(flatten)]
-        application: ApplicationPath,
-        #[arg(long)]
-        scope: String,
-    },
-    List(ApplicationPath),
 }
 
 #[derive(Subcommand)]
 enum CredentialCmd {
-    /// Issue a credential. The raw credential is printed once.
-    Create {
-        #[command(flatten)]
-        service_account: ServiceAccountPath,
-        /// Scope to grant (repeatable); must be allowed for the application.
-        #[arg(long = "scope")]
-        scopes: Vec<String>,
-        #[arg(long)]
-        label: Option<String>,
-        #[arg(long)]
-        expires_in_days: Option<i64>,
-    },
-    /// Rotate a credential. The successor's raw credential is printed once.
-    Rotate {
-        #[command(flatten)]
-        credential: CredentialRef,
-        /// Minutes the predecessor keeps working (default from configuration).
-        #[arg(long)]
-        overlap_minutes: Option<i64>,
-        /// Replacement scope set (repeatable); default: the predecessor's scopes.
-        #[arg(long = "scope")]
-        scopes: Vec<String>,
-        #[arg(long)]
-        label: Option<String>,
-        #[arg(long)]
-        expires_in_days: Option<i64>,
-    },
-    /// Revoke a credential immediately (idempotent).
-    Revoke(CredentialRef),
     Show(CredentialRef),
     List {
         #[command(flatten)]
@@ -678,27 +587,45 @@ enum CredentialCmd {
 }
 
 #[derive(Subcommand)]
-enum PrincipalCmd {
-    /// Register a principal identified by an opaque reference.
-    Register {
-        #[command(flatten)]
-        environment: EnvironmentPath,
-        #[arg(long, value_enum)]
-        kind: PrincipalKindArg,
-        /// Opaque reference (no plaintext phone numbers / contact data).
+enum IdentityCmd {
+    /// Apply the Platform Access identity change feed to Calling's projection now.
+    Sync,
+    /// Hand-off step 2: export Calling's Part III identity rows (with keyed verifiers,
+    /// never secrets) to a new 0600 file for `platform-access-admin identity import`.
+    Export {
         #[arg(long)]
-        reference: String,
+        out: std::path::PathBuf,
     },
-    /// Register a SERVICE_ACCOUNT principal explicitly linked to a service account.
-    RegisterServiceAccount(ServiceAccountPath),
+    /// Hand-off step 4: check Platform Access's import receipt against the export.
+    VerifyHandoff {
+        #[arg(long)]
+        digest: String,
+    },
+    /// Hand-off step 6: scrub Calling's verifier material (verified hand-off only).
+    CompleteHandoff {
+        #[arg(long)]
+        digest: String,
+    },
+    /// Rollback / recovery: restore verifiers from a bundle into credentials without one.
+    RestoreVerifiers {
+        #[arg(long)]
+        bundle: std::path::PathBuf,
+    },
+    /// The recorded state of a hand-off.
+    Status {
+        #[arg(long)]
+        digest: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum PrincipalCmd {
     List(EnvironmentPath),
     Show(PrincipalRef),
-    Suspend(PrincipalRef),
-    Reactivate(PrincipalRef),
-    Deactivate(PrincipalRef),
-    /// Minimize a principal for good (Part H §80.42, audited): DEACTIVATED for ever, its
-    /// reference replaced by a non-identifying tombstone, its participations' display
-    /// names erased. Calls and evidence keep the opaque id.
+    /// Minimize a principal for good (Part H §80.42, audited): Calling checks its
+    /// retention holds, Platform Access tombstones the principal (DEACTIVATED for ever,
+    /// non-identifying reference), Calling erases its participations' display names.
+    /// Calls and evidence keep the opaque id.
     Tombstone(PrincipalRef),
 }
 
@@ -776,9 +703,19 @@ struct Admin {
     clock: SystemClock,
     /// The acting operator; present for every mutating command (checked before connect).
     operator: Option<OperatorContext>,
+    /// Platform Access, when Calling's service authentication is configured.
+    authority: Option<Arc<dyn IdentityAuthority>>,
 }
 
 impl Admin {
+    fn authority(&self) -> Result<Arc<dyn IdentityAuthority>, PlatformError> {
+        self.authority.clone().ok_or_else(|| {
+            PlatformError::Validation(
+                "this command reaches Platform Access: configure Calling's service authentication (CF_*) and CF_PLATFORM_ACCESS_BASE_URL".to_string(),
+            )
+        })
+    }
+
     fn op(&self) -> Result<&OperatorContext, PlatformError> {
         self.operator.as_ref().ok_or_else(|| {
             PlatformError::Validation(
@@ -836,19 +773,6 @@ impl Admin {
                 .to_string(),
         ))
     }
-
-    fn expiry(
-        &self,
-        days: Option<i64>,
-    ) -> Result<Option<chrono::DateTime<chrono::Utc>>, PlatformError> {
-        match days {
-            None => Ok(None),
-            Some(d) if d > 0 && d <= 3650 => Ok(Some(self.clock.now() + Duration::days(d))),
-            Some(_) => Err(PlatformError::Validation(
-                "--expires-in-days must be between 1 and 3650".to_string(),
-            )),
-        }
-    }
 }
 
 fn print<T: Serialize>(value: &T) -> Result<(), PlatformError> {
@@ -858,265 +782,46 @@ fn print<T: Serialize>(value: &T) -> Result<(), PlatformError> {
     Ok(())
 }
 
-/// The single place the raw credential is written: stdout, once, at creation/rotation.
-fn print_issued(issued: IssuedCredential) -> Result<(), PlatformError> {
-    let output = json!({
-        "credential": issued.credential,
-        "secret": issued.secret.expose_once(),
-        "notice": "Store this secret now. It is shown only once and cannot be recovered; \
-                   if lost, rotate or issue a new credential.",
-    });
-    print(&output)
+/// Writes `bytes` to a NEW file readable by the owner only (a bundle holds verifiers).
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<(), PlatformError> {
+    use std::io::Write as _;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path).map_err(|_| {
+        PlatformError::Validation(
+            "the output file cannot be created (it must not exist yet)".to_string(),
+        )
+    })?;
+    file.write_all(bytes)
+        .and_then(|_| file.sync_all())
+        .map_err(|_| PlatformError::Validation("the output file cannot be written".to_string()))
 }
 
 async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
     let p = &admin.platform;
     match command {
         Command::Tenant(cmd) => match cmd {
-            TenantCmd::Create {
-                slug,
-                name,
-                classification,
-                billing_currency,
-            } => print(
-                &p.operator_create_tenant(
-                    admin.op()?,
-                    NewTenant {
-                        slug,
-                        display_name: name,
-                        classification: classification.into(),
-                        billing_currency,
-                    },
-                )
-                .await?,
-            ),
             TenantCmd::List => print(&p.list_tenants().await?),
             TenantCmd::Show(path) => print(&admin.tenant(&path).await?),
-            TenantCmd::Suspend(path) => {
-                let t = admin.tenant(&path).await?;
-                print(
-                    &p.operator_set_tenant_status(admin.op()?, t.id, TenantStatus::Suspended)
-                        .await?,
-                )
-            }
-            TenantCmd::Reactivate(path) => {
-                let t = admin.tenant(&path).await?;
-                print(
-                    &p.operator_set_tenant_status(admin.op()?, t.id, TenantStatus::Active)
-                        .await?,
-                )
-            }
         },
-        Command::Application(cmd) => match cmd {
-            ApplicationCmd::Create { tenant, slug, name } => {
-                let t = admin.tenant(&tenant).await?;
-                print(
-                    &p.operator_create_application(
-                        admin.op()?,
-                        t.id,
-                        NewApplication {
-                            slug,
-                            display_name: name,
-                        },
-                    )
-                    .await?,
-                )
-            }
-            ApplicationCmd::List(tenant) => {
-                let t = admin.tenant(&tenant).await?;
-                print(&p.list_applications(t.id).await?)
-            }
-            ApplicationCmd::Suspend(path) => {
-                let a = admin.application(&path).await?;
-                print(
-                    &p.operator_set_application_status(
-                        admin.op()?,
-                        a.id,
-                        ApplicationStatus::Suspended,
-                    )
-                    .await?,
-                )
-            }
-            ApplicationCmd::Reactivate(path) => {
-                let a = admin.application(&path).await?;
-                print(
-                    &p.operator_set_application_status(
-                        admin.op()?,
-                        a.id,
-                        ApplicationStatus::Active,
-                    )
-                    .await?,
-                )
-            }
-        },
-        Command::Environment(cmd) => match cmd {
-            EnvironmentCmd::Create(path) => {
-                let a = admin.application(&path.application).await?;
-                print(
-                    &p.operator_create_environment(admin.op()?, a.id, path.environment.into())
-                        .await?,
-                )
-            }
-            EnvironmentCmd::List(path) => {
-                let a = admin.application(&path).await?;
-                print(&p.list_environments(a.id).await?)
-            }
-            EnvironmentCmd::Suspend(path) => {
-                let e = admin.environment(&path).await?;
-                print(
-                    &p.operator_set_environment_status(
-                        admin.op()?,
-                        e.id,
-                        EnvironmentStatus::Suspended,
-                    )
-                    .await?,
-                )
-            }
-            EnvironmentCmd::Reactivate(path) => {
-                let e = admin.environment(&path).await?;
-                print(
-                    &p.operator_set_environment_status(
-                        admin.op()?,
-                        e.id,
-                        EnvironmentStatus::Active,
-                    )
-                    .await?,
-                )
-            }
-            EnvironmentCmd::SetLiveTelecom {
-                environment,
-                allowed,
-            } => {
-                let e = admin.environment(&environment).await?;
-                print(
-                    &p.operator_set_live_telecom_allowed(admin.op()?, e.id, allowed)
-                        .await?,
-                )
-            }
-        },
-        Command::ServiceAccount(cmd) => match cmd {
-            ServiceAccountCmd::Create {
-                environment,
-                name,
-                description,
-            } => {
-                let e = admin.environment(&environment).await?;
-                print(
-                    &p.operator_create_service_account(
-                        admin.op()?,
-                        e.id,
-                        NewServiceAccount { name, description },
-                    )
-                    .await?,
-                )
-            }
-            ServiceAccountCmd::List(path) => {
-                let e = admin.environment(&path).await?;
-                print(&p.list_service_accounts(e.id).await?)
-            }
-            ServiceAccountCmd::Suspend(path) => {
-                let sa = admin.service_account(&path).await?;
-                print(
-                    &p.operator_set_service_account_status(
-                        admin.op()?,
-                        sa.id,
-                        ServiceAccountStatus::Suspended,
-                    )
-                    .await?,
-                )
-            }
-            ServiceAccountCmd::Reactivate(path) => {
-                let sa = admin.service_account(&path).await?;
-                print(
-                    &p.operator_set_service_account_status(
-                        admin.op()?,
-                        sa.id,
-                        ServiceAccountStatus::Active,
-                    )
-                    .await?,
-                )
-            }
-            ServiceAccountCmd::Revoke(path) => {
-                let sa = admin.service_account(&path).await?;
-                print(
-                    &p.operator_set_service_account_status(
-                        admin.op()?,
-                        sa.id,
-                        ServiceAccountStatus::Revoked,
-                    )
-                    .await?,
-                )
-            }
-        },
-        Command::Scope(cmd) => match cmd {
-            ScopeCmd::Registry => print(&p.registry().definitions().collect::<Vec<_>>()),
-            ScopeCmd::Grant { application, scope } => {
-                let a = admin.application(&application).await?;
-                print(
-                    &p.operator_grant_application_scope(admin.op()?, a.id, &scope)
-                        .await?,
-                )
-            }
-            ScopeCmd::Revoke { application, scope } => {
-                let a = admin.application(&application).await?;
-                let removed = p
-                    .operator_revoke_application_scope(admin.op()?, a.id, &scope)
-                    .await?;
-                print(&json!({ "application_id": a.id, "scope": scope, "removed": removed }))
-            }
-            ScopeCmd::List(path) => {
-                let a = admin.application(&path).await?;
-                print(&p.list_application_scopes(a.id).await?)
-            }
-        },
+        Command::Application(ApplicationCmd::List(tenant)) => {
+            let t = admin.tenant(&tenant).await?;
+            print(&p.list_applications(t.id).await?)
+        }
+        Command::Environment(EnvironmentCmd::List(path)) => {
+            let a = admin.application(&path).await?;
+            print(&p.list_environments(a.id).await?)
+        }
+        Command::ServiceAccount(ServiceAccountCmd::List(path)) => {
+            let e = admin.environment(&path).await?;
+            print(&p.list_service_accounts(e.id).await?)
+        }
         Command::Credential(cmd) => match cmd {
-            CredentialCmd::Create {
-                service_account,
-                scopes,
-                label,
-                expires_in_days,
-            } => {
-                let sa = admin.service_account(&service_account).await?;
-                let issued = p
-                    .operator_issue_credential(
-                        admin.op()?,
-                        sa.id,
-                        IssueCredential {
-                            scopes,
-                            label,
-                            not_before: None,
-                            expires_at: admin.expiry(expires_in_days)?,
-                        },
-                    )
-                    .await?;
-                print_issued(issued)
-            }
-            CredentialCmd::Rotate {
-                credential,
-                overlap_minutes,
-                scopes,
-                label,
-                expires_in_days,
-            } => {
-                let id = admin.credential_id(&credential).await?;
-                let issued = p
-                    .operator_rotate_credential(
-                        admin.op()?,
-                        id,
-                        RotateCredential {
-                            overlap: overlap_minutes.map(Duration::minutes),
-                            scopes: (!scopes.is_empty()).then_some(scopes),
-                            label,
-                            expires_at: admin.expiry(expires_in_days)?,
-                        },
-                    )
-                    .await?;
-                print_issued(issued)
-            }
-            CredentialCmd::Revoke(reference) => {
-                let id = admin.credential_id(&reference).await?;
-                print(&p.operator_revoke_credential(admin.op()?, id).await?)
-            }
             CredentialCmd::Show(reference) => {
                 let id = admin.credential_id(&reference).await?;
                 print(&p.credential(id).await?)
@@ -1143,35 +848,6 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
             }
         },
         Command::Principal(cmd) => match cmd {
-            PrincipalCmd::Register {
-                environment,
-                kind,
-                reference,
-            } => {
-                let e = admin.environment(&environment).await?;
-                let (principal, created) = p
-                    .operator_register_principal(
-                        admin.op()?,
-                        e.id,
-                        NewPrincipal::External {
-                            kind: kind.into(),
-                            external_reference: reference,
-                        },
-                    )
-                    .await?;
-                print(&json!({ "principal": principal, "created": created }))
-            }
-            PrincipalCmd::RegisterServiceAccount(path) => {
-                let sa = admin.service_account(&path).await?;
-                let (principal, created) = p
-                    .operator_register_principal(
-                        admin.op()?,
-                        sa.environment_id,
-                        NewPrincipal::ServiceAccount(sa.id),
-                    )
-                    .await?;
-                print(&json!({ "principal": principal, "created": created }))
-            }
             PrincipalCmd::List(path) => {
                 let e = admin.environment(&path).await?;
                 print(&p.list_principals(e.id).await?)
@@ -1179,39 +855,69 @@ async fn run(admin: &Admin, command: Command) -> Result<(), PlatformError> {
             PrincipalCmd::Show(r) => {
                 print(&p.principal(PrincipalId::from_uuid(r.principal)).await?)
             }
-            PrincipalCmd::Suspend(r) => print(
-                &p.operator_set_principal_status(
-                    admin.op()?,
-                    PrincipalId::from_uuid(r.principal),
-                    PrincipalStatus::Suspended,
-                )
-                .await?,
-            ),
-            PrincipalCmd::Reactivate(r) => print(
-                &p.operator_set_principal_status(
-                    admin.op()?,
-                    PrincipalId::from_uuid(r.principal),
-                    PrincipalStatus::Active,
-                )
-                .await?,
-            ),
-            PrincipalCmd::Deactivate(r) => print(
-                &p.operator_set_principal_status(
-                    admin.op()?,
-                    PrincipalId::from_uuid(r.principal),
-                    PrincipalStatus::Deactivated,
-                )
-                .await?,
-            ),
             PrincipalCmd::Tombstone(r) => print(
                 &tombstone::operator_tombstone(
                     &admin.db,
+                    admin.authority()?.as_ref(),
                     admin.op()?,
                     r.principal,
                     admin.clock.now(),
                 )
                 .await?,
             ),
+        },
+        Command::Identity(cmd) => match cmd {
+            IdentityCmd::Sync => {
+                let projection = IdentityProjection::new(
+                    admin.db.clone(),
+                    admin.authority()?,
+                    Arc::new(SystemClock),
+                );
+                let report = projection.sync().await.map_err(|e| {
+                    PlatformError::InvalidState(format!("identity sync failed: {e}"))
+                })?;
+                print(&json!({
+                    "pages": report.pages,
+                    "changes": report.changes,
+                    "cursor": report.cursor,
+                }))
+            }
+            IdentityCmd::Export { out } => {
+                let export = handoff::export(&admin.db, admin.op()?, admin.clock.now()).await?;
+                write_private(&out, &export.bytes)?;
+                print(&json!({
+                    "file": out.display().to_string(),
+                    "bundleDigest": export.bundle_digest,
+                    "verifierDigest": export.verifier_digest,
+                    "counts": export.counts,
+                    "next": "platform-access-admin identity import --bundle <file>; then platform_admin identity verify-handoff --digest <bundleDigest>",
+                }))
+            }
+            IdentityCmd::VerifyHandoff { digest } => print(
+                &handoff::verify(
+                    &admin.db,
+                    admin.authority()?.as_ref(),
+                    admin.op()?,
+                    &digest,
+                    admin.clock.now(),
+                )
+                .await?,
+            ),
+            IdentityCmd::CompleteHandoff { digest } => {
+                let scrubbed =
+                    handoff::complete(&admin.db, admin.op()?, &digest, admin.clock.now()).await?;
+                print(&json!({ "bundleDigest": digest, "verifiersScrubbed": scrubbed }))
+            }
+            IdentityCmd::RestoreVerifiers { bundle } => {
+                let bytes = std::fs::read(&bundle).map_err(|_| {
+                    PlatformError::Validation("the bundle file cannot be read".to_string())
+                })?;
+                let restored =
+                    handoff::restore_verifiers(&admin.db, admin.op()?, &bytes, admin.clock.now())
+                        .await?;
+                print(&json!({ "restored": restored }))
+            }
+            IdentityCmd::Status { digest } => print(&handoff::status(&admin.db, &digest).await?),
         },
         Command::Limits(cmd) => match cmd {
             LimitsCmd::SetTenant { tenant, limits } => {
@@ -1898,18 +1604,19 @@ async fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // Platform Access is optional for the CLI: only the commands that reach it need it.
+    let authority: Option<Arc<dyn IdentityAuthority>> = ServiceAuthSettings::from_env()
+        .ok()
+        .and_then(|settings| settings.load(Arc::new(cf_service_auth::SystemClock)).ok())
+        .map(|runtime| {
+            Arc::new(HttpIdentityAuthority::new(runtime.client_arc())) as Arc<dyn IdentityAuthority>
+        });
     let admin = Admin {
         db: db.clone(),
-        platform: PlatformService::new(
-            db,
-            Arc::new(SystemClock),
-            Arc::new(config.keyring),
-            Arc::new(ScopeRegistry::standard()),
-            config.credential_policy,
-            config.limit_defaults,
-        ),
+        platform: PlatformService::new(db, Arc::new(SystemClock), config.limit_defaults),
         clock: SystemClock,
         operator,
+        authority,
     };
     if let Some(op) = &admin.operator {
         eprintln!(

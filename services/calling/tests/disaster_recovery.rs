@@ -50,7 +50,7 @@ use common::{
     deployment::{Deployment, Receiver},
     enterprise::{allow_enterprise_scopes, credential, strings},
     public::number_like_runs,
-    scalar_i64, secret_part, TestDb, TEST_PEPPER, TEST_SIGNALING_KEY,
+    scalar_i64, secret_part, TestDb, TEST_SIGNALING_KEY,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -295,7 +295,7 @@ async fn a_restored_backup_recovers_pending_work_exactly_once() {
     let raw_text = String::from_utf8_lossy(&raw).to_string();
     let mut forbidden: Vec<String> = vec![
         "+234".into(),
-        TEST_PEPPER.into(),
+        common::TEST_PEPPER.into(),
         TEST_SIGNALING_KEY.into(),
         signing_secret.clone(),
         "grant-secret-".into(),
@@ -327,7 +327,10 @@ async fn a_restored_backup_recovers_pending_work_exactly_once() {
     );
 
     // ---------------------------------------------------------------- restore
-    let target = TestDb::empty().await.unwrap();
+    let mut target = TestDb::empty().await.unwrap();
+    // Only Calling's database is restored: the identity authority (Platform Access, its
+    // own database) is the same one.
+    target.platform_access = Some(d.h().db.pa());
     run(
         &tools.join("restore.sh"),
         &["--database-url", &target.url, "--in", dump_s],

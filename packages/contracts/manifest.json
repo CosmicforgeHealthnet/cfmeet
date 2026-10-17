@@ -16,14 +16,14 @@
     },
     {
       "id": "cfmeet.calling.http-api",
-      "version": "1.8.0",
+      "version": "1.10.0",
       "kind": "openapi",
       "path": "calling/http/v1.openapi.json",
       "owner": "calling",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface exposed by the Calling service: health, the call API (list, get, available actions), application call creation and control (accept, decline, cancel, end, hold, resume, transfer, session removal, media credentials), the endpoint registry, signaling-credential minting, the endpoint's signaling operations (WebSocket channel, offer recovery, accept / decline, media credentials), the media connection gateway (admission before every media connection) and the media provider callback; the platform credential, signaling credential, media credential and provider signature schemes; the error envelope. No generic state mutation. Protected calls (privacyRelaySessionId, PRIVACY_RELAY_V1, fail closed: PRIVACY_AUTHORIZATION_UNAVAILABLE) and the internal Privacy Relay enforcement route (POST /internal/v1/privacy-relay/enforcement). The public Privacy Relay API served by this ingress is specified by cfmeet.privacy-relay.http-api. Part E: protected public-network contact targets on POST /v1/calls (APP_TO_PSTN; PUBLIC_ROUTE_DENIED / PUBLIC_ROUTE_UNAVAILABLE / TELECOM_SPEND_LIMIT_EXCEEDED) the callback relay (callbackRequested on POST /v1/calls) and the internal Telephony event receiver (POST /internal/v1/telephony/events). Part F: the enterprise calling API under /v1/enterprise/** (policies, departments, extensions, ring groups, queues, IVR, business hours, forwarding, voicemail, recording policies, audit; enterprise.* scopes, expectedVersion, VERSION_CONFLICT / ENTERPRISE_POLICY_DENIED) and enterprise call targets."
+      "description": "HTTP surface exposed by the Calling service: health, the call API (list, get, available actions), application call creation and control (accept, decline, cancel, end, hold, resume, transfer, session removal, media credentials), the endpoint registry, signaling-credential minting, the endpoint's signaling operations (WebSocket channel, offer recovery, accept / decline, media credentials), the media connection gateway (admission before every media connection) and the media provider callback; the platform credential, signaling credential, media credential and provider signature schemes; the error envelope. No generic state mutation. Protected calls (privacyRelaySessionId, PRIVACY_RELAY_V1, fail closed: PRIVACY_AUTHORIZATION_UNAVAILABLE) and the internal Privacy Relay enforcement route (POST /internal/v1/privacy-relay/enforcement). The public Privacy Relay API served by this ingress is specified by cfmeet.privacy-relay.http-api. Part E: protected public-network contact targets on POST /v1/calls (APP_TO_PSTN; PUBLIC_ROUTE_DENIED / PUBLIC_ROUTE_UNAVAILABLE / TELECOM_SPEND_LIMIT_EXCEEDED) the callback relay (callbackRequested on POST /v1/calls) and the internal Telephony event receiver (POST /internal/v1/telephony/events). Part F: the enterprise calling API under /v1/enterprise/** (policies, departments, extensions, ring groups, queues, IVR, business hours, forwarding, voicemail, recording policies, audit; enterprise.* scopes, expectedVersion, VERSION_CONFLICT / ENTERPRISE_POLICY_DENIED) and enterprise call targets. 1.9.0 DCN inbound offers (POST /internal/v1/telephony/dcn-inbound-calls) and presentedNumberResourceId (Part IV L); 1.10.0 the SMS Gateway as a platform-event producer (sms.* webhooks, Part IV N)."
     },
     {
       "id": "cfmeet.calling.call-common",
@@ -49,14 +49,14 @@
     },
     {
       "id": "cfmeet.calling.call-control",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "kind": "json-schema",
       "path": "calling/control/v1.schema.json",
       "owner": "calling",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Request and response bodies of the application-calling API (Part C sections 20-25): call creation, ring-offer answers, cancel / end / hold / resume / transfer and their results, session removal, available actions, the ring-offer and transfer representations, media credentials, endpoints, signaling credentials and offer recovery. No client-chosen scope, state, permission or provider data; no provider identifiers or administrative capabilities in responses. Part F: enterprise extension targets, enterprise transfer targets and the enterprise context of created calls."
+      "description": "Request and response bodies of the application-calling API (Part C sections 20-25): call creation, ring-offer answers, cancel / end / hold / resume / transfer and their results, session removal, available actions, the ring-offer and transfer representations, media credentials, endpoints, signaling credentials and offer recovery. No client-chosen scope, state, permission or provider data; no provider identifiers or administrative capabilities in responses. Part F: enterprise extension targets, enterprise transfer targets and the enterprise context of created calls. 1.5.0 presentedNumberResourceId: present an entitled Digital Communications Number on a protected-contact call (Part IV L)."
     },
     {
       "id": "cfmeet.calling.realtime-signal",
@@ -93,14 +93,14 @@
     },
     {
       "id": "cfmeet.platform.common",
-      "version": "1.5.0",
+      "version": "1.9.0",
       "kind": "json-schema",
       "path": "platform/common/v1.schema.json",
       "owner": "platform",
       "visibility": "internal",
       "lifecycle": "stable",
       "authority": "contract-first",
-      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata)."
+      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M). 1.9.0 number-usage.report, number-risk.report and number-relay.lease (Part IV S, T and P §§119–120)."
     },
     {
       "id": "cfmeet.platform.service-token-header",
@@ -170,14 +170,14 @@
     },
     {
       "id": "cfmeet.platform.webhooks",
-      "version": "1.0.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "platform/webhooks/v1.schema.json",
       "owner": "platform",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Customer webhooks (Part G §68): application-scoped subscriptions (create / list / get / update / delete / rotate-secret), the safe subscription view (the signing secret is returned only on create / rotation), delivery records with dead-letter visibility and manual replay, and the normalized, signed event body (public catalog projected from committed domain events; never a provider or internal payload). Served by Calling's platform ingress."
+      "description": "Customer webhooks (Part G §68): application-scoped subscriptions (create / list / get / update / delete / rotate-secret), the safe subscription view (the signing secret is returned only on create / rotation), delivery records with dead-letter visibility and manual replay, and the normalized, signed event body (public catalog projected from committed domain events; never a provider or internal payload). Served by Calling's platform ingress. Part IV: 1.1.0 sms.received (N); 1.2.0 sms.requested / submitted / delivered / failed / unknown / blocked (O) from the SMS Gateway (references, status and codes only; never content or a number)."
     },
     {
       "id": "cfmeet.platform.usage",
@@ -189,6 +189,72 @@
       "lifecycle": "beta",
       "authority": "contract-first",
       "description": "Usage and limits (Part G §69 / §70): the ledger of final consumption facts of the authenticated application environment (application media, public-network legs with KNOWN / ESTIMATED / UNKNOWN cost evidence, stored voicemail / recording artifacts — never a bill) and the limit status (request rate, concurrent calls, telecom spend) with every level of the API-client chain (tenant → application → service account → credential), the independent principal axis of a principal resolved in the caller's scope, and the binding level. Served by Calling's platform ingress."
+    },
+    {
+      "id": "cfmeet.platform-access.identity",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "platform-access/identity/v1.schema.json",
+      "owner": "platform-access",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Messages of the shared identity authority (Part IV Workstream B, ADR 0032): identity snapshots (tenant, application, environment, service account, credential WITHOUT verifier material, principal, scopes), credential authentication outcomes with the trusted authority chain and throttling, the trusted delegated context, credential status, authorization evaluation, the scope registry (Calling, Numbering and SMS scopes; PRIVILEGED_OPERATOR trust for numbers.admin), the commit-ordered identity change feed, Part III import receipts, principal resolution / telephone-endpoint registration / tombstones and the error envelope."
+    },
+    {
+      "id": "cfmeet.platform-access.internal-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "platform-access/internal/v1.openapi.json",
+      "owner": "platform-access",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Internal HTTP surface of services/platform-access: GET /health, GET /ready and the service-authenticated /internal/v1 API — credential authentication, credential status, authorization evaluation, trusted context, identity change feed, import receipts, scope registry, principal resolution / registration / tombstone (Calling, Numbering) and operator administration (operator console, audited)."
+    },
+    {
+      "id": "cfmeet.numbering.common",
+      "version": "1.8.0",
+      "kind": "json-schema",
+      "path": "numbering/common/v1.schema.json",
+      "owner": "numbering",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "The canonical Numbering vocabulary and messages (Part IV C5, ADR 0033): Number Resource identity (CF Meet ids canonical, provider identifiers never exposed), type, capabilities with provenance, opaque provider binding references, inventory observations, reservations, DCN assignments with ownership and routing references, routing profiles, lifecycle transitions, the trusted context and the error envelope; 1.1.0 the capability and country catalog (E); 1.2.0 KYC requirements, cases, protected evidence metadata, decisions, appeals and eligibility decisions (F); 1.3.0 provider command, provider event and incident vocabularies and the provider callback acknowledgement (G). 1.4.0 inventory search results / pages with freshness, KYC indicators, country and number-type lists, reservation creation / list, hold basis and conversion, RELEASE_HOLD commands (H). 1.5.0 acquisitions, route families / configurations / readiness (I). 1.6.0 ownership and assignment requests / views, routing target kinds, pools and transfer links (J). 1.7.0 routing grant rule codes (K). 1.8.0 lifecycle stewardship messages (P–X): suspensions, releases, quarantines, reassignment, usage, risk decisions and appeals, port requests, access justification / ownership periods / verification, operational controls, reconciliation report, usage / risk-signal reports and relay import / lease / resolution (Part P); new domain rules."
+    },
+    {
+      "id": "cfmeet.numbering.event",
+      "version": "1.7.0",
+      "kind": "json-schema",
+      "path": "numbering/events/v1.schema.json",
+      "owner": "numbering",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Numbering domain events in the platform envelope (transactional outbox, at least once, per-aggregate order): resource discovered / lifecycle-changed / classified, binding changed, capability changed, reservation changed, assignment changed, routing profile revised, catalog revised, KYC requirements published, KYC case changed, KYC evidence received, eligibility evaluated, provider command changed, provider event received. No telephone number, provider identifier, credential or secret; 1.4.0 RELEASE_HOLD provider commands (H); 1.5.0 acquisition changed, route changed (I); 1.6.0 pool changed (J). 1.7.0 number.suspended, number.restored, release / quarantine / usage / risk / port / relay-lease changes (P–X)."
+    },
+    {
+      "id": "cfmeet.numbering.internal-api",
+      "version": "1.12.0",
+      "kind": "openapi",
+      "path": "numbering/internal/v1.openapi.json",
+      "owner": "numbering",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "HTTP surface of services/numbering: GET /health, /ready, /openapi.json (the served contract); customer reads of the caller's own DCN assignments / history / reservations, the catalog, KYC / eligibility (F); 1.4.0 provider-neutral inventory search, countries and number types, reservations (create with Idempotency-Key, list, cancel) (H); 1.5.0 acquisitions (provisioning with eligibility re-evaluation and hold read-back) and provider route configuration (I); provider callbacks (G); and the service-authenticated internal Number Resource view (/internal/v1, number-resource.read). 1.5.0 internal route view and consumer route readiness (number-route.acknowledge). 1.6.0 ownership and assignment: assignment creation / activation on proven readiness, routing revisions, employee offboarding, same-owner transfers, organizational pools and the operator assignment history (J). 1.7.0 routing grants: inbound resolution (number-route.resolve), caller-identity / SMS-sender grants (delegated scope) and authoritative verification (number-grant.verify) (K). 1.8.0 delegated current-assignment view for Calling's caller-identity policy (L). 1.9.0 dedicated SMS destination resolver (number-sms-route.resolve); inbound-resolutions is voice only (M); 1.10.0 the SMS Gateway's sender re-check on number-assignments (Part IV O). 1.11.0 inventoryClass on voice inbound resolutions, grant verifications and current-assignment views (L closure: synthetic test interconnects). 1.12.0 lifecycle stewardship (P–X) and the relay-number import / lease / resolution API (Part P)."
+    },
+    {
+      "id": "cfmeet.numbering.routing-grant",
+      "version": "1.4.0",
+      "kind": "json-schema",
+      "path": "numbering/routing-grant/v1.schema.json",
+      "owner": "numbering",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Number routing grants (Part IV Workstream K): inbound resolution, caller-identity / SMS-sender grant requests and verification bodies, the grant claims (typ cf-number-grant+jwt, Numbering's dedicated grant key, no telephone number, revision-bound) and the receiver-authoritative grant trust bundle. 1.1.0 CurrentAssignment (L). 1.2.0 SmsDestinationResolutionRequest (M). 1.3.0 inventoryClass (SYNTHETIC / REAL) on voice resolutions, valid verifications and the current-assignment view (L closure). 1.4.0 ROUTING_DISABLED (an operator kill switch, Workstream W)."
     },
     {
       "id": "cfmeet.privacy-relay.http-api",
@@ -203,14 +269,14 @@
     },
     {
       "id": "cfmeet.privacy-relay.internal-api",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "kind": "openapi",
       "path": "privacy-relay/internal/v1.openapi.json",
       "owner": "privacy-relay",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Internal HTTP surface of services/privacy-relay: GET /health and the service-authenticated /internal/v1 API (context and session commands and reads for the platform ingress, communication authorization for protected calls). Scope only from the signed delegated platform context."
+      "description": "Internal HTTP surface of services/privacy-relay: GET /health and the service-authenticated /internal/v1 API (context and session commands and reads for the platform ingress, communication authorization for protected calls). Scope only from the signed delegated platform context. 1.4.0 DCN caller protection under Numbering's routing grant (Part IV L)."
     },
     {
       "id": "cfmeet.privacy-relay.common",
@@ -324,14 +390,14 @@
     },
     {
       "id": "cfmeet.privacy-relay.relay-routing",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "privacy-relay/relay-routing/v1.schema.json",
       "owner": "privacy-relay",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Inbound relay resolution (relay-number.resolve-inbound) and inbound caller protection (protected-contact.protect-inbound), Telephony only: safe mapping references and a ContactReference, never a destination or relay number in a response."
+      "description": "Inbound relay resolution (relay-number.resolve-inbound) and inbound caller protection (protected-contact.protect-inbound), Telephony only: safe mapping references and a ContactReference, never a destination or relay number in a response. 1.2.0 ProtectDcnCallerRequest / DcnCallerResult (Part IV L)."
     },
     {
       "id": "cfmeet.privacy-relay.evidence",
@@ -346,14 +412,14 @@
     },
     {
       "id": "cfmeet.telephony.common",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "telephony/common/v1.schema.json",
       "owner": "telephony",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Provider-neutral vocabulary of public-network execution (Part E): leg statuses (UNKNOWN is never a failure), public route classes, directions, end reasons, failure categories, normalized event types, bridge kinds, route health, country / currency codes. No provider, carrier, SIP or telephone-number concept. Part F: ENTERPRISE_INTERNAL legs of enterprise SIP devices; ANSWER / PROMPT (built-in prompts) on them."
+      "description": "Provider-neutral vocabulary of public-network execution (Part E): leg statuses (UNKNOWN is never a failure), public route classes, directions, end reasons, failure categories, normalized event types, bridge kinds, route health, country / currency codes. No provider, carrier, SIP or telephone-number concept. Part F: ENTERPRISE_INTERNAL legs of enterprise SIP devices; ANSWER / PROMPT (built-in prompts) on them. 1.2.0 InterconnectClass (Part IV L closure)."
     },
     {
       "id": "cfmeet.telephony.event",
@@ -368,14 +434,14 @@
     },
     {
       "id": "cfmeet.telephony.inbound-offer",
-      "version": "1.0.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "telephony/inbound/v1.schema.json",
       "owner": "telephony",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Phone-to-app inbound offer from Telephony to Calling and Calling's answer (canonical Call / CallLeg). References only: never the called relay number or the caller's number."
+      "description": "Phone-to-app inbound offer from Telephony to Calling and Calling's answer (canonical Call / CallLeg). References only: never the called relay number or the caller's number. 1.1.0 DcnInboundOffer: inbound calls to Digital Communications Numbers with Numbering's grant (Part IV L). 1.2.0 DcnInboundOffer.interconnectClass (L closure)."
     },
     {
       "id": "cfmeet.telephony.enterprise",
@@ -401,25 +467,25 @@
     },
     {
       "id": "cfmeet.telephony.command",
-      "version": "1.2.0",
+      "version": "1.4.0",
       "kind": "json-schema",
       "path": "telephony/commands/v1.schema.json",
       "owner": "telephony",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Calling -> Telephony commands (ORIGINATE, TERMINATE / HOLD / RESUME, BRIDGE) and their answers (leg / bridge views, the error envelope). Versioned; commandId, idempotencyKey, correlationId, Call / CallLeg / attempt / route ids, authorization evidence, spend reservation and expected generation. No caller identity, number, provider, carrier or SIP field. Part F: ENTERPRISE_INTERNAL legs of enterprise SIP devices; ANSWER / PROMPT (built-in prompts) on them. Part F: CAPTURE (edge voicemail capture into a transient spool) on them."
+      "description": "Calling -> Telephony commands (ORIGINATE, TERMINATE / HOLD / RESUME, BRIDGE) and their answers (leg / bridge views, the error envelope). Versioned; commandId, idempotencyKey, correlationId, Call / CallLeg / attempt / route ids, authorization evidence, spend reservation and expected generation. No caller identity, number, provider, carrier or SIP field. Part F: ENTERPRISE_INTERNAL legs of enterprise SIP devices; ANSWER / PROMPT (built-in prompts) on them. Part F: CAPTURE (edge voicemail capture into a transient spool) on them. 1.3.0 presentedIdentity: a DCN caller identity under Numbering's single-use grant (Part IV L). 1.4.0 OriginateCommand.interconnectClass (L closure: synthetic test interconnects)."
     },
     {
       "id": "cfmeet.telephony.routes",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "telephony/routes/v1.schema.json",
       "owner": "telephony",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Normalized route availability for Calling's Routing Engine: opaque route references with health and KNOWN / UNKNOWN evidence of capacity, cost estimate and quality. Provider-neutral."
+      "description": "Normalized route availability for Calling's Routing Engine: opaque route references with health and KNOWN / UNKNOWN evidence of capacity, cost estimate and quality. Provider-neutral. 1.1.0 RouteCandidate.interconnectClass (L closure)."
     },
     {
       "id": "cfmeet.telephony.usage",
@@ -442,6 +508,39 @@
       "lifecycle": "beta",
       "authority": "contract-first",
       "description": "HTTP surface of services/telephony: health and the provider callback ingress (provider-authenticated before parsing, 16 KiB limit, dedupe), and the service-authenticated /internal/v1 API for Calling (legs originate / get / terminate / hold / resume, bridges create / get / end, route availability, readiness). Metrics live on a separate listener. Part F: ENTERPRISE_INTERNAL legs of enterprise SIP devices; ANSWER / PROMPT (built-in prompts) on them. Part F: CAPTURE (edge voicemail capture into a transient spool) on them."
+    },
+    {
+      "id": "cfmeet.sms-gateway.common",
+      "version": "1.2.0",
+      "kind": "json-schema",
+      "path": "sms-gateway/common/v1.schema.json",
+      "owner": "sms-gateway",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "SMS Gateway vocabulary and messages (Part IV M–O): transport status, direction, encoding, control reasons, the error envelope; 1.1.0 messages, threads, provider callback acknowledgements (N); 1.2.0 send and opt-out requests (O). Remote parties are masked; no provider identifier."
+    },
+    {
+      "id": "cfmeet.sms-gateway.http-api",
+      "version": "1.2.0",
+      "kind": "openapi",
+      "path": "sms-gateway/http/v1.openapi.json",
+      "owner": "sms-gateway",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "HTTP surface of services/sms-gateway, served at /openapi.json: health, readiness; 1.1.0 message / thread reads (sms.read) and the inbound provider callback (N); 1.2.0 sending (sms.send, Idempotency-Key), opt-outs and delivery receipts (O)."
+    },
+    {
+      "id": "cfmeet.sms-gateway.event",
+      "version": "1.2.0",
+      "kind": "json-schema",
+      "path": "sms-gateway/events/v1.schema.json",
+      "owner": "sms-gateway",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "SMS Gateway message events in the platform envelope (transactional outbox, at least once): received (N); requested, submitted, delivered, failed, unknown, blocked (O). Published to the platform customer webhook delivery as sms.*. Never content, a number or a provider identifier."
     }
   ]
 }

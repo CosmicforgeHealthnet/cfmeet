@@ -45,7 +45,15 @@ impl Sandbox {
         let repo = dir.path().to_path_buf();
         let contracts = repo.join("packages/contracts");
         copy_dir(&real_contracts(), &contracts);
-        for service in ["calling", "meeting-service", "privacy-relay", "telephony"] {
+        for service in [
+            "calling",
+            "meeting-service",
+            "numbering",
+            "platform-access",
+            "privacy-relay",
+            "sms-gateway",
+            "telephony",
+        ] {
             fs::create_dir_all(repo.join("services").join(service)).unwrap();
         }
         Self {
@@ -238,19 +246,19 @@ fn unregistered_duplicate_authority_is_rejected() {
 
 #[test]
 fn contracts_for_unimplemented_services_are_rejected() {
-    // Numbering is a future service (no services/numbering): it cannot own a contract.
+    // Messaging is a future service (no services/messaging): it cannot own a contract.
     let s = Sandbox::new();
     s.write(
-        "numbering/http/v1.openapi.json",
+        "messaging/http/v1.openapi.json",
         &json!({ "openapi": "3.1.0", "info": { "title": "x", "version": "1.0.0" }, "paths": {} }),
     );
     s.edit_manifest(|c| {
         c.push(json!({
-            "id": "cfmeet.numbering.http-api",
+            "id": "cfmeet.messaging.http-api",
             "version": "1.0.0",
             "kind": "openapi",
-            "path": "numbering/http/v1.openapi.json",
-            "owner": "numbering",
+            "path": "messaging/http/v1.openapi.json",
+            "owner": "messaging",
             "visibility": "public",
             "lifecycle": "experimental",
             "authority": "contract-first",
@@ -259,7 +267,7 @@ fn contracts_for_unimplemented_services_are_rejected() {
     });
     assert_rejected(
         &s.run(),
-        "owner `numbering` is not an existing deployable service",
+        "owner `messaging` is not an existing deployable service",
     );
 }
 

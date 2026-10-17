@@ -1,0 +1,302 @@
+name: Numbering service
+
+# services/numbering — the canonical authority for public Number Resources, provider
+# bindings, capabilities, inventory, reservations, DCN assignments, ownership, routing
+# profiles and the number lifecycle (Part IV Workstreams C-D, ADR 0033). It owns its own
+# PostgreSQL database and depends only on packages/service-auth and the contracts
+# (packages/contracts/numbering). Customer credentials are verified by Platform Access:
+# the test job builds and runs Platform Access's real binaries.
+#
+# CI builds carry no debug info and no incremental state; debug assertions stay on.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/numbering/**"
+      - "services/platform-access/**"
+      - "packages/service-auth/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
+      - ".github/workflows/numbering.yml"
+  pull_request:
+    paths:
+      - "services/numbering/**"
+      - "services/platform-access/**"
+      - "packages/service-auth/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
+      - ".github/workflows/numbering.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: numbering-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: services/numbering
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  lint:
+    name: fmt / check / clippy / boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/numbering -> target
+          key: lint
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo check
+        run: cargo check --workspace --locked
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Repository guards (no other service's source)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if grep -n -E 'services/(calling|platform-access|privacy-relay|telephony|meeting-service)|\.\./(calling|platform-access|privacy-relay|telephony|meeting-service)|(calling|platform-access)-migration' \
+               services/numbering/Cargo.toml services/numbering/migration/Cargo.toml; then
+            echo "::error::services/numbering depends on another service"; exit 1
+          fi
+          # Numbering never owns calls, SIP / PSTN, relay sessions or SMS transport.
+          if grep -rn -E -i 'CREATE TABLE (calls|call_|sip_|relay_|sms_|kyc_|port|fraud|billing)' services/numbering/migration/src; then
+            echo "::error::services/numbering creates a table outside its domain"; exit 1
+          fi
+
+  test:
+    name: test (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      # Each test creates its own database from a migrated template.
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      PLATFORM_ACCESS_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access
+      PLATFORM_ACCESS_MIGRATION_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access-migration
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            services/numbering -> target
+            services/platform-access -> target
+          key: test
+
+      # Customer credentials are verified by the real Platform Access.
+      - name: Build Platform Access
+        working-directory: services/platform-access
+        run: cargo build --workspace --bins --locked
+
+      # Named Part IV gates first (each a separate step so a failure names the gate),
+      # then the whole workspace.
+      - name: Service foundation (C6) — probes, internal / customer auth, scopes, correlation, failures
+        run: cargo test --locked --test service --test startup
+      - name: Migrations and database isolation (C3, D10.18)
+        run: cargo test --locked --test migrations
+      - name: Outbox, workers, leases, idempotency (C4, D10.19)
+        run: cargo test --locked --test outbox --test workers
+      - name: Number Resources, lifecycle, bindings, capabilities, inventory (D10.1-D10.7)
+        run: cargo test --locked --test number_resources
+      - name: Reservations, assignments, ownership, isolation, history, routing, activation (D10.8-D10.17)
+        run: cargo test --locked --test allocation
+      - name: Contract conformance (C5)
+        run: cargo test --locked --test contracts
+      - name: Capability and country catalog (Workstream E)
+        run: cargo test --locked --test capability_catalog
+      - name: KYC, protected evidence and eligibility (Workstream F)
+        run: cargo test --locked --test kyc_eligibility
+      - name: Provider contract, simulator, durable commands, callbacks, certification (Workstream G)
+        run: cargo test --locked --test provider_contract
+      - name: Inventory search and reservation (Workstream H)
+        run: cargo test --locked --test inventory_reservations
+      - name: Provisioning and activation prerequisites (Workstream I)
+        run: cargo test --locked --test provisioning_activation
+      - name: Ownership, assignment, transfers and pools (Workstream J)
+        run: cargo test --locked --test ownership_assignment
+      - name: Routing grants, inbound resolution, caller / sender identity (Workstream K)
+        run: cargo test --locked --test routing_grants
+      - name: DCN lifecycle milestone, Scenarios A-D (Part IV Step 21)
+        run: cargo test --locked --test dcn_lifecycle
+      - name: Lifecycle stewardship (Part IV P-W)
+        env:
+          # The runner image ships pg_dump / pg_restore / psql: the backup / restore
+          # case of this suite must run here, never skip.
+          DISASTER_RECOVERY_CERT_REQUIRED: "1"
+        run: cargo test --locked --test lifecycle_stewardship
+      - name: cargo test (whole workspace)
+        run: cargo test --workspace --no-fail-fast --locked
+
+  build:
+    name: build / migration smoke / startup
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/numbering -> target
+          key: build
+
+      - name: cargo build
+        run: cargo build --workspace --locked
+
+      - name: Migration smoke (up / reset / up)
+        env:
+          PGPASSWORD: postgres
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/numbering_migration_smoke
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE numbering_migration_smoke"
+          ./target/debug/numbering-migration up
+          ./target/debug/numbering-migration status
+          ./target/debug/numbering-migration reset
+          ./target/debug/numbering-migration up
+          q() { psql -h 127.0.0.1 -U postgres -d numbering_migration_smoke -tAc "$1"; }
+          # Applied = registered migrations (derived from the migrator, never hand-counted).
+          test "$(q "SELECT count(*) FROM numbering_seaql_migrations")" = "$(grep -c 'Box::new(m20' migration/src/lib.rs)"
+          # Foundation (outbox, jobs, idempotency) + the D9 number domain + the E catalog +
+          # the F KYC / eligibility tables + the G provider command / event / incident tables +
+          # the P–W stewardship and Part P relay-lease tables (14) — and nothing of any other
+          # service.
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'numbering_seaql_migrations'")" = "50"
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'numbering_seaql_migrations' AND tablename !~ '^(number_|numbering_|dcn_)'")" = "0"
+          # No provider identifier column outside bindings / inventory snapshots and the
+          # internal applicability of catalog entries, KYC requirement sets and KYC cases, and
+          # the internal provider command / event / inventory-ref / incident records and the
+          # porting provider of a port request (never exposed to customers).
+          test "$(q "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name IN ('provider_id', 'external_ref') AND table_name NOT IN ('number_provider_bindings', 'number_inventory_snapshots', 'number_type_catalog', 'number_kyc_requirements', 'number_kyc_cases', 'number_provider_commands', 'number_provider_events', 'number_provider_inventory_refs', 'numbering_incidents', 'number_inventory_refreshes', 'number_port_requests')")" = "0"
+
+      - name: Per-service database roles with the real migrations
+        env:
+          NUMBERING_MIGRATION_BIN: ${{ github.workspace }}/services/numbering/target/debug/numbering-migration
+        run: |
+          set -euo pipefail
+          test -x "$NUMBERING_MIGRATION_BIN"
+          "$GITHUB_WORKSPACE/infra/deployment/postgres/verify-service-isolation.sh" \
+            --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres
+
+      - name: Service starts against the migrated database and refuses unsafe configuration
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/numbering_migration_smoke
+          NUMBERING_BIND_ADDRESS: 127.0.0.1:8095
+        run: |
+          set -euo pipefail
+          K="$RUNNER_TEMP/service-auth"
+          mkdir -p "$K"
+          cargo run -q --locked --manifest-path ../../packages/service-auth/Cargo.toml --bin cf-service-keygen -- \
+            generate --kid numbering-ci-1 --out "$K/numbering-ci-1.pem" > "$K/numbering-ci-1.jwk.json"
+          test "$(stat -c %a "$K/numbering-ci-1.pem")" = "600"
+          echo '{"bundle_version":1,"receiver":"cfmeet.numbering","runtime_environment":"local","trusted_issuers":[]}' > "$K/bundle.json"
+          echo '{"bundle_version":1,"receiver":"cfmeet.numbering","runtime_environment":"staging","trusted_issuers":[]}' > "$K/staging-bundle.json"
+          echo '{"bundle_version":1,"receiver":"cfmeet.calling","runtime_environment":"local","trusted_issuers":[]}' > "$K/calling-bundle.json"
+          export CF_RUNTIME_ENVIRONMENT=local CF_SERVICE_AUTH_KEY_ID=numbering-ci-1
+          export CF_SERVICE_AUTH_PRIVATE_KEY_FILE="$K/numbering-ci-1.pem" CF_SERVICE_TRUST_BUNDLE_FILE="$K/bundle.json"
+          # Never contacted at startup; customer requests fail closed (503) without it.
+          export CF_PLATFORM_ACCESS_BASE_URL=http://127.0.0.1:9
+
+          refuses() { # refuses <description> <env assignments...>: must exit 2 (config error)
+            local what="$1"; shift
+            set +e; env "$@" timeout 30 ./target/debug/numbering > "$K/out.log" 2>&1; local rc=$?; set -e
+            if [ "$rc" != "2" ]; then
+              echo "::error::service did not refuse to start ($what): exit $rc"; cat "$K/out.log"; exit 1
+            fi
+            if grep -q -- "PRIVATE KEY" "$K/out.log"; then echo "::error::key material in startup output"; exit 1; fi
+            echo "refused as expected: $what"
+          }
+          refuses "missing database URL" DATABASE_URL=
+          refuses "missing Platform Access" CF_PLATFORM_ACCESS_BASE_URL=
+          refuses "invalid lease" NUMBERING_WORKER_LEASE_SECONDS=0
+          refuses "missing signing key" CF_SERVICE_AUTH_PRIVATE_KEY_FILE=
+          refuses "unreadable signing key" CF_SERVICE_AUTH_PRIVATE_KEY_FILE="$K/missing.pem"
+          refuses "inline private key" CF_SERVICE_AUTH_PRIVATE_KEY=inline
+          refuses "missing trust bundle" CF_SERVICE_TRUST_BUNDLE_FILE=
+          refuses "bundle for another runtime environment" CF_SERVICE_TRUST_BUNDLE_FILE="$K/staging-bundle.json"
+          refuses "bundle of another receiver" CF_SERVICE_TRUST_BUNDLE_FILE="$K/calling-bundle.json"
+          refuses "wrong service identity" CF_SERVICE_ID=cfmeet.calling
+          refuses "unknown runtime environment" CF_RUNTIME_ENVIRONMENT=prod
+          refuses "unknown KYC verifier" NUMBERING_KYC_VERIFIER=external
+          refuses "KYC evidence key without a protected store" NUMBERING_KYC_EVIDENCE_KEY=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+          refuses "unknown provider adapter" NUMBERING_PROVIDERS=carrierx
+          refuses "synthetic provider without a callback secret" NUMBERING_PROVIDERS=synthetic
+
+          ./target/debug/numbering > "$K/run.log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8095/ready; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8095/health | grep -q '"status":"ok"'
+          # Internal routes need a service token; a customer credential is never one.
+          for path in /internal/v1/number-resources/00000000-0000-4000-8000-000000000000 /internal/v1/unknown; do
+            code=$(curl -s -o "$K/a.json" -w '%{http_code}' "http://127.0.0.1:8095$path")
+            test "$code" = "401" && grep -q '"code":"INTERNAL_AUTHENTICATION_FAILED"' "$K/a.json"
+            code=$(curl -s -o "$K/b.json" -w '%{http_code}' -H 'Authorization: Bearer cfmk_live_x_y' "http://127.0.0.1:8095$path")
+            test "$code" = "401" && grep -q '"code":"INTERNAL_AUTHENTICATION_FAILED"' "$K/b.json"
+          done
+          # Customer routes fail closed while Platform Access is unreachable.
+          code=$(curl -s -o "$K/c.json" -w '%{http_code}' -H 'Authorization: Bearer cfmk_live_x_y' http://127.0.0.1:8095/v1/numbers/assignments)
+          test "$code" = "503" && grep -q '"code":"SERVICE_UNAVAILABLE"' "$K/c.json"
+          code=$(curl -s -o "$K/d.json" -w '%{http_code}' http://127.0.0.1:8095/v1/numbers/assignments)
+          test "$code" = "401" && grep -q '"code":"AUTHENTICATION_FAILED"' "$K/d.json"
+          if grep -q -- "PRIVATE KEY" "$K/run.log"; then echo "::error::key material in logs"; exit 1; fi
+          rm -rf "$K"
+
+  docker:
+    name: Docker image (repository-root context)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The context is filtered by services/numbering/Dockerfile.dockerignore to the shared
+      # packages Numbering builds from (service-auth, object-storage, webhooks, its own
+      # contracts) and services/numbering only.
+      - name: docker build
+        working-directory: .
+        run: docker build -f services/numbering/Dockerfile -t cfmeet-numbering:ci .
+      - name: image contains only the Numbering binaries and no key material
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint /bin/ls cfmeet-numbering:ci /app | tr '\n' ' ')" = "numbering numbering-migration "
+          if docker run --rm --entrypoint /bin/sh cfmeet-numbering:ci -c 'grep -rlI --exclude-dir=proc --exclude-dir=sys -- "PRIVATE KEY-----" / 2>/dev/null'; then
+            echo "::error::private key material in the image"; exit 1
+          fi

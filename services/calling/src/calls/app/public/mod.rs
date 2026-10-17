@@ -17,6 +17,7 @@
 
 mod bridge;
 mod callback;
+pub(crate) mod dcn;
 mod dispatch;
 mod events;
 mod failover;
@@ -32,6 +33,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 pub use callback::CreateCallbackRelay;
+pub use dcn::DcnInboundOffer;
 pub use events::EventDisposition;
 pub use inbound::InboundOffer;
 pub use outbound::CreatePublicCall;
@@ -55,6 +57,10 @@ pub struct PublicNetwork {
     pub telephony: Arc<dyn TelephonyPort>,
     pub media: Option<Arc<dyn PublicMediaGateway>>,
     pub flags: TelecomFlags,
+    /// Part IV L closure (`CALLING_SYNTHETIC_INTERCONNECT_ENABLED`, local / test runtimes
+    /// only): synthetic DCN calls may run over Telephony's synthetic test interconnect in
+    /// a sandbox / test environment. Off: they are paid public calls like any other.
+    pub synthetic_interconnect: bool,
 }
 
 impl Default for PublicNetwork {
@@ -63,6 +69,7 @@ impl Default for PublicNetwork {
             telephony: Arc::new(UnconfiguredTelephony),
             media: None,
             flags: TelecomFlags::default(),
+            synthetic_interconnect: false,
         }
     }
 }
@@ -86,6 +93,27 @@ pub fn telecom_flags_from_lookup(
         public_inbound: flag("CALLING_PUBLIC_INBOUND_ENABLED")?,
         callback_relay: flag("CALLING_CALLBACK_RELAY_ENABLED")?,
     })
+}
+
+/// `CALLING_SYNTHETIC_INTERCONNECT_ENABLED` (default off): refused outside the local /
+/// test runtimes, so a staging or production Calling never routes over a test route.
+pub fn synthetic_interconnect_from_lookup(
+    get: &impl Fn(&str) -> Option<String>,
+    runtime: cf_service_auth::RuntimeEnvironment,
+) -> Result<bool, ConfigError> {
+    const VAR: &str = "CALLING_SYNTHETIC_INTERCONNECT_ENABLED";
+    let enabled = match get(VAR).map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+        None | Some("") | Some("false") | Some("0") => false,
+        Some("true") | Some("1") => true,
+        Some(_) => return Err(ConfigError::invalid(VAR, "must be true or false".into())),
+    };
+    if enabled && !runtime.allows_insecure_transport() {
+        return Err(ConfigError::invalid(
+            VAR,
+            format!("the synthetic test interconnect is refused in the {runtime} runtime"),
+        ));
+    }
+    Ok(enabled)
 }
 
 /// Command kinds Calling sends to Telephony.
@@ -369,5 +397,37 @@ impl AppCallService {
             kind,
             call.created_by_service_account_id,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use cf_service_auth::RuntimeEnvironment;
+
+    use super::synthetic_interconnect_from_lookup;
+
+    #[test]
+    fn the_synthetic_interconnect_switch_is_off_by_default_and_refused_outside_local_test() {
+        let none = |_: &str| None;
+        let on =
+            |k: &str| (k == "CALLING_SYNTHETIC_INTERCONNECT_ENABLED").then(|| "true".to_string());
+        for runtime in RuntimeEnvironment::ALL.iter().copied() {
+            assert!(!synthetic_interconnect_from_lookup(&none, runtime).unwrap());
+        }
+        for runtime in [RuntimeEnvironment::Local, RuntimeEnvironment::Test] {
+            assert!(synthetic_interconnect_from_lookup(&on, runtime).unwrap());
+        }
+        for runtime in [RuntimeEnvironment::Staging, RuntimeEnvironment::Production] {
+            let err = synthetic_interconnect_from_lookup(&on, runtime)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("CALLING_SYNTHETIC_INTERCONNECT_ENABLED"),
+                "{err}"
+            );
+        }
+        let bad =
+            |k: &str| (k == "CALLING_SYNTHETIC_INTERCONNECT_ENABLED").then(|| "maybe".to_string());
+        assert!(synthetic_interconnect_from_lookup(&bad, RuntimeEnvironment::Test).is_err());
     }
 }

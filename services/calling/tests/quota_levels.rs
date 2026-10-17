@@ -8,6 +8,8 @@
 
 mod common;
 
+use common::NewServiceAccount;
+
 use std::sync::Arc;
 
 use axum::http::{Method, StatusCode};
@@ -18,7 +20,7 @@ use calling::{
     domain::{EnvironmentKind, PrincipalId, ServiceAccountId},
     platform::{
         context::PlatformAuthContext, limits::LimitValues, principals::ResolvedPrincipal,
-        scopes::names, service_accounts::NewServiceAccount,
+        scopes::names,
     },
     webhooks::{WebhookService, WebhookSettings},
 };
@@ -660,7 +662,7 @@ async fn limits_api_reports_service_account_and_principal_levels_safely() {
         w.h.platform
             .register_principal(
                 w.consumer.env(EnvironmentKind::Sandbox).id,
-                calling::platform::principals::NewPrincipal::External {
+                crate::common::NewPrincipal::External {
                     kind: calling::domain::PrincipalKind::ExternalApplicationPrincipal,
                     external_reference: "sandbox-user".into(),
                 },

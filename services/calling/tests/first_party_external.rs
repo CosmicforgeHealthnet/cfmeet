@@ -3,15 +3,12 @@
 
 mod common;
 
+use common::{NewApplication, NewPrincipal};
+
 use axum::http::{Method, StatusCode};
 use calling::{
     domain::{EnvironmentKind, PrincipalKind, TenantClassification},
-    platform::{
-        applications::NewApplication,
-        principals::{NewPrincipal, PrincipalReference},
-        scopes::names,
-        PlatformError,
-    },
+    platform::{principals::PrincipalReference, scopes::names, PlatformError},
 };
 use common::Harness;
 use serde_json::{json, Value};

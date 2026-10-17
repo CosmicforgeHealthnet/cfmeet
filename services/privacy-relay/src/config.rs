@@ -22,6 +22,9 @@
 //! | `CONTACT_VAULT_KEYRING_FILE` | with the vault | AES-256-GCM encryption keyring (secret file) |
 //! | `CONTACT_FINGERPRINT_KEYRING_FILE` | with the vault | HMAC fingerprint keyring (separate secret file) |
 //! | `CONTACT_DELEGATION_TRUST_BUNDLE_FILE` | with the vault | which issuers' Contact Vault access tokens are accepted |
+//! | `NUMBER_GRANT_TRUST_BUNDLE_FILE` | no | Numbering's routing grant key (DCN inbound caller protection); unset: refused |
+//! | `RELAY_NUMBER_AUTHORITY` | no | `LOCAL` (default, the rollback position) or `NUMBERING`: relay numbers are leased from Numbering (Part IV Part P) |
+//! | `NUMBERING_INTERNAL_BASE_URL` | with `NUMBERING` | Numbering's internal API (relay inventory import, leases, resolution) |
 //!
 //! Without `CALLING_INTERNAL_BASE_URL` enforcement jobs and outbox events stay durably
 //! PENDING (authority is still revoked locally; nothing is falsely reported as applied or
@@ -102,6 +105,8 @@ pub struct RelayConfig {
     pub relay_number_pool_enabled: bool,
     /// `RELAY_NUMBER_COOLDOWN_SECONDS`.
     pub relay_number_cooldown: Duration,
+    /// `RELAY_NUMBER_AUTHORITY` (Part IV Part P).
+    pub relay_number_authority: crate::relay_numbers::authority::AuthorityMode,
 }
 
 /// Default relay-number cooldown: 72 hours. A released number keeps receiving delayed
@@ -205,6 +210,11 @@ impl RelayConfig {
                     )
                 })?,
         };
+        let relay_number_authority = match value("RELAY_NUMBER_AUTHORITY") {
+            None => crate::relay_numbers::authority::AuthorityMode::Local,
+            Some(v) => crate::relay_numbers::authority::AuthorityMode::parse(&v)
+                .ok_or_else(|| invalid("RELAY_NUMBER_AUTHORITY", "must be LOCAL or NUMBERING"))?,
+        };
         Ok(Self {
             database_url,
             database_max_connections,
@@ -215,6 +225,7 @@ impl RelayConfig {
             json_logs,
             relay_number_pool_enabled,
             relay_number_cooldown,
+            relay_number_authority,
         })
     }
 }
@@ -292,6 +303,8 @@ pub struct ServiceAuthSettings {
     pub token_ttl: TokenTtl,
     pub http_timeout: Duration,
     pub calling_base_url: Option<String>,
+    /// `NUMBERING_INTERNAL_BASE_URL`: relay-number leases (Part IV Part P).
+    pub numbering_base_url: Option<String>,
 }
 
 impl ServiceAuthSettings {
@@ -358,6 +371,7 @@ impl ServiceAuthSettings {
             token_ttl,
             http_timeout,
             calling_base_url: value("CALLING_INTERNAL_BASE_URL"),
+            numbering_base_url: value("NUMBERING_INTERNAL_BASE_URL"),
         })
     }
 
@@ -382,6 +396,11 @@ impl ServiceAuthSettings {
             targets
                 .insert(ServiceId::calling(), url)
                 .map_err(|e| invalid("CALLING_INTERNAL_BASE_URL", e.to_string()))?;
+        }
+        if let Some(url) = &self.numbering_base_url {
+            targets
+                .insert(ServiceId::numbering(), url)
+                .map_err(|e| invalid("NUMBERING_INTERNAL_BASE_URL", e.to_string()))?;
         }
         let client = Arc::new(
             InternalServiceClient::new(signer.clone(), targets, self.http_timeout)
@@ -480,12 +499,16 @@ pub struct ContactVaultSettings {
     pub keyring_file: Option<PathBuf>,
     pub fingerprint_keyring_file: Option<PathBuf>,
     pub delegation_trust_file: Option<PathBuf>,
+    /// Numbering's routing grant trust (`NUMBER_GRANT_TRUST_BUNDLE_FILE`).
+    pub number_grant_trust_file: Option<PathBuf>,
 }
 
 /// Loaded Contact Vault material.
 pub struct ContactVaultMaterial {
     pub keys: Option<crate::contact_vault::VaultKeys>,
     pub delegation: Option<cf_service_auth::ContactDelegationVerifier>,
+    /// Numbering's routing grant verification (the DCN inbound caller's scope proof).
+    pub number_grants: Option<cf_service_auth::number_grant::NumberGrantVerifier>,
 }
 
 impl ContactVaultSettings {
@@ -509,6 +532,7 @@ impl ContactVaultSettings {
             keyring_file: value("CONTACT_VAULT_KEYRING_FILE").map(PathBuf::from),
             fingerprint_keyring_file: value("CONTACT_FINGERPRINT_KEYRING_FILE").map(PathBuf::from),
             delegation_trust_file: value("CONTACT_DELEGATION_TRUST_BUNDLE_FILE").map(PathBuf::from),
+            number_grant_trust_file: value("NUMBER_GRANT_TRUST_BUNDLE_FILE").map(PathBuf::from),
         };
         if settings.enabled {
             for (var, v) in [
@@ -580,10 +604,38 @@ impl ContactVaultSettings {
                     ));
                 }
                 Some(cf_service_auth::ContactDelegationVerifier::new(
-                    trust, clock,
+                    trust,
+                    clock.clone(),
                 ))
             }
         };
-        Ok(ContactVaultMaterial { keys, delegation })
+        let number_grants = match &self.number_grant_trust_file {
+            None => None,
+            Some(path) => {
+                let trust = cf_service_auth::number_grant::NumberGrantTrust::from_file(
+                    path,
+                    &privacy_relay_service_id(),
+                    runtime_environment,
+                )
+                .map_err(|err| invalid("NUMBER_GRANT_TRUST_BUNDLE_FILE", err.to_string()))?;
+                let service_keys: std::collections::BTreeSet<&str> =
+                    service_trust.public_keys().collect();
+                if trust.public_keys().any(|k| service_keys.contains(k)) {
+                    return Err(invalid(
+                        "NUMBER_GRANT_TRUST_BUNDLE_FILE",
+                        "a key trusted for service tokens may not be trusted for routing grants",
+                    ));
+                }
+                Some(cf_service_auth::number_grant::NumberGrantVerifier::new(
+                    trust,
+                    clock.clone(),
+                ))
+            }
+        };
+        Ok(ContactVaultMaterial {
+            keys,
+            delegation,
+            number_grants,
+        })
     }
 }

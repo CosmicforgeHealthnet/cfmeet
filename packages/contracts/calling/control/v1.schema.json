@@ -129,6 +129,10 @@
         "targetExtension": {
           "description": "Part F: an enterprise extension number (an internal short code, never a telephone number) resolved in the credential's scope and routed by enterprise configuration over ENTERPRISE_INTERNAL (no public leg, no spend). Requires enterprise.calls.use and initiatorEndpointId; excludes every other target. An unknown number is 404; a policy refusal 403 CALL_NOT_AUTHORIZED; enterprise calling disabled 422 CAPABILITY_UNAVAILABLE.",
           "$ref": "https://schemas.cfmeet.com/calling/enterprise/v1.schema.json#/$defs/ExtensionNumber"
+        },
+        "presentedNumberResourceId": {
+          "description": "Part IV L: a Digital Communications Number (CF Meet Number Resource id — never a telephone number) to present as the caller identity of a targetContactReference call instead of the session's relay identity. Numbering must hold it ACTIVE for the credential's scope with usable outbound voice, and the initiator must be entitled to present it: the owner of a personal / professional number, or an ACTIVE enterprise principal reached through an organization number's voice target (organizational scope alone never suffices). 403 PUBLIC_ROUTE_DENIED otherwise; 503 PUBLIC_ROUTE_UNAVAILABLE while Numbering is unreachable. No other identity is ever substituted.",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
         }
       },
       "oneOf": [
@@ -157,6 +161,11 @@
               {
                 "required": [
                   "targetExtension"
+                ]
+              },
+              {
+                "required": [
+                  "presentedNumberResourceId"
                 ]
               }
             ]
@@ -221,6 +230,11 @@
                 "required": [
                   "targetExtension"
                 ]
+              },
+              {
+                "required": [
+                  "presentedNumberResourceId"
+                ]
               }
             ]
           }
@@ -255,6 +269,11 @@
               {
                 "required": [
                   "privacyRelaySessionId"
+                ]
+              },
+              {
+                "required": [
+                  "presentedNumberResourceId"
                 ]
               }
             ]

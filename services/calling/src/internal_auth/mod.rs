@@ -97,4 +97,9 @@ impl ServiceAuthRuntime {
     pub fn client(&self) -> &InternalServiceClient {
         &self.client
     }
+
+    /// The shared client handle (for adapters that keep it, e.g. Platform Access).
+    pub fn client_arc(&self) -> Arc<InternalServiceClient> {
+        self.client.clone()
+    }
 }

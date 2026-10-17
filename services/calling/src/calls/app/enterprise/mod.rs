@@ -16,6 +16,7 @@
 //! visited set; `enterprise_routing_steps` is the append-only routing evidence.
 
 mod capture;
+mod dcn;
 mod forward;
 mod ivr;
 mod orphans;
@@ -541,7 +542,49 @@ impl AppCallService {
         destination: Destination,
         policy: &EffectivePolicy,
     ) -> CallResult<calls::Model> {
+        self.authorize_enterprise_with_in(
+            txn,
+            cmd,
+            call,
+            kind,
+            extension,
+            destination,
+            policy,
+            None,
+        )
+        .await
+    }
+
+    /// [`Self::authorize_enterprise_in`] for a Call that entered through a DCN (Part IV
+    /// L): the snapshot also names Numbering's verified routing (references only).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn authorize_enterprise_with_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        kind: CallKind,
+        extension: &extensions::ExtensionRow,
+        destination: Destination,
+        policy: &EffectivePolicy,
+        dcn: Option<&crate::numbering::VerifiedInboundGrant>,
+    ) -> CallResult<calls::Model> {
         let mut snapshot = SafeAttributes::new();
+        if let Some(v) = dcn {
+            snapshot.insert(
+                "dcn_number_resource_id",
+                SafeValue::Text(v.number_resource_id.to_string()),
+            )?;
+            snapshot.insert(
+                "dcn_assignment_id",
+                SafeValue::Text(v.assignment_id.to_string()),
+            )?;
+            snapshot.insert(
+                "dcn_routing_revision",
+                SafeValue::from(v.routing_revision as usize),
+            )?;
+            snapshot.insert("dcn_grant_id", SafeValue::Text(v.grant_id.to_string()))?;
+        }
         snapshot.insert("call_kind", SafeValue::Text(kind.to_string()))?;
         snapshot.insert("scope_rule", SafeValue::Text("SAME_ENVIRONMENT".into()))?;
         snapshot.insert("extension_id", SafeValue::Text(extension.id.to_string()))?;
@@ -705,6 +748,7 @@ impl AppCallService {
                 relay_session_id: None,
                 context_id: None,
                 live_telecom_allowed: false,
+                interconnect: crate::routing::engine::InterconnectClass::Public,
                 flags: TelecomFlags::default(),
                 routes: Evidence::Unknown,
                 spend_headroom_minor: Evidence::Unknown,

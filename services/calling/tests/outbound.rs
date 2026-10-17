@@ -4,6 +4,8 @@
 
 mod common;
 
+use common::NewPrincipal;
+
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -16,7 +18,7 @@ use axum::{routing::any, Router};
 use calling::{
     domain::{EnvironmentKind, PrincipalKind, TenantClassification},
     internal_auth::delegation::{delegated_context, outbound_for_customer, DelegationError},
-    platform::principals::{NewPrincipal, PrincipalReference},
+    platform::principals::PrincipalReference,
 };
 use cf_service_auth::{
     client::{InternalCallError, InternalServiceClient, InternalTargets},
@@ -132,7 +134,7 @@ async fn delegated_context_is_built_only_from_trusted_customer_state() {
     }
 }
 
-fn cf_service_auth_secret(credential: &calling::platform::credentials::IssuedCredential) -> &str {
+fn cf_service_auth_secret(credential: &crate::common::IssuedCredential) -> &str {
     common::secret_part(credential.secret.expose_once())
 }
 

@@ -3,12 +3,13 @@
 
 mod common;
 
+use common::NewTenant;
+
 use axum::http::{Method, StatusCode};
 use calling::{
     domain::{EnvironmentKind, TenantClassification},
     platform::{
         limits::{EffectiveLimit, LimitDefaults, LimitSource, LimitValues},
-        tenants::NewTenant,
         PlatformError,
     },
 };

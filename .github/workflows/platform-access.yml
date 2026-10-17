@@ -1,0 +1,264 @@
+name: Platform Access service
+
+# services/platform-access — the shared identity authority (Part IV Workstream B, ADR 0032):
+# Tenant -> Application -> Environment -> Service Account -> API Credential, principals,
+# the scope registry (Calling, Numbering and SMS scopes), first-party vs external
+# classification, credential verification (the Part III verifiers, moved — not
+# re-issued), the identity change feed consumers project from, the operator-only
+# Part III identity import, and the authenticated internal contract
+# (packages/contracts/platform/identity, platform/platform-access-internal-api).
+# It owns its own PostgreSQL database and depends only on packages/service-auth and the
+# contracts. Calling's suite runs against this service's real binaries in calling.yml.
+#
+# CI builds carry no debug info and no incremental state; debug assertions stay on.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/platform-access/**"
+      - "packages/service-auth/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
+      - ".github/workflows/platform-access.yml"
+  pull_request:
+    paths:
+      - "services/platform-access/**"
+      - "packages/service-auth/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
+      - ".github/workflows/platform-access.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: platform-access-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: services/platform-access
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  lint:
+    name: fmt / check / clippy / boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/platform-access -> target
+          key: lint
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo check
+        run: cargo check --workspace --locked
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Repository guards (no other service's source)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if grep -n -E 'services/(calling|numbering|privacy-relay|telephony|meeting-service)|\.\./(calling|numbering|privacy-relay|telephony|meeting-service)|calling-migration' \
+               services/platform-access/Cargo.toml services/platform-access/migration/Cargo.toml; then
+            echo "::error::services/platform-access depends on another service"; exit 1
+          fi
+
+  test:
+    name: test (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      # Each test creates its own database from a migrated template.
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/platform-access -> target
+          key: test
+
+      # Named Part IV §B6 gates first (each a separate step so a failure names the gate),
+      # then the whole workspace.
+      - name: Part III credential continuity, rotation, expiry, revocation, throttling (B6.1-B6.3)
+        run: cargo test --locked --test authentication --test credential_storage
+      - name: Scope registry, first-party / external and privileged grants (B6.4-B6.6)
+        run: cargo test --locked --test scopes
+      - name: Tenant / application / environment isolation and internal authorization (B6.7-B6.9)
+        run: cargo test --locked --test isolation
+      - name: Identity change feed (commit order, no verifier material)
+        run: cargo test --locked --test change_feed
+      - name: Part III identity import (digest-bound, idempotent, verifier-preserving)
+        run: cargo test --locked --test handoff
+      - name: Migrations (up / down / up, schema guards)
+        run: cargo test --locked --test migrations
+      - name: cargo test (whole workspace)
+        run: cargo test --workspace --no-fail-fast --locked
+
+  build:
+    name: build / migration smoke / startup
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/platform-access -> target
+          key: build
+
+      - name: cargo build
+        run: cargo build --workspace --locked
+
+      - name: Migration smoke (up / reset / up)
+        env:
+          PGPASSWORD: postgres
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/platform_access_migration_smoke
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE platform_access_migration_smoke"
+          ./target/debug/platform-access-migration up
+          ./target/debug/platform-access-migration status
+          ./target/debug/platform-access-migration reset
+          ./target/debug/platform-access-migration up
+          q() { psql -h 127.0.0.1 -U postgres -d platform_access_migration_smoke -tAc "$1"; }
+          # Applied = registered migrations (derived from the migrator, never hand-counted).
+          test "$(q "SELECT count(*) FROM platform_access_seaql_migrations")" = "$(grep -c 'Box::new(m20' migration/src/lib.rs)"
+          # The identity hierarchy (8), the change feed, the operator audit, failed-
+          # authentication windows, Part III import receipts and credential principal
+          # restrictions — and nothing of any other service.
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'platform_access_seaql_migrations'")" = "13"
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'platform_access_seaql_migrations' AND tablename NOT LIKE 'platform\_%'")" = "0"
+          # Verifier material lives only in the credential table (never in the change feed).
+          # The one exception is the Part III import receipt's integrity checksum
+          # (`platform_identity_imports.verifier_digest`): a SHA-256 over the whole imported
+          # verifier set, constrained to 64 hex characters — never a usable verifier.
+          test "$(q "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name ~* 'verifier' AND table_name <> 'platform_api_credentials' AND (table_name, column_name) <> ('platform_identity_imports', 'verifier_digest')")" = "0"
+          test "$(q "SELECT data_type || ':' || character_maximum_length FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'platform_identity_imports' AND column_name = 'verifier_digest'")" = "character:64"
+          test "$(q "SELECT count(*) FROM pg_constraint WHERE conname = 'ck_platform_identity_imports_digests' AND pg_get_constraintdef(oid) LIKE '%verifier_digest ~ ''^[0-9a-f]{64}\$''%'")" = "1"
+
+      - name: Per-service database roles with the real migrations
+        env:
+          PLATFORM_ACCESS_MIGRATION_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access-migration
+        run: |
+          set -euo pipefail
+          test -x "$PLATFORM_ACCESS_MIGRATION_BIN"
+          "$GITHUB_WORKSPACE/infra/deployment/postgres/verify-service-isolation.sh" \
+            --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres
+
+      - name: Service starts against the migrated database and refuses unsafe configuration
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/platform_access_migration_smoke
+          PLATFORM_ACCESS_BIND_ADDRESS: 127.0.0.1:8094
+        run: |
+          set -euo pipefail
+          K="$RUNNER_TEMP/service-auth"
+          mkdir -p "$K"
+          cargo run -q --locked --manifest-path ../../packages/service-auth/Cargo.toml --bin cf-service-keygen -- \
+            generate --kid platform-access-ci-1 --out "$K/platform-access-ci-1.pem" > "$K/platform-access-ci-1.jwk.json"
+          test "$(stat -c %a "$K/platform-access-ci-1.pem")" = "600"
+          echo '{"bundle_version":1,"receiver":"cfmeet.platform-access","runtime_environment":"local","trusted_issuers":[]}' > "$K/bundle.json"
+          echo '{"bundle_version":1,"receiver":"cfmeet.platform-access","runtime_environment":"staging","trusted_issuers":[]}' > "$K/staging-bundle.json"
+          echo '{"bundle_version":1,"receiver":"cfmeet.calling","runtime_environment":"local","trusted_issuers":[]}' > "$K/calling-bundle.json"
+          export CF_RUNTIME_ENVIRONMENT=local CF_SERVICE_AUTH_KEY_ID=platform-access-ci-1
+          export CF_SERVICE_AUTH_PRIVATE_KEY_FILE="$K/platform-access-ci-1.pem" CF_SERVICE_TRUST_BUNDLE_FILE="$K/bundle.json"
+          export API_CREDENTIAL_PEPPER="$(openssl rand -base64 48)"
+
+          refuses() { # refuses <description> <env assignments...>: must exit 2 (config error)
+            local what="$1"; shift
+            set +e; env "$@" timeout 30 ./target/debug/platform-access > "$K/out.log" 2>&1; local rc=$?; set -e
+            if [ "$rc" != "2" ]; then
+              echo "::error::service did not refuse to start ($what): exit $rc"; cat "$K/out.log"; exit 1
+            fi
+            if grep -q -- "PRIVATE KEY" "$K/out.log"; then echo "::error::key material in startup output"; exit 1; fi
+            echo "refused as expected: $what"
+          }
+          refuses "missing database URL" DATABASE_URL=
+          refuses "missing pepper" API_CREDENTIAL_PEPPER=
+          refuses "placeholder pepper" API_CREDENTIAL_PEPPER=changeme
+          refuses "invalid failure threshold" PLATFORM_ACCESS_AUTH_FAILURE_THRESHOLD=0
+          refuses "missing signing key" CF_SERVICE_AUTH_PRIVATE_KEY_FILE=
+          refuses "unreadable signing key" CF_SERVICE_AUTH_PRIVATE_KEY_FILE="$K/missing.pem"
+          refuses "inline private key" CF_SERVICE_AUTH_PRIVATE_KEY=inline
+          refuses "missing trust bundle" CF_SERVICE_TRUST_BUNDLE_FILE=
+          refuses "bundle for another runtime environment" CF_SERVICE_TRUST_BUNDLE_FILE="$K/staging-bundle.json"
+          refuses "bundle of another receiver" CF_SERVICE_TRUST_BUNDLE_FILE="$K/calling-bundle.json"
+          refuses "wrong service identity" CF_SERVICE_ID=cfmeet.calling
+          refuses "unknown runtime environment" CF_RUNTIME_ENVIRONMENT=prod
+
+          ./target/debug/platform-access > "$K/run.log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8094/ready; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8094/health | grep -q '"status":"ok"'
+          # Every identity route is internal and requires a service token — a customer
+          # credential is never accepted in its place.
+          for path in /internal/v1/scopes /internal/v1/identity/context /internal/v1/admin/tenants; do
+            code=$(curl -s -o "$K/a.json" -w '%{http_code}' "http://127.0.0.1:8094$path")
+            test "$code" = "401" && grep -q '"code":"INTERNAL_AUTHENTICATION_FAILED"' "$K/a.json"
+            code=$(curl -s -o "$K/b.json" -w '%{http_code}' -H 'Authorization: Bearer cfmk_live_x_y' "http://127.0.0.1:8094$path")
+            test "$code" = "401" && grep -q '"code":"INTERNAL_AUTHENTICATION_FAILED"' "$K/b.json"
+          done
+          code=$(curl -s -o "$K/c.json" -w '%{http_code}' -X POST -H 'content-type: application/json' \
+            -d '{"credential":"cfmk_live_x_y"}' http://127.0.0.1:8094/internal/v1/credentials/authenticate)
+          test "$code" = "401" && grep -q '"code":"INTERNAL_AUTHENTICATION_FAILED"' "$K/c.json"
+          if grep -q -- "PRIVATE KEY" "$K/run.log"; then echo "::error::key material in logs"; exit 1; fi
+          if grep -qF -- "$API_CREDENTIAL_PEPPER" "$K/run.log" "$K"/*.json; then echo "::error::the pepper appears in logs or responses"; exit 1; fi
+          rm -rf "$K"
+
+  docker:
+    name: Docker image (repository-root context)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The context is filtered by services/platform-access/Dockerfile.dockerignore to
+      # packages/service-auth and services/platform-access only.
+      - name: docker build
+        working-directory: .
+        run: docker build -f services/platform-access/Dockerfile -t cfmeet-platform-access:ci .
+      - name: image contains only the Platform Access binaries and no key material
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint /bin/ls cfmeet-platform-access:ci /app | tr '\n' ' ')" = "platform-access platform-access-admin platform-access-migration "
+          if docker run --rm --entrypoint /bin/sh cfmeet-platform-access:ci -c 'grep -rlI --exclude-dir=proc --exclude-dir=sys -- "PRIVATE KEY-----" / 2>/dev/null'; then
+            echo "::error::private key material in the image"; exit 1
+          fi

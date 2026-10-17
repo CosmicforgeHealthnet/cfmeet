@@ -1,16 +1,15 @@
 //! Applications / projects: every consumer product — first-party or external — is an
 //! application of a tenant. There is no product-specific schema or code path.
+//!
+//! Read-only projection of the Platform Access authority (ADR 0032).
 
 use chrono::{DateTime, Utc};
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    QueryOrder,
-};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::Serialize;
 
-use super::{display_name, PlatformError, PlatformResult, PlatformService};
+use super::{PlatformError, PlatformResult, PlatformService};
 use crate::{
-    domain::{ApplicationId, ApplicationStatus, Slug, TenantId},
+    domain::{ApplicationId, ApplicationStatus, TenantId},
     models::applications,
 };
 
@@ -39,54 +38,7 @@ impl From<applications::Model> for ApplicationView {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct NewApplication {
-    pub slug: String,
-    pub display_name: String,
-}
-
 impl PlatformService {
-    /// Creates an application owned by `tenant_id` (never re-parentable).
-    pub async fn create_application(
-        &self,
-        tenant_id: TenantId,
-        new: NewApplication,
-    ) -> PlatformResult<ApplicationView> {
-        self.create_application_in(&self.db, tenant_id, new).await
-    }
-
-    pub(crate) async fn create_application_in<C: ConnectionTrait>(
-        &self,
-        db: &C,
-        tenant_id: TenantId,
-        new: NewApplication,
-    ) -> PlatformResult<ApplicationView> {
-        let slug = Slug::parse(&new.slug).map_err(PlatformError::Validation)?;
-        let display_name = display_name(&new.display_name)?;
-        let tenant = self.tenant(tenant_id).await?;
-        let now = self.clock.now();
-        let model = applications::ActiveModel {
-            id: Set(ApplicationId::generate().as_uuid()),
-            tenant_id: Set(tenant.id.as_uuid()),
-            slug: Set(slug.as_str().to_string()),
-            display_name: Set(display_name),
-            status: Set(ApplicationStatus::Active),
-            created_at: Set(now),
-            updated_at: Set(now),
-        }
-        .insert(db)
-        .await
-        .map_err(|e| match PlatformError::from(e) {
-            PlatformError::Conflict(_) => PlatformError::Conflict(format!(
-                "application `{slug}` already exists in tenant `{}`",
-                tenant.slug
-            )),
-            other => other,
-        })?;
-        tracing::info!(tenant_id = %model.tenant_id, application_id = %model.id, "application created");
-        Ok(model.into())
-    }
-
     pub async fn application(&self, id: ApplicationId) -> PlatformResult<ApplicationView> {
         applications::Entity::find_by_id(id.as_uuid())
             .one(&self.db)
@@ -121,34 +73,5 @@ impl PlatformService {
             .into_iter()
             .map(Into::into)
             .collect())
-    }
-
-    pub async fn set_application_status(
-        &self,
-        id: ApplicationId,
-        status: ApplicationStatus,
-    ) -> PlatformResult<ApplicationView> {
-        self.set_application_status_in(&self.db, id, status).await
-    }
-
-    pub(crate) async fn set_application_status_in<C: ConnectionTrait>(
-        &self,
-        db: &C,
-        id: ApplicationId,
-        status: ApplicationStatus,
-    ) -> PlatformResult<ApplicationView> {
-        let model = applications::Entity::find_by_id(id.as_uuid())
-            .one(db)
-            .await?
-            .ok_or(PlatformError::NotFound("application"))?;
-        if model.status == status {
-            return Ok(model.into());
-        }
-        let mut active: applications::ActiveModel = model.into();
-        active.status = Set(status);
-        active.updated_at = Set(self.clock.now());
-        let model = active.update(db).await?;
-        tracing::info!(application_id = %model.id, status = %model.status, "application status changed");
-        Ok(model.into())
     }
 }

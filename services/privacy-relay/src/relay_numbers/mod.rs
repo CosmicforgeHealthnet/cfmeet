@@ -23,6 +23,7 @@
 //!   waits on an inventory row: SKIP LOCKED).
 
 pub mod assignment;
+pub mod authority;
 pub mod inbound;
 pub mod inventory;
 pub mod retention;

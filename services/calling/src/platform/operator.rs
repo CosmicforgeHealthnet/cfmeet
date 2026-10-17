@@ -1,6 +1,11 @@
 //! Operator audit of platform administration (Part H §72.8; table
 //! `platform_operator_audit`, migrations 000034 / 000038 / 000042).
 //!
+//! Identity administration (tenants … credentials, principals) moved to Platform Access
+//! with the identity authority (ADR 0032); its vocabulary stays here because the
+//! append-only audit keeps the Part III rows. Calling still audits its own policy
+//! administration (limits, routing / spend policy, …) and the identity hand-off.
+//!
 //! Every mutating administration operation takes an explicit [`OperatorContext`] — WHO
 //! acts and the correlation id of the command — and writes exactly ONE audit row in the
 //! SAME transaction as the mutation: the row exists if and only if the change committed.
@@ -24,21 +29,10 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use super::{
-    applications::{ApplicationView, NewApplication},
-    credentials::{CredentialView, IssueCredential, IssuedCredential, RotateCredential},
-    environments::EnvironmentView,
-    limits::LimitValues,
-    principals::{NewPrincipal, PrincipalView},
-    scopes::ApplicationScopeView,
-    service_accounts::{NewServiceAccount, ServiceAccountView},
-    tenants::{NewTenant, TenantView},
-    PlatformError, PlatformResult, PlatformService,
+    credentials::CredentialView, limits::LimitValues, principals::PrincipalView,
+    service_accounts::ServiceAccountView, PlatformError, PlatformResult, PlatformService,
 };
-use crate::domain::{
-    ApplicationId, ApplicationStatus, CredentialId, EnvironmentId, EnvironmentKind,
-    EnvironmentStatus, PrincipalId, PrincipalStatus, ServiceAccountId, ServiceAccountStatus,
-    TenantId, TenantStatus,
-};
+use crate::domain::{ApplicationId, CredentialId, PrincipalId, ServiceAccountId, TenantId};
 
 /// The environment variable `platform_admin` reads the operator id from when
 /// `--operator` is absent.
@@ -77,6 +71,10 @@ text_enum!(
         PrincipalTombstoned = "PRINCIPAL_TOMBSTONED",
         WebhookKeysResealed = "WEBHOOK_KEYS_RESEALED",
         IncidentResolved = "INCIDENT_RESOLVED",
+        IdentityExported = "IDENTITY_EXPORTED",
+        IdentityHandoffVerified = "IDENTITY_HANDOFF_VERIFIED",
+        IdentityHandoffCompleted = "IDENTITY_HANDOFF_COMPLETED",
+        IdentityVerifiersRestored = "IDENTITY_VERIFIERS_RESTORED",
     }
 );
 
@@ -95,6 +93,7 @@ text_enum!(
         RetentionHold = "RETENTION_HOLD",
         WebhookKeyRing = "WEBHOOK_KEY_RING",
         Incident = "INCIDENT",
+        IdentityHandoff = "IDENTITY_HANDOFF",
     }
 );
 
@@ -272,283 +271,6 @@ macro_rules! audited {
 }
 
 impl PlatformService {
-    pub async fn operator_create_tenant(
-        &self,
-        op: &OperatorContext,
-        new: NewTenant,
-    ) -> PlatformResult<TenantView> {
-        audited!(self, op, |txn| {
-            let t = self.create_tenant_in(&txn, new).await?;
-            let entry = AuditEntry::new(
-                OperatorAction::TenantCreated,
-                AuditTargetKind::Tenant,
-                t.id.as_uuid(),
-            )
-            .scope(Some(t.id.as_uuid()), None, None)
-            .detail(json!({ "classification": t.classification.as_str() }));
-            (t, entry)
-        })
-    }
-
-    pub async fn operator_set_tenant_status(
-        &self,
-        op: &OperatorContext,
-        id: TenantId,
-        status: TenantStatus,
-    ) -> PlatformResult<TenantView> {
-        audited!(self, op, |txn| {
-            let t = self.set_tenant_status_in(&txn, id, status).await?;
-            let entry = AuditEntry::new(
-                OperatorAction::TenantStatusSet,
-                AuditTargetKind::Tenant,
-                t.id.as_uuid(),
-            )
-            .scope(Some(t.id.as_uuid()), None, None)
-            .detail(json!({ "status": status.as_str() }));
-            (t, entry)
-        })
-    }
-
-    pub async fn operator_create_application(
-        &self,
-        op: &OperatorContext,
-        tenant_id: TenantId,
-        new: NewApplication,
-    ) -> PlatformResult<ApplicationView> {
-        audited!(self, op, |txn| {
-            let a = self.create_application_in(&txn, tenant_id, new).await?;
-            let entry = AuditEntry::new(
-                OperatorAction::ApplicationCreated,
-                AuditTargetKind::Application,
-                a.id.as_uuid(),
-            )
-            .scope(Some(a.tenant_id.as_uuid()), Some(a.id.as_uuid()), None);
-            (a, entry)
-        })
-    }
-
-    pub async fn operator_set_application_status(
-        &self,
-        op: &OperatorContext,
-        id: ApplicationId,
-        status: ApplicationStatus,
-    ) -> PlatformResult<ApplicationView> {
-        audited!(self, op, |txn| {
-            let a = self.set_application_status_in(&txn, id, status).await?;
-            let entry = AuditEntry::new(
-                OperatorAction::ApplicationStatusSet,
-                AuditTargetKind::Application,
-                a.id.as_uuid(),
-            )
-            .scope(Some(a.tenant_id.as_uuid()), Some(a.id.as_uuid()), None)
-            .detail(json!({ "status": status.as_str() }));
-            (a, entry)
-        })
-    }
-
-    pub async fn operator_create_environment(
-        &self,
-        op: &OperatorContext,
-        application_id: ApplicationId,
-        kind: EnvironmentKind,
-    ) -> PlatformResult<EnvironmentView> {
-        audited!(self, op, |txn| {
-            let e = self
-                .create_environment_in(&txn, application_id, kind)
-                .await?;
-            let entry = environment_entry(OperatorAction::EnvironmentCreated, &e)
-                .detail(json!({ "kind": kind.as_str() }));
-            (e, entry)
-        })
-    }
-
-    pub async fn operator_set_environment_status(
-        &self,
-        op: &OperatorContext,
-        id: EnvironmentId,
-        status: EnvironmentStatus,
-    ) -> PlatformResult<EnvironmentView> {
-        audited!(self, op, |txn| {
-            let e = self.set_environment_status_in(&txn, id, status).await?;
-            let entry = environment_entry(OperatorAction::EnvironmentStatusSet, &e)
-                .detail(json!({ "status": status.as_str() }));
-            (e, entry)
-        })
-    }
-
-    pub async fn operator_set_live_telecom_allowed(
-        &self,
-        op: &OperatorContext,
-        id: EnvironmentId,
-        allowed: bool,
-    ) -> PlatformResult<EnvironmentView> {
-        audited!(self, op, |txn| {
-            let e = self.set_live_telecom_allowed_in(&txn, id, allowed).await?;
-            let entry = environment_entry(OperatorAction::EnvironmentLiveTelecomSet, &e)
-                .detail(json!({ "liveTelecomAllowed": allowed }));
-            (e, entry)
-        })
-    }
-
-    pub async fn operator_create_service_account(
-        &self,
-        op: &OperatorContext,
-        environment_id: EnvironmentId,
-        new: NewServiceAccount,
-    ) -> PlatformResult<ServiceAccountView> {
-        audited!(self, op, |txn| {
-            let sa = self
-                .create_service_account_in(&txn, environment_id, new)
-                .await?;
-            let entry = service_account_entry(OperatorAction::ServiceAccountCreated, &sa);
-            (sa, entry)
-        })
-    }
-
-    pub async fn operator_set_service_account_status(
-        &self,
-        op: &OperatorContext,
-        id: ServiceAccountId,
-        status: ServiceAccountStatus,
-    ) -> PlatformResult<ServiceAccountView> {
-        audited!(self, op, |txn| {
-            let sa = self.set_service_account_status_in(&txn, id, status).await?;
-            let entry = service_account_entry(OperatorAction::ServiceAccountStatusSet, &sa)
-                .detail(json!({ "status": status.as_str() }));
-            (sa, entry)
-        })
-    }
-
-    /// Issues a credential (audited). The raw secret is in the result only: the audit
-    /// row carries the credential id, public id and scope names.
-    pub async fn operator_issue_credential(
-        &self,
-        op: &OperatorContext,
-        service_account_id: ServiceAccountId,
-        request: IssueCredential,
-    ) -> PlatformResult<IssuedCredential> {
-        audited!(self, op, |txn| {
-            let issued = self
-                .issue_credential_in(&txn, service_account_id, request)
-                .await?;
-            let entry = credential_entry(OperatorAction::CredentialCreated, &issued.credential);
-            (issued, entry)
-        })
-    }
-
-    pub async fn operator_rotate_credential(
-        &self,
-        op: &OperatorContext,
-        credential_id: CredentialId,
-        request: RotateCredential,
-    ) -> PlatformResult<IssuedCredential> {
-        audited!(self, op, |txn| {
-            let issued = self
-                .rotate_credential_in(&txn, credential_id, request)
-                .await?;
-            let mut entry = credential_entry(OperatorAction::CredentialRotated, &issued.credential);
-            entry.target_id = Some(credential_id.as_uuid());
-            entry.detail["successorCredentialId"] = json!(issued.credential.id);
-            (issued, entry)
-        })
-    }
-
-    pub async fn operator_revoke_credential(
-        &self,
-        op: &OperatorContext,
-        credential_id: CredentialId,
-    ) -> PlatformResult<CredentialView> {
-        audited!(self, op, |txn| {
-            let view = self.revoke_credential_in(&txn, credential_id).await?;
-            let entry = credential_entry(OperatorAction::CredentialRevoked, &view);
-            (view, entry)
-        })
-    }
-
-    pub async fn operator_grant_application_scope(
-        &self,
-        op: &OperatorContext,
-        application_id: ApplicationId,
-        scope: &str,
-    ) -> PlatformResult<ApplicationScopeView> {
-        let application = self.application(application_id).await?;
-        audited!(self, op, |txn| {
-            let view = self
-                .grant_application_scope_in(&txn, application_id, scope)
-                .await?;
-            let entry = AuditEntry::new(
-                OperatorAction::ScopeGranted,
-                AuditTargetKind::Application,
-                application_id.as_uuid(),
-            )
-            .scope(
-                Some(application.tenant_id.as_uuid()),
-                Some(application_id.as_uuid()),
-                None,
-            )
-            .detail(json!({ "scope": view.scope }));
-            (view, entry)
-        })
-    }
-
-    pub async fn operator_revoke_application_scope(
-        &self,
-        op: &OperatorContext,
-        application_id: ApplicationId,
-        scope: &str,
-    ) -> PlatformResult<bool> {
-        let application = self.application(application_id).await?;
-        // Only a registry name is echoed into the audit row (never arbitrary input).
-        let name = self.registry.definition(scope).map(|d| d.name);
-        audited!(self, op, |txn| {
-            let removed = self
-                .revoke_application_scope_in(&txn, application_id, scope)
-                .await?;
-            let entry = AuditEntry::new(
-                OperatorAction::ScopeRevoked,
-                AuditTargetKind::Application,
-                application_id.as_uuid(),
-            )
-            .scope(
-                Some(application.tenant_id.as_uuid()),
-                Some(application_id.as_uuid()),
-                None,
-            )
-            .detail(json!({ "scope": name.unwrap_or("UNKNOWN"), "removed": removed }));
-            (removed, entry)
-        })
-    }
-
-    pub async fn operator_register_principal(
-        &self,
-        op: &OperatorContext,
-        environment_id: EnvironmentId,
-        new: NewPrincipal,
-    ) -> PlatformResult<(PrincipalView, bool)> {
-        audited!(self, op, |txn| {
-            let (p, created) = self
-                .register_principal_in(&txn, environment_id, new)
-                .await?;
-            let entry = principal_entry(OperatorAction::PrincipalRegistered, &p)
-                .detail(json!({ "kind": p.kind.as_str(), "created": created }));
-            ((p, created), entry)
-        })
-    }
-
-    pub async fn operator_set_principal_status(
-        &self,
-        op: &OperatorContext,
-        id: PrincipalId,
-        status: PrincipalStatus,
-    ) -> PlatformResult<PrincipalView> {
-        audited!(self, op, |txn| {
-            let p = self.set_principal_status_in(&txn, id, status).await?;
-            let entry = principal_entry(OperatorAction::PrincipalStatusSet, &p)
-                .detail(json!({ "status": status.as_str() }));
-            (p, entry)
-        })
-    }
-
     pub async fn operator_set_tenant_limits(
         &self,
         op: &OperatorContext,
@@ -646,14 +368,6 @@ impl PlatformService {
     }
 }
 
-fn environment_entry(action: OperatorAction, e: &EnvironmentView) -> AuditEntry {
-    AuditEntry::new(action, AuditTargetKind::Environment, e.id.as_uuid()).scope(
-        Some(e.tenant_id.as_uuid()),
-        Some(e.application_id.as_uuid()),
-        Some(e.id.as_uuid()),
-    )
-}
-
 fn service_account_entry(action: OperatorAction, sa: &ServiceAccountView) -> AuditEntry {
     AuditEntry::new(action, AuditTargetKind::ServiceAccount, sa.id.as_uuid()).scope(
         Some(sa.tenant_id.as_uuid()),
@@ -715,9 +429,9 @@ mod tests {
 
     #[test]
     fn the_action_vocabulary_is_the_tables() {
-        // Kept in step with migrations 000034 + 000038 + 000042 + 000043 (an unknown
+        // Kept in step with migrations 000034 + 000038 + 000042 + 000043 + 000044 (an unknown
         // code is refused there).
-        assert_eq!(OperatorAction::ALL.len(), 30);
-        assert_eq!(AuditTargetKind::ALL.len(), 12);
+        assert_eq!(OperatorAction::ALL.len(), 34);
+        assert_eq!(AuditTargetKind::ALL.len(), 13);
     }
 }

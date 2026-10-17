@@ -73,8 +73,8 @@ struct Rec {
     e: EnterpriseWorld,
     store: Arc<MemoryObjectStore>,
     capture: Arc<RecordingCapture>,
-    admin: calling::platform::credentials::IssuedCredential,
-    reader: calling::platform::credentials::IssuedCredential,
+    admin: crate::common::IssuedCredential,
+    reader: crate::common::IssuedCredential,
 }
 
 impl Rec {

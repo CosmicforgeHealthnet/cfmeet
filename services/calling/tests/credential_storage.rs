@@ -1,5 +1,7 @@
-//! D. Credential storage: the raw credential is returned once and never persisted; only a
-//! keyed verifier is stored; every read path is masked.
+//! D. Credential storage. Platform Access owns credentials and their verifiers (its own
+//! `credential_storage` tests prove the keyed-verifier storage); Calling's projection holds
+//! neither the raw credential nor any verifier of a credential Platform Access issued, and
+//! every Calling read path is masked.
 
 mod common;
 
@@ -9,12 +11,10 @@ use calling::{
     platform::{credentials::CredentialFilter, error::summarize_db_error, scopes::names},
 };
 use common::{dump_database, secret_part, Harness};
-use hmac::{Hmac, Mac};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
-use sha2::{Digest, Sha256};
 
 #[tokio::test]
-async fn raw_secret_is_never_persisted_only_a_keyed_verifier() {
+async fn calling_holds_neither_the_raw_secret_nor_a_verifier() {
     let Some(h) = Harness::new().await else {
         return;
     };
@@ -25,8 +25,10 @@ async fn raw_secret_is_never_persisted_only_a_keyed_verifier() {
     let token = issued.secret.expose_once().to_string();
     let secret_hex = secret_part(&token).to_string();
     assert_eq!(secret_hex.len(), 64);
+    // Authenticating (through Platform Access) does not leave anything behind either.
+    h.ctx(&token).await;
 
-    // Search every row of every table for the secret (and its halves).
+    // Search every row of every Calling table for the secret (and its halves).
     let dump = dump_database(h.conn()).await;
     assert!(dump.contains(&issued.credential.public_id), "dump sanity");
     for needle in [
@@ -41,27 +43,16 @@ async fn raw_secret_is_never_persisted_only_a_keyed_verifier() {
         );
     }
 
-    // The verifier is present: 32 bytes, keyed algorithm, version 1.
+    // The projected credential carries no verifier at all — only what masking needs.
     let row = api_credentials::Entity::find_by_id(issued.credential.id.as_uuid())
         .one(h.conn())
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(row.verifier.0.len(), 32);
-    assert_eq!(row.verifier_algorithm, "HMAC_SHA256");
-    assert_eq!(row.verifier_key_version, 1);
+    assert!(row.verifier.is_none());
+    assert!(row.verifier_algorithm.is_none());
+    assert!(row.verifier_key_version.is_none());
     assert_eq!(row.last_four, &secret_hex[60..]);
-
-    // It is not an unkeyed hash of the secret or the token.
-    let secret_bytes = hex::decode(&secret_hex).unwrap();
-    assert_ne!(row.verifier.0, Sha256::digest(&secret_bytes).to_vec());
-    assert_ne!(row.verifier.0, Sha256::digest(token.as_bytes()).to_vec());
-    // Nor an HMAC under some other key (e.g. an empty pepper).
-    let mut unkeyed = Hmac::<Sha256>::new_from_slice(b"").unwrap();
-    unkeyed.update(&secret_bytes);
-    assert_ne!(row.verifier.0, unkeyed.finalize().into_bytes().to_vec());
-    // The Debug output of the row does not reveal the verifier.
-    assert!(format!("{row:?}").contains("Verifier([REDACTED])"));
 }
 
 #[tokio::test]
@@ -143,7 +134,9 @@ async fn database_error_summaries_never_echo_row_content() {
     let mut bad: api_credentials::ActiveModel = row.into();
     bad.id = Set(uuid::Uuid::new_v4());
     bad.public_id = Set("0123456789abcdef01234567".to_string());
-    bad.verifier = Set(api_credentials::Verifier(marker));
+    bad.verifier = Set(Some(api_credentials::Verifier(marker)));
+    bad.verifier_algorithm = Set(Some("HMAC_SHA256".to_string()));
+    bad.verifier_key_version = Set(Some(1));
     bad.rotated_from_credential_id = Set(None);
     let err = bad.insert(h.conn()).await.unwrap_err();
     let summary = summarize_db_error(&err);

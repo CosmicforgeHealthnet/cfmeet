@@ -593,11 +593,36 @@ fn calling_never_handles_raw_contact_values() {
 #[test]
 fn privacy_relay_and_telephony_are_peer_services_and_later_services_do_not_exist_yet() {
     let services = manifest_dir().join("..");
-    for future in ["numbering", "contact-vault"] {
-        assert!(
-            !services.join(future).exists(),
-            "services/{future} must not exist before its implementation phase"
-        );
+    assert!(
+        !services.join("contact-vault").exists(),
+        "services/contact-vault must not exist before its implementation phase"
+    );
+    // Platform Access (the identity authority) and Numbering (Part IV) are peer services:
+    // Calling reaches Platform Access over authenticated internal HTTP only and never
+    // depends on either's source, migrations or database.
+    for peer in ["platform-access", "numbering"] {
+        assert!(services.join(peer).join("Cargo.toml").exists(), "{peer}");
+    }
+    for manifest in ["Cargo.toml", "migration/Cargo.toml"] {
+        let text = std::fs::read_to_string(manifest_dir().join(manifest)).unwrap();
+        for peer in ["platform-access", "platform_access", "numbering"] {
+            assert!(!text.contains(peer), "{manifest} depends on {peer}");
+        }
+    }
+    for (file, code) in production_sources() {
+        for forbidden in [
+            "platform_access_migration",
+            "numbering_migration",
+            "use platform_access::",
+            "use numbering::",
+            "number_resources",
+            "dcn_assignments",
+        ] {
+            assert!(
+                !code.contains(forbidden),
+                "{file} reaches into a peer service (`{forbidden}`)"
+            );
+        }
     }
     // Privacy Relay (Part D) is its own deployable service: Calling reaches it only over
     // authenticated internal HTTP and never depends on its source or migrations.
@@ -781,24 +806,32 @@ fn call_domain_guards_detect_violations() {
     );
 }
 
+/// Part IV (ADR 0032): credentials are issued and verified by Platform Access only. Calling
+/// never displays a raw credential, holds no verifier keyring or pepper, and computes no
+/// verifier (the repository boundary guard enforces the same across services).
 #[test]
-fn raw_credentials_are_exposed_only_at_the_issuance_display_site() {
+fn calling_never_handles_raw_credentials_or_verifier_material() {
     for (file, code) in production_sources() {
-        if code.contains("expose_once()") {
-            assert_eq!(
-                file, "src/bin/platform_admin.rs",
-                "{file} exposes a raw credential"
+        for forbidden in [
+            "expose_once()",
+            "VerifierKeyring",
+            "CredentialPepper",
+            "verifier_message",
+            "compute_current",
+            "Hmac<",
+        ] {
+            assert!(!code.contains(forbidden), "{file} contains `{forbidden}`");
+        }
+        // The pepper's variable names appear only in the configuration that refuses them.
+        if file != "src/config/mod.rs" {
+            assert!(
+                !code.contains("API_CREDENTIAL_PEPPER"),
+                "{file} reads the credential pepper"
             );
         }
-        // Secret containers never derive Serialize / Display.
-        if file == "src/domain/secret.rs" {
-            assert!(!code.contains("Serialize"));
-            assert!(!code.contains("impl fmt::Display"));
-            assert!(!code.contains("derive(Debug"));
-        }
     }
-    let admin = production_code_of(&manifest_dir().join("src/bin/platform_admin.rs"));
-    assert_eq!(admin.matches("expose_once()").count(), 1);
+    assert!(!manifest_dir().join("src/domain/secret.rs").exists());
+    assert!(!manifest_dir().join("src/platform/verifier.rs").exists());
 }
 
 #[test]

@@ -5,10 +5,12 @@
 
 mod common;
 
+use common::NewPrincipal;
+
 use axum::http::{Method, StatusCode};
 use calling::{
     domain::{EnvironmentKind, PrincipalKind, TenantClassification},
-    platform::principals::{NewPrincipal, PrincipalReference, PrincipalResolutionError},
+    platform::principals::{PrincipalReference, PrincipalResolutionError},
 };
 use common::Harness;
 use serde_json::json;
@@ -275,7 +277,7 @@ async fn calls_are_confined_to_their_tenant_application_and_environment() {
         return;
     };
     let call = w.call_in(CallState::Connected).await;
-    let shared = || Harness::on(w.h.db.clone(), common::TEST_PEPPER, w.h.clock.clone());
+    let shared = || Harness::on(w.h.db.clone(), w.h.clock.clone());
     let others = [
         CallWorld::in_harness(shared(), "tenant-b", EnvironmentKind::Production).await,
         CallWorld::for_consumer(
@@ -403,13 +405,11 @@ async fn calls_are_confined_to_their_tenant_application_and_environment() {
 mod cross_scope {
     use std::sync::Arc;
 
+    use crate::common::IssuedCredential;
     use axum::http::{Method, StatusCode};
     use calling::{
-        calls::app::enterprise::CapturedMedia,
-        domain::EnvironmentKind,
-        enterprise::policy::AdminCapability,
-        platform::{credentials::IssuedCredential, scopes::names},
-        webhooks::WebhookSettings,
+        calls::app::enterprise::CapturedMedia, domain::EnvironmentKind,
+        enterprise::policy::AdminCapability, platform::scopes::names, webhooks::WebhookSettings,
     };
     use cf_object_storage::MemoryObjectStore;
     use cf_webhooks::{endpoint::EndpointPolicy, secret_box::SecretBox};

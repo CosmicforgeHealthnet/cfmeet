@@ -10,7 +10,9 @@ name: Calling service
 # Independent of
 # services/meeting-service: this workflow never builds or starts the Meeting Service.
 # It depends only on the shared packages/service-auth crate and the Calling / platform
-# contracts in packages/contracts.
+# contracts in packages/contracts — and, at runtime, on Platform Access (the identity
+# authority, ADR 0032): the test job runs Calling's suite against the REAL
+# services/platform-access binaries (each with its own database, signed internal HTTP).
 #
 # CI builds carry no debug info and no incremental state (as in backend.yml);
 # debug assertions stay on.
@@ -20,6 +22,7 @@ on:
     branches: [main, staging]
     paths:
       - "services/calling/**"
+      - "services/platform-access/**"
       - "packages/service-auth/**"
       - "packages/object-storage/**"
       - "packages/webhooks/**"
@@ -29,6 +32,7 @@ on:
   pull_request:
     paths:
       - "services/calling/**"
+      - "services/platform-access/**"
       - "packages/service-auth/**"
       - "packages/object-storage/**"
       - "packages/webhooks/**"
@@ -120,8 +124,16 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: services/calling -> target
+          workspaces: |
+            services/calling -> target
+            services/platform-access -> target
           key: test
+
+      # Calling verifies every customer credential through Platform Access: its tests start
+      # the real server (and migrate its own database) per test database.
+      - name: Build Platform Access
+        working-directory: services/platform-access
+        run: cargo build --workspace --bins --locked
 
       # Unit + PostgreSQL integration tests: migrations, tenant isolation, first-party vs
       # external, credential storage, authentication, environment isolation, scopes,
@@ -138,6 +150,9 @@ jobs:
       # reconciliation), call control / transfer / idempotency, WebSocket signaling,
       # two-instance LISTEN / NOTIFY fan-out, contract conformance and load paths.
       - name: cargo test
+        env:
+          PLATFORM_ACCESS_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access
+          PLATFORM_ACCESS_MIGRATION_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access-migration
         run: cargo test --workspace --no-fail-fast --locked
 
   build:
@@ -177,9 +192,11 @@ jobs:
           cargo run -q --locked -p calling-migration -- reset
           cargo run -q --locked -p calling-migration -- up
           # Platform tables: 11 (Part B) + tenant / service-account / principal limits,
-          # compliance eligibility, operator audit + the failed-authentication windows (000043).
+          # compliance eligibility, operator audit + the failed-authentication windows (000043,
+          # retired by Part IV but kept until the contract step) + the Platform Access
+          # projection cursor and identity hand-off record (000044, ADR 0032).
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
-            "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'platform\_%'")" = "17"
+            "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'platform\_%'")" = "19"
           # Call domain (Part C §15–§25, Part D §26–§30 evidence, Part E §37–§51 routing,
           # public-network parties / bridges / telephony commands and events, spend): calls
           # + 28 call_* tables + the outbox; Part F §55 adds call_answer_group_claims (the
@@ -252,7 +269,9 @@ jobs:
           echo '{"bundle_version":1,"receiver":"cfmeet.calling","runtime_environment":"staging","trusted_issuers":[]}' > "$K/staging-bundle.json"
           export CF_RUNTIME_ENVIRONMENT=local CF_SERVICE_AUTH_KEY_ID=calling-ci-1
           export CF_SERVICE_AUTH_PRIVATE_KEY_FILE="$K/calling-ci-1.pem" CF_SERVICE_TRUST_BUNDLE_FILE="$K/bundle.json"
-          export API_CREDENTIAL_PEPPER="$(openssl rand -base64 48)"
+          # Platform Access (the identity authority) need not be up for Calling to start; the
+          # target must be configured.
+          export CF_PLATFORM_ACCESS_BASE_URL=http://127.0.0.1:8094
           export CALLING_SIGNALING_SIGNING_KEY="$(openssl rand -base64 48)"
           LK_SECRET="$(openssl rand -hex 32)"
           EDGE_KEY="$(openssl rand -hex 32)"
@@ -267,7 +286,8 @@ jobs:
             if grep -q -- "PRIVATE KEY" "$K/out.log"; then echo "::error::key material in startup output"; exit 1; fi
             echo "refused as expected: $what"
           }
-          refuses "placeholder pepper" API_CREDENTIAL_PEPPER=changeme
+          refuses "credential pepper left in Calling (owned by Platform Access)" API_CREDENTIAL_PEPPER="$(openssl rand -base64 48)"
+          refuses "missing Platform Access target" CF_PLATFORM_ACCESS_BASE_URL=
           refuses "missing signing key" CF_SERVICE_AUTH_PRIVATE_KEY_FILE=
           refuses "unreadable signing key" CF_SERVICE_AUTH_PRIVATE_KEY_FILE="$K/missing.pem"
           refuses "inline private key" CF_SERVICE_AUTH_PRIVATE_KEY=inline
@@ -350,7 +370,7 @@ jobs:
           test "$code" = "401" -o "$code" = "405"
           grep -q "internal service authentication ready" "$K/run.log"
           if grep -q -- "PRIVATE KEY" "$K/run.log"; then echo "::error::key material in logs"; exit 1; fi
-          for secret in "$LK_SECRET" "$EDGE_KEY" "$CALLING_SIGNALING_SIGNING_KEY" "$API_CREDENTIAL_PEPPER"; do
+          for secret in "$LK_SECRET" "$EDGE_KEY" "$CALLING_SIGNALING_SIGNING_KEY"; do
             if grep -qF -- "$secret" "$K/run.log" "$K"/*.json; then echo "::error::a secret appears in logs or responses"; exit 1; fi
           done
           rm -rf "$K"

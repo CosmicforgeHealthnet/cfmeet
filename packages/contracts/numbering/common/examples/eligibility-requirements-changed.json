@@ -1,0 +1,32 @@
+{
+  "eligibilityDecisionId": "6f8b0d2e-4a6c-4b8d-9f0e-2a4c6e8b0d2f",
+  "outcome": "ADDITIONAL_EVIDENCE_REQUIRED",
+  "reasons": [
+    {
+      "code": "KYC_REQUIREMENTS_CHANGED",
+      "outcome": "ADDITIONAL_EVIDENCE_REQUIRED"
+    }
+  ],
+  "subject": {
+    "subjectKind": "INDIVIDUAL",
+    "subjectRef": "0e2a4c6e-8a0c-4e2a-9c4e-6a8c0e2a4c6e"
+  },
+  "countryCode": "US",
+  "inventoryClass": "SYNTHETIC",
+  "numberType": "MOBILE",
+  "ownershipClass": "PERSONAL",
+  "numberResourceId": null,
+  "requestedCapabilities": [
+    "SMS_INBOUND",
+    "VOICE_INBOUND"
+  ],
+  "kycCaseId": "7a1c3b5d-9f01-4e2d-8b6f-5f0b2c1e8d3a",
+  "kycCaseRevision": 5,
+  "requirementSetIds": [
+    "3c5e7a9b-1d3f-4e5a-8c7b-9d1f3e5a7c9b"
+  ],
+  "catalogRevision": 4,
+  "policyVersion": "2026-10-18",
+  "evaluatedAt": "2031-04-01T10:00:00Z",
+  "validUntil": "2031-04-01T10:30:00Z"
+}

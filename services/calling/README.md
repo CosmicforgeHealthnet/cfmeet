@@ -35,12 +35,13 @@ Provider room / dialog / carrier / request identifiers are never Call identities
 | **Part D §26–§30** Privacy Relay ingress (`/v1/privacy-relay/...`), `PRIVACY_RELAY_V1` protected calls and transfers (fail closed), `POST /internal/v1/privacy-relay/enforcement` | **Implemented** (ADR 0010; the business authority is `services/privacy-relay`) |
 | **Part E §37–§51** Routing Engine and route plans, public-network calls executed by `services/telephony` (ContactReference parties, durable command outbox, normalized events, bridges, spend reservations, failover) | **Implemented** (ADRs 0013–0017). **Real lawful telecom interconnect certification remains an external blocker (ADR 0016): no PSTN result is claimed** |
 | **Part F §52–§62** Enterprise calling and continuity on the ONE canonical Call | **Implemented** (ADRs 0018–0027; summary below) |
+| **Part IV Workstream L** Calls to and from Digital Communications Numbers (DCNs) owned by `services/numbering` (inbound DCN offers verified against Numbering, outbound DCN presentation with enterprise membership policy and single-use caller-identity grants) | **Implemented** (ADR 0041; summary below) |
 | **Part G §63–§70** Durable event publication, customer webhooks, `call.route_changed`, usage facts and `GET /v1/usage`, tenant → application → service account → credential limits and the principal axis, `GET /v1/limits`, limit notices | **Implemented** (ADR 0028; summary below) |
 
 **Deferred (later sections / services):** push delivery through a push vendor (a
 transport-neutral push-ready payload is produced), a message-broker transport for
-platform events, quality metrics from providers that do not offer them, Numbering,
-billing / invoicing / pricing, and the Part F items listed below.
+platform events, quality metrics from providers that do not offer them, Numbering's own
+lifecycle and number administration (it is a separate service), billing / invoicing / pricing, and the Part F items listed below.
 
 HTTP surface (contract:
 [`packages/contracts/calling/http/v1.openapi.json`](../../packages/contracts/calling/http/v1.openapi.json),
@@ -391,6 +392,44 @@ closed with 503).
 
 Migration 000015 adds the two evidence tables.
 
+## Digital Communications Numbers (Part IV Workstream L, ADR 0041)
+
+Numbering owns DCNs (assignments, lifecycle, routing revision, grants); Calling holds
+references only and never a number. `CF_NUMBERING_BASE_URL` configures the port
+(`src/numbering`); unset or unreachable, every DCN operation fails closed while
+application, relay-number and enterprise calls are unaffected.
+
+* **Inbound** `POST /internal/v1/telephony/dcn-inbound-calls` (`telephony-inbound.offer`):
+  Calling verifies Numbering's INBOUND_VOICE grant against Numbering's CURRENT state
+  (`grant-verifications`, audience Calling); the relayed scope, number, assignment,
+  routing revision and target must equal the verified ones (otherwise
+  `CALL_NOT_AUTHORIZED`, never corrected). Routing follows the VERIFIED target only:
+  `PRINCIPAL` → PSTN_TO_APP (no Privacy Relay session; authorization
+  `DCN_ROUTING_V1` with the number-free DCN evidence); `ENTERPRISE_EXTENSION` /
+  `ENTERPRISE_RING_GROUP` / `ENTERPRISE_QUEUE` → the enterprise router entered through
+  the extension (for a group / queue: the scope's ACTIVE extension publishing it);
+  anything else → `PUBLIC_ROUTE_DENIED` (`DCN_TARGET_UNSUPPORTED`). Entry destinations
+  needing prompts / capture on the caller's leg (IVR, voicemail, schedules) are refused
+  for DCN calls.
+* **Outbound** `presentedNumberResourceId` on a `targetContactReference` call: Numbering's
+  delegated current-assignment view, then Calling's presentation policy — a personal /
+  professional number only for its owner; an organization number only for an ACTIVE
+  principal reached through its voice target (the extension's principal, a ring group's
+  member, a queue's ACTIVE member, a department member). Organizational scope alone never
+  suffices. The policy is re-checked at dispatch, where Numbering issues the single-use
+  CALLER_IDENTITY grant for exactly that origination (`leg:{callLegId}:{commandId}`);
+  Telephony receives it as `presentedIdentity` and consumes it before transmission. No
+  relay identity is lent for such a call and none is ever substituted for a refused DCN.
+* **Synthetic TEST interconnect** (ADR 0041 decision 7). Numbering's `inventoryClass`
+  decides the interconnect class at the route-policy boundary: a REAL DCN uses PUBLIC
+  routes under the unchanged PRODUCTION + `live_telecom_allowed` gate; a SYNTHETIC DCN
+  uses `SYNTHETIC_TEST` routes only, and only with `CALLING_SYNTHETIC_INTERCONNECT_ENABLED`
+  (refused at start-up outside local / test) in an ACTIVE SANDBOX / TEST environment —
+  never where live telecom is allowed (`SYNTHETIC_INTERCONNECT_NOT_ALLOWED`). Every other
+  routing gate still applies. An offer whose class does not match Numbering's inventory
+  is refused (`INTERCONNECT_MISMATCH`); a sandbox call without a DCN is still a paid
+  public call and is refused (`LIVE_TELECOM_NOT_ALLOWED`).
+
 ## Internal service authentication
 
 ```text
@@ -415,51 +454,48 @@ peer service ◄─ X-CF-Service-Authorization: Bearer <EdDSA JWS> ◄───�
 
 ADR: [0004 — Internal service authentication](../../docs/decisions/0004-internal-service-authentication.md).
 
-## Model
+## Identity (owned by Platform Access, ADR 0032)
+
+Since Part IV the platform identity hierarchy is owned by **Platform Access**
+(`services/platform-access`): tenants, applications, environments, service accounts, API
+credentials (issuance, rotation, revocation, verifiers), scopes, principals and the
+failed-authentication throttle. Calling keeps a **read-only projection** of the hierarchy
+in its `platform_*` tables (same ids, `pa_revision`-guarded) so its foreign keys, limits,
+enterprise configuration and call evidence are unchanged.
 
 ```text
 Tenant (FIRST_PARTY | EXTERNAL; ACTIVE | SUSPENDED)
-└── Application (ACTIVE | SUSPENDED) ── allowed scopes ── limit policy
+└── Application (ACTIVE | SUSPENDED) ── allowed scopes ── limit policy (Calling)
     └── Environment (SANDBOX | TEST | PRODUCTION; ACTIVE | SUSPENDED; live_telecom_allowed)
         ├── Service account (ACTIVE | SUSPENDED | REVOKED)
-        │   └── API credential (ACTIVE | REVOKED; validity window; rotation links) ── granted scopes ── limit policy
+        │   └── API credential (ACTIVE | REVOKED; validity window; rotation links) ── granted scopes ── limit policy (Calling)
         └── Principal (7 categories, opaque reference; ACTIVE | SUSPENDED | DEACTIVATED)
 ```
 
-* Every child row carries its whole ownership chain and references its parent with a
-  composite foreign key on `(…ownership…, id)`, so a row can never point at a parent of
-  another tenant / application / environment. Ownership columns are immutable (trigger).
-* An application has exactly one environment of each kind. SANDBOX and TEST can never
-  have `live_telecom_allowed = true` (validated and `CHECK`-enforced); PRODUCTION starts
-  with it disabled.
-* FIRST_PARTY is a trust classification only. CosmicForge products and external
-  customers are ordinary applications; privileges exist only as explicit scopes.
-
-## API credentials
-
-Format: `cfmk_<sbx|test|live>_<public id: 24 hex>_<secret: 64 hex>`.
-
-* The secret is 32 bytes from the OS CSPRNG. The environment tag is convenience only; it
-  grants nothing and is bound into the verifier, so an edited tag never verifies.
-* The database stores `HMAC-SHA-256(API_CREDENTIAL_PEPPER, context ‖ tag ‖ public id ‖
-  secret)` plus algorithm and pepper version — never the secret. Verification is
-  constant time. The raw credential is returned once, at creation or rotation.
-* Authentication (`Authorization: Bearer <credential>`) loads the credential's full
-  authority chain in one query and requires: verifier match, credential ACTIVE, not
-  revoked, inside its validity window and rotation overlap, and service account,
-  environment, application and tenant all ACTIVE. No caches: suspension and revocation
-  apply to the next request. Every failure returns the same `AUTHENTICATION_FAILED` 401.
-* Scopes come from a server-side registry, must be allowed for the application
-  (foreign-key enforced) and are loaded from the database at authentication; requests
-  cannot add scopes. `PlatformAuthContext::require_scope` is the check for handlers.
-* Rotation issues an independent successor for the same service account (scopes and
-  credential limits preserved) and limits the predecessor to `min(original expiry,
-  now + overlap)`. Revocation is immediate and idempotent.
+* **Authentication** (`Authorization: Bearer cfmk_…`): every request is verified live by
+  Platform Access (`POST /internal/v1/credentials/authenticate`, internal service
+  authentication); the returned authority chain refreshes the projection. Suspension and
+  revocation apply to the next request; every failure is the same `AUTHENTICATION_FAILED`
+  401; Platform Access unreachable is a 503 (fail closed). Above Platform Access's
+  failure threshold further failures are answered 429 and Calling raises one
+  `CREDENTIAL_GUESSING` incident.
+* **Projection**: the identity change feed is applied every
+  `CALLING_IDENTITY_SYNC_INTERVAL_MS` (default 1 s) and on demand when a principal is not
+  yet projected. Calling never writes identity rows of its own.
+* **No verifier material**: Calling holds no pepper (it refuses to start with any
+  `API_CREDENTIAL_*` setting) and, after the hand-off, no verifier.
+* **Scopes** come from Platform Access's registry; `PlatformAuthContext::require_scope`
+  is the check for handlers. `names::ALL` lists the scopes Calling enforces (each must be
+  registered by Platform Access).
+* **Hand-off** of a Part III estate: `platform_admin identity export | verify-handoff |
+  complete-handoff | restore-verifiers | status` with `platform-access-admin identity
+  import | export` — see ADR 0032 for the procedure and the rollback path.
 
 ## Principals
 
 `PlatformAuthContext` says which application / service account is calling.
-`PrincipalResolver::resolve(ctx, reference)` resolves *who takes part* — only inside the
+`PrincipalResolver::resolve(ctx, reference)` resolves *who takes part* (from the
+projection; principals are registered at Platform Access) — only inside the
 context's tenant, application and environment; a principal elsewhere is reported exactly
 like a nonexistent one. Authentication never creates or implies a principal; a service
 account is a principal only if explicitly registered as a linked SERVICE_ACCOUNT
@@ -499,10 +535,12 @@ window and never carry an identifier.
 
 ## Configuration
 
-See [`.env.example`](.env.example). Required: `DATABASE_URL`, `CALLING_SIGNALING_SIGNING_KEY`, `API_CREDENTIAL_PEPPER`
-(≥ 32 random bytes, e.g. `openssl rand -base64 48`; placeholder values are rejected and
-there is no fallback), `CF_RUNTIME_ENVIRONMENT`, `CF_SERVICE_AUTH_KEY_ID`,
-`CF_SERVICE_AUTH_PRIVATE_KEY_FILE` and `CF_SERVICE_TRUST_BUNDLE_FILE`. The service exits
+See [`.env.example`](.env.example). Required: `DATABASE_URL`, `CALLING_SIGNALING_SIGNING_KEY`,
+`CF_PLATFORM_ACCESS_BASE_URL` (the identity authority), `CF_RUNTIME_ENVIRONMENT`,
+`CF_SERVICE_AUTH_KEY_ID`, `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` and
+`CF_SERVICE_TRUST_BUNDLE_FILE`. Platform Access's trust bundle must grant
+`cfmeet.calling` `platform-credential.authenticate`, `platform-principal.resolve`,
+`platform-principal.register` and `platform-identity.read`. The service exits
 at startup if its identity, key, trust bundle or runtime environment is missing or
 inconsistent. The Calling service owns its own database.
 
@@ -520,6 +558,7 @@ consult a switch (`tests/feature_rollback.rs`).
 | `CALLING_PUBLIC_OUTBOUND_ENABLED` | `false` | App-to-phone calls (and the outbound legs of every public class) |
 | `CALLING_PUBLIC_INBOUND_ENABLED` | `false` | Phone-to-app / phone-to-phone inbound calls |
 | `CALLING_CALLBACK_RELAY_ENABLED` | `false` | Callback relay (requires public outbound too) |
+| `CALLING_SYNTHETIC_INTERCONNECT_ENABLED` | `false` | Synthetic DCN voice over Telephony's SYNTHETIC_TEST interconnect (local / test runtimes only; refused at start-up elsewhere) |
 | `ENTERPRISE_CALLING_ENABLED` | `false` | New enterprise routing (extensions, SIP desk offers) |
 | `VOICEMAIL_ENABLED` | `false` | New voicemail routing / capture |
 | `CALL_RECORDING_ENABLED` | `false` | New call recordings |
@@ -585,7 +624,8 @@ app refusals.
 ## Running locally (no Docker required)
 
 ```bash
-cp .env.example .env              # set DATABASE_URL, API_CREDENTIAL_PEPPER, CALLING_SIGNALING_SIGNING_KEY
+# Platform Access first (services/platform-access/README.md): it verifies every credential.
+cp .env.example .env              # set DATABASE_URL, CALLING_SIGNALING_SIGNING_KEY, CF_PLATFORM_ACCESS_BASE_URL
 # A local signing key (outside the repository) and a trust bundle with no peers yet:
 mkdir -p ~/.cfmeet && cargo run -q --manifest-path ../../packages/service-auth/Cargo.toml \
   --bin cf-service-keygen -- generate --kid calling-local-1 --out ~/.cfmeet/calling-local-1.pem
@@ -601,8 +641,9 @@ From the repository root: `make calling-migrate`, `make calling`.
 
 ## Administration
 
-`platform_admin` uses the same domain services as future administration APIs. There are
-no public credential-management endpoints.
+`platform_admin` administers what Calling owns. Identity (tenants … credentials, scopes,
+principals) is administered with **`platform-access-admin`** (services/platform-access);
+Calling's CLI reads the identity projection (masked — it never sees a raw credential).
 
 Every mutating command names the acting operator (`--operator <id>` or
 `CF_OPERATOR_ID`) and is refused (exit 2, nothing changed) without one; each mutation
@@ -613,17 +654,8 @@ as the change. Read-only commands need no operator.
 ```bash
 export CF_OPERATOR_ID=ops.alice
 A="cargo run -q --bin platform_admin --"
-$A tenant create --slug acme --name "Acme" --classification external
-$A application create --tenant acme --slug dispatch --name "Dispatch"
-$A environment create --tenant acme --application dispatch --environment production
-$A service-account create --tenant acme --application dispatch --environment production --name backend
-$A scope grant --tenant acme --application dispatch --scope principals.read
-$A credential create --tenant acme --application dispatch --environment production \
-   --service-account backend --scope principals.read      # prints the secret ONCE
-$A credential rotate --credential <public id> --overlap-minutes 60
-$A credential revoke --credential <public id>
-$A principal register --tenant acme --application dispatch --environment production \
-   --kind external-application-principal --reference user-123
+$A tenant list
+$A credential list --tenant acme --application dispatch      # masked
 $A limits set-credential --credential <public id> --requests-per-minute 120
 $A limits effective --credential <public id>
 $A compliance set --tenant acme --application dispatch --environment production \
@@ -639,25 +671,33 @@ $A retention hold --tenant acme --application dispatch --environment production 
 $A retention hold --platform-wide --reason security-investigation
 $A retention list [--all]
 $A retention release --hold <id>
-$A principal tombstone --principal <id>       # DEACTIVATED for ever, reference replaced
+$A principal tombstone --principal <id>       # holds checked here, tombstoned at Platform Access
+$A identity sync                              # apply the identity change feed now
 $A webhooks reseal --batch 100                # one WEBHOOK_KEYS_RESEALED audit row
 # Operational incidents (§86): list is read-only; resolve is operator-audited.
 $A incidents list --status open --category TELEPHONY_COMMAND_DEAD
 $A incidents resolve --incident <id>           # one INCIDENT_RESOLVED audit row
 ```
 
-`$A --help` lists every command (suspend / reactivate for tenants, applications,
-environments, service accounts and principals; `environment set-live-telecom`; scope
-registry; credential show / list). Output is JSON on stdout; audit lines go to stderr.
+`$A --help` lists every command (read-only tenant / application / environment /
+service-account / credential / principal views, the identity hand-off commands). Output is JSON on stdout; audit lines go to stderr.
 
 ## Tests
 
 ```bash
+make calling-test          # builds Platform Access and runs the suite against it
+# or, by hand:
+(cd ../platform-access && cargo build --workspace --bins)
 TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres \
+PLATFORM_ACCESS_BIN=../platform-access/target/debug/platform-access \
+PLATFORM_ACCESS_MIGRATION_BIN=../platform-access/target/debug/platform-access-migration \
   cargo test --workspace --no-fail-fast
 ```
 
-Each test clones its own database from a migrated template (no Docker needed). Without
+Each test clones its own database from a migrated template (no Docker needed) and gets
+its own REAL Platform Access process with its own database: Calling authenticates every
+credential through it exactly as in production (`tests/common/identity.rs`;
+`identity_handoff` runs the Part III hand-off across both services' operator CLIs). Without
 `TEST_DATABASE_URL` the database suites fail, unless `CFMEET_SKIP_DB_TESTS=1` is set
 (explicit SKIPPED lines). Suites: `migrations`, `tenant_isolation`,
 `first_party_external`, `credential_storage`, `authentication`, `environment_isolation`,

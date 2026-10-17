@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "SMS_BLOCKED",
+    "message": "A safety control refused the message.",
+    "requestId": "req_6f1c2d3e4a5b4c6d8e7f90a1b2c3d4e5",
+    "reason": "RECIPIENT_OPTED_OUT",
+    "messageId": "0b2c8f5e-7a41-4d3e-9b6c-1f2e3d4c5b6a"
+  }
+}

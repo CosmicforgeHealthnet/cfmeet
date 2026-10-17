@@ -60,6 +60,13 @@ catalog! {
     "usage.recorded" => names::USAGE_READ,
     "limit.warning" => names::USAGE_READ,
     "limit.exceeded" => names::USAGE_READ,
+    "sms.received" => names::SMS_READ,
+    "sms.requested" => names::SMS_READ,
+    "sms.submitted" => names::SMS_READ,
+    "sms.delivered" => names::SMS_READ,
+    "sms.failed" => names::SMS_READ,
+    "sms.unknown" => names::SMS_READ,
+    "sms.blocked" => names::SMS_READ,
 }
 
 pub fn definition(name: &str) -> Option<&'static EventTypeDef> {
@@ -223,10 +230,90 @@ pub fn project_privacy_relay(envelope: &Value) -> Option<PublicEvent> {
     Some(PublicEvent { event_type, data })
 }
 
+/// SMS message keys that may cross (internal snake_case → public camelCase; numeric?).
+const SMS_KEYS: &[(&str, &str, bool)] = &[
+    ("message_id", "messageId", false),
+    ("thread_id", "threadId", false),
+    ("number_resource_id", "numberResourceId", false),
+    ("direction", "direction", false),
+    ("status", "status", false),
+    ("segment_count", "segmentCount", true),
+    ("encoding", "encoding", false),
+    ("principal_id", "principalId", false),
+    ("target_kind", "targetKind", false),
+    ("target_ref", "targetRef", false),
+    ("failure_code", "failureCode", false),
+    ("blocked_reason", "blockedReason", false),
+];
+
+/// Projects an SMS Gateway envelope (`sms-gateway.message.<fact>` → `sms.<fact>`). The
+/// public data are references, status and bounded codes only: never content, a number
+/// (not even masked), a provider reference or a grant.
+pub fn project_sms_gateway(envelope: &Value) -> Option<PublicEvent> {
+    let internal = envelope.get("event_type")?.as_str()?;
+    let payload = envelope.get("payload")?.as_object()?;
+    let event_type = match internal {
+        "sms-gateway.message.received" => "sms.received",
+        "sms-gateway.message.requested" => "sms.requested",
+        "sms-gateway.message.submitted" => "sms.submitted",
+        "sms-gateway.message.delivered" => "sms.delivered",
+        "sms-gateway.message.failed" => "sms.failed",
+        "sms-gateway.message.unknown" => "sms.unknown",
+        "sms-gateway.message.blocked" => "sms.blocked",
+        _ => return None,
+    };
+    let mut data = Map::new();
+    for (internal, public, numeric) in SMS_KEYS {
+        if let Some(v) = payload.get(*internal).and_then(|v| safe_value(v, *numeric)) {
+            data.insert((*public).to_string(), v);
+        }
+    }
+    data.get("messageId")?;
+    Some(PublicEvent { event_type, data })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn sms_events_carry_references_and_codes_only() {
+        let env = json!({ "event_type": "sms-gateway.message.received", "payload": {
+            "message_id": "8d3e2a1c-0b6f-4c1e-9a49-6f0e3f2d1c7a", "direction": "INBOUND",
+            "status": "RECEIVED", "segment_count": 2, "encoding": "GSM7",
+            "thread_id": "11111111-1111-4111-8111-111111111111",
+            "number_resource_id": "22222222-2222-4222-8222-222222222222",
+            "remote_masked": "+***0123", "content": "hello", "from": "+15550100123",
+            "provider_message_ref": "dsms-1", "target_kind": "PRINCIPAL",
+            "target_ref": "33333333-3333-4333-8333-333333333333" } });
+        let e = project_sms_gateway(&env).unwrap();
+        assert_eq!(e.event_type, "sms.received");
+        assert_eq!(
+            Value::Object(e.data),
+            json!({ "messageId": "8d3e2a1c-0b6f-4c1e-9a49-6f0e3f2d1c7a", "direction": "INBOUND",
+                    "status": "RECEIVED", "segmentCount": 2, "encoding": "GSM7",
+                    "threadId": "11111111-1111-4111-8111-111111111111",
+                    "numberResourceId": "22222222-2222-4222-8222-222222222222",
+                    "targetKind": "PRINCIPAL", "targetRef": "33333333-3333-4333-8333-333333333333" })
+        );
+        for (internal, public) in [
+            ("requested", "sms.requested"),
+            ("submitted", "sms.submitted"),
+            ("delivered", "sms.delivered"),
+            ("failed", "sms.failed"),
+            ("unknown", "sms.unknown"),
+            ("blocked", "sms.blocked"),
+        ] {
+            let mut e = env.clone();
+            e["event_type"] = json!(format!("sms-gateway.message.{internal}"));
+            assert_eq!(project_sms_gateway(&e).unwrap().event_type, public);
+            assert!(definition(public).is_some());
+        }
+        let mut other = env.clone();
+        other["event_type"] = json!("sms-gateway.message.internal-fact");
+        assert!(project_sms_gateway(&other).is_none());
+    }
 
     #[test]
     fn catalog_names_are_unique_and_scoped() {

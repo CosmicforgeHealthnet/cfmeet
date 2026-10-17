@@ -1,0 +1,674 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet SMS Gateway API",
+    "version": "1.2.0",
+    "description": "HTTP surface of services/sms-gateway: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/sms (credential verified by Platform Access on every request; scopes sms.read/ sms.send; 503 when Platform Access is unreachable — fail closed); provider callbacks under /provider-callbacks/v1/sms (adapter signature). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 32 KiB."
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "security": [],
+        "description": "Liveness.",
+        "responses": {
+          "200": {
+            "description": "Alive.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "operationId": "ready",
+        "security": [],
+        "description": "Readiness: database, migrations, provider configured, outbox / unknown-transport backlog (counts only).",
+        "responses": {
+          "200": {
+            "description": "Ready.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not ready.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "openapi",
+        "security": [],
+        "description": "This document (the served contract).",
+        "responses": {
+          "200": {
+            "description": "The OpenAPI document.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sms/messages/{messageId}": {
+      "get": {
+        "operationId": "getMessage",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "One message of the credential's environment (scope sms.read). Another environment's message is NOT_FOUND. Content is returned to its owner only; the remote party is masked.",
+        "parameters": [
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/Message"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sms/messages": {
+      "get": {
+        "operationId": "listMessages",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Messages of the environment, newest first (scope sms.read), optionally of one number (`numberResourceId`) or direction.",
+        "parameters": [
+          {
+            "name": "numberResourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/Direction"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/MessagePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "sendMessage",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Sends ONE message (scope sms.send, Idempotency-Key required). Validation, segmentation (CONTENT_TOO_LONG above 10 segments), the safety controls (SMS_BLOCKED with a reason, recorded; 429 RATE_LIMITED for rate windows, not recorded), Numbering's single-use SMS_SENDER grant (an arbitrary sender id is impossible; refusal = SMS_BLOCKED SENDER_NOT_AUTHORIZED; Numbering unreachable = 503 NUMBERING_UNAVAILABLE, nothing recorded), then a durable AUTHORIZED transport submitted by the dispatcher. 202 with the message; the same key replays it (200).",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/SendMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted (AUTHORIZED; submission is asynchronous).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/Message"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Replayed (same Idempotency-Key and request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/Message"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sms/threads": {
+      "get": {
+        "operationId": "listThreads",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Transport threads of the environment, most recent first (scope sms.read).",
+        "parameters": [
+          {
+            "name": "numberResourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/ThreadPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sms/threads/{threadId}/messages": {
+      "get": {
+        "operationId": "listThreadMessages",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "The messages of one thread, newest first (scope sms.read).",
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/MessagePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/provider-callbacks/v1/sms/{providerId}/inbound": {
+      "post": {
+        "operationId": "providerInboundCallback",
+        "security": [
+          {
+            "providerSignature": []
+          }
+        ],
+        "description": "A provider's inbound message. Authenticated by the adapter (signature over the raw body, timestamp window) BEFORE parsing; de-duplicated by the provider event id. The destination is resolved by Numbering (sms-destination-resolutions): ROUTED → stored sealed for the owning environment (sms.received); not routable → QUARANTINED (never delivered to a customer). 503 while Numbering is unreachable (the provider retries; nothing is stored).",
+        "parameters": [
+          {
+            "name": "providerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/CallbackAck"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sms/opt-outs": {
+      "post": {
+        "operationId": "createOptOut",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Blocks a recipient for one number or the whole environment (scope sms.send). Idempotent.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/OptOutRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Blocked (already or newly).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/OptOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/provider-callbacks/v1/sms/{providerId}/delivery-receipts": {
+      "post": {
+        "operationId": "providerDeliveryReceiptCallback",
+        "security": [
+          {
+            "providerSignature": []
+          }
+        ],
+        "description": "A provider's delivery receipt. Authenticated before parsing, de-duplicated by event id; applied by the state machine (SUBMITTED / UNKNOWN → DELIVERED / FAILED; a receipt after a final state is STALE; an unknown reference UNMATCHED). Confirms the cost.",
+        "parameters": [
+          {
+            "name": "providerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/CallbackAck"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "customerCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A CF Meet API credential, verified by Platform Access (never by the SMS Gateway)."
+      },
+      "providerSignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Provider-Signature",
+        "description": "The provider adapter's HMAC-SHA256 signature over the raw body with X-Provider-Timestamp (300 s window) and X-Provider-Event-Id."
+      },
+      "cfServiceAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Service-Authorization",
+        "description": "Bearer <service token> (cfmeet.platform.internal-http)."
+      }
+    },
+    "schemas": {
+      "HealthStatus": {
+        "description": "Liveness.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "service"
+        ],
+        "properties": {
+          "status": {
+            "const": "ok"
+          },
+          "service": {
+            "const": "sms-gateway"
+          }
+        }
+      },
+      "Readiness": {
+        "description": "Readiness (counts only).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "service",
+          "database",
+          "migrations",
+          "provider",
+          "outboxPending",
+          "outboxDeadLetter",
+          "transportsUnknown"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "ready",
+              "not_ready"
+            ]
+          },
+          "service": {
+            "const": "sms-gateway"
+          },
+          "database": {
+            "enum": [
+              "ok",
+              "unavailable"
+            ]
+          },
+          "migrations": {
+            "enum": [
+              "current",
+              "pending",
+              "unknown"
+            ]
+          },
+          "provider": {
+            "enum": [
+              "configured",
+              "none"
+            ]
+          },
+          "outboxPending": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "outboxDeadLetter": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "transportsUnknown": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "SMS Gateway error envelope.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

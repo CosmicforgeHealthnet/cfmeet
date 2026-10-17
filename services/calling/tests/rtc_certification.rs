@@ -46,7 +46,7 @@ use common::{
     app::{AppWorld, Device},
     calls::CallWorld,
     fake_media::FakeMediaProvider,
-    test_runtime, Harness, TestDb, TEST_PEPPER,
+    test_runtime, Harness, TestDb,
 };
 use serde_json::{json, Value};
 use tokio::{
@@ -288,7 +288,6 @@ impl Cert {
         };
         let h = Harness::with_runtime(
             db,
-            TEST_PEPPER,
             calling::domain::ManualClock::new(chrono::Utc::now()),
             Arc::new(FakeMediaProvider::default()),
             bus.clone(),
@@ -746,7 +745,7 @@ async fn enterprise_extension_call(cert: &Cert) {
             .platform
             .register_principal(
                 cert.a.w.consumer.env(cert.a.w.kind).id,
-                calling::platform::principals::NewPrincipal::External {
+                crate::common::NewPrincipal::External {
                     kind: calling::domain::PrincipalKind::EnterpriseMember,
                     external_reference: reference.to_string(),
                 },
@@ -946,7 +945,7 @@ async fn enterprise_ring_groups(cert: &Cert) {
             .platform
             .register_principal(
                 cert.a.w.consumer.env(cert.a.w.kind).id,
-                calling::platform::principals::NewPrincipal::External {
+                crate::common::NewPrincipal::External {
                     kind: calling::domain::PrincipalKind::EnterpriseMember,
                     external_reference: reference,
                 },
@@ -1113,7 +1112,7 @@ async fn enterprise_queue(cert: &Cert) {
             .platform
             .register_principal(
                 cert.a.w.consumer.env(cert.a.w.kind).id,
-                calling::platform::principals::NewPrincipal::External {
+                crate::common::NewPrincipal::External {
                     kind: calling::domain::PrincipalKind::EnterpriseMember,
                     external_reference: reference.to_string(),
                 },
@@ -1282,7 +1281,7 @@ async fn enterprise_transfer(cert: &Cert) {
             .platform
             .register_principal(
                 cert.a.w.consumer.env(cert.a.w.kind).id,
-                calling::platform::principals::NewPrincipal::External {
+                crate::common::NewPrincipal::External {
                     kind: calling::domain::PrincipalKind::EnterpriseMember,
                     external_reference: reference.to_string(),
                 },
@@ -2115,7 +2114,7 @@ async fn enterprise_member(
         .platform
         .register_principal(
             cert.a.w.consumer.env(cert.a.w.kind).id,
-            calling::platform::principals::NewPrincipal::External {
+            crate::common::NewPrincipal::External {
                 kind: calling::domain::PrincipalKind::EnterpriseMember,
                 external_reference: reference.to_string(),
             },
@@ -2132,16 +2131,13 @@ async fn enterprise_member(
         .unwrap()
 }
 
-async fn scoped(
-    cert: &Cert,
-    scopes: &[&'static str],
-) -> calling::platform::credentials::IssuedCredential {
+async fn scoped(cert: &Cert, scopes: &[&'static str]) -> crate::common::IssuedCredential {
     common::enterprise::credential(cert.a.h(), &cert.a.w.consumer, cert.a.w.kind, scopes).await
 }
 
 async fn send(
     cert: &Cert,
-    token: &calling::platform::credentials::IssuedCredential,
+    token: &crate::common::IssuedCredential,
     method: Method,
     path: &str,
     body: Option<Value>,

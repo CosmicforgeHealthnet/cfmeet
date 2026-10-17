@@ -30,7 +30,7 @@ use uuid::Uuid;
 
 use crate::{
     db,
-    domain::{LegStatus, NormalizedEvent, PublicRouteClass},
+    domain::{InterconnectClass, LegStatus, NormalizedEvent, PublicRouteClass},
     error::TelephonyResult,
     incidents::{self, Incident, Severity},
     legs,
@@ -47,6 +47,17 @@ struct InboundRoute {
     route_id: String,
     provider_id: String,
     max_call_seconds: i32,
+    /// `RELAY` (Privacy Relay relay number) or `DCN` (Numbering-owned number).
+    number_kind: String,
+    number_resource_id: Option<Uuid>,
+    /// Part IV L: `PUBLIC` or `SYNTHETIC_TEST`.
+    interconnect_class: String,
+}
+
+impl InboundRoute {
+    fn interconnect(&self) -> InterconnectClass {
+        InterconnectClass::parse(&self.interconnect_class).unwrap_or(InterconnectClass::Public)
+    }
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -108,8 +119,31 @@ pub enum InboundRejection {
     NoActiveMapping,
     /// Privacy Relay could not be reached (fails closed; incident).
     PrivacyRelayUnavailable,
+    /// Part IV L: Numbering could not be reached for a DCN (fails closed; incident).
+    NumberingUnavailable,
+    /// Part IV L: the DCN is not routable now (unassigned, suspended, releasing,
+    /// quarantined, capability or route not ready): never a former owner.
+    DcnNotRoutable,
+    /// Part IV L: the DCN is assigned but its voice routes nowhere.
+    DcnNotRouted,
+    /// Part IV L: Numbering's answer does not match the local DCN binding.
+    DcnMismatch,
     AnonymousCaller,
+    /// Calling could not be reached (transport failure, timeout, 5xx): fails closed.
     CallingUnavailable,
+    /// Calling answered and explicitly refused the route (e.g. PUBLIC_ROUTE_DENIED, the
+    /// target unavailable, a spend limit).
+    CallingRefused,
+    /// Calling answered with an authorization / policy denial (CALL_NOT_AUTHORIZED, a
+    /// grant it could not verify, a live-telecom or internal-permission refusal).
+    CallingDenied,
+    /// Calling answered 2xx with a body that is not a valid acceptance.
+    CallingInvalidResponse,
+    /// Part IV L: the call arrived on a synthetic test route that is not enabled.
+    InterconnectDisabled,
+    /// Part IV L: a synthetic number on a public route, a real one (or a relay number) on
+    /// a synthetic test route.
+    InterconnectMismatch,
     Internal,
 }
 
@@ -124,8 +158,17 @@ impl InboundRejection {
             InboundRejection::RateLimited => "RATE_LIMITED",
             InboundRejection::NoActiveMapping => "NO_ACTIVE_MAPPING",
             InboundRejection::PrivacyRelayUnavailable => "PRIVACY_RELAY_UNAVAILABLE",
+            InboundRejection::NumberingUnavailable => "NUMBERING_UNAVAILABLE",
+            InboundRejection::DcnNotRoutable => "DCN_NOT_ROUTABLE",
+            InboundRejection::DcnNotRouted => "DCN_NOT_ROUTED",
+            InboundRejection::DcnMismatch => "DCN_MISMATCH",
             InboundRejection::AnonymousCaller => "ANONYMOUS_CALLER",
             InboundRejection::CallingUnavailable => "CALLING_UNAVAILABLE",
+            InboundRejection::CallingRefused => "CALLING_REFUSED",
+            InboundRejection::CallingDenied => "CALLING_DENIED",
+            InboundRejection::CallingInvalidResponse => "CALLING_INVALID_RESPONSE",
+            InboundRejection::InterconnectDisabled => "INTERCONNECT_DISABLED",
+            InboundRejection::InterconnectMismatch => "INTERCONNECT_MISMATCH",
             InboundRejection::Internal => "INTERNAL",
         }
     }
@@ -137,6 +180,33 @@ fn relay_rejection(error: crate::ports::PortError) -> InboundRejection {
     match error {
         crate::ports::PortError::Unavailable => InboundRejection::PrivacyRelayUnavailable,
         _ => InboundRejection::NoActiveMapping,
+    }
+}
+
+/// Calling's answer to an inbound offer that is not an acceptance (Step 4 of the L
+/// closure): an unreachable Calling, an explicit route refusal and an authorization /
+/// policy denial are distinct outcomes. Every one rejects the dialog (fail closed).
+pub fn calling_rejection(error: crate::ports::PortError) -> InboundRejection {
+    use crate::ports::PortError;
+    match error {
+        PortError::Unavailable => InboundRejection::CallingUnavailable,
+        PortError::NotFound => InboundRejection::CallingRefused,
+        PortError::Denied(code) => match code.as_str() {
+            "CALL_NOT_AUTHORIZED"
+            | "INTERNAL_AUTHENTICATION_FAILED"
+            | "INTERNAL_PERMISSION_DENIED"
+            | "AUTHORIZATION_REQUIRED" => InboundRejection::CallingDenied,
+            _ => InboundRejection::CallingRefused,
+        },
+    }
+}
+
+/// The Call and leg of Calling's acceptance; anything else is an invalid response.
+fn accepted_refs(accepted: &Value) -> Result<(Uuid, Uuid), InboundRejection> {
+    let parse = |k: &str| accepted[k].as_str().and_then(|s| Uuid::parse_str(s).ok());
+    match (parse("callId"), parse("callLegId")) {
+        (Some(call), Some(leg)) => Ok((call, leg)),
+        _ => Err(InboundRejection::CallingInvalidResponse),
     }
 }
 
@@ -172,6 +242,7 @@ impl TelephonyService {
                     }
                     // Privacy Relay answered (no active mapping): it is reachable.
                     InboundRejection::NoActiveMapping => self.privacy_relay_available().await?,
+                    InboundRejection::NumberingUnavailable => self.numbering_unavailable().await?,
                     _ => {}
                 }
                 Ok(())
@@ -193,7 +264,9 @@ impl TelephonyService {
         };
         let route: Option<InboundRoute> = db::one(
             &self.db,
-            "SELECT r.id AS route_id, r.provider_id, r.max_call_seconds FROM telecom_routes r \
+            "SELECT r.id AS route_id, r.provider_id, r.max_call_seconds, b.number_kind, b.number_resource_id, \
+               r.interconnect_class \
+             FROM telecom_routes r \
              JOIN telecom_providers p ON p.id = r.provider_id \
              JOIN telecom_number_bindings b ON b.route_id = r.id \
              WHERE r.sip_peer_config_ref_id = $1 AND r.status = 'ENABLED' AND p.status = 'ENABLED' \
@@ -287,6 +360,19 @@ impl TelephonyService {
         // The caller hears ringing; nothing is answered (charged) yet.
         let _ = self.edge.ring(&event.channel).await;
         let correlation = cf_service_auth::CorrelationId::generate();
+        // Part IV L: a synthetic test route exists only while enabled, and carries
+        // synthetic DCNs only (never a relay number).
+        if !self.interconnect_usable(route.interconnect()) {
+            return Err(InboundRejection::InterconnectDisabled);
+        }
+        if route.number_kind == "DCN" {
+            return self
+                .accept_dcn_inbound(event, inbound, &route, &called, correlation)
+                .await;
+        }
+        if route.interconnect() != InterconnectClass::Public {
+            return Err(InboundRejection::InterconnectMismatch);
+        }
         let mapping = self
             .privacy
             .resolve_inbound(
@@ -339,16 +425,13 @@ impl TelephonyService {
             .calling
             .offer_inbound(&offer)
             .await
-            .map_err(|_| InboundRejection::CallingUnavailable)?;
-        let parse = |k: &str| accepted[k].as_str().and_then(|s| Uuid::parse_str(s).ok());
-        let (Some(call_id), Some(call_leg_id)) = (parse("callId"), parse("callLegId")) else {
-            return Err(InboundRejection::CallingUnavailable);
-        };
+            .map_err(calling_rejection)?;
+        let (call_id, call_leg_id) = accepted_refs(&accepted)?;
         let class = accepted["routeClass"]
             .as_str()
             .and_then(PublicRouteClass::parse)
             .filter(|c| matches!(c, PublicRouteClass::PstnToApp | PublicRouteClass::PstnRelay))
-            .ok_or(InboundRejection::CallingUnavailable)?;
+            .ok_or(InboundRejection::CallingInvalidResponse)?;
         let now = self.now();
         let persisted: TelephonyResult<()> = async {
             let txn = self.db.begin().await?;
@@ -416,6 +499,170 @@ impl TelephonyService {
         if persisted.is_err() {
             return Err(InboundRejection::Internal);
         }
+        Ok(leg_id)
+    }
+
+    /// Part IV L: a call to a DCN. Numbering resolves the called number to its CURRENT
+    /// ACTIVE assignment and routing revision (unassigned / suspended / releasing /
+    /// quarantined / unready numbers never route — and never to a former owner); the
+    /// caller is protected by Privacy Relay in the scope Numbering's signed grant proves;
+    /// Calling receives the grant (it verifies it with Numbering) and the opaque target —
+    /// never a number.
+    async fn accept_dcn_inbound(
+        &self,
+        event: &EdgeEvent,
+        inbound: &EdgeInbound,
+        route: &InboundRoute,
+        called: &ExecutionNumber,
+        correlation: cf_service_auth::CorrelationId,
+    ) -> Result<Uuid, InboundRejection> {
+        use crate::ports::{DcnInbound, PortError};
+        let routing = match self
+            .numbering
+            .resolve_inbound_voice(called, correlation.as_str())
+            .await
+        {
+            Ok(DcnInbound::Routed(r)) => r,
+            Ok(DcnInbound::NotRouted) => {
+                self.numbering_available()
+                    .await
+                    .map_err(|_| InboundRejection::Internal)?;
+                return Err(InboundRejection::DcnNotRouted);
+            }
+            Ok(DcnInbound::Unavailable(reason)) => {
+                self.numbering_available()
+                    .await
+                    .map_err(|_| InboundRejection::Internal)?;
+                tracing::info!(reason = %reason, "DCN not routable");
+                return Err(InboundRejection::DcnNotRoutable);
+            }
+            Err(PortError::Unavailable) => return Err(InboundRejection::NumberingUnavailable),
+            Err(_) => return Err(InboundRejection::DcnNotRoutable),
+        };
+        self.numbering_available()
+            .await
+            .map_err(|_| InboundRejection::Internal)?;
+        // The local binding and Numbering must name the same Number Resource.
+        if route.number_resource_id != Some(routing.number_resource_id) {
+            return Err(InboundRejection::DcnMismatch);
+        }
+        // A synthetic DCN arrives only on a synthetic test route, a real one only on a
+        // public route (Numbering's inventory class, never the number's format).
+        let interconnect = route.interconnect();
+        if (interconnect == InterconnectClass::SyntheticTest) != routing.synthetic() {
+            return Err(InboundRejection::InterconnectMismatch);
+        }
+        let caller = inbound
+            .caller
+            .clone()
+            .ok_or(InboundRejection::AnonymousCaller)?;
+        let contact_reference = self
+            .privacy
+            .protect_dcn_caller(&routing.grant, &caller, correlation.as_str())
+            .await
+            .map_err(relay_rejection)?;
+        self.privacy_relay_available()
+            .await
+            .map_err(|_| InboundRejection::Internal)?;
+        drop(caller);
+        let leg_id = Uuid::new_v4();
+        let offer = json!({
+            "schemaVersion": "1",
+            "telephonyLegId": leg_id,
+            "correlationId": correlation.as_str(),
+            "scope": {
+                "tenantId": routing.scope.tenant_id,
+                "applicationId": routing.scope.application_id,
+                "environmentId": routing.scope.environment_id,
+            },
+            "dcnResolution": {
+                "numberResourceId": routing.number_resource_id,
+                "assignmentId": routing.assignment_id,
+                "routingRevision": routing.routing_revision,
+                "ownershipClass": routing.ownership_class,
+                "target": { "kind": routing.target_kind, "ref": routing.target_ref },
+                "grant": routing.grant,
+            },
+            "callerContactReference": contact_reference,
+            "maxDurationSeconds": route.max_call_seconds,
+            "interconnectClass": interconnect.as_str(),
+        });
+        let accepted: Value = self
+            .calling
+            .offer_dcn_inbound(&offer)
+            .await
+            .map_err(calling_rejection)?;
+        drop(offer);
+        let (call_id, call_leg_id) = accepted_refs(&accepted)?;
+        if accepted["routeClass"] != "PSTN_TO_APP" {
+            return Err(InboundRejection::CallingInvalidResponse);
+        }
+        let now = self.now();
+        let persisted: TelephonyResult<()> = async {
+            let txn = self.db.begin().await?;
+            db::exec(
+                &txn,
+                "INSERT INTO telephony_legs (id, calling_call_id, calling_call_leg_id, tenant_id, application_id, \
+                   environment_id, direction, route_class, route_id, provider_id, status, generation, contact_reference, \
+                   max_duration_seconds, media_attachment, usage_status, dcn_number_resource_id, dcn_assignment_id, \
+                   dcn_routing_revision, dcn_grant_id, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, 'INBOUND', 'PSTN_TO_APP', $7, $8, 'PLANNED', 1, $9, $10, 'APPLICATION', \
+                   'PENDING', $11, $12, $13, $14, $15, $15)",
+                vec![
+                    leg_id.into(),
+                    call_id.into(),
+                    call_leg_id.into(),
+                    routing.scope.tenant_id.into(),
+                    routing.scope.application_id.into(),
+                    routing.scope.environment_id.into(),
+                    route.route_id.clone().into(),
+                    route.provider_id.clone().into(),
+                    contact_reference.into(),
+                    route.max_call_seconds.clamp(30, 86_400).into(),
+                    routing.number_resource_id.into(),
+                    routing.assignment_id.into(),
+                    routing.routing_revision.into(),
+                    routing.grant_id.into(),
+                    now.into(),
+                ],
+            )
+            .await?;
+            db::exec(
+                &txn,
+                "INSERT INTO provider_call_bindings (id, telephony_leg_id, provider_id, route_id, correlation_key, \
+                   provider_call_ref, status, created_at, sent_at, bound_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, 'BOUND', $7, $7, $7, $7)",
+                vec![
+                    Uuid::new_v4().into(),
+                    leg_id.into(),
+                    route.provider_id.clone().into(),
+                    route.route_id.clone().into(),
+                    format!("cfm-{}", Uuid::new_v4().simple()).into(),
+                    event.channel.clone().into(),
+                    now.into(),
+                ],
+            )
+            .await?;
+            let leg = legs::lock(&txn, leg_id).await?;
+            let leg = legs::transition_in(
+                &txn,
+                &leg,
+                &legs::Change::to(LegStatus::Originating, NormalizedEvent::LegAccepted, now).silent(),
+            )
+            .await?
+            .unwrap_or(leg);
+            let leg = legs::transition_in(&txn, &leg, &legs::Change::to(LegStatus::Ringing, NormalizedEvent::LegRinging, now))
+                .await?
+                .unwrap_or(leg);
+            drop(leg);
+            txn.commit().await?;
+            Ok(())
+        }
+        .await;
+        if persisted.is_err() {
+            return Err(InboundRejection::Internal);
+        }
+        crate::metrics::inc("telephony_dcn_inbound_total", &[("result", "OFFERED")]);
         Ok(leg_id)
     }
 

@@ -1,0 +1,22 @@
+{
+  "bundle_version": 1,
+  "token_use": "NUMBER_ROUTING_GRANT",
+  "audience": "cfmeet.telephony",
+  "runtime_environment": "staging",
+  "trusted_issuers": [
+    {
+      "issuer": "cfmeet.numbering",
+      "keys": [
+        {
+          "kid": "numbering-grant-staging-1",
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "x": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"
+        }
+      ],
+      "grant_kinds": [
+        "CALLER_IDENTITY"
+      ]
+    }
+  ]
+}

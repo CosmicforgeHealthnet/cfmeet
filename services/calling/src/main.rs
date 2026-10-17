@@ -9,7 +9,10 @@ use calling::{
     domain::{SharedClock, SystemClock},
     internal_auth::config::ServiceAuthSettings,
     media::MediaSettings,
-    platform::{error::summarize_db_error, scopes::ScopeRegistry},
+    platform::{
+        access::{HttpIdentityAuthority, IdentityAuthority},
+        error::summarize_db_error,
+    },
     privacy_relay::{HttpPrivacyRelay, PrivacyRelayAuthority, UnconfiguredPrivacyRelay},
     routes,
     signaling::{NoPushTransport, PgNotifySignalBus, RealtimeSignalBus, SignalingKeys},
@@ -144,6 +147,19 @@ async fn main() -> anyhow::Result<()> {
         "privacy relay authority configured"
     );
 
+    // Numbering (Part IV L): DCN inbound grants and caller identity. Without
+    // CF_NUMBERING_BASE_URL every DCN call fails closed; nothing else depends on it.
+    let numbering_configured = service_auth_settings
+        .targets
+        .iter()
+        .any(|(service, _)| service.as_str() == cf_service_auth::services::NUMBERING);
+    let numbering: Arc<dyn calling::numbering::NumberingPort> = if numbering_configured {
+        Arc::new(calling::numbering::HttpNumbering::new(service_auth.clone()))
+    } else {
+        Arc::new(calling::numbering::UnconfiguredNumbering)
+    };
+    tracing::info!(numbering_configured, "numbering (DCN) authority configured");
+
     // Contact Vault delegated access (§31): a dedicated key, never the service-auth key.
     let contact_delegation =
         match calling::privacy_relay::contacts::ContactDelegationSettings::from_lookup(&lookup)
@@ -178,6 +194,17 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(2);
         }
     };
+    let synthetic_interconnect =
+        match calling::calls::app::public::synthetic_interconnect_from_lookup(
+            &lookup,
+            service_auth.signer().runtime_environment(),
+        ) {
+            Ok(enabled) => enabled,
+            Err(err) => {
+                tracing::error!(error = %err, "telecom configuration error");
+                std::process::exit(2);
+            }
+        };
     let public_network = calling::calls::app::public::PublicNetwork {
         telephony: if telephony_configured {
             Arc::new(calling::telephony::HttpTelephony::new(service_auth.clone()))
@@ -186,6 +213,7 @@ async fn main() -> anyhow::Result<()> {
         },
         media: media.public_bridge.clone(),
         flags: telecom_flags,
+        synthetic_interconnect,
     };
     tracing::info!(
         telephony_configured,
@@ -193,6 +221,7 @@ async fn main() -> anyhow::Result<()> {
         public_inbound_enabled = telecom_flags.public_inbound,
         callback_relay_enabled = telecom_flags.callback_relay,
         public_media_bridge = media.public_bridge.is_some(),
+        synthetic_interconnect,
         "public-network calling configured"
     );
 
@@ -314,8 +343,6 @@ async fn main() -> anyhow::Result<()> {
         compliance_required_everywhere = compliance_overlay.all,
         blocked_attempts_incident_threshold = abuse_controls.blocked_attempts_incident_threshold,
         abuse_reports_incident_threshold = abuse_controls.abuse_reports_incident_threshold,
-        auth_failure_threshold = abuse_controls.auth_failure_threshold,
-        auth_failure_window_seconds = abuse_controls.auth_failure_window_seconds,
         "abuse and compliance controls configured"
     );
 
@@ -338,12 +365,23 @@ async fn main() -> anyhow::Result<()> {
         "retention configured"
     );
 
+    // The identity authority (ADR 0032): customer credentials are verified by Platform
+    // Access; without it the customer API cannot authenticate anyone, so refuse to start.
+    if !service_auth_settings
+        .targets
+        .iter()
+        .any(|(s, _)| s.as_str() == cf_service_auth::services::PLATFORM_ACCESS)
+    {
+        tracing::error!("CF_PLATFORM_ACCESS_BASE_URL is required: Platform Access verifies every customer credential");
+        std::process::exit(2);
+    }
+    let authority: Arc<dyn IdentityAuthority> =
+        Arc::new(HttpIdentityAuthority::new(service_auth.client_arc()));
     let clock: SharedClock = Arc::new(SystemClock);
     let state = AppState::new(
         db,
         clock.clone(),
-        Arc::new(config.keyring),
-        Arc::new(ScopeRegistry::standard()),
+        authority,
         config.limit_defaults,
         service_auth,
         CallingRuntime {
@@ -356,6 +394,7 @@ async fn main() -> anyhow::Result<()> {
             app_config,
             call_config: CallServiceConfig::default(),
             privacy_relay,
+            numbering,
             contact_delegation,
             public_network,
             enterprise_flags,
@@ -391,21 +430,17 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // The identity projection follows the Platform Access change feed (every instance;
+    // the cursor row lock serializes pages).
+    tokio::spawn(state.identity.clone().run(config.identity_sync_interval));
+
     let pruner = state.rate_limiter.clone();
-    let auth_windows = state.authenticator.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
             interval.tick().await;
             if let Err(err) = pruner.prune(clock.now() - RATE_WINDOW_RETENTION).await {
                 tracing::warn!(summary = %summarize_db_error(&err), "rate window pruning failed");
-            }
-            // Failed-authentication windows (§109) are at most one hour long.
-            if let Err(err) = auth_windows
-                .prune_failure_windows(clock.now() - chrono::Duration::hours(2))
-                .await
-            {
-                tracing::warn!(summary = %summarize_db_error(&err), "auth failure window pruning failed");
             }
         }
     });

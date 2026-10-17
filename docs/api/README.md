@@ -1,5 +1,37 @@
 # API documentation
 
+## Unified CF Meet Swagger explorer
+
+The **Meeting Service** Swagger UI at `/swagger-ui/` provides a service selector for the
+versioned OpenAPI contracts checked into `packages/contracts`. It uses its own
+`/api-docs/openapi.json` for meetings and serves peer-domain specifications from
+`/api-docs/*.json`. The meeting schema and all existing meeting routes are unchanged.
+
+| Swagger selector | JSON document | Contract authority | Operation scope |
+|---|---|---|---|
+| Meetings | `/api-docs/openapi.json` | `services/meeting-service/src/swagger` | Meeting Service |
+| Calling | `/api-docs/calling.json` | `calling/http/v1.openapi.json` | Calling + platform ingress |
+| Platform Access (internal) | `/api-docs/platform-access.json` | `platform-access/internal/v1.openapi.json` | Service-auth only |
+| Numbering / DCNs | `/api-docs/numbering.json` | `numbering/internal/v1.openapi.json` | Customer + internal Numbering |
+| Privacy Relay | `/api-docs/privacy-relay.json` | `privacy-relay/http/v1.openapi.json` | Customer ingress + Contact Vault |
+| Privacy Relay (internal) | `/api-docs/privacy-relay-internal.json` | `privacy-relay/internal/v1.openapi.json` | Service-auth only |
+| Telephony (internal) | `/api-docs/telephony.json` | `telephony/internal/v1.openapi.json` | Service-auth only |
+| SMS Gateway | `/api-docs/sms-gateway.json` | `sms-gateway/http/v1.openapi.json` | Customer SMS + signed provider callbacks |
+
+**Discovery versus deployment:** The Swagger selector is a read-only *documentation
+aggregation*. It does not proxy or publish the peer services at the Meeting Service host.
+Actual API calls still require a separately deployed and reachable target service,
+its designated ingress, and its existing customer/service/provider authentication.
+Do not use Meeting Service's URL as an assumed Numbering or SMS Gateway API base.
+Only claim that the public Swagger page has changed after deploying the updated Meeting
+Service image and verifying the running `/swagger-ui/` and `/api-docs/numbering.json`.
+
+**Internal APIs:** Their schemas are discoverable for engineering review; they are not
+customer APIs and cannot be called without service-auth. The original service-specific
+`GET /openapi.json` endpoints remain the canonical served contracts for Numbering and
+SMS Gateway. Real carrier certification and production deployment are separate gates.
+
+
 ## Meeting service (`services/meeting-service`)
 
 The authoritative HTTP API description for the current Meeting & Conference Platform service is the OpenAPI 3.0 document generated from the Rust code (utoipa annotations collected in `services/meeting-service/src/swagger/mod.rs`).

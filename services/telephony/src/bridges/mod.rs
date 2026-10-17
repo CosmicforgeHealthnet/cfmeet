@@ -413,13 +413,19 @@ impl TelephonyService {
                 .await
             {
                 Ok(r) => {
+                    // Under the bridge row lock: an application-media channel that arrived
+                    // before this ref was stored is held on its member (see
+                    // `application_media_joined`) and attached below.
+                    let txn = self.db.begin().await?;
+                    self.load_bridge(&txn, bridge_id, true).await?;
                     db::exec(
-                        &self.db,
+                        &txn,
                         "UPDATE telephony_bridges SET edge_bridge_ref = $2, updated_at = GREATEST(updated_at, $3), \
                            version = version + 1 WHERE id = $1 AND edge_bridge_ref IS NULL",
                         vec![bridge_id.into(), r.clone().into(), now.into()],
                     )
                     .await?;
+                    txn.commit().await?;
                     r
                 }
                 Err(EdgeError::Unavailable) | Err(EdgeError::Timeout) => {
@@ -498,6 +504,32 @@ impl TelephonyService {
                     return self
                         .requeue(command, "EDGE_UNAVAILABLE", Duration::seconds(1))
                         .await
+                }
+            }
+        }
+        // The application media that presented its code before the edge bridge existed.
+        if let Some(held) = members
+            .iter()
+            .find(|m| m.member_kind == "APPLICATION_MEDIA" && m.status == "EXPECTED")
+        {
+            let held = self
+                .members(&self.db, bridge_id)
+                .await?
+                .into_iter()
+                .find(|m| m.id == held.id && m.status == "EXPECTED");
+            if let Some(channel) = held.as_ref().and_then(|m| m.edge_channel_ref.clone()) {
+                let attached = self.edge.answer(&channel).await.is_ok()
+                    && self.edge.add_to_bridge(&edge_ref, &channel).await.is_ok();
+                if attached {
+                    self.member_joined(bridge_id, held.unwrap().id, &channel, now)
+                        .await?;
+                } else {
+                    // The held media side is gone: it may not rejoin with this code.
+                    let _ = self.edge.reject(&channel).await;
+                    self.finish_bridge(bridge_id, "MEMBER_LEFT", now).await?;
+                    self.finish_simple(command.id, "FAILED", "MEMBER_ENDED")
+                        .await?;
+                    return Ok(Executed::DefiniteFailure("MEMBER_ENDED"));
                 }
             }
         }
@@ -670,9 +702,43 @@ impl TelephonyService {
         else {
             return Ok(false);
         };
-        let Some(edge_ref) = bridge.edge_bridge_ref.clone() else {
-            // The edge bridge is not created yet: the bridge command will pick it up.
-            return Ok(false);
+        let edge_ref = {
+            // Serialized with the bridge command storing the edge bridge ref: either the
+            // ref exists (attach now) or the channel is held on the member for the
+            // command to attach — exactly one of the two attaches it.
+            let txn = self.db.begin().await?;
+            let locked = self.load_bridge(&txn, bridge.id, true).await?;
+            match locked.edge_bridge_ref {
+                Some(r) if locked.status == "PENDING" => {
+                    let held_elsewhere = self
+                        .members(&txn, bridge.id)
+                        .await?
+                        .into_iter()
+                        .any(|m| m.id == member.id && m.edge_channel_ref.is_some());
+                    txn.commit().await?;
+                    if held_elsewhere {
+                        return Ok(false);
+                    }
+                    r
+                }
+                Some(_) => {
+                    txn.commit().await?;
+                    return Ok(false);
+                }
+                None => {
+                    let held = db::exec(
+                        &txn,
+                        "UPDATE telephony_bridge_legs SET edge_channel_ref = $3, updated_at = GREATEST(updated_at, $4) \
+                         WHERE id = $1 AND bridge_id = $2 AND status = 'EXPECTED' AND edge_channel_ref IS NULL",
+                        vec![member.id.into(), bridge.id.into(), channel.into(), now.into()],
+                    )
+                    .await?;
+                    txn.commit().await?;
+                    // Held (unanswered) until the bridge command attaches it; a second
+                    // presentation of the code is refused.
+                    return Ok(held == 1);
+                }
+            }
         };
         if self.edge.answer(&channel.to_string()).await.is_err() {
             return Ok(false);

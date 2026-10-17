@@ -132,7 +132,7 @@ fn dev_settings() -> WebhookSettings {
 
 struct World {
     e: EnterpriseWorld,
-    manager: calling::platform::credentials::IssuedCredential,
+    manager: crate::common::IssuedCredential,
 }
 
 impl World {
@@ -941,6 +941,128 @@ async fn privacy_relay_events_are_normalized_before_delivery() {
         w.one("SELECT count(*)::text FROM webhook_events").await,
         "1"
     );
+}
+
+/// Part IV N: the SMS Gateway's committed message events reach Calling's platform-event
+/// ingress only from the gateway itself (`platform-event.publish`), are projected to
+/// `sms.*` (references, status and codes only — never content or a number, not even
+/// masked) and delivered once to subscribers holding `sms.read`.
+#[tokio::test]
+async fn sms_gateway_events_become_sms_webhooks_with_safe_data_only() {
+    let Some(w) = World::new(dev_settings()).await else {
+        return;
+    };
+    w.e.h()
+        .platform
+        .grant_application_scope(w.e.a.w.consumer.application.id, names::SMS_READ)
+        .await
+        .unwrap();
+    // Subscribing to sms.* needs sms.read.
+    let r = w
+        .send(
+            Method::POST,
+            "/v1/webhooks",
+            Some(json!({ "url": "https://example.com/hook", "eventTypes": ["sms.received"] })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    let reader = credential(
+        w.e.h(),
+        &w.e.a.w.consumer,
+        w.e.a.w.kind,
+        &[names::WEBHOOKS_MANAGE, names::SMS_READ],
+    )
+    .await;
+    let rx = Receiver::start().await;
+    let r =
+        w.e.send(
+            reader.secret.expose_once(),
+            Method::POST,
+            "/v1/webhooks",
+            Some(json!({ "url": rx.url, "eventTypes": ["sms.received"], "description": "sms" })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let s = w.e.a.w.scope();
+    let message_id = Uuid::new_v4();
+    let envelope = json!({
+        "event_id": format!("evt_{}", Uuid::new_v4().simple()),
+        "event_type": "sms-gateway.message.received",
+        "schema_version": 1,
+        "occurred_at": "2031-03-01T10:00:00.000000Z",
+        "producer_service": "cfmeet.sms-gateway",
+        "runtime_environment": "test",
+        "correlation_id": "corr_sms_1",
+        "ownership": {
+            "tenant_id": s.tenant_id().as_uuid(),
+            "application_id": s.application_id().as_uuid(),
+            "application_environment_id": s.environment_id().as_uuid(),
+        },
+        "payload": {
+            "message_id": message_id, "direction": "INBOUND", "status": "RECEIVED",
+            "number_resource_id": Uuid::new_v4(), "thread_id": Uuid::new_v4(),
+            "segment_count": 1, "encoding": "GSM7", "remote_masked": "+***0123",
+            "principal_id": null, "target_kind": "PRINCIPAL", "target_ref": Uuid::new_v4(),
+            "failure_code": null, "blocked_reason": null,
+            "content": "Is the 3pm slot still free?", "from": "+15550100123",
+        },
+    });
+    let world = &w;
+    let send = |signer: Arc<cf_service_auth::ServiceTokenSigner>, body: Value| async move {
+        let signed = signer
+            .sign(&OutboundServiceRequest::new_operation(ServiceId::calling()))
+            .unwrap();
+        let headers: Vec<(String, String)> = signed
+            .headers()
+            .iter()
+            .map(|(n, v)| (n.as_str().to_string(), v.to_str().unwrap().to_string()))
+            .collect();
+        let refs: Vec<(&str, &str)> = headers
+            .iter()
+            .map(|(n, v)| (n.as_str(), v.as_str()))
+            .collect();
+        world
+            .e
+            .h()
+            .request_with(
+                Method::POST,
+                "/internal/v1/platform/events",
+                None,
+                Some(body),
+                &refs,
+            )
+            .await
+    };
+    let peers = w.e.h().peers.clone();
+    // Privacy Relay may not publish the gateway's events, nor the gateway Privacy Relay's.
+    let r = send(peers.privacy_relay.clone(), envelope.clone()).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
+    let mut forged = envelope.clone();
+    forged["producer_service"] = json!("cfmeet.privacy-relay");
+    let r = send(peers.sms_gateway.clone(), forged).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
+    // At-least-once publication: one public event, one delivery.
+    for _ in 0..2 {
+        let r = send(peers.sms_gateway.clone(), envelope.clone()).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    }
+    w.deliver().await;
+    let seen = rx.seen();
+    assert_eq!(seen.len(), 1);
+    let body: Value = serde_json::from_slice(&seen[0].body).unwrap();
+    common::contracts::check(
+        "platform/webhooks/v1.schema.json#/$defs/WebhookEvent",
+        &body,
+    );
+    assert_eq!(body["type"], "sms.received");
+    assert_eq!(body["data"]["messageId"], json!(message_id));
+    assert_eq!(body["data"]["status"], "RECEIVED");
+    let text = String::from_utf8_lossy(&seen[0].body);
+    for leak in ["3pm", "5550100123", "0123", "remote", "content"] {
+        assert!(!text.contains(leak), "{leak} in {text}");
+    }
+    // The receiver verifies the platform signature as for every event.
+    assert!(seen[0].headers.contains_key("cf-webhook-signature"));
 }
 
 /// §68 DNS rebinding at delivery: a subscription whose (accepted) host name resolves to
