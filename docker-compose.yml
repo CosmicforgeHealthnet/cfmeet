@@ -61,8 +61,8 @@ services:
   meeting-service:
     profiles: ["app"]
     build:
-      context: ./services/meeting-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/meeting-service/Dockerfile
     env_file:
       - ./services/meeting-service/.env
     environment:
