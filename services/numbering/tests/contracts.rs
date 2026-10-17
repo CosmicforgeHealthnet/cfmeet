@@ -405,7 +405,11 @@ fn error_and_rule_codes_match_the_contract() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut used = BTreeSet::new();
     let mut files = Vec::new();
-    let mut stack = vec![root.join("src/numbers"), root.join("src/providers")];
+    let mut stack = vec![
+        root.join("src/numbers"),
+        root.join("src/providers"),
+        root.join("src/stewardship"),
+    ];
     while let Some(d) = stack.pop() {
         for entry in std::fs::read_dir(d).unwrap() {
             let p = entry.unwrap().path();

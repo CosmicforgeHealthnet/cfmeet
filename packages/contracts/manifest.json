@@ -93,14 +93,14 @@
     },
     {
       "id": "cfmeet.platform.common",
-      "version": "1.8.0",
+      "version": "1.9.0",
       "kind": "json-schema",
       "path": "platform/common/v1.schema.json",
       "owner": "platform",
       "visibility": "internal",
       "lifecycle": "stable",
       "authority": "contract-first",
-      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M)."
+      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M). 1.9.0 number-usage.report, number-risk.report and number-relay.lease (Part IV S, T and P §§119–120)."
     },
     {
       "id": "cfmeet.platform.service-token-header",
@@ -214,47 +214,47 @@
     },
     {
       "id": "cfmeet.numbering.common",
-      "version": "1.7.0",
+      "version": "1.8.0",
       "kind": "json-schema",
       "path": "numbering/common/v1.schema.json",
       "owner": "numbering",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "The canonical Numbering vocabulary and messages (Part IV C5, ADR 0033): Number Resource identity (CF Meet ids canonical, provider identifiers never exposed), type, capabilities with provenance, opaque provider binding references, inventory observations, reservations, DCN assignments with ownership and routing references, routing profiles, lifecycle transitions, the trusted context and the error envelope; 1.1.0 the capability and country catalog (E); 1.2.0 KYC requirements, cases, protected evidence metadata, decisions, appeals and eligibility decisions (F); 1.3.0 provider command, provider event and incident vocabularies and the provider callback acknowledgement (G). 1.4.0 inventory search results / pages with freshness, KYC indicators, country and number-type lists, reservation creation / list, hold basis and conversion, RELEASE_HOLD commands (H). 1.5.0 acquisitions, route families / configurations / readiness (I). 1.6.0 ownership and assignment requests / views, routing target kinds, pools and transfer links (J). 1.7.0 routing grant rule codes (K)."
+      "description": "The canonical Numbering vocabulary and messages (Part IV C5, ADR 0033): Number Resource identity (CF Meet ids canonical, provider identifiers never exposed), type, capabilities with provenance, opaque provider binding references, inventory observations, reservations, DCN assignments with ownership and routing references, routing profiles, lifecycle transitions, the trusted context and the error envelope; 1.1.0 the capability and country catalog (E); 1.2.0 KYC requirements, cases, protected evidence metadata, decisions, appeals and eligibility decisions (F); 1.3.0 provider command, provider event and incident vocabularies and the provider callback acknowledgement (G). 1.4.0 inventory search results / pages with freshness, KYC indicators, country and number-type lists, reservation creation / list, hold basis and conversion, RELEASE_HOLD commands (H). 1.5.0 acquisitions, route families / configurations / readiness (I). 1.6.0 ownership and assignment requests / views, routing target kinds, pools and transfer links (J). 1.7.0 routing grant rule codes (K). 1.8.0 lifecycle stewardship messages (P–X): suspensions, releases, quarantines, reassignment, usage, risk decisions and appeals, port requests, access justification / ownership periods / verification, operational controls, reconciliation report, usage / risk-signal reports and relay import / lease / resolution (Part P); new domain rules."
     },
     {
       "id": "cfmeet.numbering.event",
-      "version": "1.6.0",
+      "version": "1.7.0",
       "kind": "json-schema",
       "path": "numbering/events/v1.schema.json",
       "owner": "numbering",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Numbering domain events in the platform envelope (transactional outbox, at least once, per-aggregate order): resource discovered / lifecycle-changed / classified, binding changed, capability changed, reservation changed, assignment changed, routing profile revised, catalog revised, KYC requirements published, KYC case changed, KYC evidence received, eligibility evaluated, provider command changed, provider event received. No telephone number, provider identifier, credential or secret; 1.4.0 RELEASE_HOLD provider commands (H); 1.5.0 acquisition changed, route changed (I); 1.6.0 pool changed (J)."
+      "description": "Numbering domain events in the platform envelope (transactional outbox, at least once, per-aggregate order): resource discovered / lifecycle-changed / classified, binding changed, capability changed, reservation changed, assignment changed, routing profile revised, catalog revised, KYC requirements published, KYC case changed, KYC evidence received, eligibility evaluated, provider command changed, provider event received. No telephone number, provider identifier, credential or secret; 1.4.0 RELEASE_HOLD provider commands (H); 1.5.0 acquisition changed, route changed (I); 1.6.0 pool changed (J). 1.7.0 number.suspended, number.restored, release / quarantine / usage / risk / port / relay-lease changes (P–X)."
     },
     {
       "id": "cfmeet.numbering.internal-api",
-      "version": "1.11.0",
+      "version": "1.12.0",
       "kind": "openapi",
       "path": "numbering/internal/v1.openapi.json",
       "owner": "numbering",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface of services/numbering: GET /health, /ready, /openapi.json (the served contract); customer reads of the caller's own DCN assignments / history / reservations, the catalog, KYC / eligibility (F); 1.4.0 provider-neutral inventory search, countries and number types, reservations (create with Idempotency-Key, list, cancel) (H); 1.5.0 acquisitions (provisioning with eligibility re-evaluation and hold read-back) and provider route configuration (I); provider callbacks (G); and the service-authenticated internal Number Resource view (/internal/v1, number-resource.read). 1.5.0 internal route view and consumer route readiness (number-route.acknowledge). 1.6.0 ownership and assignment: assignment creation / activation on proven readiness, routing revisions, employee offboarding, same-owner transfers, organizational pools and the operator assignment history (J). 1.7.0 routing grants: inbound resolution (number-route.resolve), caller-identity / SMS-sender grants (delegated scope) and authoritative verification (number-grant.verify) (K). 1.8.0 delegated current-assignment view for Calling's caller-identity policy (L). 1.9.0 dedicated SMS destination resolver (number-sms-route.resolve); inbound-resolutions is voice only (M); 1.10.0 the SMS Gateway's sender re-check on number-assignments (Part IV O). 1.11.0 inventoryClass on voice inbound resolutions, grant verifications and current-assignment views (L closure: synthetic test interconnects)."
+      "description": "HTTP surface of services/numbering: GET /health, /ready, /openapi.json (the served contract); customer reads of the caller's own DCN assignments / history / reservations, the catalog, KYC / eligibility (F); 1.4.0 provider-neutral inventory search, countries and number types, reservations (create with Idempotency-Key, list, cancel) (H); 1.5.0 acquisitions (provisioning with eligibility re-evaluation and hold read-back) and provider route configuration (I); provider callbacks (G); and the service-authenticated internal Number Resource view (/internal/v1, number-resource.read). 1.5.0 internal route view and consumer route readiness (number-route.acknowledge). 1.6.0 ownership and assignment: assignment creation / activation on proven readiness, routing revisions, employee offboarding, same-owner transfers, organizational pools and the operator assignment history (J). 1.7.0 routing grants: inbound resolution (number-route.resolve), caller-identity / SMS-sender grants (delegated scope) and authoritative verification (number-grant.verify) (K). 1.8.0 delegated current-assignment view for Calling's caller-identity policy (L). 1.9.0 dedicated SMS destination resolver (number-sms-route.resolve); inbound-resolutions is voice only (M); 1.10.0 the SMS Gateway's sender re-check on number-assignments (Part IV O). 1.11.0 inventoryClass on voice inbound resolutions, grant verifications and current-assignment views (L closure: synthetic test interconnects). 1.12.0 lifecycle stewardship (P–X) and the relay-number import / lease / resolution API (Part P)."
     },
     {
       "id": "cfmeet.numbering.routing-grant",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "kind": "json-schema",
       "path": "numbering/routing-grant/v1.schema.json",
       "owner": "numbering",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Number routing grants (Part IV Workstream K): inbound resolution, caller-identity / SMS-sender grant requests and verification bodies, the grant claims (typ cf-number-grant+jwt, Numbering's dedicated grant key, no telephone number, revision-bound) and the receiver-authoritative grant trust bundle. 1.1.0 CurrentAssignment (L). 1.2.0 SmsDestinationResolutionRequest (M). 1.3.0 inventoryClass (SYNTHETIC / REAL) on voice resolutions, valid verifications and the current-assignment view (L closure)."
+      "description": "Number routing grants (Part IV Workstream K): inbound resolution, caller-identity / SMS-sender grant requests and verification bodies, the grant claims (typ cf-number-grant+jwt, Numbering's dedicated grant key, no telephone number, revision-bound) and the receiver-authoritative grant trust bundle. 1.1.0 CurrentAssignment (L). 1.2.0 SmsDestinationResolutionRequest (M). 1.3.0 inventoryClass (SYNTHETIC / REAL) on voice resolutions, valid verifications and the current-assignment view (L closure). 1.4.0 ROUTING_DISABLED (an operator kill switch, Workstream W)."
     },
     {
       "id": "cfmeet.privacy-relay.http-api",

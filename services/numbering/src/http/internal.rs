@@ -38,6 +38,7 @@ pub fn routes() -> Router<AppState> {
             post(acknowledge_route),
         )
         .merge(super::grants::routes())
+        .merge(super::stewardship_internal::routes())
 }
 
 /// The current provider route configuration of every family of a number, with consumer

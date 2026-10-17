@@ -36,6 +36,8 @@ pub fn routes() -> Router<AppState> {
         .merge(super::catalog::admin_routes())
         .merge(super::kyc::customer_routes())
         .merge(super::kyc::admin_routes())
+        .merge(super::stewardship::customer_routes())
+        .merge(super::stewardship::admin_routes())
 }
 
 /// The customer view of an assignment (contract `cfmeet.numbering.common`

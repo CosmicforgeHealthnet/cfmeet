@@ -45,7 +45,7 @@ use crate::{
 };
 
 /// What happens to the number after the owner lets it go.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ReleasePolicy {
     /// Returned to the platform / organization pool: CF Meet keeps it at the provider.

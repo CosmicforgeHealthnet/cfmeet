@@ -121,7 +121,10 @@ struct L {
 }
 
 async fn setup_with(settings: StewardshipSettings) -> Option<L> {
-    let h = Harness::new().await?;
+    build(Harness::new().await?, settings).await
+}
+
+async fn build(h: Harness, settings: StewardshipSettings) -> Option<L> {
     let (_, vault) = fx::vault();
     let kyc = fx::service(&h, vault, Arc::new(DeterministicKycVerifier::new()));
     let h = h.with_kyc(kyc.clone(), EligibilityPolicy::default());
@@ -1657,4 +1660,446 @@ async fn database_guards_hold_the_quarantine_and_service_class_invariants() {
     assert!(refused.is_err());
     let v: Value = json!(relay.number_resource_id);
     assert!(v.is_string());
+}
+
+// ---------------------------------------------------------------------------------------
+// The HTTP surface: customer / operator authorization through a real Platform Access,
+// internal permissions, the served contract.
+// ---------------------------------------------------------------------------------------
+
+const COMMON: &str = "numbering/common/v1.schema.json#/$defs/";
+
+#[tokio::test]
+async fn http_customer_and_operator_routes_are_scoped_audited_and_conform() {
+    use common::contracts::conforms;
+    let Some(h) = Harness::with_platform_access().await else {
+        return;
+    };
+    let Some(t) = build(h, StewardshipSettings::default()).await else {
+        return;
+    };
+    let pa = t.h.pa.clone().unwrap();
+    let all = [
+        "numbers.search",
+        "numbers.read",
+        "numbers.manage",
+        "numbers.assign",
+        "numbers.kyc.read",
+    ];
+    let alice = pa.customer("SANDBOX", &all, &all).await;
+    let bob = pa.customer("SANDBOX", &all, &all).await;
+    let reader = pa.customer("SANDBOX", &all, &["numbers.read"]).await;
+    let admin = pa
+        .customer_as(
+            "SANDBOX",
+            "FIRST_PARTY",
+            &["numbers.admin"],
+            &["numbers.admin"],
+        )
+        .await;
+    let s = OwnerScope {
+        tenant_id: alice.tenant_id,
+        application_id: alice.application_id,
+        environment_id: alice.environment_id,
+        environment_kind: EnvironmentKind::Sandbox,
+        service_account_id: alice.service_account_id,
+    };
+    let (number, a) = t.active(&s).await;
+    let call = |token: String,
+                method: Method,
+                path: String,
+                body: Option<Value>,
+                headers: Vec<(&'static str, String)>| {
+        let h = &t.h;
+        async move {
+            let hs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+            h.customer_with(&token, method, &path, body, &hs).await
+        }
+    };
+    let suspend = format!("/v1/numbers/assignments/{}/suspend", a.id);
+    // Another tenant: indistinguishable from missing; a reader: insufficient scope.
+    let r = call(
+        bob.secret.clone(),
+        Method::POST,
+        suspend.clone(),
+        Some(json!({ "reasonCode": "CUSTOMER_REQUEST" })),
+        vec![],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let r = call(
+        reader.secret.clone(),
+        Method::POST,
+        suspend.clone(),
+        Some(json!({ "reasonCode": "CUSTOMER_REQUEST" })),
+        vec![],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r = call(
+        alice.secret.clone(),
+        Method::POST,
+        suspend.clone(),
+        Some(json!({ "reasonCode": "CUSTOMER_REQUEST" })),
+        vec![],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    conforms(&format!("{COMMON}Suspension"), &r.body);
+    assert_eq!(r.body["source"], "ORGANIZATION");
+    let r = call(
+        alice.secret.clone(),
+        Method::GET,
+        format!("/v1/numbers/assignments/{}/suspension", a.id),
+        None,
+        vec![],
+    )
+    .await;
+    conforms(&format!("{COMMON}Suspension"), &r.body);
+    t.drain().await;
+    t.st.advance_suspensions(&ctx(), 10).await.unwrap();
+    let r = call(
+        alice.secret.clone(),
+        Method::POST,
+        format!("/v1/numbers/assignments/{}/restore", a.id),
+        None,
+        vec![],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["status"], "RESTORING");
+    t.drain().await;
+    t.st.advance_suspensions(&ctx(), 10).await.unwrap();
+    // Release needs an Idempotency-Key; replays answer 200.
+    let release = format!("/v1/numbers/assignments/{}/release", a.id);
+    let body = json!({ "reasonCode": "CUSTOMER_RELEASE", "policy": "POOL_RETURN" });
+    let r = call(
+        alice.secret.clone(),
+        Method::POST,
+        release.clone(),
+        Some(body.clone()),
+        vec![],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let k = vec![("idempotency-key", "release-http-0001".to_string())];
+    let r = call(
+        alice.secret.clone(),
+        Method::POST,
+        release.clone(),
+        Some(body.clone()),
+        k.clone(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{:?}", r.body);
+    conforms(&format!("{COMMON}Release"), &r.body);
+    assert_eq!(r.body["status"], "QUARANTINED");
+    let again = call(
+        alice.secret.clone(),
+        Method::POST,
+        release.clone(),
+        Some(body),
+        k,
+    )
+    .await;
+    assert_eq!(
+        (again.status, again.body["releaseId"].clone()),
+        (StatusCode::OK, r.body["releaseId"].clone())
+    );
+    let rid = r.body["releaseId"].as_str().unwrap().to_string();
+    assert_eq!(
+        call(
+            bob.secret.clone(),
+            Method::GET,
+            format!("/v1/numbers/releases/{rid}"),
+            None,
+            vec![]
+        )
+        .await
+        .status,
+        StatusCode::NOT_FOUND
+    );
+    let q = call(
+        alice.secret.clone(),
+        Method::GET,
+        format!("/v1/numbers/assignments/{}/quarantine", a.id),
+        None,
+        vec![],
+    )
+    .await;
+    conforms(&format!("{COMMON}Quarantine"), &q.body);
+    // Usage: quantities only, never provider costs; another scope sees nothing.
+    t.st.accrue_usage(&ctx(), 10).await.unwrap();
+    let window = format!(
+        "/v1/numbers/usage?from={}&to={}",
+        (t.h.now() - Duration::days(40)).format("%Y-%m-%dT%H:%M:%SZ"),
+        (t.h.now() + Duration::days(40)).format("%Y-%m-%dT%H:%M:%SZ")
+    );
+    let u = call(
+        alice.secret.clone(),
+        Method::GET,
+        window.clone(),
+        None,
+        vec![],
+    )
+    .await;
+    assert_eq!(u.status, StatusCode::OK, "{:?}", u.body);
+    conforms(&format!("{COMMON}UsageSummaryList"), &u.body);
+    assert!(!u.body.to_string().contains("Cost"));
+    assert_eq!(
+        call(bob.secret.clone(), Method::GET, window, None, vec![])
+            .await
+            .body["data"],
+        json!([])
+    );
+    // Porting is off by default.
+    let p = call(alice.secret.clone(), Method::POST, "/v1/numbers/ports".into(),
+        Some(json!({ "direction": "IN", "e164": "+12025550188", "country": "US", "ownershipClass": "ORGANIZATION" })),
+        vec![("idempotency-key", "port-http-0001".to_string())]).await;
+    assert_eq!(p.body["error"]["reason"], "PORTING_DISABLED");
+    // Operators: numbers.admin on a first-party application AND an operator header.
+    let controls = "/v1/admin/controls/DCN_INBOUND_ROUTING".to_string();
+    let change = json!({ "engaged": true, "reasonCode": "CARRIER_INCIDENT" });
+    assert_eq!(
+        call(
+            alice.secret.clone(),
+            Method::POST,
+            controls.clone(),
+            Some(change.clone()),
+            vec![]
+        )
+        .await
+        .status,
+        StatusCode::FORBIDDEN
+    );
+    let r = call(
+        admin.secret.clone(),
+        Method::POST,
+        controls.clone(),
+        Some(change),
+        vec![],
+    )
+    .await;
+    assert_eq!(r.code(), "OPERATOR_REQUIRED");
+    let op_header = vec![("x-cf-operator", "ops.alice".to_string())];
+    let r = call(
+        admin.secret.clone(),
+        Method::POST,
+        controls.clone(),
+        Some(json!({ "engaged": true, "reasonCode": "CARRIER_INCIDENT" })),
+        op_header.clone(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    conforms(&format!("{COMMON}OperationalControl"), &r.body);
+    let list = call(
+        admin.secret.clone(),
+        Method::GET,
+        "/v1/admin/controls".into(),
+        None,
+        op_header.clone(),
+    )
+    .await;
+    conforms(&format!("{COMMON}OperationalControlList"), &list.body);
+    call(
+        admin.secret.clone(),
+        Method::POST,
+        controls,
+        Some(json!({ "engaged": false, "reasonCode": "RESOLVED" })),
+        op_header.clone(),
+    )
+    .await;
+    // Audited, masked history: the justification is mandatory.
+    let periods = format!("/v1/admin/number-resources/{number}/ownership-periods");
+    let r = call(
+        admin.secret.clone(),
+        Method::POST,
+        periods.clone(),
+        Some(json!({})),
+        op_header.clone(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let r = call(
+        admin.secret.clone(),
+        Method::POST,
+        periods,
+        Some(json!({ "purpose": "ACCOUNT_RECOVERY", "caseRef": "CASE-2001" })),
+        op_header.clone(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    conforms(&format!("{COMMON}OwnershipPeriodList"), &r.body);
+    assert_eq!(r.body["data"][0]["tenantId"], json!(alice.tenant_id));
+    assert!(!r.body.to_string().contains("ownerRef"));
+    let v = call(admin.secret.clone(), Method::POST, format!("/v1/admin/number-resources/{number}/ownership-verifications"),
+        Some(json!({ "tenantId": bob.tenant_id, "ownerRef": bob.tenant_id, "at": t.h.now().to_rfc3339(), "purpose": "LEGAL_REQUEST", "caseRef": "CASE-2002" })),
+        op_header.clone()).await;
+    conforms(&format!("{COMMON}OwnershipVerification"), &v.body);
+    assert_eq!(v.body["outcome"], "NO_MATCH");
+    assert_eq!(
+        t.h.scalar("SELECT count(*) FROM number_history_access WHERE operator_ref = 'ops.alice'")
+            .await,
+        2
+    );
+    let rep = call(
+        admin.secret.clone(),
+        Method::POST,
+        "/v1/admin/reconciliation/lifecycle".into(),
+        None,
+        op_header,
+    )
+    .await;
+    conforms(&format!("{COMMON}LifecycleReconciliationReport"), &rep.body);
+}
+
+#[tokio::test]
+async fn http_internal_usage_signals_and_relay_leases_enforce_their_permissions() {
+    use common::contracts::conforms;
+    let Some(t) = setup().await else { return };
+    let s = scope(EnvironmentKind::Sandbox);
+    let (number, a) = t.active(&s).await;
+    let usage = |kind: &str, key: &str| {
+        json!({
+            "sourceKey": key, "numberResourceId": number, "assignmentId": a.id, "usageKind": kind,
+            "quantity": 61, "providerCostMinor": 12, "currency": "USD",
+            "periodStart": t.h.now().to_rfc3339(), "periodEnd": t.h.now().to_rfc3339(),
+        })
+    };
+    let r =
+        t.h.internal_json(
+            &t.h.peers.telephony,
+            Method::POST,
+            "/internal/v1/number-usage",
+            usage("VOICE_OUTBOUND_SECONDS", "leg-1"),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    conforms(&format!("{COMMON}UsageReportResult"), &r.body);
+    let r =
+        t.h.internal_json(
+            &t.h.peers.telephony,
+            Method::POST,
+            "/internal/v1/number-usage",
+            usage("VOICE_OUTBOUND_SECONDS", "leg-1"),
+        )
+        .await;
+    assert_eq!(
+        (r.status, r.body["recorded"].clone()),
+        (StatusCode::OK, json!(false))
+    );
+    let r =
+        t.h.internal_json(
+            &t.h.peers.sms_gateway,
+            Method::POST,
+            "/internal/v1/number-usage",
+            usage("VOICE_OUTBOUND_SECONDS", "leg-2"),
+        )
+        .await;
+    assert_eq!(r.body["error"]["reason"], "USAGE_KIND_NOT_PERMITTED");
+    let r =
+        t.h.internal_json(
+            &t.h.peers.calling,
+            Method::POST,
+            "/internal/v1/number-usage",
+            usage("VOICE_OUTBOUND_SECONDS", "leg-3"),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r = t.h.internal_json(&t.h.peers.calling, Method::POST, "/internal/v1/number-risk-signals",
+        json!({ "numberResourceId": number, "signalKind": "SPAM_CALLS", "magnitude": 30, "sourceKey": "spam-1" })).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    conforms(&format!("{COMMON}RiskSignalResult"), &r.body);
+    // Relay inventory: Privacy Relay only.
+    let relay_ref = Uuid::new_v4();
+    let import = json!({ "relayInventoryRef": relay_ref, "e164": "+12025550177", "country": "US",
+        "capabilities": ["VOICE_INBOUND", "VOICE_OUTBOUND"], "bindingRef": "relay-binding-http-1" });
+    let r =
+        t.h.internal_json(
+            &t.h.peers.telephony,
+            Method::POST,
+            "/internal/v1/relay-inventory/imports",
+            import.clone(),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r =
+        t.h.internal_json(
+            &t.h.peers.relay,
+            Method::POST,
+            "/internal/v1/relay-inventory/imports",
+            import.clone(),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    conforms(&format!("{COMMON}RelayImportResult"), &r.body);
+    let r =
+        t.h.internal_json(
+            &t.h.peers.relay,
+            Method::POST,
+            "/internal/v1/relay-inventory/imports",
+            import,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let lease = |holder: Uuid, key: &str| {
+        json!({ "relayInventoryRef": relay_ref, "holderRef": holder, "generation": 1,
+        "expiresAt": (t.h.now() + Duration::hours(1)).to_rfc3339(), "idempotencyKey": key })
+    };
+    let first =
+        t.h.internal_json(
+            &t.h.peers.relay,
+            Method::POST,
+            "/internal/v1/relay-leases",
+            lease(Uuid::new_v4(), "lease-key-0001"),
+        )
+        .await;
+    assert_eq!(first.status, StatusCode::CREATED, "{:?}", first.body);
+    conforms(&format!("{COMMON}RelayLeaseResult"), &first.body);
+    let second =
+        t.h.internal_json(
+            &t.h.peers.relay,
+            Method::POST,
+            "/internal/v1/relay-leases",
+            lease(Uuid::new_v4(), "lease-key-0002"),
+        )
+        .await;
+    assert_eq!(
+        second.body["error"]["reason"], "RELAY_NUMBER_LEASED",
+        "{:?}",
+        second.body
+    );
+    let res =
+        t.h.internal(
+            &t.h.peers.relay,
+            Method::GET,
+            &format!("/internal/v1/relay-numbers/{relay_ref}/resolution"),
+        )
+        .await;
+    conforms(&format!("{COMMON}RelayResolution"), &res.body);
+    assert_eq!(res.body["lease"]["leaseId"], first.body["lease"]["leaseId"]);
+    assert!(!res.body.to_string().contains("+1202"));
+    let lid = first.body["lease"]["leaseId"].as_str().unwrap().to_string();
+    let rel =
+        t.h.internal_json(
+            &t.h.peers.relay,
+            Method::POST,
+            &format!("/internal/v1/relay-leases/{lid}/release"),
+            json!({ "reasonCode": "SESSION_ENDED" }),
+        )
+        .await;
+    assert_eq!(rel.body["lease"]["status"], "RELEASED");
+    // The kill switch stops new leases.
+    t.st.set_control(&operator(), Control::RelayLeases, true, "CARRIER_INCIDENT")
+        .await
+        .unwrap();
+    let r =
+        t.h.internal_json(
+            &t.h.peers.relay,
+            Method::POST,
+            "/internal/v1/relay-leases",
+            lease(Uuid::new_v4(), "lease-key-0003"),
+        )
+        .await;
+    assert_eq!(r.body["error"]["reason"], "OPERATION_DISABLED");
 }

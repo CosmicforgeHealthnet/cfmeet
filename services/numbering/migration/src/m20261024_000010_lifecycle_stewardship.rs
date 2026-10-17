@@ -40,10 +40,12 @@ impl MigrationName for Migration {
 }
 
 const UP: &str = r#"
--- Event types of the specification (`number.suspended`, `number.restored`) have two segments.
+-- The specification names two events with two segments (`number.suspended`, `number.restored`);
+-- every other event type keeps `number.<aggregate>.<change>`.
 ALTER TABLE numbering_outbox_events DROP CONSTRAINT ck_numbering_outbox_events_type;
 ALTER TABLE numbering_outbox_events ADD CONSTRAINT ck_numbering_outbox_events_type
-    CHECK (event_type ~ '^number(\.[a-z][a-z0-9-]*){1,}$' AND length(event_type) <= 80);
+    CHECK ((event_type ~ '^number(\.[a-z][a-z0-9-]*){2,}$' OR event_type IN ('number.suspended', 'number.restored'))
+        AND length(event_type) <= 80);
 
 -- Incidents of the lifecycle workflows (P–W).
 ALTER TABLE numbering_incidents DROP CONSTRAINT ck_numbering_incidents_category;

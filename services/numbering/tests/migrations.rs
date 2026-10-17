@@ -28,8 +28,10 @@ const DOMAIN: &[&str] = &[
     "number_assignment_history",
     "number_capabilities",
     "number_catalog_revisions",
+    "number_control_events",
     "number_country_catalog",
     "number_eligibility_decisions",
+    "number_history_access",
     "number_inventory_refreshes",
     "number_inventory_snapshots",
     "number_kyc_appeals",
@@ -39,22 +41,34 @@ const DOMAIN: &[&str] = &[
     "number_kyc_evidence_refs",
     "number_kyc_requirements",
     "number_kyc_verifications",
+    "number_late_activity",
     "number_lifecycle_events",
+    "number_operational_controls",
     "number_pool_members",
     "number_pools",
+    "number_port_events",
+    "number_port_requests",
     "number_provider_bindings",
     "number_provider_command_attempts",
     "number_provider_commands",
     "number_provider_events",
     "number_provider_inventory_refs",
+    "number_quarantines",
+    "number_relay_leases",
+    "number_relay_pool_members",
+    "number_release_requests",
     "number_reservations",
     "number_resources",
+    "number_risk_decisions",
+    "number_risk_signals",
     "number_route_configurations",
     "number_route_readiness",
     "number_routing_grants",
     "number_routing_profiles",
     "number_search_windows",
+    "number_suspensions",
     "number_type_catalog",
+    "number_usage_records",
     "numbering_incidents",
 ];
 
@@ -93,19 +107,19 @@ async fn fresh_migration_creates_exactly_numbering_tables_and_down_removes_them(
         scalar(&db.conn, "SELECT count(*) FROM numbering_seaql_migrations").await,
         Migrator::migrations().len() as i64
     );
-    // Nothing that later workstreams own yet (SMS, portability, fraud, billing), nothing of
-    // another service. (KYC is Workstream F's.)
+    // Nothing of another service's domain (SMS transport, calls, credentials, tenants) and
+    // no retail billing / invoicing. (KYC is Workstream F's; number portability requests
+    // and relay-number leases are Numbering's since Workstreams U and Part P.)
     for t in tables(&db.conn).await {
         for forbidden in [
             "sms",
-            "port",
             "fraud",
             "billing",
             "invoice",
             "call",
             "credential",
             "tenant",
-            "relay",
+            "session",
         ] {
             assert!(!t.contains(forbidden), "{t} looks like a {forbidden} table");
         }

@@ -166,6 +166,18 @@ pub enum InternalPermission {
     /// voice resolver (`number-route.resolve`) is never used for SMS.
     #[serde(rename = "number-sms-route.resolve")]
     NumberSmsRouteResolve,
+    /// Numbering (Part IV S): report the per-number usage a carrier metered (voice seconds:
+    /// Telephony; SMS segments: the SMS Gateway) — internal cost evidence, idempotent.
+    #[serde(rename = "number-usage.report")]
+    NumberUsageReport,
+    /// Numbering (Part IV T): report an abuse / fraud signal about a number (SMS pumping,
+    /// spam calls, premium destinations, cost spikes) for number-level risk decisions.
+    #[serde(rename = "number-risk.report")]
+    NumberRiskReport,
+    /// Numbering (Part IV P §§119–120): import the relay-number inventory, lease a relay
+    /// number for a relay session and resolve its lease — Privacy Relay only.
+    #[serde(rename = "number-relay.lease")]
+    NumberRelayLease,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -478,6 +490,30 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: true,
         description: "Resolve the destination number of a received SMS to its owner scope and SMS routing target, with a short-lived INBOUND_SMS grant (the SMS Gateway only)",
     },
+    PermissionDefinition {
+        permission: InternalPermission::NumberUsageReport,
+        name: "number-usage.report",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::TELEPHONY, services::SMS_GATEWAY],
+        sensitive: false,
+        description: "Report the usage a carrier metered for a number (voice seconds / SMS segments) as idempotent internal cost evidence",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberRiskReport,
+        name: "number-risk.report",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::CALLING, services::TELEPHONY, services::SMS_GATEWAY],
+        sensitive: false,
+        description: "Report an abuse, fraud or cost signal about a number for number-level risk decisions (restrictive only)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberRelayLease,
+        name: "number-relay.lease",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::PRIVACY_RELAY],
+        sensitive: true,
+        description: "Import Privacy Relay's relay-number inventory into Numbering, lease a relay number for a relay session and resolve its lease (Privacy Relay only)",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -522,6 +558,9 @@ impl InternalPermission {
         InternalPermission::NumberSmsSenderAuthorize,
         InternalPermission::NumberGrantVerify,
         InternalPermission::NumberSmsRouteResolve,
+        InternalPermission::NumberUsageReport,
+        InternalPermission::NumberRiskReport,
+        InternalPermission::NumberRelayLease,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {

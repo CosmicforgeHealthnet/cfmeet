@@ -116,7 +116,7 @@ pub struct TargetsBody {
 }
 
 impl TargetsBody {
-    fn targets(&self) -> crate::numbers::routing::RoutingTargets {
+    pub(crate) fn targets(&self) -> crate::numbers::routing::RoutingTargets {
         crate::numbers::routing::RoutingTargets {
             voice: (self.voice.kind, self.voice.target_ref),
             sms: (self.sms.kind, self.sms.target_ref),

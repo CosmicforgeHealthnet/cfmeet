@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Numbering API",
-    "version": "1.11.0",
-    "description": "HTTP surface of services/numbering: GET /health, /ready and /openapi.json (public, no data); the customer API under /v1 (credential verified by Platform Access on every request; normalized 401, 429 when Platform Access throttles or a quota is exhausted, 503 when it is unreachable — fail closed): assignment / reservation reads, the catalog, KYC and eligibility (F), provider-neutral inventory search and reservations (H); provider callbacks (G); and the service-authenticated /internal/v1 API (cfmeet.platform.internal-http; permission from Numbering's own trust bundle). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 64 KiB."
+    "version": "1.12.0",
+    "description": "HTTP surface of services/numbering: GET /health, /ready and /openapi.json (public, no data); the customer API under /v1 (credential verified by Platform Access on every request; normalized 401, 429 when Platform Access throttles or a quota is exhausted, 503 when it is unreachable — fail closed): assignment / reservation reads, the catalog, KYC and eligibility (F), provider-neutral inventory search and reservations (H); provider callbacks (G); and the service-authenticated /internal/v1 API (cfmeet.platform.internal-http; permission from Numbering's own trust bundle). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 64 KiB. 1.12.0 lifecycle stewardship (Part IV P–X): suspension / restoration, release / quarantine / reassignment, audited ownership history, usage, risk and appeals, portability (flagged), kill switches, drift reconciliation, and the relay-number import / lease / resolution API (Part P)."
   },
   "components": {
     "securitySchemes": {
@@ -3934,6 +3934,2355 @@
             "$ref": "#/components/responses/Error"
           },
           "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/numbers/assignments/{assignmentId}/suspend": {
+      "post": {
+        "operationId": "suspendAssignment",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream P: local-first suspension of the caller's ACTIVE number — new caller-identity / SMS-sender grants and inbound resolutions are refused from that commit on, outstanding grants are revoked, the provider routes are disabled through the durable executor; ownership is retained; `number.suspended` is published. Idempotent. Requires scope `numbers.manage`.",
+        "parameters": [
+          {
+            "name": "assignmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Suspension"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/SuspendRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/numbers/assignments/{assignmentId}/restore": {
+      "post": {
+        "operationId": "restoreAssignment",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream P: restoration after the owner, KYC / eligibility basis, standing, risk, provider binding, capability truth and route readiness re-check (a failed check is recorded and refused with its rule); RESTORING while the provider RESTORE runs, RESTORED (and `number.restored`) only once it is confirmed. Operator / risk / provider suspensions are lifted by operators only (OPERATOR_RESTORE_REQUIRED). Requires scope `numbers.manage`.",
+        "parameters": [
+          {
+            "name": "assignmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Suspension"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/numbers/assignments/{assignmentId}/suspension": {
+      "get": {
+        "operationId": "getAssignmentSuspension",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "The open (else latest) suspension of the caller's assignment. Requires scope `numbers.read`.",
+        "parameters": [
+          {
+            "name": "assignmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Suspension"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/numbers/assignments/{assignmentId}/release": {
+      "post": {
+        "operationId": "releaseAssignment",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream Q: an auditable release (never a delete) in the mandatory order — grants and SMS submissions stopped, voice and SMS routing removed, organizational resources detached, removal evidence confirmed, provider release (PROVIDER_RELINQUISH), unknown outcomes reconciled, quarantine. 202 with the release; a future `effectiveAt` schedules it. Requires scope `numbers.manage`.",
+        "parameters": [
+          {
+            "name": "assignmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Release"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Replayed (same Idempotency-Key / source key and request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Release"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReleaseNumberRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/numbers/assignments/{assignmentId}/quarantine": {
+      "get": {
+        "operationId": "getAssignmentQuarantine",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "The quarantine that followed the release of the caller's assignment. Requires scope `numbers.read`.",
+        "parameters": [
+          {
+            "name": "assignmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Quarantine"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/numbers/releases/{releaseId}": {
+      "get": {
+        "operationId": "getRelease",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "A release request of the caller's scope. Requires scope `numbers.read`.",
+        "parameters": [
+          {
+            "name": "releaseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Release"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/numbers/reassignments": {
+      "post": {
+        "operationId": "reassignNumber",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream Q: reassignment of a REASSIGNABLE number to the caller (see ReassignmentRequest); the new owner's eligibility, a provider read-back, fresh routes. Requires scope `numbers.assign`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReassignmentResult"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Replayed (same Idempotency-Key / source key and request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReassignmentResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReassignmentRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/numbers/usage": {
+      "get": {
+        "operationId": "getNumberUsage",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream S: the caller's usage per number and kind in [from, to) — quantities only (provider costs are internal evidence, never prices). Requires scope `numbers.read`.",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/UsageSummaryList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/numbers/risk-decisions/{decisionId}": {
+      "get": {
+        "operationId": "getRiskDecision",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream T: an explainable risk decision of the caller's scope. Requires scope `numbers.read`.",
+        "parameters": [
+          {
+            "name": "decisionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RiskDecision"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/numbers/risk-decisions/{decisionId}/appeals": {
+      "post": {
+        "operationId": "appealRiskDecision",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream T: an appeal (appended, PENDING until an operator decides). Requires scope `numbers.manage`.",
+        "parameters": [
+          {
+            "name": "decisionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RiskDecision"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/AppealRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/numbers/ports": {
+      "get": {
+        "operationId": "listPortRequests",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream U: the caller's port requests. Requires scope `numbers.read`.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/PortRequestList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createPortRequest",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream U (NUMBERING_PORTING_ENABLED, else PORTING_DISABLED): a port-in / port-out request with its eligibility check (ownership evidence, KYC, gateway support). Port-out never touches routing before authoritative completion. Requires scope `numbers.manage`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/PortRequest"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Replayed (same Idempotency-Key / source key and request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/PortRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CreatePortRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/numbers/ports/{portId}": {
+      "get": {
+        "operationId": "getPortRequest",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "A port request of the caller's scope. Requires scope `numbers.read`.",
+        "parameters": [
+          {
+            "name": "portId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/PortRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/numbers/ports/{portId}/evidence": {
+      "post": {
+        "operationId": "addPortEvidence",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Adds ownership evidence to a DOCUMENTS_REQUIRED request and re-checks it. Requires scope `numbers.manage`.",
+        "parameters": [
+          {
+            "name": "portId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/PortRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/PortEvidenceRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/numbers/ports/{portId}/submit": {
+      "post": {
+        "operationId": "submitPortRequest",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Submits an eligible request once (an uncertain submission is UNKNOWN_PROVIDER_STATE, resolved by status queries, never resubmitted). Requires scope `numbers.manage`.",
+        "parameters": [
+          {
+            "name": "portId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/PortRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/numbers/ports/{portId}/cancel": {
+      "post": {
+        "operationId": "cancelPortRequest",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Cancels a request that was not submitted. Requires scope `numbers.manage`.",
+        "parameters": [
+          {
+            "name": "portId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/PortRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/number-resources/{numberResourceId}/suspend": {
+      "post": {
+        "operationId": "adminSuspendNumber",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "An operator suspension (source OPERATOR) of a number's open assignment. Requires scope `numbers.admin` on a FIRST_PARTY application and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "numberResourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Suspension"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/SuspendRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/number-resources/{numberResourceId}/restore": {
+      "post": {
+        "operationId": "adminRestoreNumber",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "An operator restoration (every restoration check still applies). Requires scope `numbers.admin` on a FIRST_PARTY application and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "numberResourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Suspension"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/number-resources/{numberResourceId}/release": {
+      "post": {
+        "operationId": "adminReleaseNumber",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "An operator release of a number's open assignment. Requires scope `numbers.admin` on a FIRST_PARTY application and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "numberResourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Release"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Replayed (same Idempotency-Key / source key and request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Release"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReleaseNumberRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/number-resources/{numberResourceId}/quarantine": {
+      "get": {
+        "operationId": "adminGetQuarantine",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "A number's latest quarantine. Requires scope `numbers.admin` on a FIRST_PARTY application and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "numberResourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Quarantine"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/quarantines/{quarantineId}/review": {
+      "post": {
+        "operationId": "adminReviewQuarantine",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "A quarantine review decision (approve / extend / hold). Requires scope `numbers.admin` on a FIRST_PARTY application and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "quarantineId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Quarantine"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/QuarantineReviewRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/number-resources/{numberResourceId}/ownership-periods": {
+      "post": {
+        "operationId": "adminOwnershipPeriods",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream R: every owner's period, owners masked; audited with the stated purpose and case. Requires scope `numbers.admin` on a FIRST_PARTY application and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "numberResourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/OwnershipPeriodList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/AccessJustification"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/number-resources/{numberResourceId}/ownership-verifications": {
+      "post": {
+        "operationId": "adminVerifyOwnership",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream R: verifies a claimed historical ownership (audited with its outcome). Requires scope `numbers.admin` on a FIRST_PARTY application and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "numberResourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/OwnershipVerification"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/OwnershipVerificationRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/number-resources/{numberResourceId}/lifecycle-evidence": {
+      "post": {
+        "operationId": "adminLifecycleEvidence",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream R: the number's lifecycle, suspension, release, quarantine, port and risk evidence (audited). Requires scope `numbers.admin` on a FIRST_PARTY application and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "numberResourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/LifecycleEvidence"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/AccessJustification"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/number-resources/{numberResourceId}/usage": {
+      "get": {
+        "operationId": "adminNumberUsage",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream S: every usage record of a number with internal provider costs. Requires scope `numbers.admin` on a FIRST_PARTY application and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "numberResourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/AdminUsageList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/number-resources/{numberResourceId}/risk-decisions": {
+      "get": {
+        "operationId": "adminRiskDecisions",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream T: every risk decision of a number. Requires scope `numbers.admin` on a FIRST_PARTY application and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "numberResourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RiskDecisionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/risk-decisions/{decisionId}/appeal-decisions": {
+      "post": {
+        "operationId": "adminDecideAppeal",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream T: decides an appeal (appended). Requires scope `numbers.admin` on a FIRST_PARTY application and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "decisionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RiskDecision"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/AppealDecisionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/controls": {
+      "get": {
+        "operationId": "adminListControls",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream W: every kill switch. Requires scope `numbers.admin` on a FIRST_PARTY application and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/OperationalControlList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/controls/{control}": {
+      "post": {
+        "operationId": "adminSetControl",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream W: engages / releases a kill switch (audited). Requires scope `numbers.admin` on a FIRST_PARTY application and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "control",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/OperationalControlKey"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/OperationalControl"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/OperationalControlChange"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/reconciliation/lifecycle": {
+      "post": {
+        "operationId": "adminReconcileLifecycle",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Workstream V: runs one drift-reconciliation sweep now. Requires scope `numbers.admin` on a FIRST_PARTY application and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/LifecycleReconciliationReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/relay-numbers/{relayInventoryRef}/retire": {
+      "post": {
+        "operationId": "adminRetireRelayNumber",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Part P: retires a relay number from the pool (no new lease). Requires scope `numbers.admin` on a FIRST_PARTY application and the audited human operator in `X-CF-Operator`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "relayInventoryRef",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RelayRetireResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/number-usage": {
+      "post": {
+        "operationId": "reportNumberUsage",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "description": "Workstream S: a carrier's per-number usage (Telephony: voice seconds, SMS Gateway: SMS segments). Permission `number-usage.report`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/UsageReportResult"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Replayed (same Idempotency-Key / source key and request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/UsageReportResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/UsageReport"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/number-risk-signals": {
+      "post": {
+        "operationId": "reportNumberRiskSignal",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "description": "Workstream T: an abuse / fraud / cost signal (restrictive only). Permission `number-risk.report`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RiskSignalResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RiskSignalReport"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/relay-inventory/imports": {
+      "post": {
+        "operationId": "importRelayNumber",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "description": "Part P §§119–120: idempotent relay inventory backfill. Permission `number-relay.lease` (Privacy Relay).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RelayImportResult"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Replayed (same Idempotency-Key / source key and request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RelayImportResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RelayImportRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/relay-leases": {
+      "post": {
+        "operationId": "leaseRelayNumber",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "description": "Part P: a temporary relay-number lease (refused while the number is out of service, retired, leased or the RELAY_LEASES switch is engaged). Permission `number-relay.lease`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RelayLeaseResult"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Replayed (same Idempotency-Key / source key and request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RelayLeaseResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RelayLeaseRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/relay-leases/{leaseId}/release": {
+      "post": {
+        "operationId": "releaseRelayLease",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "description": "Part P: ends a lease (its holder only; idempotent). Permission `number-relay.lease`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "leaseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RelayLeaseResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RelayLeaseReleaseRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/relay-numbers/{relayInventoryRef}/resolution": {
+      "get": {
+        "operationId": "resolveRelayNumber",
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "description": "Part P: the compatibility resolution of a relay number by its Privacy Relay inventory id. Permission `number-relay.lease`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "relayInventoryRef",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RelayResolution"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
             "$ref": "#/components/responses/Error"
           },
           "503": {

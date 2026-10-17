@@ -285,6 +285,8 @@ pub struct Peers {
     pub privacy_relay: Arc<ServiceTokenSigner>,
     /// Trusted Calling identity name, but a key the bundle does not list.
     pub rogue_calling: Arc<ServiceTokenSigner>,
+    /// Privacy Relay with its TRUSTED key: relay-number import / leases only (Part P).
+    pub relay: Arc<ServiceTokenSigner>,
 }
 
 /// Numbering's service-auth runtime (system clock) whose client reaches `targets`.
@@ -296,6 +298,7 @@ pub fn service_auth(
     let calling = peer_key("calling-test-1");
     let telephony = peer_key("telephony-test-1");
     let sms_gateway = peer_key("sms-gateway-test-1");
+    let relay = peer_key("privacy-relay-lease-1");
     let policy = TrustPolicy::from_json(
         &trust_bundle_json(
             cf_service_auth::services::NUMBERING,
@@ -307,6 +310,7 @@ pub fn service_auth(
                         "number-resource.read",
                         "number-caller-identity.authorize",
                         "number-grant.verify",
+                        "number-risk.report",
                     ],
                 ),
                 (
@@ -317,6 +321,8 @@ pub fn service_auth(
                         "number-route.acknowledge",
                         "number-route.resolve",
                         "number-grant.verify",
+                        "number-usage.report",
+                        "number-risk.report",
                     ],
                 ),
                 (
@@ -327,7 +333,14 @@ pub fn service_auth(
                         "number-sms-route.resolve",
                         "number-sms-sender.authorize",
                         "number-grant.verify",
+                        "number-usage.report",
+                        "number-risk.report",
                     ],
+                ),
+                (
+                    cf_service_auth::services::PRIVACY_RELAY,
+                    vec![relay.public_jwk()],
+                    &["number-relay.lease"],
                 ),
             ],
         ),
@@ -364,6 +377,7 @@ pub fn service_auth(
         sms_gateway: signer(ServiceId::sms_gateway(), sms_gateway),
         privacy_relay: signer(ServiceId::privacy_relay(), key("privacy-relay-test-1")),
         rogue_calling: signer(ServiceId::calling(), key("calling-rogue-1")),
+        relay: signer(ServiceId::privacy_relay(), relay),
     };
     (runtime, peers)
 }

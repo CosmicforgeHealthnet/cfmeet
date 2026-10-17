@@ -608,6 +608,8 @@ async fn every_implemented_route_is_in_the_contract_and_vice_versa() {
         ("src/http/callbacks.rs", "/provider-callbacks/v1"),
         ("src/http/internal.rs", "/internal/v1"),
         ("src/http/grants.rs", "/internal/v1"),
+        ("src/http/stewardship.rs", "/v1"),
+        ("src/http/stewardship_internal.rs", "/internal/v1"),
     ] {
         for (method, path) in routes_in(&src(file)) {
             let path: String = path

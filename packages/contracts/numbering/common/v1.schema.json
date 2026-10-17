@@ -2308,7 +2308,43 @@
         "PRINCIPAL_NOT_PERMITTED",
         "SYNTHETIC_NOT_ROUTABLE",
         "NOT_ACTIVE",
-        "OPERATION_ALREADY_AUTHORIZED"
+        "OPERATION_ALREADY_AUTHORIZED",
+        "NOT_SUSPENDED",
+        "OPERATOR_RESTORE_REQUIRED",
+        "ASSIGNMENT_NOT_SUSPENDED",
+        "KYC_NOT_IN_FORCE",
+        "STANDING_NOT_ACTIVE",
+        "RISK_RESTRICTED",
+        "ROUTE_NOT_READY",
+        "RESTORE_CHECK_FAILED",
+        "PROVIDER_NOT_CONFIGURED",
+        "PORT_OUT_REQUIRED",
+        "ASSIGNMENT_NOT_RELEASABLE",
+        "PORT_IN_PROGRESS",
+        "RELEASE_IN_PROGRESS",
+        "SUSPENSION_EXISTS",
+        "QUARANTINE_EXISTS",
+        "QUARANTINE_COMPLETED",
+        "SIGNAL_NOT_PERMITTED",
+        "APPEAL_PENDING",
+        "NOT_AN_APPEAL",
+        "APPEAL_DECIDED",
+        "RISK_DENIED",
+        "RISK_REVIEW_REQUIRED",
+        "SPEND_LIMIT_REACHED",
+        "PROVIDER_COST_BREAKER_OPEN",
+        "USAGE_SOURCE_CONFLICT",
+        "USAGE_KIND_NOT_PERMITTED",
+        "USAGE_FINAL",
+        "PORTING_DISABLED",
+        "NUMBER_ALREADY_MANAGED",
+        "PORT_NOT_AWAITING_DOCUMENTS",
+        "PORT_NOT_ELIGIBLE",
+        "PORT_SUBMITTED",
+        "OPERATION_DISABLED",
+        "RELAY_IMPORT_CONFLICT",
+        "RELAY_NUMBER_NOT_LEASABLE",
+        "RELAY_NUMBER_LEASED"
       ]
     },
     "Error": {
@@ -4276,7 +4312,11 @@
         "UNMATCHED_PROVIDER_EVENT",
         "PROVIDER_RELEASED_UNEXPECTEDLY",
         "RECONCILIATION_CONFLICT",
-        "PROVIDER_OUTAGE"
+        "PROVIDER_OUTAGE",
+        "LIFECYCLE_SAFETY",
+        "QUARANTINE_CONFLICT",
+        "PROVIDER_COST_SPIKE",
+        "RISK_RESTRICTION"
       ]
     },
     "ProviderCallbackAck": {
@@ -5890,6 +5930,1697 @@
           }
         }
       }
+    },
+    "SuspensionSource": {
+      "description": "Who suspended a number: its customer (CUSTOMER / ORGANIZATION, lifted by the customer) or an operator, the risk policy or a provider state drift (lifted by an operator only).",
+      "type": "string",
+      "enum": [
+        "CUSTOMER",
+        "ORGANIZATION",
+        "OPERATOR",
+        "RISK",
+        "PROVIDER"
+      ]
+    },
+    "SuspensionStatus": {
+      "description": "A suspension's state.",
+      "type": "string",
+      "enum": [
+        "SUSPENDED",
+        "RESTORING",
+        "RESTORED",
+        "ENDED"
+      ]
+    },
+    "SuspensionProviderState": {
+      "description": "The provider route disable: not required (no adapter), PENDING / CONFIRMED / FAILED / UNKNOWN through the durable command executor, UNSUPPORTED by the adapter.",
+      "type": "string",
+      "enum": [
+        "NOT_REQUIRED",
+        "PENDING",
+        "CONFIRMED",
+        "UNSUPPORTED",
+        "UNKNOWN",
+        "FAILED"
+      ]
+    },
+    "SuspendRequest": {
+      "description": "POST /v1/numbers/assignments/{id}/suspend and POST /v1/admin/number-resources/{id}/suspend: local-first suspension (grants refused and revoked at once, ownership retained), then the provider SUSPEND.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reasonCode"
+      ],
+      "properties": {
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "evidenceRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "Suspension": {
+      "description": "A number's suspension with its restoration checks (each true / false) and outcome.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "suspensionId",
+        "numberResourceId",
+        "assignmentId",
+        "source",
+        "reasonCode",
+        "status",
+        "providerState",
+        "suspendedAt",
+        "revision"
+      ],
+      "properties": {
+        "suspensionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "assignmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "source": {
+          "$ref": "#/$defs/SuspensionSource"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "status": {
+          "$ref": "#/$defs/SuspensionStatus"
+        },
+        "providerState": {
+          "$ref": "#/$defs/SuspensionProviderState"
+        },
+        "suspendedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "restoreRequestedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "restoreBlockedReason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "restoreChecks": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": {
+                "type": "boolean"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "restoredAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endedReason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        }
+      }
+    },
+    "ReleasePolicy": {
+      "description": "POOL_RETURN keeps the number CF Meet-controlled (reassignable after quarantine); PROVIDER_RELINQUISH gives it back to the provider (finally RELEASED, never reassigned); PORTED_OUT is completed by a port-out only.",
+      "type": "string",
+      "enum": [
+        "POOL_RETURN",
+        "PROVIDER_RELINQUISH",
+        "PORTED_OUT"
+      ]
+    },
+    "ReleaseStatus": {
+      "description": "A release request's state.",
+      "type": "string",
+      "enum": [
+        "REQUESTED",
+        "ROUTING_REMOVED",
+        "PROVIDER_RELEASE_PENDING",
+        "PROVIDER_OUTCOME_UNKNOWN",
+        "QUARANTINED",
+        "FAILED",
+        "CANCELLED"
+      ]
+    },
+    "ReleaseNumberRequest": {
+      "description": "POST /v1/numbers/assignments/{id}/release (Idempotency-Key required): a scheduled or immediate release run in the mandatory order (grants stopped, voice / SMS routing removed, resources detached, removal confirmed, provider release, quarantine).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reasonCode",
+        "policy"
+      ],
+      "properties": {
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "policy": {
+          "$ref": "#/$defs/ReleasePolicy"
+        },
+        "effectiveAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "Release": {
+      "description": "An auditable release request (never a delete).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "releaseId",
+        "numberResourceId",
+        "assignmentId",
+        "policy",
+        "reasonCode",
+        "status",
+        "requestedAt",
+        "effectiveAt",
+        "revision"
+      ],
+      "properties": {
+        "releaseId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "assignmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "policy": {
+          "$ref": "#/$defs/ReleasePolicy"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "status": {
+          "$ref": "#/$defs/ReleaseStatus"
+        },
+        "requestedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "effectiveAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "grantsStoppedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "routingRemovedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detachedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "providerReleasedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quarantineId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "failureReason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        }
+      }
+    },
+    "Quarantine": {
+      "description": "The cooldown of a released number with its policy, review and provider confirmation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "quarantineId",
+        "numberResourceId",
+        "disposition",
+        "policyRef",
+        "cooldownDays",
+        "startedAt",
+        "quarantineUntil",
+        "status",
+        "reviewRequired",
+        "providerConfirmed",
+        "revision"
+      ],
+      "properties": {
+        "quarantineId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "disposition": {
+          "type": "string",
+          "enum": [
+            "POOL_RETURN",
+            "RELINQUISHED"
+          ]
+        },
+        "policyRef": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{1,64}$"
+        },
+        "cooldownDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650
+        },
+        "startedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "quarantineUntil": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "HELD_FOR_REVIEW",
+            "COMPLETED"
+          ]
+        },
+        "reviewRequired": {
+          "type": "boolean"
+        },
+        "reviewDecision": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "APPROVED",
+                "EXTENDED",
+                "HELD"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "extensions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "providerConfirmed": {
+          "type": "boolean"
+        },
+        "completedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "completionReason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        }
+      }
+    },
+    "QuarantineReviewRequest": {
+      "description": "An operator's quarantine review: APPROVE completion, EXTEND by `days`, or HOLD.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision"
+      ],
+      "properties": {
+        "decision": {
+          "type": "string",
+          "enum": [
+            "APPROVE",
+            "EXTEND",
+            "HOLD"
+          ]
+        },
+        "days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650
+        }
+      }
+    },
+    "ReassignmentRequest": {
+      "description": "POST /v1/numbers/reassignments (Idempotency-Key required): a new owner for a REASSIGNABLE number (completed, provider-confirmed POOL_RETURN quarantine; no open release or provider command). A fresh reservation, assignment, routing revision and route configuration; nothing of the previous owner carries over.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numberResourceId",
+        "ownershipClass",
+        "routing",
+        "capabilities",
+        "eligibilityDecisionId"
+      ],
+      "properties": {
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "ownershipClass": {
+          "$ref": "#/$defs/OwnershipClass"
+        },
+        "ownerPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "routing": {
+          "$ref": "#/$defs/RoutingTargets"
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Capability"
+          }
+        },
+        "eligibilityDecisionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "poolId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "ReassignmentResult": {
+      "description": "The new assignment (RESERVED; activated once the new routes are READY).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignment"
+      ],
+      "properties": {
+        "assignment": {
+          "$ref": "#/$defs/DcnAssignment"
+        }
+      }
+    },
+    "UsageKind": {
+      "description": "What a usage record measures (internal provider cost evidence, never a customer price).",
+      "type": "string",
+      "enum": [
+        "NUMBER_RENTAL",
+        "NUMBER_SETUP",
+        "NUMBER_RENEWAL",
+        "VOICE_INBOUND_SECONDS",
+        "VOICE_OUTBOUND_SECONDS",
+        "SMS_INBOUND_SEGMENTS",
+        "SMS_OUTBOUND_SEGMENTS",
+        "PORTING"
+      ]
+    },
+    "UsageSummaryList": {
+      "description": "GET /v1/numbers/usage: quantities of the caller's scope per number and kind (no costs).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "description": "Usage of one number and kind.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "numberResourceId",
+              "usageKind",
+              "unit",
+              "quantity",
+              "records",
+              "finalRecords"
+            ],
+            "properties": {
+              "numberResourceId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "assignmentId": {
+                "oneOf": [
+                  {
+                    "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "usageKind": {
+                "$ref": "#/$defs/UsageKind"
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "MONTH",
+                  "EVENT",
+                  "SECOND",
+                  "SEGMENT"
+                ]
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "records": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "finalRecords": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "from": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "to": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "AdminUsageList": {
+      "description": "Every usage record of a number with internal provider costs (operators).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "RiskDecision": {
+      "description": "An explainable, append-only number risk decision.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "riskDecisionId",
+        "decisionKind",
+        "outcome",
+        "score",
+        "reasons",
+        "policyVersion",
+        "decidedAt"
+      ],
+      "properties": {
+        "riskDecisionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "decisionKind": {
+          "type": "string",
+          "enum": [
+            "ALLOCATION",
+            "SCORE",
+            "SPEND",
+            "APPEAL_FILED",
+            "APPEAL_UPHELD",
+            "APPEAL_REJECTED",
+            "RESTRICTION_LIFTED"
+          ]
+        },
+        "numberResourceId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "ALLOW",
+            "REVIEW",
+            "DENY",
+            "RESTRICT",
+            "PENDING"
+          ]
+        },
+        "score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          }
+        },
+        "policyVersion": {
+          "type": "string"
+        },
+        "supersedesId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decidedAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "RiskDecisionList": {
+      "description": "Risk decisions, oldest first.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RiskDecision"
+          }
+        }
+      }
+    },
+    "AppealRequest": {
+      "description": "A customer appeal of a restricting / denying / review decision of its own scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "statementRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "AppealDecisionRequest": {
+      "description": "An operator's decision on an appeal (appended; the original stays untouched).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "upheld"
+      ],
+      "properties": {
+        "upheld": {
+          "type": "boolean"
+        }
+      }
+    },
+    "PortDirection": {
+      "description": "Port-in (to CF Meet) or port-out (away from CF Meet).",
+      "type": "string",
+      "enum": [
+        "IN",
+        "OUT"
+      ]
+    },
+    "PortStatus": {
+      "description": "The provider-independent port request states.",
+      "type": "string",
+      "enum": [
+        "REQUESTED",
+        "ELIGIBILITY_CHECK",
+        "DOCUMENTS_REQUIRED",
+        "SUBMITTED",
+        "IN_PROGRESS",
+        "COMPLETED",
+        "REJECTED",
+        "CANCELLED",
+        "UNKNOWN_PROVIDER_STATE"
+      ]
+    },
+    "CreatePortRequest": {
+      "description": "POST /v1/numbers/ports (Idempotency-Key required; NUMBERING_PORTING_ENABLED): port-in names the number and country, port-out the assignment. Ownership evidence is protected KYC evidence ids of the scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "direction",
+        "ownershipClass"
+      ],
+      "properties": {
+        "direction": {
+          "$ref": "#/$defs/PortDirection"
+        },
+        "e164": {
+          "type": "string",
+          "pattern": "^\\+[1-9][0-9]{6,14}$"
+        },
+        "country": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "assignmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "ownershipClass": {
+          "$ref": "#/$defs/OwnershipClass"
+        },
+        "kycCaseId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "evidenceIds": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        }
+      }
+    },
+    "PortEvidenceRequest": {
+      "description": "Adds ownership evidence to a DOCUMENTS_REQUIRED port request.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidenceIds"
+      ],
+      "properties": {
+        "evidenceIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "kycCaseId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "PortRequest": {
+      "description": "A port request (the number itself is never returned).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "portRequestId",
+        "direction",
+        "country",
+        "ownershipClass",
+        "evidenceIds",
+        "status",
+        "requestedAt",
+        "revision"
+      ],
+      "properties": {
+        "portRequestId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "direction": {
+          "$ref": "#/$defs/PortDirection"
+        },
+        "numberResourceId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "assignmentId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "country": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "ownershipClass": {
+          "$ref": "#/$defs/OwnershipClass"
+        },
+        "kycCaseId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "status": {
+          "$ref": "#/$defs/PortStatus"
+        },
+        "statusReason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requestedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "completedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        }
+      }
+    },
+    "PortRequestList": {
+      "description": "The scope's port requests, newest first.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PortRequest"
+          }
+        }
+      }
+    },
+    "AccessPurpose": {
+      "description": "Why an operator reads number history (audited).",
+      "type": "string",
+      "enum": [
+        "ACCOUNT_RECOVERY",
+        "LEGAL_REQUEST",
+        "FRAUD_INVESTIGATION",
+        "CUSTOMER_SUPPORT",
+        "AUDIT"
+      ]
+    },
+    "AccessJustification": {
+      "description": "The purpose and case reference every privileged history read carries.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "purpose",
+        "caseRef"
+      ],
+      "properties": {
+        "purpose": {
+          "$ref": "#/$defs/AccessPurpose"
+        },
+        "caseRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{2,63}$"
+        }
+      }
+    },
+    "OwnershipPeriodList": {
+      "description": "Every owner's period of routing authority, owners masked per case.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "description": "One owner's period.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "assignmentId",
+              "tenantId",
+              "applicationId",
+              "environmentId",
+              "ownerKind",
+              "ownerDigest",
+              "ownershipClass",
+              "status"
+            ],
+            "properties": {
+              "assignmentId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "tenantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "applicationId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "environmentId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "ownerKind": {
+                "$ref": "#/$defs/OwnerKind"
+              },
+              "ownerDigest": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{16}$"
+              },
+              "ownershipClass": {
+                "$ref": "#/$defs/OwnershipClass"
+              },
+              "status": {
+                "type": "string"
+              },
+              "startedAt": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/Timestamp"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "endedAt": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/Timestamp"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "closeReason": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "transferredFrom": {
+                "oneOf": [
+                  {
+                    "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "OwnershipVerificationRequest": {
+      "description": "Verifies a claimed historical ownership (account recovery / legal): possession of the number proves nothing; other owners are never revealed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenantId",
+        "ownerRef",
+        "at",
+        "purpose",
+        "caseRef"
+      ],
+      "properties": {
+        "tenantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "ownerRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "purpose": {
+          "$ref": "#/$defs/AccessPurpose"
+        },
+        "caseRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{2,63}$"
+        }
+      }
+    },
+    "OwnershipVerification": {
+      "description": "MATCH (with the matched period), NO_MATCH or AMBIGUOUS.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome"
+      ],
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "MATCH",
+            "NO_MATCH",
+            "AMBIGUOUS"
+          ]
+        },
+        "periodStart": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "periodEnd": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "assignmentId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "LifecycleEvidence": {
+      "description": "The audited lifecycle evidence of a number (operators).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numberResourceId",
+        "lifecycle",
+        "workflow",
+        "lateActivityEvents"
+      ],
+      "properties": {
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "lifecycle": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "workflow": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "lateActivityEvents": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "OperationalControlKey": {
+      "description": "Emergency kill switches (restrictive only).",
+      "type": "string",
+      "enum": [
+        "DCN_INBOUND_ROUTING",
+        "DCN_CALLER_IDENTITY",
+        "DCN_SMS_SENDER",
+        "NUMBER_PROVISIONING",
+        "NUMBER_PORTING",
+        "RELAY_LEASES"
+      ]
+    },
+    "OperationalControl": {
+      "description": "A kill switch's current state.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "control",
+        "engaged"
+      ],
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/OperationalControlKey"
+        },
+        "engaged": {
+          "type": "boolean"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "changedBy": {
+          "type": "string"
+        },
+        "changedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "OperationalControlList": {
+      "description": "Every control (unset ones are open).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OperationalControl"
+          }
+        }
+      }
+    },
+    "OperationalControlChange": {
+      "description": "Engages / releases a control (audited).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "engaged",
+        "reasonCode"
+      ],
+      "properties": {
+        "engaged": {
+          "type": "boolean"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        }
+      }
+    },
+    "LifecycleReconciliationReport": {
+      "description": "One recurring drift-reconciliation sweep (counts only).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inspected",
+        "drift",
+        "failClosed",
+        "skippedInFlight",
+        "providerUnavailable",
+        "staleInventory",
+        "unknownCommandsReconciled"
+      ],
+      "properties": {
+        "inspected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "drift": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failClosed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skippedInFlight": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "providerUnavailable": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "staleInventory": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unknownCommandsReconciled": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "UsageReport": {
+      "description": "POST /internal/v1/number-usage (number-usage.report): the usage a carrier metered for a number — voice seconds (Telephony) or SMS segments (SMS Gateway); idempotent per source key.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceKey",
+        "numberResourceId",
+        "assignmentId",
+        "usageKind",
+        "quantity",
+        "periodStart",
+        "periodEnd"
+      ],
+      "properties": {
+        "sourceKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "assignmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "usageKind": {
+          "$ref": "#/$defs/UsageKind"
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "providerCostMinor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "periodStart": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "periodEnd": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "UsageReportResult": {
+      "description": "The usage record (recorded false: an earlier report with this key).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "usageRecordId",
+        "status",
+        "recorded"
+      ],
+      "properties": {
+        "usageRecordId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "PROVISIONAL",
+            "FINAL"
+          ]
+        },
+        "recorded": {
+          "type": "boolean"
+        }
+      }
+    },
+    "RiskSignalKind": {
+      "description": "Abuse / fraud / cost signals about a number.",
+      "type": "string",
+      "enum": [
+        "SMS_PUMPING",
+        "ABNORMAL_SMS_TRAFFIC",
+        "SPAM_CALLS",
+        "NUISANCE_CALLS",
+        "RAPID_RELEASE",
+        "MASS_REGISTRATION",
+        "NUMBER_FARMING",
+        "COST_SPIKE",
+        "PREMIUM_DESTINATION"
+      ]
+    },
+    "RiskSignalReport": {
+      "description": "POST /internal/v1/number-risk-signals (number-risk.report): restrictive only; a restricting score suspends the number (source RISK).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numberResourceId",
+        "signalKind",
+        "magnitude",
+        "sourceKey"
+      ],
+      "properties": {
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "signalKind": {
+          "$ref": "#/$defs/RiskSignalKind"
+        },
+        "magnitude": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "sourceKey": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,160}$"
+        }
+      }
+    },
+    "RiskSignalResult": {
+      "description": "The number's score and outcome after the signal.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recorded",
+        "score",
+        "outcome",
+        "reasons"
+      ],
+      "properties": {
+        "recorded": {
+          "type": "boolean"
+        },
+        "score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "ALLOW",
+            "REVIEW",
+            "RESTRICT"
+          ]
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          }
+        },
+        "riskDecisionId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "suspensionId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RelayImportRequest": {
+      "description": "POST /internal/v1/relay-inventory/imports (number-relay.lease, Privacy Relay): idempotent backfill of one Part III relay number as a PRIVACY_RELAY Number Resource keyed by the Privacy Relay inventory id.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relayInventoryRef",
+        "e164",
+        "country",
+        "capabilities",
+        "bindingRef"
+      ],
+      "properties": {
+        "relayInventoryRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "e164": {
+          "type": "string",
+          "pattern": "^\\+[1-9][0-9]{6,14}$"
+        },
+        "country": {
+          "$ref": "#/$defs/CountryCode"
+        },
+        "region": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": {
+            "type": "string",
+            "enum": [
+              "VOICE_INBOUND",
+              "VOICE_OUTBOUND"
+            ]
+          }
+        },
+        "bindingRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        }
+      }
+    },
+    "RelayImportResult": {
+      "description": "The relay pool member (200: an earlier import).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relayInventoryRef",
+        "numberResourceId",
+        "status"
+      ],
+      "properties": {
+        "relayInventoryRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "RETIRED"
+          ]
+        }
+      }
+    },
+    "RelayLeaseRequest": {
+      "description": "POST /internal/v1/relay-leases (number-relay.lease): a temporary lease of a relay number for one Privacy Relay assignment (idempotent per key; one ACTIVE lease per number; bounded lifetime).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relayInventoryRef",
+        "holderRef",
+        "generation",
+        "expiresAt",
+        "idempotencyKey"
+      ],
+      "properties": {
+        "relayInventoryRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "holderRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+        }
+      }
+    },
+    "RelayLease": {
+      "description": "A relay-number lease (never the number).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "leaseId",
+        "numberResourceId",
+        "holderRef",
+        "generation",
+        "status",
+        "grantedAt",
+        "expiresAt"
+      ],
+      "properties": {
+        "leaseId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "holderRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "RELEASED",
+            "EXPIRED",
+            "REVOKED"
+          ]
+        },
+        "grantedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "endedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endReason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RelayLeaseResult": {
+      "description": "A lease.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lease"
+      ],
+      "properties": {
+        "lease": {
+          "$ref": "#/$defs/RelayLease"
+        }
+      }
+    },
+    "RelayLeaseReleaseRequest": {
+      "description": "Ends a lease (idempotent).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reasonCode"
+      ],
+      "properties": {
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        }
+      }
+    },
+    "RelayResolution": {
+      "description": "The compatibility resolution of a relay number: its lifecycle, pool status and current lease.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relayInventoryRef",
+        "numberResourceId",
+        "lifecycleState",
+        "memberStatus",
+        "leasable"
+      ],
+      "properties": {
+        "relayInventoryRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "lifecycleState": {
+          "$ref": "#/$defs/LifecycleState"
+        },
+        "memberStatus": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "RETIRED"
+          ]
+        },
+        "leasable": {
+          "type": "boolean"
+        },
+        "lease": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RelayLease"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RelayRetireResult": {
+      "description": "A retired relay number (no new lease).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relayInventoryRef",
+        "numberResourceId",
+        "status"
+      ],
+      "properties": {
+        "relayInventoryRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "RETIRED"
+          ]
+        }
+      }
+    },
+    "ServiceClass": {
+      "description": "A DCN, or a Part III relay number lent by leases (never reserved or assigned as a DCN).",
+      "type": "string",
+      "enum": [
+        "DCN",
+        "PRIVACY_RELAY"
+      ]
     }
   }
 }

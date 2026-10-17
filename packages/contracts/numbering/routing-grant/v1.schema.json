@@ -63,7 +63,8 @@
         "STALE_ROUTING_REVISION",
         "ASSIGNMENT_NOT_ACTIVE",
         "GRANT_ALREADY_USED",
-        "OPERATION_MISMATCH"
+        "OPERATION_MISMATCH",
+        "ROUTING_DISABLED"
       ]
     },
     "RoutingGrantClaims": {

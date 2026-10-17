@@ -204,30 +204,36 @@ async fn event(
     txn: &DatabaseTransaction,
     ctx: &RequestContext,
     row: &SuspensionRow,
-    event_type: &'static str,
+    restored: bool,
     now: DateTime<Utc>,
 ) -> DomainResult<()> {
-    outbox::enqueue(
-        txn,
+    let payload = json!({
+        "number_resource_id": row.number_resource_id,
+        "assignment_id": row.assignment_id,
+        "suspension_id": row.id,
+        "source": row.source,
+        "reason_code": row.reason_code,
+        "provider_state": row.provider_state,
+        "status": row.status,
+    });
+    let event = if restored {
         NewEvent {
-            event_type,
+            event_type: "number.restored",
             aggregate_type: "NUMBER_RESOURCE",
             aggregate_id: row.number_resource_id,
             scope: Some(row.event_scope()),
-            payload: json!({
-                "number_resource_id": row.number_resource_id,
-                "assignment_id": row.assignment_id,
-                "suspension_id": row.id,
-                "source": row.source,
-                "reason_code": row.reason_code,
-                "provider_state": row.provider_state,
-                "status": row.status,
-            }),
-        },
-        ctx,
-        now,
-    )
-    .await?;
+            payload,
+        }
+    } else {
+        NewEvent {
+            event_type: "number.suspended",
+            aggregate_type: "NUMBER_RESOURCE",
+            aggregate_id: row.number_resource_id,
+            scope: Some(row.event_scope()),
+            payload,
+        }
+    };
+    outbox::enqueue(txn, event, ctx, now).await?;
     Ok(())
 }
 
@@ -402,7 +408,7 @@ impl Stewardship {
         .one(txn)
         .await?
         .expect("insert returns the row");
-        event(txn, ctx, &row, "number.suspended", now).await?;
+        event(txn, ctx, &row, false, now).await?;
         Ok(row)
     }
 
@@ -671,7 +677,7 @@ impl Stewardship {
             now,
         )
         .await?;
-        event(txn, ctx, &row, "number.restored", now).await?;
+        event(txn, ctx, &row, true, now).await?;
         crate::metrics::inc("numbering_restorations_total", &[]);
         Ok(row)
     }
