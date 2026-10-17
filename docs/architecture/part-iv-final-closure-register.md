@@ -112,21 +112,34 @@ SMS `outbound` with four concurrent dispatchers), not benchmarked.
 6. `privacy-relay/tests/dcn_caller.rs`: the "no number in the answer" check matched the
    4-digit run `7946`, which a random UUID can contain — now checks the whole subscriber
    number; 5 / 5 re-runs pass.
+7. PR #6 closure (`0556e3f`): Platform Access binaries for the Calling RTC and both
+   enterprise certification jobs; the Platform Access smoke rule exempts exactly the
+   import receipt's `verifier_digest` (a SHA-256 integrity checksum) and asserts it stays
+   `CHAR(64)` with its 64-hex check constraint (reproduced `1 = 0` locally, then passing);
+   service-auth's forbidden-word scan masks 16+-character hex / UUID runs first, with a
+   test proving field names and phone values stay visible; the SMS webhook privacy check
+   matches the remote party's whole national number; SIPp gets `cap_net_raw` in the
+   communications e2e workflow as in the other SIP workflows. No assertion was removed.
 
 ### C.5 Remote CI
 
-Dispatched with `workflow_dispatch` on this branch (no pull request was opened):
+**Pull request #6 → `main` (head `0556e3f`): 49 / 49 check runs succeeded, 0 failed,
+0 pending** — every workflow of the repository that the change touches ran on the pull
+request, including the four that could not be dispatched from the branch (Numbering,
+SMS Gateway, Communications e2e, Platform Access) and the certification workflows:
 
-| Workflow | Result |
+| Workflow (PR #6, `0556e3f`) | Result |
 |---|---|
-| Contracts and service auth | success (`448d6a2`) |
-| Service boundaries | success (`448d6a2`) |
-| Dependency and image security | success (`448d6a2`) |
-| Calling service | success (`448d6a2`) |
-| Telephony service | failure on `448d6a2` (Calling e2e job without Platform Access binaries — a CI wiring gap since Workstream B); success on `97c201a` after the fix |
-| Privacy Relay service | failure on `448d6a2` (smoke table count 26 → 27; same Calling e2e wiring gap); on `97c201a` everything passed except one intermittent pre-existing assertion in `dcn_caller` (a random UUID can contain the digits `7946`), fixed in `a817e74` — **success** on `a817e74` (all five jobs) |
-| Numbering, SMS Gateway, Communications e2e, Platform Access | **not executed remotely**: `workflow_dispatch` returns 404 for them (these workflow files are not on the default branch, which GitHub requires for dispatch); they run on push to main / staging or on a pull request. Their table-count smoke steps were run locally against the real migrations (Numbering 50 tables, Privacy Relay 27, SMS Gateway checks pass) |
+| Calling RTC certification — real LiveKit certification | success (was failing: no Platform Access binaries) |
+| Contracts and service auth — service-auth (core), (client), contracts validate | success (was failing: `e164` matched inside a random UUID) |
+| Communications e2e — SMS + voice journeys (real processes, SIP edge, LiveKit) | success (was failing: `4242` matched inside a random UUID; SIPp lacked `cap_net_raw` for its RTP pcap) |
+| Enterprise calling certification — Enterprise SIP; races and burst invariants (5 repetitions) | success (was failing: no Platform Access binaries) |
+| Platform Access — build / migration smoke / startup | success (was failing: the no-verifier-column rule counted the import receipt's `verifier_digest` checksum) |
+| Numbering, SMS Gateway, Privacy Relay, Telephony, Calling services (test, migration smoke, lint, Docker image, e2e jobs) | success |
+| Telephony SIP certification, Service boundaries (guard, secret scan, database roles), Dependency and image security (RustSec, image scans), contracts / OpenAPI validate | success |
 
+Earlier branch dispatches (before the pull request) are superseded by the pull-request
+run above; their failures and fixes are listed in §C.4.
 
 ## D. §§161–166
 
@@ -160,7 +173,7 @@ Dispatched with `workflow_dispatch` on this branch (no pull request was opened):
    quarantine and reassignment; permanent assignment history; portability foundation;
    allocation / fraud / SMS / spend controls; migrations, APIs, contracts, workers and
    observability; Part III compatibility — all implemented and covered by the suites in
-   §C. **SOFTWARE COMPLETE** (local evidence; remote CI as stated in §C).
+   §C. **SOFTWARE COMPLETE** — local evidence and remote CI (PR #6, 49 / 49 checks green).
 4. **§166 Architecture lock — unchanged.** Platform Access authenticates; Numbering owns
    DCN resources and lifecycle (and now the relay-number inventory authority, by lease);
    Calling owns logical calls; Telephony owns public voice execution; Privacy Relay owns
@@ -172,7 +185,7 @@ Dispatched with `workflow_dispatch` on this branch (no pull request was opened):
 
 | Status | Claimed? | Basis |
 |---|---|---|
-| SOFTWARE COMPLETE | **Yes** | every CosmicForge-owned gate in §C passes locally |
+| SOFTWARE COMPLETE | **Yes** | every CosmicForge-owned gate in §C passes locally and in remote CI (PR #6) |
 | PROVIDER INTEGRATION READY | **Yes** | provider-neutral contract, environment-restricted registry, reusable certification suite with gated live cases, deterministic simulator passing it |
 | REAL PROVIDER CERTIFIED | **No — REAL PROVIDER CERTIFICATION PENDING** | no lawful provider credentials / inventory / approved spend |
 | PRODUCTION PASS | **No** | regulatory, provider, operations, scale and rollout gates pending |
