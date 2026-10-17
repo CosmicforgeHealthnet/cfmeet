@@ -12,6 +12,10 @@
 //!   `platform-principal.resolve`); services by `packages/service-auth`.
 //! * [`http`]: health / readiness, the customer read API and the internal API.
 //!
+//! * [`stewardship`]: lifecycle stewardship after activation — suspension / restore,
+//!   release / quarantine / reassignment, history, usage, risk, portability, drift
+//!   reconciliation, kill switches and relay-number leases (Workstreams P–X).
+//!
 //! Numbering owns no logical call, SIP / PSTN execution, relay-session semantics or SMS
 //! transport envelope, and never reads another service's database.
 
@@ -26,3 +30,4 @@ pub mod metrics;
 pub mod numbers;
 pub mod providers;
 pub mod state;
+pub mod stewardship;

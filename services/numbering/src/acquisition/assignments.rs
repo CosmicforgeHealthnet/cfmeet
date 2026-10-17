@@ -978,3 +978,333 @@ impl Acquisition {
         Ok(())
     }
 }
+
+/// A new owner for a number whose quarantine completed (Workstream Q reassignment).
+#[derive(Debug, Clone)]
+pub struct ReassignmentRequest {
+    pub number_resource_id: Uuid,
+    pub ownership_class: OwnershipClass,
+    pub owner_principal_id: Option<Uuid>,
+    pub targets: RoutingTargets,
+    pub capabilities: Vec<Capability>,
+    pub eligibility_decision_id: Uuid,
+    pub pool_id: Option<Uuid>,
+}
+
+impl Acquisition {
+    /// Reassigns a REASSIGNABLE number (a POOL_RETURN quarantine that COMPLETED with the
+    /// provider's confirmation) to a new owner: a fresh reservation confirmed by a fresh
+    /// provider read-back (CF Meet still holds the number — no provider hold is taken), a
+    /// NEW assignment with the new owner's eligibility, a new routing profile (the number's
+    /// routing revision advances) and NEW provider route configurations that the consumers
+    /// must acknowledge again before activation. Nothing of the previous owner (routes,
+    /// grants, voicemail / inbox / webhook targets, external references) carries over.
+    pub async fn reassign(
+        &self,
+        ctx: &RequestContext,
+        scope: &OwnerScope,
+        standing: Standing,
+        request: ReassignmentRequest,
+        idempotency_key: &str,
+    ) -> DomainResult<Assigned> {
+        let commands = self.commands()?;
+        let caps = normalize(&request.capabilities)?;
+        let fingerprint = idempotency::fingerprint(&[
+            b"assignment.reassign",
+            request.number_resource_id.as_bytes(),
+            request.ownership_class.as_str().as_bytes(),
+            request
+                .owner_principal_id
+                .map(|p| p.to_string())
+                .unwrap_or_default()
+                .as_bytes(),
+            format!("{:?}", request.targets).as_bytes(),
+            capability_names(&caps).join(",").as_bytes(),
+            request.eligibility_decision_id.as_bytes(),
+        ]);
+        if let Some(done) = self
+            .replay(
+                scope,
+                "numbers.assignment.reassign",
+                idempotency_key,
+                &fingerprint,
+            )
+            .await?
+        {
+            return Ok(Assigned {
+                assignment: done,
+                replayed: true,
+            });
+        }
+        let resource = self.numbers.resource(request.number_resource_id).await?;
+        if !scope.may_use(resource.inventory()) || resource.service_class != "DCN" {
+            return Err(DomainError::NotFound("number resource"));
+        }
+        let refuse = || {
+            DomainError::precondition(
+                "NOT_ALLOCATABLE",
+                "the number is not available for reassignment",
+            )
+        };
+        if resource.lifecycle_state() != LifecycleState::Reassignable {
+            return Err(refuse());
+        }
+        // The gate: a completed, provider-confirmed POOL_RETURN quarantine; no open
+        // release; no unsettled provider command.
+        #[derive(FromQueryResult)]
+        struct Gate {
+            quarantine_ok: i64,
+            open_release: i64,
+            unsettled: i64,
+        }
+        let gate = Gate::find_by_statement(stmt(
+            "SELECT \
+               (SELECT count(*) FROM (SELECT * FROM number_quarantines WHERE number_resource_id = $1 \
+                   ORDER BY started_at DESC LIMIT 1) q \
+                 WHERE q.status = 'COMPLETED' AND q.disposition = 'POOL_RETURN' AND q.provider_confirmed_at IS NOT NULL) AS quarantine_ok, \
+               (SELECT count(*) FROM number_release_requests WHERE number_resource_id = $1 \
+                 AND status NOT IN ('QUARANTINED', 'FAILED', 'CANCELLED')) AS open_release, \
+               (SELECT count(*) FROM number_provider_commands WHERE number_resource_id = $1 \
+                 AND status IN ('PENDING', 'DISPATCHING', 'UNKNOWN')) AS unsettled",
+            vec![resource.id.into()],
+        ))
+        .one(self.numbers.db())
+        .await?
+        .ok_or_else(refuse)?;
+        if gate.quarantine_ok != 1 || gate.open_release > 0 || gate.unsettled > 0 {
+            return Err(refuse());
+        }
+        // The provider's own, fresh word that CF Meet still controls the number.
+        let state = match commands.inspect_resource(resource.id).await? {
+            Some(crate::providers::ProviderOutcome::Succeeded(s)) => s,
+            _ => {
+                return Err(DomainError::precondition(
+                    "PROVIDER_UNAVAILABLE",
+                    "the provider state could not be confirmed",
+                ))
+            }
+        };
+        if !state.owned_by_us || state.status != crate::providers::ProviderNumberStatus::Provisioned
+        {
+            return Err(refuse());
+        }
+        let risk = crate::stewardship::risk::evaluate_allocation_in(
+            self.numbers.db(),
+            ctx,
+            &self.settings.risk,
+            scope,
+            &crate::stewardship::risk::AllocationRequest {
+                country: resource.country_code.clone(),
+                ownership_class: Some(request.ownership_class),
+            },
+            self.now(),
+        )
+        .await?;
+        if risk.outcome != "ALLOW" {
+            return Err(DomainError::precondition(
+                if risk.outcome == "DENY" {
+                    "RISK_DENIED"
+                } else {
+                    "RISK_REVIEW_REQUIRED"
+                },
+                format!(
+                    "reassignment refused by the risk policy: {}",
+                    risk.reasons.join(", ")
+                ),
+            ));
+        }
+        let class = request.ownership_class;
+        let owner_ref = self
+            .resolve_owner(scope, class, request.owner_principal_id)
+            .await?;
+        self.check_targets(scope, class, owner_ref, &request.targets)
+            .await?;
+        let decision = self
+            .eligibility_for(
+                ctx,
+                scope,
+                standing,
+                request.eligibility_decision_id,
+                class,
+                owner_ref,
+                resource.id,
+                &caps,
+            )
+            .await?;
+        let bindings = self.numbers.bindings(resource.id).await?;
+        if let Some(c) = caps.iter().find(|c| {
+            !bindings
+                .iter()
+                .any(|b| b.status == "ACTIVE" && b.capabilities.iter().any(|x| x == c.as_str()))
+        }) {
+            return Err(DomainError::precondition(
+                "CAPABILITY_NOT_SUPPORTED",
+                format!("{c} is not served by the number's provider binding"),
+            ));
+        }
+        let now = self.now();
+        let actor = customer_actor(scope);
+        // A fresh observation from the read-back (reservation needs fresh inventory).
+        let mut observation = crate::numbers::inventory::NewObservation::offered(
+            resource.inventory(),
+            now,
+            chrono::Duration::minutes(15),
+        );
+        observation.offered_capabilities = caps.clone();
+        self.numbers.observe(ctx, resource.id, observation).await?;
+        let txn = self.numbers.db().begin().await?;
+        let record = match begin_idempotent(
+            &txn,
+            scope,
+            "numbers.assignment.reassign",
+            idempotency_key,
+            &fingerprint,
+            now,
+        )
+        .await?
+        {
+            Ok(record) => record,
+            Err(existing) => {
+                txn.commit().await?;
+                let id = existing.ok_or(DomainError::NotFound("assignment"))?;
+                return Ok(Assigned {
+                    assignment: self.numbers.assignment(scope, id).await?,
+                    replayed: true,
+                });
+            }
+        };
+        let reservation = self
+            .numbers
+            .reserve_in(
+                &txn,
+                ctx,
+                scope,
+                actor.clone(),
+                resource.id,
+                self.settings.reservation_default_ttl,
+                crate::numbers::reservations::ReservationBasis {
+                    basis: crate::numbers::reservations::HoldBasis::EligibilityDecision,
+                    eligibility_decision_ref: Some(decision),
+                    capabilities: caps.clone(),
+                    for_principal: request.owner_principal_id,
+                },
+                now,
+            )
+            .await?;
+        let evidence = Uuid::new_v4();
+        self.numbers
+            .confirm_hold_in(&txn, ctx, actor.clone(), reservation.id, evidence, now)
+            .await?;
+        let opened = self
+            .numbers
+            .open_assignment_in(
+                &txn,
+                ctx,
+                scope,
+                &actor,
+                OpenAssignment {
+                    id: Uuid::new_v4(),
+                    number_resource_id: resource.id,
+                    ownership_class: class,
+                    owner_ref,
+                    capability_snapshot: capability_names(&caps),
+                    policy_snapshot_ref: None,
+                    kyc_profile_ref: None,
+                    predecessor_assignment_id: None,
+                },
+                "REASSIGNMENT_REQUESTED",
+                now,
+            )
+            .await?;
+        let admitted = self
+            .numbers
+            .admit_in(&txn, ctx, &actor, &opened, decision, now)
+            .await?;
+        let reserved = self
+            .numbers
+            .hold_for_assignment_in(&txn, ctx, &actor, &admitted, reservation.id, now)
+            .await?;
+        let profile = self
+            .numbers
+            .create_routing_profile_in(&txn, ctx, scope, &actor, request.targets, now)
+            .await?;
+        let pinned = self
+            .numbers
+            .pin_routing_in(
+                &txn,
+                ctx,
+                &actor,
+                &reserved,
+                profile.profile_id,
+                "ROUTING_ASSIGNED",
+                now,
+            )
+            .await?;
+        if let Some(pool) = request.pool_id {
+            self.numbers
+                .add_pool_member_in(&txn, ctx, scope, &actor, pool, &pinned, now)
+                .await?;
+        }
+        // Still provisioned at the provider: RESERVED → PROVISIONING → PROVISIONED on the
+        // read-back evidence (no provider provisioning is repeated).
+        for to in [LifecycleState::Provisioning, LifecycleState::Provisioned] {
+            let r = crate::numbers::resources::lock(&txn, resource.id).await?;
+            crate::numbers::lifecycle::transition_in(
+                &txn,
+                ctx,
+                r.id,
+                crate::numbers::lifecycle::TransitionRequest::new(
+                    to,
+                    r.revision,
+                    actor.clone(),
+                    "REASSIGNMENT_PROVIDER_CONFIRMED",
+                )
+                .with_evidence(evidence),
+                now,
+            )
+            .await?;
+        }
+        // New route configurations: the consumers acknowledge them afresh.
+        let mut families: Vec<crate::numbers::acquisitions::RouteFamily> = caps
+            .iter()
+            .filter_map(|c| crate::numbers::acquisitions::RouteFamily::of(*c))
+            .collect();
+        families.sort();
+        families.dedup();
+        for family in families {
+            let binding = bindings
+                .iter()
+                .find(|b| {
+                    b.status == "ACTIVE"
+                        && b.capabilities
+                            .iter()
+                            .any(|c| family.capabilities().iter().any(|f| f.as_str() == c))
+                })
+                .expect("checked above");
+            let route = self
+                .numbers
+                .request_route_configuration_in(&txn, ctx, resource.id, family, binding, now)
+                .await?;
+            let submitted = commands
+                .request_route_in(
+                    &txn,
+                    ctx,
+                    resource.id,
+                    family == crate::numbers::acquisitions::RouteFamily::Voice,
+                    route.route_ref,
+                    &format!("route:{}", route.id.simple()),
+                )
+                .await?;
+            self.numbers
+                .attach_route_command_in(&txn, &route, submitted.command.id, now)
+                .await?;
+        }
+        idempotency::complete(&txn, record, 201, None, Some(pinned.id), now).await?;
+        txn.commit().await?;
+        crate::metrics::inc("numbering_reassignments_total", &[]);
+        Ok(Assigned {
+            assignment: pinned,
+            replayed: false,
+        })
+    }
+}

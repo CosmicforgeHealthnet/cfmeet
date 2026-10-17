@@ -744,6 +744,43 @@ impl NumberDomain {
         Ok(row)
     }
 
+    /// Retires every CONFIGURED route of a number (Workstream Q: the previous owner's
+    /// voice / SMS routing is removed; a later owner needs a NEW configuration and a new
+    /// consumer acknowledgement). In-flight configurations are left to their command.
+    /// Returns `(family, route_ref, route_revision)` of each retired route (evidence).
+    pub(crate) async fn retire_routes_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        resource_id: Uuid,
+        reason: &str,
+        now: DateTime<Utc>,
+    ) -> DomainResult<Vec<(String, Uuid, i64)>> {
+        let current = RouteConfigurationRow::find_by_statement(stmt(
+            "SELECT * FROM number_route_configurations WHERE number_resource_id = $1 \
+               AND status = 'CONFIGURED' ORDER BY family FOR UPDATE",
+            vec![resource_id.into()],
+        ))
+        .all(txn)
+        .await?;
+        let mut out = Vec::new();
+        for r in current {
+            set_route(
+                txn,
+                ctx,
+                &r,
+                RouteStatus::Superseded,
+                None,
+                None,
+                reason,
+                now,
+            )
+            .await?;
+            out.push((r.family.clone(), r.route_ref, r.route_revision));
+        }
+        Ok(out)
+    }
+
     /// Records the `CONFIGURE_*` command of a route configuration (same transaction).
     pub(crate) async fn attach_route_command_in(
         &self,

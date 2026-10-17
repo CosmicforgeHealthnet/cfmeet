@@ -488,6 +488,7 @@ impl Acquisition {
              JOIN LATERAL (SELECT availability FROM number_inventory_snapshots s \
                             WHERE s.number_resource_id = r.id ORDER BY s.observed_at DESC, s.sequence DESC LIMIT 1) o ON true \
              WHERE r.country_code = $1 AND (r.inventory_source = 'SYNTHETIC_TEST') = $2 \
+               AND r.service_class = 'DCN' \
                AND r.state IN ('AVAILABLE', 'REASSIGNABLE') AND o.availability = 'AVAILABLE' \
                AND NOT EXISTS (SELECT 1 FROM number_reservations x WHERE x.number_resource_id = r.id \
                                 AND x.status IN ('PENDING', 'HELD', 'UNKNOWN')) \

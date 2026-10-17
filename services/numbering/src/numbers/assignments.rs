@@ -1049,6 +1049,39 @@ pub struct OpenAssignment {
 /// The in-transaction steps the assignment orchestration composes (Workstream J). Each
 /// goes through the one status-changing path and appends history and the outbox event.
 impl NumberDomain {
+    /// One assignment status change inside the caller's transaction (Workstreams P–Q
+    /// orchestration): the same guarded path, history, grant revocation and event as
+    /// every other change. Does NOT touch the Number Resource.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn step_assignment_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        current: &AssignmentRow,
+        to: AssignmentStatus,
+        close_reason: Option<&str>,
+        actor: &Actor,
+        reason: &str,
+        now: DateTime<Utc>,
+    ) -> DomainResult<AssignmentRow> {
+        super::types::reason_code(reason)?;
+        transition_assignment(
+            txn,
+            ctx,
+            current,
+            current.revision,
+            to,
+            Fields {
+                close_reason: close_reason.map(str::to_string),
+                ..Default::default()
+            },
+            actor,
+            reason,
+            now,
+        )
+        .await
+    }
+
     /// Inserts a REQUESTED assignment (the open-assignment index refuses a second one).
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn open_assignment_in(

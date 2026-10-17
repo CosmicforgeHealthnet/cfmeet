@@ -278,6 +278,30 @@ impl Acquisition {
             .numbers
             .reservation(scope, request.reservation_id)
             .await?;
+        // Workstream W / T: the provisioning kill switch and the provider cost breaker.
+        crate::stewardship::controls::require_open(
+            self.numbers.db(),
+            crate::stewardship::controls::Control::NumberProvisioning,
+        )
+        .await?;
+        if let Ok((provider_id, _)) = commands
+            .provider_object_of(reservation.number_resource_id)
+            .await
+        {
+            if crate::stewardship::risk::cost_breaker_open(
+                self.numbers.db(),
+                &self.settings.risk,
+                &provider_id,
+                now,
+            )
+            .await?
+            {
+                return Err(DomainError::precondition(
+                    "PROVIDER_COST_BREAKER_OPEN",
+                    "provisioning at this provider is paused by its cost circuit breaker",
+                ));
+            }
+        }
         // The acquisition basis: a HELD, unexpired reservation, or one an assignment of
         // this scope took over (and still holds).
         let assignment = match (reservation.status(), reservation.converted_to.as_deref()) {

@@ -68,6 +68,14 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(2);
         }
     };
+    let stewardship_settings =
+        match numbering::config::stewardship::from_lookup(|key| std::env::var(key).ok()) {
+            Ok(s) => s,
+            Err(err) => {
+                eprintln!("numbering: stewardship configuration error: {err}");
+                std::process::exit(2);
+            }
+        };
     let acquisition_settings =
         match numbering::config::acquisition::from_lookup(|key| std::env::var(key).ok()) {
             Ok(s) => s,
@@ -205,8 +213,10 @@ async fn main() -> anyhow::Result<()> {
         None => state,
     }
     .with_acquisition_settings(acquisition_settings)
-    .with_principals(principals);
+    .with_principals(principals)
+    .with_stewardship_settings(stewardship_settings);
     let acquisition = Arc::new(state.acquisition());
+    let stewardship = Arc::new(state.stewardship());
 
     // Worker foundation: lease recovery of interrupted jobs (UNKNOWN_OUTCOME parking for
     // provider-affecting ones) and idempotency-key expiry. Business job handlers are
@@ -284,6 +294,35 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         });
+        // Lifecycle stewardship (Workstreams P–X): suspension / restoration and release
+        // steps, quarantine completion, relay lease expiry, usage accrual, port status and
+        // the recurring provider drift reconciliation. Each task is idempotent and
+        // multi-instance safe (row locks / SKIP LOCKED / unique source keys).
+        {
+            let stewardship = stewardship.clone();
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(Duration::from_secs(30));
+                let mut sweeps: u64 = 0;
+                loop {
+                    ticker.tick().await;
+                    let ctx = numbering::domain::RequestContext::generate();
+                    if let Err(e) = stewardship.run_workers(&ctx, 200).await {
+                        tracing::warn!(error = %e, "stewardship workers failed");
+                    }
+                    sweeps += 1;
+                    if sweeps % 10 == 0 {
+                        if let Err(e) = stewardship.reconcile_lifecycle(&ctx, 200).await {
+                            tracing::warn!(error = %e, "lifecycle reconciliation failed");
+                        }
+                        let cutoff =
+                            stewardship.numbers().clock().now() - chrono::Duration::days(2);
+                        if let Err(e) = stewardship.finalize_usage(cutoff).await {
+                            tracing::warn!(error = %e, "usage finalization failed");
+                        }
+                    }
+                }
+            });
+        }
         // Capability evidence past its expiry is already not granting (resolution reads
         // expiry); the sweep records it durably and emits the change event.
         let numbers = state.numbers.clone();

@@ -38,6 +38,10 @@ pub struct AppState {
     /// Routing grant issuance / verification (Workstream K); `None`: not configured (the
     /// grant endpoints refuse, fail closed).
     pub grants: Option<crate::grants::RoutingGrants>,
+    /// Lifecycle stewardship policy (Workstreams P–X).
+    pub stewardship_settings: crate::stewardship::StewardshipSettings,
+    /// The porting boundary (default: no porting).
+    pub porting: Arc<dyn crate::stewardship::porting::PortingGateway>,
 }
 
 impl AppState {
@@ -63,6 +67,8 @@ impl AppState {
             acquisition_settings: Default::default(),
             principals: Arc::new(crate::identity::UnconfiguredPrincipals),
             grants: None,
+            stewardship_settings: Default::default(),
+            porting: Arc::new(crate::stewardship::porting::UnsupportedPorting),
             numbers,
             db,
             clock,
@@ -88,6 +94,42 @@ impl AppState {
             self.acquisition_settings.clone(),
         )
         .with_principals(self.principals.clone())
+    }
+
+    /// The lifecycle stewardship workflows over this state's domain and providers.
+    pub fn stewardship(&self) -> crate::stewardship::Stewardship {
+        crate::stewardship::Stewardship::new(
+            self.numbers.clone(),
+            self.providers.clone(),
+            self.eligibility.clone(),
+            self.stewardship_settings.clone(),
+        )
+        .with_porting(self.porting.clone())
+    }
+
+    /// Replaces the stewardship policy (the grant path and acquisition follow it).
+    pub fn with_stewardship_settings(
+        mut self,
+        settings: crate::stewardship::StewardshipSettings,
+    ) -> Self {
+        self.acquisition_settings.risk = settings.risk.clone();
+        if let Some(g) = self.grants.take() {
+            self.grants = Some(g.with_policies(crate::grants::GrantPolicies {
+                risk: settings.risk.clone(),
+                late_review_after: settings.quarantine.review_after_late_events,
+            }));
+        }
+        self.stewardship_settings = settings;
+        self
+    }
+
+    /// Installs a porting gateway.
+    pub fn with_porting(
+        mut self,
+        gateway: Arc<dyn crate::stewardship::porting::PortingGateway>,
+    ) -> Self {
+        self.porting = gateway;
+        self
     }
 
     /// Installs the routing grant signer (Numbering's dedicated grant key).

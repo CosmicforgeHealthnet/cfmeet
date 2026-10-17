@@ -145,6 +145,26 @@ impl From<DbErr> for DomainError {
                     "BINDING_CONFLICT",
                     "the provider reference is already actively bound",
                 ),
+                "uq_number_release_requests_open" => DomainError::conflict(
+                    "RELEASE_IN_PROGRESS",
+                    "the number already has an open release",
+                ),
+                "uq_number_suspensions_open" => DomainError::conflict(
+                    "SUSPENSION_EXISTS",
+                    "the number already has an open suspension",
+                ),
+                "uq_number_quarantines_open" => DomainError::conflict(
+                    "QUARANTINE_EXISTS",
+                    "the number already has an open quarantine",
+                ),
+                "uq_number_port_requests_open" => DomainError::conflict(
+                    "PORT_IN_PROGRESS",
+                    "the number already has an open port request",
+                ),
+                "uq_number_relay_leases_active" => DomainError::conflict(
+                    "RELAY_NUMBER_LEASED",
+                    "the relay number is already leased",
+                ),
                 _ => DomainError::conflict("CONFLICT", "the record already exists"),
             },
             (Some(SqlErr::ForeignKeyConstraintViolation(_)), _) => DomainError::precondition(

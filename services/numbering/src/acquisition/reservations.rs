@@ -286,6 +286,37 @@ impl Acquisition {
                 ),
             ));
         }
+        // Workstream T: the allocation risk decision (recorded when it refuses).
+        let risk = crate::stewardship::risk::evaluate_allocation_in(
+            self.numbers.db(),
+            ctx,
+            &self.settings.risk,
+            scope,
+            &crate::stewardship::risk::AllocationRequest {
+                country: resource.country_code.clone(),
+                ownership_class: None,
+            },
+            now,
+        )
+        .await?;
+        match risk.outcome.as_str() {
+            "DENY" => {
+                return Err(DomainError::precondition(
+                    "RISK_DENIED",
+                    format!(
+                        "allocation refused by the risk policy: {}",
+                        risk.reasons.join(", ")
+                    ),
+                ))
+            }
+            "REVIEW" => {
+                return Err(DomainError::precondition(
+                    "RISK_REVIEW_REQUIRED",
+                    format!("allocation needs review: {}", risk.reasons.join(", ")),
+                ))
+            }
+            _ => {}
+        }
         let basis = self
             .reservation_basis(scope, &resource, &request, now)
             .await?;

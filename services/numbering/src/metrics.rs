@@ -78,6 +78,48 @@ pub async fn render(state: &AppState) -> String {
             "numbering_jobs",
             "status",
         ),
+        // Workstreams P–X: lifecycle workflow backlogs, kill switches, open incidents.
+        (
+            "SELECT status, count(*) FROM number_suspensions GROUP BY status ORDER BY status",
+            "numbering_suspensions",
+            "status",
+        ),
+        (
+            "SELECT status, count(*) FROM number_release_requests GROUP BY status ORDER BY status",
+            "numbering_release_requests",
+            "status",
+        ),
+        (
+            "SELECT status, count(*) FROM number_quarantines GROUP BY status ORDER BY status",
+            "numbering_quarantines",
+            "status",
+        ),
+        (
+            "SELECT status, count(*) FROM number_port_requests GROUP BY status ORDER BY status",
+            "numbering_port_requests",
+            "status",
+        ),
+        (
+            "SELECT status, count(*) FROM number_relay_leases GROUP BY status ORDER BY status",
+            "numbering_relay_leases",
+            "status",
+        ),
+        (
+            "SELECT category, count(*) FROM numbering_incidents WHERE status = 'OPEN' GROUP BY category ORDER BY category",
+            "numbering_open_incidents",
+            "category",
+        ),
+        (
+            "SELECT control_key, CASE WHEN engaged THEN 1::bigint ELSE 0::bigint END FROM number_operational_controls ORDER BY control_key",
+            "numbering_control_engaged",
+            "control",
+        ),
+        (
+            "SELECT 'STALE', count(*) FROM number_resources WHERE state = 'AVAILABLE' \
+               AND (observation_fresh_until IS NULL OR observation_fresh_until <= now())",
+            "numbering_inventory_observations",
+            "freshness",
+        ),
     ] {
         if let Ok(rows) = db
             .query_all(Statement::from_string(DbBackend::Postgres, sql))

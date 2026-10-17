@@ -310,6 +310,40 @@ impl NumberDomain {
         Ok(ended)
     }
 
+    /// Ends every pool membership of an assignment (Workstream Q: the released owner's
+    /// organizational resources are detached). Returns how many ended.
+    pub(crate) async fn detach_pool_memberships_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        actor: &Actor,
+        assignment_id: Uuid,
+        now: DateTime<Utc>,
+    ) -> DomainResult<u64> {
+        let ended = PoolMemberRow::find_by_statement(stmt(
+            "UPDATE number_pool_members SET removed_at = $2, removed_by = $3 \
+             WHERE assignment_id = $1 AND removed_at IS NULL RETURNING *",
+            vec![
+                assignment_id.into(),
+                now.into(),
+                actor.reference.clone().into(),
+            ],
+        ))
+        .all(txn)
+        .await?;
+        for m in &ended {
+            let pool = PoolRow::find_by_statement(stmt(
+                "SELECT * FROM number_pools WHERE id = $1",
+                vec![m.pool_id.into()],
+            ))
+            .one(txn)
+            .await?
+            .ok_or(DomainError::NotFound("pool"))?;
+            pool_event(txn, ctx, &pool, "MEMBER_REMOVED", Some(assignment_id), now).await?;
+        }
+        Ok(ended.len() as u64)
+    }
+
     /// Carries a pool membership to the successor of an internal transfer.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn transfer_pool_membership_in(

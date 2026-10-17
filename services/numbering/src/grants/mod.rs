@@ -69,6 +69,8 @@ pub mod reason {
     pub const ASSIGNMENT_NOT_ACTIVE: &str = "ASSIGNMENT_NOT_ACTIVE";
     pub const GRANT_ALREADY_USED: &str = "GRANT_ALREADY_USED";
     pub const OPERATION_MISMATCH: &str = "OPERATION_MISMATCH";
+    /// Workstream W: an operator's emergency control disabled DCN routing / grants.
+    pub const ROUTING_DISABLED: &str = "ROUTING_DISABLED";
     pub const ALL: &[&str] = &[
         UNKNOWN_NUMBER,
         NOT_ASSIGNED,
@@ -84,6 +86,7 @@ pub mod reason {
         ASSIGNMENT_NOT_ACTIVE,
         GRANT_ALREADY_USED,
         OPERATION_MISMATCH,
+        ROUTING_DISABLED,
     ];
 }
 
@@ -189,6 +192,8 @@ pub struct RoutingGrants {
     numbers: NumberDomain,
     signer: Arc<NumberGrantSigner>,
     verifier: Arc<NumberGrantVerifier>,
+    /// Workstreams Q / T policies the grant path applies (late traffic, spend).
+    policies: Arc<GrantPolicies>,
 }
 
 impl std::fmt::Debug for RoutingGrants {
@@ -196,6 +201,25 @@ impl std::fmt::Debug for RoutingGrants {
         f.debug_struct("RoutingGrants")
             .field("signer", &self.signer)
             .finish()
+    }
+}
+
+/// Policies of later workstreams that the grant path applies.
+#[derive(Debug, Clone)]
+pub struct GrantPolicies {
+    /// Workstream T: per-number spend threshold.
+    pub risk: crate::stewardship::risk::RiskPolicy,
+    /// Workstream Q: late events after which a quarantine needs review.
+    pub late_review_after: i64,
+}
+
+impl Default for GrantPolicies {
+    fn default() -> Self {
+        Self {
+            risk: Default::default(),
+            late_review_after: crate::stewardship::QuarantinePolicy::default()
+                .review_after_late_events,
+        }
     }
 }
 
@@ -216,7 +240,14 @@ impl RoutingGrants {
             numbers,
             verifier: Arc::new(NumberGrantVerifier::new(trust, clock)),
             signer: Arc::new(signer),
+            policies: Arc::new(GrantPolicies::default()),
         }
+    }
+
+    /// Replaces the Workstream Q / T policies applied on the grant path.
+    pub fn with_policies(mut self, policies: GrantPolicies) -> Self {
+        self.policies = Arc::new(policies);
+        self
     }
 
     pub fn signer(&self) -> &NumberGrantSigner {
@@ -405,7 +436,35 @@ impl RoutingGrants {
         if resource.inventory() == InventorySource::SyntheticTest && self.protected_runtime() {
             return unavailable(reason::SYNTHETIC_NOT_ROUTABLE);
         }
+        use crate::stewardship::controls::{engaged, Control};
+        if engaged(self.numbers.db(), Control::DcnInboundRouting).await? {
+            return unavailable(reason::ROUTING_DISABLED);
+        }
         if resource.lifecycle_state() != LifecycleState::Active {
+            if matches!(
+                resource.lifecycle_state(),
+                LifecycleState::Releasing
+                    | LifecycleState::Quarantined
+                    | LifecycleState::Reassignable
+            ) {
+                // Late traffic for a previous owner: refused and recorded, never delivered.
+                let family_label = match family {
+                    RouteFamily::Voice => "VOICE",
+                    RouteFamily::Sms => "SMS",
+                };
+                if let Err(e) = crate::stewardship::Stewardship::record_late_activity(
+                    &self.numbers,
+                    self.policies.late_review_after,
+                    ctx,
+                    &resource,
+                    family_label,
+                    consumer.as_str(),
+                )
+                .await
+                {
+                    tracing::warn!(error = e.code(), "late activity not recorded");
+                }
+            }
             return unavailable(reason::NOT_ACTIVE);
         }
         let Some(assignment) = self.active_assignment(resource.id).await? else {
@@ -538,6 +597,18 @@ impl RoutingGrants {
                 format!("{} is not usable on this number", capability_of(kind)),
             ));
         }
+        {
+            use crate::stewardship::controls::{require_open, Control};
+            require_open(
+                self.numbers.db(),
+                if kind == NumberGrantKind::CallerIdentity {
+                    Control::DcnCallerIdentity
+                } else {
+                    Control::DcnSmsSender
+                },
+            )
+            .await?;
+        }
         let class = OwnershipClass::parse(&assignment.ownership_class)
             .ok_or_else(|| DomainError::Validation("corrupt ownership class".into()))?;
         // Who may present the number: the owner of a personal / professional number, the
@@ -557,6 +628,22 @@ impl RoutingGrants {
             return Err(DomainError::precondition(
                 "PRINCIPAL_NOT_PERMITTED",
                 "the initiating principal may not use this number",
+            ));
+        }
+        // Workstream T: a number whose provider spend reached its threshold is not used
+        // for new outbound traffic (app-to-app communication is never affected).
+        if crate::stewardship::risk::spend_exceeded(
+            self.numbers.db(),
+            &self.policies.risk,
+            resource.id,
+            self.numbers.clock().now(),
+        )
+        .await?
+        {
+            crate::metrics::inc("numbering_spend_refusals_total", &[]);
+            return Err(DomainError::precondition(
+                "SPEND_LIMIT_REACHED",
+                "the number reached its spend threshold",
             ));
         }
         self.issue(
@@ -625,6 +712,19 @@ impl RoutingGrants {
         };
         if record.revoked_at.is_some() {
             return Ok(refuse(reason::GRANT_REVOKED, record));
+        }
+        {
+            use crate::stewardship::controls::{engaged, Control};
+            let control = match verified.kind {
+                NumberGrantKind::InboundVoice | NumberGrantKind::InboundSms => {
+                    Control::DcnInboundRouting
+                }
+                NumberGrantKind::CallerIdentity => Control::DcnCallerIdentity,
+                NumberGrantKind::SmsSender => Control::DcnSmsSender,
+            };
+            if engaged(self.numbers.db(), control).await? {
+                return Ok(refuse(reason::ROUTING_DISABLED, record));
+            }
         }
         let resource = self.numbers.resource(record.number_resource_id).await?;
         if resource.routing_revision != record.routing_revision {

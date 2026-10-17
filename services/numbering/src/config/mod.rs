@@ -28,6 +28,7 @@ pub mod grants;
 pub mod kyc;
 pub mod providers;
 pub mod service_auth;
+pub mod stewardship;
 
 use std::{fmt, net::SocketAddr, time::Duration};
 

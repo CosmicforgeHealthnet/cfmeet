@@ -33,7 +33,7 @@ use super::{
     dispatch, incidents,
     registry::{ProviderRegistry, SYNTHETIC_PROVIDER},
     simple_enum, CommandOperation, InventoryQuery, OperationKind, OperationReceipt,
-    OperationRequest, ProviderFailure, ProviderOutcome,
+    OperationRequest, ProviderFailure, ProviderOperation, ProviderOutcome,
 };
 use crate::{
     domain::{RequestContext, SharedClock},
@@ -944,7 +944,14 @@ impl ProviderCommands {
             OperationKind::Suspend {
                 reason_code: reason_code.into(),
             },
-            |row| expect_state(row, S::Active, "SUSPENDED").map(|_| None),
+            |row| {
+                // Local-first suspension (Workstream P) has already moved the number to
+                // SUSPENDED; the provider command then disables its routes.
+                if row.lifecycle_state() == S::Suspended {
+                    return Ok(None);
+                }
+                expect_state(row, S::Active, "SUSPENDED").map(|_| None)
+            },
         )
         .await
     }
@@ -1113,6 +1120,114 @@ impl ProviderCommands {
             command,
             replayed: false,
         })
+    }
+
+    /// [`Self::request_suspend`] inside the caller's transaction (Workstream P: the
+    /// suspension record and its provider command commit together).
+    pub(crate) async fn request_suspend_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        resource_id: Uuid,
+        reason_code: &str,
+        idempotency_key: &str,
+    ) -> DomainResult<Submitted> {
+        crate::numbers::types::reason_code(reason_code)?;
+        self.lifecycle_command_in(
+            txn,
+            ctx,
+            resource_id,
+            idempotency_key,
+            OperationKind::Suspend {
+                reason_code: reason_code.into(),
+            },
+            |row| match row.lifecycle_state() {
+                S::Active | S::Suspended => Ok(None),
+                _ => expect_state(row, S::Suspended, "SUSPENDED").map(|_| None),
+            },
+        )
+        .await
+    }
+
+    /// [`Self::request_restore`] inside the caller's transaction.
+    pub(crate) async fn request_restore_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        resource_id: Uuid,
+        idempotency_key: &str,
+    ) -> DomainResult<Submitted> {
+        self.lifecycle_command_in(
+            txn,
+            ctx,
+            resource_id,
+            idempotency_key,
+            OperationKind::Restore,
+            |row| expect_state(row, S::Suspended, "ACTIVE").map(|_| None),
+        )
+        .await
+    }
+
+    /// [`Self::request_release`] inside the caller's transaction (Workstream Q: after the
+    /// routing removal is recorded).
+    pub(crate) async fn request_release_in(
+        &self,
+        txn: &DatabaseTransaction,
+        ctx: &RequestContext,
+        actor: Actor,
+        resource_id: Uuid,
+        idempotency_key: &str,
+    ) -> DomainResult<Submitted> {
+        self.lifecycle_command_in(
+            txn,
+            ctx,
+            resource_id,
+            idempotency_key,
+            OperationKind::Release,
+            |row| {
+                Ok(match row.lifecycle_state() {
+                    S::Releasing | S::Quarantined => None,
+                    _ => Some(TransitionRequest::new(
+                        S::Releasing,
+                        row.revision,
+                        actor.clone(),
+                        "RELEASE_REQUESTED",
+                    )),
+                })
+            },
+        )
+        .await
+    }
+
+    /// Whether the provider serving `resource_id` declares `operation`.
+    pub async fn provider_supports(
+        &self,
+        resource_id: Uuid,
+        operation: ProviderOperation,
+    ) -> DomainResult<bool> {
+        let resource = self.numbers.resource(resource_id).await?;
+        let (provider_id, _) = self.provider_object_of(resource_id).await?;
+        Ok(self
+            .registry
+            .for_inventory(&provider_id, resource.inventory())
+            .is_some_and(|p| p.descriptor().supports(operation)))
+    }
+
+    /// The provider's read-back of a number (reconciliation / quarantine confirmation).
+    /// `None`: no adapter serves it.
+    pub async fn inspect_resource(
+        &self,
+        resource_id: Uuid,
+    ) -> DomainResult<Option<ProviderOutcome<super::ProviderNumberState>>> {
+        let resource = self.numbers.resource(resource_id).await?;
+        let (provider_id, external_ref) = self.provider_object_of(resource_id).await?;
+        let Some(p) = self
+            .registry
+            .for_inventory(&provider_id, resource.inventory())
+        else {
+            return Ok(None);
+        };
+        Ok(Some(p.inspect(&external_ref).await))
     }
 
     async fn lifecycle_command(

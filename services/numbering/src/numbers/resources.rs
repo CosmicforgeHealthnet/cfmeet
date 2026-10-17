@@ -70,6 +70,9 @@ pub struct ResourceRow {
     pub renewal_period_days: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// `DCN`, or `PRIVACY_RELAY` for a Part III relay number lent by leases (never
+    /// reserved or assigned as a DCN).
+    pub service_class: String,
 }
 
 impl ResourceRow {

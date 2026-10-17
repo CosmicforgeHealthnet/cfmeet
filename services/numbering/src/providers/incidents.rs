@@ -19,6 +19,14 @@ pub enum Category {
     ProviderReleasedUnexpectedly,
     ReconciliationConflict,
     ProviderOutage,
+    /// A lifecycle workflow (P–Q) could not proceed safely and failed closed.
+    LifecycleSafety,
+    /// Quarantine completion found provider state that contradicts CF Meet's.
+    QuarantineConflict,
+    /// Provider costs exceeded the circuit-breaker threshold (T).
+    ProviderCostSpike,
+    /// A number was restricted by the risk policy (T).
+    RiskRestriction,
 }
 
 impl Category {
@@ -30,6 +38,10 @@ impl Category {
         Category::ProviderReleasedUnexpectedly,
         Category::ReconciliationConflict,
         Category::ProviderOutage,
+        Category::LifecycleSafety,
+        Category::QuarantineConflict,
+        Category::ProviderCostSpike,
+        Category::RiskRestriction,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -41,6 +53,10 @@ impl Category {
             Category::ProviderReleasedUnexpectedly => "PROVIDER_RELEASED_UNEXPECTEDLY",
             Category::ReconciliationConflict => "RECONCILIATION_CONFLICT",
             Category::ProviderOutage => "PROVIDER_OUTAGE",
+            Category::LifecycleSafety => "LIFECYCLE_SAFETY",
+            Category::QuarantineConflict => "QUARANTINE_CONFLICT",
+            Category::ProviderCostSpike => "PROVIDER_COST_SPIKE",
+            Category::RiskRestriction => "RISK_RESTRICTION",
         }
     }
 
@@ -50,6 +66,9 @@ impl Category {
             Category::ReconciliationConflict | Category::UnknownProviderOutcome => "MEDIUM",
             Category::CallbackAuthenticationFailed | Category::ProviderOutage => "MEDIUM",
             Category::UnmatchedProviderEvent => "LOW",
+            Category::LifecycleSafety | Category::QuarantineConflict => "HIGH",
+            Category::ProviderCostSpike => "CRITICAL",
+            Category::RiskRestriction => "MEDIUM",
         }
     }
 }

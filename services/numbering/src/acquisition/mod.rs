@@ -46,6 +46,8 @@ pub struct AcquisitionSettings {
     /// Environments where a temporary hold before eligibility is permitted. PRODUCTION is
     /// never one of them (also database-enforced).
     pub pre_eligibility_hold_environments: BTreeSet<EnvironmentKind>,
+    /// Workstream T: allocation risk, spend and cost-breaker policy.
+    pub risk: crate::stewardship::risk::RiskPolicy,
 }
 
 impl Default for AcquisitionSettings {
@@ -60,6 +62,7 @@ impl Default for AcquisitionSettings {
             pre_eligibility_hold_environments: [EnvironmentKind::Sandbox, EnvironmentKind::Test]
                 .into_iter()
                 .collect(),
+            risk: Default::default(),
         }
     }
 }
