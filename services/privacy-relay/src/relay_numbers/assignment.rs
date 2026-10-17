@@ -292,24 +292,69 @@ impl RelayService {
         }
         // Deterministic, concurrency-safe selection: least recently changed eligible
         // number; a row another allocation holds is skipped, never shared.
-        let candidate: Option<InventoryRow> = db::one(
+        use crate::relay_numbers::authority::{AuthorityError, AuthorityMode};
+        let numbering = self.authority_mode == AuthorityMode::Numbering;
+        if numbering && !self.numbering_cutover_verified() {
+            // Not yet compatible with Numbering: lend nothing (fail closed).
+            return Err(RelayError::Refused(ErrorCode::RelayNumberUnavailable));
+        }
+        let candidates: Vec<InventoryRow> = db::all(
             &txn,
             &format!(
                 "SELECT {INVENTORY_COLUMNS} FROM relay_number_inventory \
                  WHERE operational_status = 'AVAILABLE' AND country_iso2 = $1 \
                    AND ($2::text IS NULL OR region = $2) AND capabilities @> $3::text[] \
                    AND (cooldown_until IS NULL OR cooldown_until <= $4) \
-                 ORDER BY updated_at, id LIMIT 1 FOR UPDATE SKIP LOCKED"
+                 ORDER BY updated_at, id LIMIT $5 FOR UPDATE SKIP LOCKED"
             ),
             vec![
                 wanted.country.clone().into(),
                 wanted.region.clone().into(),
                 wanted.capabilities.clone().into(),
                 now.into(),
+                (if numbering { 5i64 } else { 1i64 }).into(),
             ],
         )
         .await?;
-        let Some(number) = candidate else {
+        let id = Uuid::new_v4();
+        // NUMBERING: the first candidate Numbering leases to this very assignment wins;
+        // a refused one (out of service, retired, leased) is skipped; Numbering
+        // unavailable refuses the assignment (fail closed).
+        let mut lease = None;
+        let mut chosen = None;
+        for candidate in candidates {
+            if !numbering {
+                chosen = Some(candidate);
+                break;
+            }
+            let authority = self
+                .number_authority
+                .as_ref()
+                .ok_or(RelayError::Refused(ErrorCode::ServiceUnavailable))?;
+            match authority
+                .lease(
+                    candidate.id,
+                    id,
+                    candidate.generation + 1,
+                    row.final_expires_at,
+                )
+                .await
+            {
+                Ok(l) => {
+                    lease = Some(l);
+                    chosen = Some(candidate);
+                    break;
+                }
+                Err(AuthorityError::Refused(code)) => {
+                    tracing::warn!(relay_number_id = %candidate.id, code, "Numbering refused a relay-number lease");
+                    crate::metrics::inc("privacy_relay_numbering_lease_refusals_total", &[]);
+                }
+                Err(AuthorityError::Unavailable) => {
+                    return Err(RelayError::Refused(ErrorCode::ServiceUnavailable));
+                }
+            }
+        }
+        let Some(number) = chosen else {
             return Err(RelayError::Refused(ErrorCode::RelayNumberUnavailable));
         };
         let generation: Generation = db::one(
@@ -321,7 +366,6 @@ impl RelayService {
         )
         .await?
         .ok_or(RelayError::Refused(ErrorCode::RelayNumberUnavailable))?;
-        let id = Uuid::new_v4();
         db::exec(
             &txn,
             "INSERT INTO relay_number_assignments (id, relay_number_id, tenant_id, application_id, environment_id, \
@@ -348,6 +392,21 @@ impl RelayService {
             ],
         )
         .await?;
+        if let Some(l) = &lease {
+            db::exec(
+                &txn,
+                "INSERT INTO relay_number_leases (assignment_id, relay_number_id, numbering_lease_id, generation, \
+                   status, acquired_at) VALUES ($1, $2, $3, $4, 'ACTIVE', $5)",
+                vec![
+                    id.into(),
+                    number.id.into(),
+                    l.lease_id.into(),
+                    generation.generation.into(),
+                    now.into(),
+                ],
+            )
+            .await?;
+        }
         // The session's relay identity binding is the assignment id (never a provider id).
         db::exec(
             &txn,
@@ -476,6 +535,14 @@ impl RelayService {
             return Ok(None);
         }
         let cooldown_until = now + self.relay_numbers.cooldown;
+        // Its Numbering lease (if any) is released by the worker sweep, durably.
+        db::exec(
+            txn,
+            "UPDATE relay_number_leases SET status = 'RELEASE_PENDING', release_requested_at = $2 \
+             WHERE assignment_id = $1 AND status = 'ACTIVE'",
+            vec![a.id.into(), now.into()],
+        )
+        .await?;
         db::exec(
             txn,
             "UPDATE relay_number_assignments SET status = 'COOLDOWN', end_reason = $2, released_at = $3, \

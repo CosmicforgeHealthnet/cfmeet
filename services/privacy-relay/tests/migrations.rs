@@ -34,6 +34,7 @@ const TABLES: &[&str] = &[
     "relay_number_assignments",
     "relay_number_events",
     "relay_number_inventory",
+    "relay_number_leases",
 ];
 
 async fn tables(conn: &sea_orm::DatabaseConnection) -> Vec<String> {
@@ -63,8 +64,9 @@ async fn up_down_up_creates_exactly_the_privacy_relay_tables() {
         .await,
         // Part G §67 adds the outbox publication state (000012); Part H §80 adds
         // retention holds / audit and contact erasure (000013); §81 / §86 add incidents,
-        // operator audit and the enforcement dead letter (000014).
-        14
+        // operator audit and the enforcement dead letter (000014); Part IV Part P adds
+        // the Numbering relay-number lease ledger (000015).
+        15
     );
     Migrator::down(&db.conn, None).await.unwrap();
     assert_eq!(tables(&db.conn).await, ["privacy_relay_seaql_migrations"]);

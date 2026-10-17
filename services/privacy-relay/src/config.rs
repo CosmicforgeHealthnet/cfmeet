@@ -23,6 +23,8 @@
 //! | `CONTACT_FINGERPRINT_KEYRING_FILE` | with the vault | HMAC fingerprint keyring (separate secret file) |
 //! | `CONTACT_DELEGATION_TRUST_BUNDLE_FILE` | with the vault | which issuers' Contact Vault access tokens are accepted |
 //! | `NUMBER_GRANT_TRUST_BUNDLE_FILE` | no | Numbering's routing grant key (DCN inbound caller protection); unset: refused |
+//! | `RELAY_NUMBER_AUTHORITY` | no | `LOCAL` (default, the rollback position) or `NUMBERING`: relay numbers are leased from Numbering (Part IV Part P) |
+//! | `NUMBERING_INTERNAL_BASE_URL` | with `NUMBERING` | Numbering's internal API (relay inventory import, leases, resolution) |
 //!
 //! Without `CALLING_INTERNAL_BASE_URL` enforcement jobs and outbox events stay durably
 //! PENDING (authority is still revoked locally; nothing is falsely reported as applied or
@@ -103,6 +105,8 @@ pub struct RelayConfig {
     pub relay_number_pool_enabled: bool,
     /// `RELAY_NUMBER_COOLDOWN_SECONDS`.
     pub relay_number_cooldown: Duration,
+    /// `RELAY_NUMBER_AUTHORITY` (Part IV Part P).
+    pub relay_number_authority: crate::relay_numbers::authority::AuthorityMode,
 }
 
 /// Default relay-number cooldown: 72 hours. A released number keeps receiving delayed
@@ -206,6 +210,11 @@ impl RelayConfig {
                     )
                 })?,
         };
+        let relay_number_authority = match value("RELAY_NUMBER_AUTHORITY") {
+            None => crate::relay_numbers::authority::AuthorityMode::Local,
+            Some(v) => crate::relay_numbers::authority::AuthorityMode::parse(&v)
+                .ok_or_else(|| invalid("RELAY_NUMBER_AUTHORITY", "must be LOCAL or NUMBERING"))?,
+        };
         Ok(Self {
             database_url,
             database_max_connections,
@@ -216,6 +225,7 @@ impl RelayConfig {
             json_logs,
             relay_number_pool_enabled,
             relay_number_cooldown,
+            relay_number_authority,
         })
     }
 }
@@ -293,6 +303,8 @@ pub struct ServiceAuthSettings {
     pub token_ttl: TokenTtl,
     pub http_timeout: Duration,
     pub calling_base_url: Option<String>,
+    /// `NUMBERING_INTERNAL_BASE_URL`: relay-number leases (Part IV Part P).
+    pub numbering_base_url: Option<String>,
 }
 
 impl ServiceAuthSettings {
@@ -359,6 +371,7 @@ impl ServiceAuthSettings {
             token_ttl,
             http_timeout,
             calling_base_url: value("CALLING_INTERNAL_BASE_URL"),
+            numbering_base_url: value("NUMBERING_INTERNAL_BASE_URL"),
         })
     }
 
@@ -383,6 +396,11 @@ impl ServiceAuthSettings {
             targets
                 .insert(ServiceId::calling(), url)
                 .map_err(|e| invalid("CALLING_INTERNAL_BASE_URL", e.to_string()))?;
+        }
+        if let Some(url) = &self.numbering_base_url {
+            targets
+                .insert(ServiceId::numbering(), url)
+                .map_err(|e| invalid("NUMBERING_INTERNAL_BASE_URL", e.to_string()))?;
         }
         let client = Arc::new(
             InternalServiceClient::new(signer.clone(), targets, self.http_timeout)

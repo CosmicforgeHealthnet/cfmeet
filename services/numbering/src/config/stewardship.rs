@@ -11,7 +11,7 @@
 //! | `NUMBERING_NUMBER_SPEND_THRESHOLD_MINOR` | 50000 | provider cost per number per 24 h before outbound grants stop |
 //! | `NUMBERING_PROVIDER_COST_SPIKE_MINOR` | 1000000 | provider cost per hour that opens the provisioning breaker |
 //! | `NUMBERING_PORTING_ENABLED` | false | porting APIs (no live portability provider is integrated) |
-//! | `NUMBERING_RELAY_LEASE_MAX_HOURS` | 48 | longest relay-number lease (1–720) |
+//! | `NUMBERING_RELAY_LEASE_MAX_HOURS` | 9600 | longest relay-number lease (1–10000; the default covers Privacy Relay's longest session) |
 
 use chrono::Duration;
 
@@ -76,9 +76,9 @@ pub fn from_lookup(
     s.relay_lease_max = Duration::hours(bounded(
         &get,
         "NUMBERING_RELAY_LEASE_MAX_HOURS",
-        48,
+        9600,
         1,
-        720,
+        10_000,
     )?);
     if let Some(v) = get("NUMBERING_RISK_RESTRICTED_COUNTRIES").filter(|v| !v.trim().is_empty()) {
         for c in v.split(',').map(str::trim) {
@@ -134,7 +134,7 @@ mod tests {
             ("NUMBERING_PORTING_ENABLED", "yes"),
             ("NUMBERING_QUARANTINE_DAYS", "0"),
             ("NUMBERING_RISK_RESTRICTED_COUNTRIES", "usa"),
-            ("NUMBERING_RELAY_LEASE_MAX_HOURS", "9999"),
+            ("NUMBERING_RELAY_LEASE_MAX_HOURS", "10001"),
         ] {
             assert!(
                 from_lookup(lookup(&[(var, value)])).is_err(),

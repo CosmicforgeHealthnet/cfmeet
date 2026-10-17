@@ -1,6 +1,6 @@
 //! §94: an in-place upgrade from the previous migration head keeps every row and adds
-//! the new objects; reverting the newest migration keeps the data; re-applying it is
-//! clean. The previous head is COMPUTED (every registered migration but the newest), so
+//! the new objects (today: the Part IV Part P Numbering lease ledger); reverting the
+//! newest migration keeps the data; re-applying it is clean. The previous head is COMPUTED (every registered migration but the newest), so
 //! this test follows the history as it grows.
 //!
 //! Representative rows are written by the real service against the previous schema
@@ -166,13 +166,15 @@ async fn upgrade_from_the_previous_head_keeps_data_adds_objects_and_reverts_clea
         .is_empty());
     assert_eq!(digest(&db.conn, &shape).await, before, "data intact");
     let after_tables = tables(&db.conn).await;
-    for new in ["privacy_relay_incidents", "privacy_relay_operator_audit"] {
+    // The newest migration (Part IV Part P): the Numbering lease ledger.
+    for new in ["relay_number_leases"] {
         assert!(!before_tables.contains(&new.to_string()));
         assert!(after_tables.contains(&new.to_string()), "{new}");
     }
     assert_eq!(
-        scalar(&db.conn, "SELECT count(*) FROM information_schema.columns WHERE table_name = 'privacy_relay_enforcement_jobs' AND column_name = 'dead_lettered_at'").await,
-        1
+        scalar(&db.conn, "SELECT count(*) FROM relay_number_leases").await,
+        0,
+        "a Part III assignment carries no lease until it is adopted"
     );
 
     // The service keeps working on the upgraded data: authority as before, the pending
@@ -200,9 +202,7 @@ async fn upgrade_from_the_previous_head_keeps_data_adds_objects_and_reverts_clea
         1
     );
 
-    // Down one: the newest objects go, every previous table keeps its rows (the dead
-    // letter becomes a due PENDING job again — enforcement is restrictive, retrying is
-    // safe).
+    // Down one: the newest objects go, every previous table keeps its rows.
     let counts_before_down: Vec<(String, i64)> = {
         let d = digest(&db.conn, &shape).await;
         d.into_iter().map(|(t, (n, _))| (t, n)).collect()
@@ -224,13 +224,17 @@ async fn upgrade_from_the_previous_head_keeps_data_adds_objects_and_reverts_clea
         .collect();
     assert_eq!(counts_after_down, counts_before_down);
     assert_eq!(
-        scalar(&db.conn, "SELECT count(*) FROM privacy_relay_enforcement_jobs WHERE status = 'PENDING' AND lease_owner IS NULL").await,
+        scalar(
+            &db.conn,
+            "SELECT count(*) FROM privacy_relay_enforcement_jobs WHERE status = 'DEAD_LETTER'"
+        )
+        .await,
         1
     );
     assert_eq!(
         scalar(
             &db.conn,
-            "SELECT count(*) FROM pg_proc WHERE proname = 'privacy_relay_guard_incident'"
+            "SELECT count(*) FROM pg_proc WHERE proname = 'privacy_relay_guard_lease'"
         )
         .await,
         0
@@ -253,8 +257,13 @@ async fn upgrade_from_the_previous_head_keeps_data_adds_objects_and_reverts_clea
         .map(|(t, (n, _))| (t, n))
         .collect();
     assert_eq!(counts_reup, counts_before_down);
-    // And the service delivers the re-pended job once Calling is back.
+    // The service keeps working on the re-upgraded data: a dead letter stays dead (never
+    // re-delivered by a migration), and the sweep — lease releases included — runs clean.
     h.calling.fail_with(None);
     h.clock.advance(Duration::minutes(10));
-    assert_eq!(h.relay.run_enforcement_sweep(10).await.unwrap(), 1);
+    assert_eq!(h.relay.run_enforcement_sweep(10).await.unwrap(), 0);
+    assert_eq!(
+        h.relay.run_sweep().await.unwrap().numbering_leases_released,
+        0
+    );
 }

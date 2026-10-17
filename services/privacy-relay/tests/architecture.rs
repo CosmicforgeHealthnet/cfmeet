@@ -203,7 +203,10 @@ fn the_relay_number_inventory_is_an_isolated_boundary() {
                 file.ends_with("src/relay_numbers/inventory.rs")
                     || file.ends_with("src/relay_numbers/mod.rs")
                     // The operator input path (it only passes the value to `add`).
-                    || file.ends_with("src/bin/privacy-relay-admin.rs"),
+                    || file.ends_with("src/bin/privacy-relay-admin.rs")
+                    // Part IV Part P: the backfill hands it to Numbering, the binding
+                    // authority, over the authenticated internal API (never a view or log).
+                    || file.ends_with("src/relay_numbers/authority.rs"),
                 "{file} touches the provider binding"
             );
         }

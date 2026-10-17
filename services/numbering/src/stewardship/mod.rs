@@ -110,7 +110,8 @@ pub struct StewardshipSettings {
     pub risk: risk::RiskPolicy,
     /// `NUMBERING_PORTING_ENABLED` (default false): porting APIs answer PORTING_DISABLED.
     pub porting_enabled: bool,
-    /// Longest relay lease Numbering grants.
+    /// Longest relay lease Numbering grants: covers Privacy Relay's longest session
+    /// (366 days of validity + 30 days of completion grace).
     pub relay_lease_max: Duration,
 }
 
@@ -120,7 +121,7 @@ impl Default for StewardshipSettings {
             quarantine: QuarantinePolicy::default(),
             risk: risk::RiskPolicy::default(),
             porting_enabled: false,
-            relay_lease_max: Duration::hours(48),
+            relay_lease_max: Duration::days(400),
         }
     }
 }
