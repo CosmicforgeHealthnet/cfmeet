@@ -1557,9 +1557,10 @@ struct VoiceBins {
     livekit_sip: PathBuf,
     /// Redis for LiveKit's SIP service.
     redis: PathBuf,
-    /// A Python with the LiveKit RTC SDK: the accepting application's real media client
-    /// (Calling's `tests/rtc/rtc_client.py`).
+    /// A Python with the LiveKit RTC SDK and the accepting application's real media client
+    /// (`CALLING_RTC_CLIENT`: the RTC certification client, supplied like the binaries).
     rtc_python: PathBuf,
+    rtc_client: PathBuf,
 }
 
 fn tool_available(binary: &str) -> bool {
@@ -1596,6 +1597,7 @@ fn voice_bins() -> Option<VoiceBins> {
                 tool_available("redis-server").then(|| PathBuf::from("redis-server"))
             })?,
             rtc_python: get("CALLING_RTC_CERT_PYTHON")?,
+            rtc_client: get("CALLING_RTC_CLIENT")?,
         })
     })()
     .filter(|_| tool_available("asterisk") && tool_available("sipp"));
@@ -1606,7 +1608,7 @@ fn voice_bins() -> Option<VoiceBins> {
         );
         eprintln!(
             "SKIPPED: voice journeys (asterisk, sipp, redis-server, LIVEKIT_SERVER_BIN, \
-             LIVEKIT_SIP_BIN, CALLING_RTC_CERT_PYTHON, CALLING_BIN, TELEPHONY_BIN, PRIVACY_RELAY_BIN and their \
+             LIVEKIT_SIP_BIN, CALLING_RTC_CERT_PYTHON, CALLING_RTC_CLIENT, CALLING_BIN, TELEPHONY_BIN, PRIVACY_RELAY_BIN and their \
              migration binaries are required)"
         );
     }
@@ -1713,9 +1715,7 @@ struct RtcApp {
 }
 
 impl RtcApp {
-    fn spawn(python: &PathBuf) -> Self {
-        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../calling/tests/rtc/rtc_client.py");
+    fn spawn(python: &PathBuf, script: &PathBuf) -> Self {
         let mut child = tokio::process::Command::new(python)
             .arg("-I")
             .arg(script)
@@ -2876,7 +2876,7 @@ impl VoiceStack {
             )
             .await;
         assert_eq!(status, StatusCode::OK, "{credential}");
-        let mut app = RtcApp::spawn(&self.bins.rtc_python);
+        let mut app = RtcApp::spawn(&self.bins.rtc_python, &self.bins.rtc_client);
         let joined = app
             .cmd(
                 json!({ "cmd": "connect", "url": credential["url"], "token": credential["token"] }),

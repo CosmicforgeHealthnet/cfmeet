@@ -144,4 +144,5 @@ jobs:
           TELEPHONY_BIN: ${{ github.workspace }}/target/debug/telephony
           TELEPHONY_MIGRATION_BIN: ${{ github.workspace }}/target/debug/telephony-migration
           CALLING_RTC_CERT_PYTHON: python
+          CALLING_RTC_CLIENT: ${{ github.workspace }}/services/calling/tests/rtc/rtc_client.py
         run: cargo test --locked --test communications_e2e -- --nocapture

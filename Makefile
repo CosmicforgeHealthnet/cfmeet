@@ -183,7 +183,8 @@ telephony-integration: platform-access-bins ## Calling <-> Telephony <-> Privacy
 # the SMS Gateway, Calling, Telephony and Privacy Relay. The voice journeys also need
 # asterisk + sipp (the certification SIP edge), redis-server, LIVEKIT_SERVER_BIN (Calling's
 # media), LIVEKIT_SIP_BIN (its SIP bridge) and CALLING_RTC_CERT_PYTHON (a Python with the
-# LiveKit RTC SDK: the application's media client); without them they are SKIPPED.
+# LiveKit RTC SDK: the application's media client, run from Calling's RTC certification
+# client, CALLING_RTC_CLIENT, set below); without them they are SKIPPED.
 communications-e2e: platform-access-bins ## Cross-service SMS + voice journeys (requires TEST_DATABASE_URL; voice: asterisk, sipp, redis-server, LIVEKIT_SERVER_BIN, LIVEKIT_SIP_BIN, CALLING_RTC_CERT_PYTHON)
 	cd $(SMS_GATEWAY) && cargo build --workspace --bins
 	cd $(CALLING) && cargo build --workspace --bins
@@ -198,6 +199,7 @@ communications-e2e: platform-access-bins ## Cross-service SMS + voice journeys (
 		PRIVACY_RELAY_MIGRATION_BIN=$(call bin_dir,$(PRIVACY_RELAY))/privacy-relay-migration \
 		TELEPHONY_BIN=$(call bin_dir,$(TELEPHONY))/telephony \
 		TELEPHONY_MIGRATION_BIN=$(call bin_dir,$(TELEPHONY))/telephony-migration \
+		CALLING_RTC_CLIENT=$(CURDIR)/$(CALLING)/tests/rtc/rtc_client.py \
 		cargo test --test communications_e2e -- --nocapture
 
 service-auth-test: ## Test packages/service-auth (core and client feature sets)
