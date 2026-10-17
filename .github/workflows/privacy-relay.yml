@@ -201,8 +201,8 @@ jobs:
           # Applied = registered migrations (derived from the migrator, never hand-counted).
           test "$(q "SELECT count(*) FROM privacy_relay_seaql_migrations")" = "$(grep -c 'Box::new(m20' migration/src/lib.rs)"
           # 22 Part D tables + Part H retention holds and retention audit + incidents and
-          # operator audit.
-          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'privacy_relay_seaql_migrations'")" = "26"
+          # operator audit + the Numbering lease ledger (Part IV Part P).
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'privacy_relay_seaql_migrations'")" = "27"
           # Contact-shaped columns exist only where they belong: the vault's ciphertext and
           # fingerprints, and CF Meet's own PUBLIC relay numbers in the relay inventory.
           test "$(q "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' \
@@ -338,9 +338,14 @@ jobs:
           workspaces: |
             services/privacy-relay -> target
             services/calling -> target
+            services/platform-access -> target
           key: e2e
 
       - name: Build privacy-relay binaries (service, migration, admin)
+        run: cargo build --workspace --bins --locked
+
+      - name: Build Platform Access binaries (Calling authenticates through it)
+        working-directory: services/platform-access
         run: cargo build --workspace --bins --locked
 
       # Protected calls authorized by the real Privacy Relay, transfer re-authorization,
@@ -356,6 +361,9 @@ jobs:
           export PRIVACY_RELAY_BIN="$GITHUB_WORKSPACE/services/privacy-relay/target/debug/privacy-relay"
           export PRIVACY_RELAY_MIGRATION_BIN="$GITHUB_WORKSPACE/services/privacy-relay/target/debug/privacy-relay-migration"
           test -x "$PRIVACY_RELAY_BIN" && test -x "$PRIVACY_RELAY_MIGRATION_BIN"
+          export PLATFORM_ACCESS_BIN="$GITHUB_WORKSPACE/services/platform-access/target/debug/platform-access"
+          export PLATFORM_ACCESS_MIGRATION_BIN="$GITHUB_WORKSPACE/services/platform-access/target/debug/platform-access-migration"
+          test -x "$PLATFORM_ACCESS_BIN" && test -x "$PLATFORM_ACCESS_MIGRATION_BIN"
           test -x "$(dirname "$PRIVACY_RELAY_BIN")/privacy-relay-admin"
           cargo test --locked --test privacy_relay_e2e -- --nocapture 2>&1 | tee "$RUNNER_TEMP/e2e.log"
           grep -q "test result: ok. 3 passed" "$RUNNER_TEMP/e2e.log"

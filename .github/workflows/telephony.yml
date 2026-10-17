@@ -349,6 +349,7 @@ jobs:
             services/telephony -> target
             services/privacy-relay -> target
             services/calling -> target
+            services/platform-access -> target
           key: e2e
 
       - name: Build telephony binaries (service, migration, admin)
@@ -356,6 +357,10 @@ jobs:
 
       - name: Build privacy-relay binaries (service, migration, admin)
         working-directory: services/privacy-relay
+        run: cargo build --workspace --bins --locked
+
+      - name: Build Platform Access binaries (Calling authenticates through it)
+        working-directory: services/platform-access
         run: cargo build --workspace --bins --locked
 
       # App-to-phone across the three services (Privacy Relay authority + real Contact
@@ -374,6 +379,9 @@ jobs:
           export TELEPHONY_BIN="$GITHUB_WORKSPACE/services/telephony/target/debug/telephony"
           export TELEPHONY_MIGRATION_BIN="$GITHUB_WORKSPACE/services/telephony/target/debug/telephony-migration"
           for b in "$PRIVACY_RELAY_BIN" "$PRIVACY_RELAY_MIGRATION_BIN" "$TELEPHONY_BIN" "$TELEPHONY_MIGRATION_BIN"; do test -x "$b"; done
+          export PLATFORM_ACCESS_BIN="$GITHUB_WORKSPACE/services/platform-access/target/debug/platform-access"
+          export PLATFORM_ACCESS_MIGRATION_BIN="$GITHUB_WORKSPACE/services/platform-access/target/debug/platform-access-migration"
+          test -x "$PLATFORM_ACCESS_BIN" && test -x "$PLATFORM_ACCESS_MIGRATION_BIN"
           test -x "$(dirname "$PRIVACY_RELAY_BIN")/privacy-relay-admin"
           test -x "$(dirname "$TELEPHONY_BIN")/telephony-admin"
           cargo test --locked --test telephony_e2e -- --nocapture 2>&1 | tee "$RUNNER_TEMP/e2e.log"

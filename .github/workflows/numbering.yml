@@ -194,15 +194,16 @@ jobs:
           # Applied = registered migrations (derived from the migrator, never hand-counted).
           test "$(q "SELECT count(*) FROM numbering_seaql_migrations")" = "$(grep -c 'Box::new(m20' migration/src/lib.rs)"
           # Foundation (outbox, jobs, idempotency) + the D9 number domain + the E catalog +
-          # the F KYC / eligibility tables + the G provider command / event / incident tables —
-          # and nothing of any other service.
-          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'numbering_seaql_migrations'")" = "36"
+          # the F KYC / eligibility tables + the G provider command / event / incident tables +
+          # the P–W stewardship and Part P relay-lease tables (14) — and nothing of any other
+          # service.
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'numbering_seaql_migrations'")" = "50"
           test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'numbering_seaql_migrations' AND tablename !~ '^(number_|numbering_|dcn_)'")" = "0"
           # No provider identifier column outside bindings / inventory snapshots and the
           # internal applicability of catalog entries, KYC requirement sets and KYC cases, and
-          # the internal provider command / event / inventory-ref / incident records (never
-          # exposed to customers).
-          test "$(q "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name IN ('provider_id', 'external_ref') AND table_name NOT IN ('number_provider_bindings', 'number_inventory_snapshots', 'number_type_catalog', 'number_kyc_requirements', 'number_kyc_cases', 'number_provider_commands', 'number_provider_events', 'number_provider_inventory_refs', 'numbering_incidents', 'number_inventory_refreshes')")" = "0"
+          # the internal provider command / event / inventory-ref / incident records and the
+          # porting provider of a port request (never exposed to customers).
+          test "$(q "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name IN ('provider_id', 'external_ref') AND table_name NOT IN ('number_provider_bindings', 'number_inventory_snapshots', 'number_type_catalog', 'number_kyc_requirements', 'number_kyc_cases', 'number_provider_commands', 'number_provider_events', 'number_provider_inventory_refs', 'numbering_incidents', 'number_inventory_refreshes', 'number_port_requests')")" = "0"
 
       - name: Per-service database roles with the real migrations
         env:
