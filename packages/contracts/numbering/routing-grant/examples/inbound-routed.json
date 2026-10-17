@@ -24,5 +24,6 @@
     "issuedAt": "2031-03-01T10:05:00Z",
     "expiresAt": "2031-03-01T10:06:00Z"
   },
-  "reason": null
+  "reason": null,
+  "inventoryClass": "REAL"
 }

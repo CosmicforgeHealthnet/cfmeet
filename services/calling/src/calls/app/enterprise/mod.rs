@@ -748,6 +748,7 @@ impl AppCallService {
                 relay_session_id: None,
                 context_id: None,
                 live_telecom_allowed: false,
+                interconnect: crate::routing::engine::InterconnectClass::Public,
                 flags: TelecomFlags::default(),
                 routes: Evidence::Unknown,
                 spend_headroom_minor: Evidence::Unknown,

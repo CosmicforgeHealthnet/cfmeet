@@ -21,6 +21,7 @@ use std::sync::Arc;
 use axum::http::{Method, StatusCode};
 use common::{edge::ScriptedEdge, FakeDcn, Harness, RELAY_NUMBER};
 use serde_json::{json, Value};
+use telephony::domain::RouteCapability;
 use telephony::{
     commands::originate::dcn_operation_ref,
     dcn::{self, DcnActivationError},
@@ -51,6 +52,7 @@ fn dcn_of(h: &Harness, id: Uuid, target: Option<(&str, Uuid)>) -> FakeDcn {
         scope: scope_of(h),
         target: target.map(|(k, r)| (k.to_string(), r)),
         unavailable: None,
+        inventory_class: Some("REAL".into()),
     }
 }
 
@@ -81,6 +83,10 @@ impl Edge {
     }
 
     async fn dialog(&self, called: &str, caller: Option<&str>) -> String {
+        self.dialog_via(PEER, called, caller).await
+    }
+
+    async fn dialog_via(&self, peer: &str, called: &str, caller: Option<&str>) -> String {
         let channel = format!("chan-{}", Uuid::new_v4().simple());
         self.edge.add_live(&channel, LegStatus::Ringing);
         self.h
@@ -91,7 +97,7 @@ impl Edge {
                 application_media: false,
                 correlation_key: None,
                 kind: EdgeEventKind::Inbound(EdgeInbound {
-                    peer: Some(PEER.to_string()),
+                    peer: Some(peer.to_string()),
                     source_address: Some("192.0.2.10".parse().unwrap()),
                     called: ExecutionNumber::parse(called),
                     caller: caller.and_then(ExecutionNumber::parse),
@@ -723,4 +729,271 @@ async fn a_relay_number_cannot_be_rebound_as_a_dcn() {
         ))
         .await
         .is_err());
+}
+
+// ---------------------------------------------------------------------------------------
+// Part IV L closure: Calling's answers, and synthetic test interconnects
+// ---------------------------------------------------------------------------------------
+
+fn offers_rejected(result: &'static str) -> u64 {
+    telephony::metrics::counter("telephony_inbound_offers_total", &[("result", result)])
+}
+
+/// Step 4: Calling unreachable, Calling refusing the route, Calling denying the call and
+/// an invalid Calling answer are four distinct, recorded outcomes — each rejects the
+/// dialog (fail closed) and creates no leg.
+#[tokio::test]
+async fn calling_answers_are_classified_unavailable_refused_denied_or_invalid() {
+    let Some(w) = Edge::new().await else {
+        return;
+    };
+    let id = Uuid::new_v4();
+    bind_dcn(&w.h, id, "ng-a", "'VOICE_INBOUND'").await;
+    w.h.numbering
+        .add_dcn(DCN, dcn_of(&w.h, id, Some(("PRINCIPAL", Uuid::new_v4()))));
+    let cases: [(&str, &'static str); 5] = [
+        ("unreachable", "CALLING_UNAVAILABLE"),
+        ("PUBLIC_ROUTE_DENIED", "CALLING_REFUSED"),
+        ("CALL_NOT_AUTHORIZED", "CALLING_DENIED"),
+        ("INTERNAL_PERMISSION_DENIED", "CALLING_DENIED"),
+        ("invalid", "CALLING_INVALID_RESPONSE"),
+    ];
+    for (mode, result) in cases {
+        *w.h.calling.available.lock().unwrap() = mode != "unreachable";
+        *w.h.calling.dcn_refusal.lock().unwrap() = match mode {
+            "unreachable" | "invalid" => None,
+            code => Some(match code {
+                "PUBLIC_ROUTE_DENIED" => "PUBLIC_ROUTE_DENIED",
+                "CALL_NOT_AUTHORIZED" => "CALL_NOT_AUTHORIZED",
+                _ => "INTERNAL_PERMISSION_DENIED",
+            }),
+        };
+        *w.h.calling.dcn_answer.lock().unwrap() = (mode == "invalid")
+            .then(|| json!({ "callId": "not-a-call", "routeClass": "PSTN_TO_APP" }));
+        let before = offers_rejected(result);
+        let c = w.dialog(DCN, Some(CALLER)).await;
+        assert!(w.rejected(&c).await, "{mode}: the dialog is rejected");
+        assert_eq!(
+            offers_rejected(result),
+            before + 1,
+            "{mode} is recorded as {result}"
+        );
+    }
+    assert_eq!(w.inbound_legs().await, 0);
+    // The classifier itself (an explicit refusal is never "unavailable").
+    use telephony::{inbound::calling_rejection, ports::PortError};
+    assert_eq!(
+        calling_rejection(PortError::Unavailable).as_str(),
+        "CALLING_UNAVAILABLE"
+    );
+    assert_eq!(
+        calling_rejection(PortError::NotFound).as_str(),
+        "CALLING_REFUSED"
+    );
+    assert_eq!(
+        calling_rejection(PortError::Denied("TELECOM_SPEND_LIMIT_EXCEEDED".into())).as_str(),
+        "CALLING_REFUSED"
+    );
+    assert_eq!(
+        calling_rejection(PortError::Denied("INTERNAL_AUTHENTICATION_FAILED".into())).as_str(),
+        "CALLING_DENIED"
+    );
+}
+
+/// A SYNTHETIC_TEST route (zero cost) for `provider` reached through `peer`, carrying the
+/// DCN `id`.
+async fn synthetic_route(h: &Harness, route: &str, peer: &str, provider: &str, id: Uuid) {
+    let now = h.clock_now();
+    h.sql(&format!(
+        "INSERT INTO sip_peer_config_refs (id, provider_id, secret_ref, transport, allowed_source_cidrs, max_concurrent_dialogs, created_at, updated_at) \
+         VALUES ('{peer}', '{provider}', 'trunk/{route}', 'UDP', ARRAY['192.0.2.0/24']::cidr[], 10, '{now}', '{now}')"
+    ))
+    .await;
+    h.sql(&format!(
+        "INSERT INTO telecom_routes (id, provider_id, countries, capabilities, priority, status, sip_peer_config_ref_id, \
+           max_concurrent_legs, estimated_leg_cost_minor, cost_currency, max_call_seconds, created_at, updated_at, health, interconnect_class) \
+         VALUES ('{route}', '{provider}', ARRAY['NG'], ARRAY['VOICE_OUTBOUND','VOICE_INBOUND'], 90, 'ENABLED', '{peer}', \
+           10, 0, 'NGN', 3600, '{now}', '{now}', 'HEALTHY', 'SYNTHETIC_TEST')"
+    ))
+    .await;
+    bind_dcn(h, id, route, "'VOICE_INBOUND','VOICE_OUTBOUND'").await;
+}
+
+#[tokio::test]
+async fn synthetic_test_routes_carry_synthetic_dcns_only_and_only_when_enabled() {
+    let Some(w) = Edge::new().await else {
+        return;
+    };
+    let id = Uuid::new_v4();
+    synthetic_route(&w.h, "syn-a", "peer-syn-a", "sip-a", id).await;
+    let mut synthetic = dcn_of(&w.h, id, Some(("PRINCIPAL", Uuid::new_v4())));
+    synthetic.inventory_class = Some("SYNTHETIC".into());
+
+    // Disabled (the default): the synthetic route does not exist for Telephony.
+    w.h.numbering.add_dcn(DCN, synthetic.clone());
+    let before = offers_rejected("INTERCONNECT_DISABLED");
+    let c = w.dialog_via("peer-syn-a", DCN, Some(CALLER)).await;
+    assert!(w.rejected(&c).await);
+    assert_eq!(offers_rejected("INTERCONNECT_DISABLED"), before + 1);
+    let availability =
+        w.h.svc
+            .availability("NG", RouteCapability::VoiceOutbound)
+            .await
+            .unwrap();
+    assert!(
+        availability["routes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["routeRef"] != "syn-a"),
+        "{availability}"
+    );
+
+    // Enabled: a synthetic DCN on the synthetic route is offered as SYNTHETIC_TEST.
+    w.h.svc.flags.synthetic_interconnect.set(true);
+    let availability =
+        w.h.svc
+            .availability("NG", RouteCapability::VoiceOutbound)
+            .await
+            .unwrap();
+    let routes = availability["routes"].as_array().unwrap();
+    assert!(routes
+        .iter()
+        .any(|r| r["routeRef"] == "syn-a" && r["interconnectClass"] == "SYNTHETIC_TEST"));
+    assert!(routes
+        .iter()
+        .filter(|r| r["routeRef"] != "syn-a")
+        .all(|r| r["interconnectClass"] == "PUBLIC"));
+    let c = w.dialog_via("peer-syn-a", DCN, Some(CALLER)).await;
+    assert!(!w.rejected(&c).await);
+    let offers = w.dcn_offers();
+    assert_eq!(offers.len(), 1);
+    assert_eq!(offers[0]["interconnectClass"], "SYNTHETIC_TEST");
+
+    // A REAL number on the synthetic route, a synthetic number on a public route: refused.
+    let mut real = synthetic.clone();
+    real.inventory_class = Some("REAL".into());
+    w.h.numbering.add_dcn(DCN, real);
+    let before = offers_rejected("INTERCONNECT_MISMATCH");
+    let c = w.dialog_via("peer-syn-a", DCN, Some(CALLER)).await;
+    assert!(w.rejected(&c).await, "a real number on a test route");
+    w.h.numbering.add_dcn(DCN, synthetic);
+    let other = Uuid::new_v4();
+    let mut on_public = dcn_of(&w.h, other, Some(("PRINCIPAL", Uuid::new_v4())));
+    on_public.inventory_class = Some("SYNTHETIC".into());
+    const PUBLIC_DCN: &str = "+2342010000999";
+    w.h.sql(&format!(
+        "INSERT INTO telecom_number_bindings (public_e164, route_id, capabilities, status, number_kind, \
+           number_resource_id, created_at, updated_at) \
+         VALUES ('{PUBLIC_DCN}', 'ng-a', ARRAY['VOICE_INBOUND'], 'ENABLED', 'DCN', '{other}', now(), now())"
+    ))
+    .await;
+    w.h.numbering.add_dcn(PUBLIC_DCN, on_public);
+    let c = w.dialog(PUBLIC_DCN, Some(CALLER)).await;
+    assert!(w.rejected(&c).await, "a synthetic number on a public route");
+    assert_eq!(offers_rejected("INTERCONNECT_MISMATCH"), before + 2);
+    assert_eq!(w.dcn_offers().len(), 1);
+}
+
+/// Originates presenting the DCN over `class`; returns (leg, result code).
+async fn originate_over(
+    h: &Harness,
+    id: Uuid,
+    dcn: &FakeDcn,
+    class: &str,
+) -> (Uuid, Option<String>) {
+    let contact = h.privacy.add_contact("+2348031234567", "NG");
+    let mut body = h.originate_body(contact, Uuid::new_v4(), 1);
+    let token = h
+        .numbering
+        .issue_caller_identity(DCN, dcn.clone(), &op_ref(&body));
+    body["presentedIdentity"] = json!({ "numberResourceId": id, "grant": token });
+    body["interconnectClass"] = json!(class);
+    // Calling's candidates name both; Telephony keeps only the routes of the class.
+    body["candidateRoutes"] = json!(["ng-a", "syn-a"]);
+    let r = h
+        .calling(Method::POST, "/internal/v1/legs/originate", Some(body))
+        .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{}", r.text);
+    let leg: Uuid = r.json["leg"]["telephonyLegId"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    h.run().await;
+    let code = h
+        .text(&format!(
+            "SELECT result_code FROM telephony_commands WHERE telephony_leg_id = '{leg}' AND kind = 'ORIGINATE'"
+        ))
+        .await;
+    (leg, code)
+}
+
+#[tokio::test]
+async fn a_synthetic_dcn_is_presented_only_over_a_synthetic_test_route() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let id = Uuid::new_v4();
+    // The DCN is bound to the public route (better priority) AND to a synthetic one.
+    bind_dcn(&h, id, "ng-a", "'VOICE_OUTBOUND','VOICE_INBOUND'").await;
+    synthetic_route(&h, "syn-a", "peer-syn-a", "dp-a", id).await;
+    let mut synthetic = dcn_of(&h, id, None);
+    synthetic.inventory_class = Some("SYNTHETIC".into());
+
+    // Disabled: refused before Numbering is asked, nothing dialled.
+    let (_, code) = originate_over(&h, id, &synthetic, "SYNTHETIC_TEST").await;
+    assert_eq!(code.as_deref(), Some("SYNTHETIC_INTERCONNECT_DISABLED"));
+    assert!(h.numbering.verifications.lock().unwrap().is_empty());
+    assert!(presented(&h).is_empty());
+
+    h.svc.flags.synthetic_interconnect.set(true);
+    // A synthetic DCN over SYNTHETIC_TEST: executed on the synthetic route only.
+    let (leg, code) = originate_over(&h, id, &synthetic, "SYNTHETIC_TEST").await;
+    assert_eq!(
+        code.as_deref(),
+        Some("ACCEPTED"),
+        "{}",
+        h.leg_status(leg).await
+    );
+    assert_eq!(
+        h.text(&format!(
+            "SELECT route_id FROM telephony_legs WHERE id = '{leg}'"
+        ))
+        .await
+        .as_deref(),
+        Some("syn-a")
+    );
+    assert_eq!(presented(&h), vec![DCN.to_string()]);
+    // A synthetic DCN over PUBLIC, a real DCN over SYNTHETIC_TEST: refused, nothing sent.
+    let (_, code) = originate_over(&h, id, &synthetic, "PUBLIC").await;
+    assert_eq!(code.as_deref(), Some("INTERCONNECT_MISMATCH"));
+    let mut real = synthetic.clone();
+    real.inventory_class = Some("REAL".into());
+    let (_, code) = originate_over(&h, id, &real, "SYNTHETIC_TEST").await;
+    assert_eq!(code.as_deref(), Some("INTERCONNECT_MISMATCH"));
+    assert_eq!(
+        presented(&h).len(),
+        1,
+        "only the synthetic execution reached a provider"
+    );
+    // A real DCN over PUBLIC never selects the synthetic route.
+    let (leg, code) = originate_over(&h, id, &real, "PUBLIC").await;
+    assert_eq!(code.as_deref(), Some("ACCEPTED"));
+    assert_eq!(
+        h.text(&format!(
+            "SELECT route_id FROM telephony_legs WHERE id = '{leg}'"
+        ))
+        .await
+        .as_deref(),
+        Some("ng-a")
+    );
+    // A SYNTHETIC_TEST origination without a presented DCN is malformed.
+    let contact = h.privacy.add_contact("+2348031234567", "NG");
+    let mut body = h.originate_body(contact, Uuid::new_v4(), 1);
+    body["interconnectClass"] = json!("SYNTHETIC_TEST");
+    let r = h
+        .calling(Method::POST, "/internal/v1/legs/originate", Some(body))
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
 }

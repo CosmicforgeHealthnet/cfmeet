@@ -608,3 +608,96 @@ async fn an_enterprise_leg_bridges_to_application_media() {
         "{target} (channel {channel})"
     );
 }
+
+/// The application media side may present its join code before the bridge command has
+/// created the edge bridge (LiveKit SIP dials as soon as Calling has the code): the channel
+/// is held, not refused, and the bridge command attaches it — exactly once. A second
+/// presentation of the same code is refused.
+#[tokio::test]
+async fn application_media_arriving_before_the_edge_bridge_is_held_and_attached() {
+    let Some(w) = World::new().await else {
+        return;
+    };
+    let (leg, _channel) = w.dialog().await;
+    let call: Uuid =
+        w.h.text(&format!(
+            "SELECT calling_call_id::text FROM telephony_legs WHERE id = '{leg}'"
+        ))
+        .await
+        .unwrap()
+        .parse()
+        .unwrap();
+    let r =
+        w.h.calling(
+            Method::POST,
+            "/internal/v1/bridges",
+            Some(json!({
+                "schemaVersion": "1",
+                "commandId": Uuid::new_v4(),
+                "idempotencyKey": format!("bridge-{}", Uuid::new_v4().simple()),
+                "correlationId": cf_service_auth::CorrelationId::generate().as_str(),
+                "callId": call,
+                "kind": "APPLICATION_MEDIA",
+                "telephonyLegIds": [leg],
+            })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{}", r.text);
+    let code = r.json["bridge"]["mediaJoinCode"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // Before the command ran: no edge bridge yet. The media channel is held.
+    assert_eq!(
+        w.h.scalar("SELECT count(*) FROM telephony_bridges WHERE edge_bridge_ref IS NULL")
+            .await,
+        1
+    );
+    let media = "app-media-early".to_string();
+    w.edge.add_live(&media, LegStatus::Connected);
+    assert!(w
+        .h
+        .svc
+        .application_media_joined(&code, &media)
+        .await
+        .unwrap());
+    assert_eq!(
+        w.h.text("SELECT status FROM telephony_bridges")
+            .await
+            .unwrap(),
+        "PENDING"
+    );
+    // The same code presented again (another channel) is refused.
+    let other = "app-media-second".to_string();
+    w.edge.add_live(&other, LegStatus::Connected);
+    assert!(!w
+        .h
+        .svc
+        .application_media_joined(&code, &other)
+        .await
+        .unwrap());
+    // The bridge command creates the edge bridge and attaches the held channel.
+    w.h.run().await;
+    assert_eq!(
+        w.h.text("SELECT status FROM telephony_bridges")
+            .await
+            .unwrap(),
+        "ACTIVE"
+    );
+    assert_eq!(
+        w.h.text(
+            "SELECT edge_channel_ref FROM telephony_bridge_legs WHERE member_kind = 'APPLICATION_MEDIA' AND status = 'JOINED'"
+        )
+        .await
+        .unwrap(),
+        media
+    );
+    assert_eq!(w.h.leg_status(leg).await, "CONNECTED");
+    // Used: the code admits nothing more.
+    assert!(!w
+        .h
+        .svc
+        .application_media_joined(&code, &other)
+        .await
+        .unwrap());
+}

@@ -1488,3 +1488,102 @@ async fn the_grant_surface_is_internal_only_and_in_the_served_contract() {
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
     let _ = (COMMON, t.h.conn());
 }
+
+/// Step 5 of the L closure: the routing-revision check on its own. Only the number's
+/// routing revision moves — same ACTIVE assignment, owner, targets, readiness,
+/// capabilities and expiry, and no revocation of outstanding grants — so a grant issued at
+/// the previous revision is refused for exactly that reason (no other check can refuse
+/// it), and a grant issued at the current revision verifies.
+#[tokio::test]
+async fn a_grant_from_a_previous_routing_revision_is_refused_as_stale() {
+    let Some(t) = setup().await else {
+        return;
+    };
+    let s = sandbox();
+    let queue = Uuid::new_v4();
+    let (id, a) = t
+        .active(
+            &s,
+            "syn-voice-sms-geo",
+            NumberType::Geographic,
+            &[C::VoiceInbound, C::VoiceOutbound],
+            O::Organization,
+            None,
+            targets((V::EnterpriseQueue, Some(queue)), (Sms::None, None)),
+        )
+        .await;
+    let e164 = t.e164(id).await;
+    let first = t.resolve(&t.h.peers.telephony, "VOICE", &e164).await;
+    assert_eq!(first.body["outcome"], "ROUTED", "{:?}", first.body);
+    let old_revision = first.body["routingRevision"].as_i64().unwrap();
+    let inbound = grant_of(&first);
+    let outbound = grant_of(&t.caller_identity(&s, None, id, &op()).await);
+    assert_eq!(
+        t.verify(&t.h.peers.calling, &inbound, false, None)
+            .await
+            .body["valid"],
+        true
+    );
+
+    // Only the number's routing revision moves (what a carrier route re-provisioning
+    // records on the canonical number): same ACTIVE assignment, owner, targets, readiness,
+    // capabilities and expiry, and nothing revokes the outstanding grants.
+    common::exec(
+        t.h.conn(),
+        &format!("UPDATE number_resources SET routing_revision = routing_revision + 1, revision = revision + 1 WHERE id = '{id}'"),
+    )
+    .await
+    .unwrap();
+    let resource = t.h.numbers.resource(id).await.unwrap();
+    assert!(resource.routing_revision > old_revision);
+    let still = t.h.numbers.assignment(&s, a.id).await.unwrap();
+    assert_eq!(
+        (
+            still.status.as_str(),
+            still.revision,
+            still.routing_profile_revision
+        ),
+        ("ACTIVE", a.revision, a.routing_profile_revision),
+        "the assignment and its routing profile are unchanged"
+    );
+    assert_eq!(
+        t.h.scalar(&format!(
+            "SELECT count(*) FROM number_routing_grants WHERE number_resource_id = '{id}' AND revoked_at IS NOT NULL"
+        ))
+        .await,
+        0,
+        "nothing revoked the outstanding grants: only the revision check can refuse them"
+    );
+
+    // The previous revision's grants are refused as stale (then recorded revoked).
+    for (peer, grant, consume, operation) in [
+        (&t.h.peers.calling, &inbound, false, None),
+        (&t.h.peers.telephony, &outbound, true, Some(op())),
+    ] {
+        let v = t.verify(peer, grant, consume, operation.as_deref()).await;
+        assert_eq!(v.body["valid"], false, "{:?}", v.body);
+        assert_eq!(v.body["reason"], "STALE_ROUTING_REVISION", "{:?}", v.body);
+    }
+
+    // A grant issued at the current revision verifies.
+    let fresh = t.resolve(&t.h.peers.telephony, "VOICE", &e164).await;
+    assert_eq!(fresh.body["outcome"], "ROUTED", "{:?}", fresh.body);
+    assert_eq!(
+        fresh.body["routingRevision"].as_i64(),
+        Some(resource.routing_revision)
+    );
+    assert_eq!(fresh.body["inventoryClass"], "SYNTHETIC");
+    let v = t
+        .verify(&t.h.peers.calling, &grant_of(&fresh), false, None)
+        .await;
+    assert_eq!(v.body["valid"], true, "{:?}", v.body);
+    assert_eq!(
+        v.body["routingRevision"].as_i64(),
+        Some(resource.routing_revision)
+    );
+    assert_eq!(v.body["inventoryClass"], "SYNTHETIC");
+    assert_eq!(
+        v.body["target"],
+        json!({ "kind": "ENTERPRISE_QUEUE", "ref": queue })
+    );
+}

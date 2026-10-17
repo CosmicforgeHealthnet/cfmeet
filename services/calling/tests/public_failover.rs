@@ -47,6 +47,7 @@ fn route(r: &str, health: RouteHealth) -> CandidateRoute {
         capacity_available: Evidence::Known(true),
         estimated_leg_cost_minor: Evidence::Known(100),
         quality_permille: Evidence::Unknown,
+        interconnect_class: Default::default(),
     }
 }
 

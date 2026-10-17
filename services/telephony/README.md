@@ -93,6 +93,18 @@ See `src/config.rs` for the full table. Highlights:
   enterprise calls never depend on it. `telephony-admin dcn acknowledge` (and the
   worker's reconciliation) confirms Numbering's VOICE route only while the DCN is
   routable locally.
+* `TELEPHONY_SYNTHETIC_INTERCONNECT_ENABLED` (default `false`; ADR 0041 decision 7):
+  enables `SYNTHETIC_TEST` routes, the test-only interconnect that carries Numbering's
+  SYNTHETIC DCNs in local / test runtimes. Refused at start-up outside local / test; any
+  non-PUBLIC route is refused at load outside local / test. `telephony-admin route add
+  --interconnect-class SYNTHETIC_TEST` admits one only in a local / test runtime, at zero
+  cost, on a SIP_TRUNK provider with loopback-only peers. A synthetic DCN never travels a
+  PUBLIC route and a SYNTHETIC_TEST route carries only synthetic DCNs
+  (`INTERCONNECT_MISMATCH`); disabled → `SYNTHETIC_INTERCONNECT_DISABLED` /
+  `INTERCONNECT_DISABLED`. Calling's answer to an inbound offer is classified as
+  `CALLING_UNAVAILABLE` (transport / outage), `CALLING_REFUSED` (route refusal),
+  `CALLING_DENIED` (authorization / policy) or `CALLING_INVALID_RESPONSE`, each failing
+  the dialog closed (`telephony_inbound_offers_total{result}`).
 * The SIP / media edge: ARI URL and a credentials FILE (`infra/telephony/README.md`).
   Trunk usernames and passwords live in the edge's secret store. Database rows hold
   references only.

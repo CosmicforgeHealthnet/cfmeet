@@ -194,6 +194,17 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(2);
         }
     };
+    let synthetic_interconnect =
+        match calling::calls::app::public::synthetic_interconnect_from_lookup(
+            &lookup,
+            service_auth.signer().runtime_environment(),
+        ) {
+            Ok(enabled) => enabled,
+            Err(err) => {
+                tracing::error!(error = %err, "telecom configuration error");
+                std::process::exit(2);
+            }
+        };
     let public_network = calling::calls::app::public::PublicNetwork {
         telephony: if telephony_configured {
             Arc::new(calling::telephony::HttpTelephony::new(service_auth.clone()))
@@ -202,6 +213,7 @@ async fn main() -> anyhow::Result<()> {
         },
         media: media.public_bridge.clone(),
         flags: telecom_flags,
+        synthetic_interconnect,
     };
     tracing::info!(
         telephony_configured,
@@ -209,6 +221,7 @@ async fn main() -> anyhow::Result<()> {
         public_inbound_enabled = telecom_flags.public_inbound,
         callback_relay_enabled = telecom_flags.callback_relay,
         public_media_bridge = media.public_bridge.is_some(),
+        synthetic_interconnect,
         "public-network calling configured"
     );
 

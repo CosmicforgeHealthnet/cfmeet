@@ -42,8 +42,8 @@ use crate::{
     db,
     destinations::{self, Classification},
     domain::{
-        CommandKind, EndReason, FailureCategory, LegStatus, NormalizedEvent, PublicRouteClass,
-        RouteCapability,
+        CommandKind, EndReason, FailureCategory, InterconnectClass, LegStatus, NormalizedEvent,
+        PublicRouteClass, RouteCapability,
     },
     error::{ErrorCode, TelephonyError, TelephonyResult},
     events::outbox,
@@ -549,6 +549,21 @@ impl TelephonyService {
                     .collect()
             })
             .unwrap_or_default();
+        // Part IV L closure: the interconnect class Calling's route policy selected. A
+        // synthetic test interconnect exists only while it is enabled (local / test).
+        let interconnect = command.payload["interconnectClass"]
+            .as_str()
+            .and_then(InterconnectClass::parse)
+            .unwrap_or_default();
+        if !self.interconnect_usable(interconnect) {
+            return self
+                .fail_before_send(
+                    &command,
+                    FailureCategory::Policy,
+                    "SYNTHETIC_INTERCONNECT_DISABLED",
+                )
+                .await;
+        }
         // The caller identity: a DCN presented under a Numbering CALLER_IDENTITY grant
         // (Workstream L), else the relay number Privacy Relay lent to the session.
         let presented: Option<Uuid> = command.payload["presentedNumberResourceId"]
@@ -564,6 +579,19 @@ impl TelephonyService {
             },
             None => None,
         };
+        // A synthetic DCN travels ONLY over a synthetic test interconnect and a synthetic
+        // test interconnect carries ONLY a synthetic DCN: no real number on a test route,
+        // no test number on a real carrier.
+        let synthetic_identity = dcn.as_ref().is_some_and(|d| d.synthetic());
+        if (interconnect == InterconnectClass::SyntheticTest) != synthetic_identity {
+            crate::metrics::inc(
+                "telephony_interconnect_refusals_total",
+                &[("class", interconnect.as_str())],
+            );
+            return self
+                .fail_before_send(&command, FailureCategory::Policy, "INTERCONNECT_MISMATCH")
+                .await;
+        }
         let caller_identity = match &dcn {
             Some(identity) => identity.identity.clone(),
             None => match resolved.caller_identity.clone() {
@@ -600,7 +628,13 @@ impl TelephonyService {
         .map(|r| r.route_id)
         .collect();
         let routes: Vec<_> = self
-            .eligible_routes(&txn, &country, RouteCapability::VoiceOutbound, &candidates)
+            .eligible_routes(
+                &txn,
+                &country,
+                RouteCapability::VoiceOutbound,
+                &candidates,
+                interconnect,
+            )
             .await?
             .into_iter()
             .filter(|r| !failed_before.contains(&r.id))

@@ -66,15 +66,50 @@ calls.
   can play prompts on a public inbound leg (documented limitation).
 * The full suspend / release orchestration across services remains Workstreams P/Q;
   Workstream L only enforces current state per call.
-* **Sandbox DCNs are not callable for voice.** Numbering assigns synthetic DCNs only to
-  SANDBOX / TEST environments, while Calling carries paid public-network routes
-  (PSTN_TO_APP, APP_TO_PSTN) only in a PRODUCTION environment allowed live telecom
-  (Part E). A routed call to a sandbox DCN therefore travels the whole chain — edge,
-  Telephony's allowlist, Numbering's grant, Privacy Relay's caller protection, Calling's
-  grant verification and routing to the verified target — and is refused by Calling's
-  live-telecom gate (`LIVE_TELECOM_NOT_ALLOWED`); an outbound call presenting one is
-  refused before the presentation check. The Step 20 journeys
-  (`services/numbering/tests/communications_e2e.rs`) prove exactly that chain; ringing an
-  application from a DCN needs a production number from a live carrier. Whether sandbox
-  DCN voice should run against the deterministic interconnect is a Part E policy
-  decision, deliberately not changed here.
+* **Sandbox DCN voice runs only over the synthetic TEST interconnect** (decision 7); paid
+  public routes stay PRODUCTION + live-telecom only, unchanged. A real-carrier DCN call
+  (public network, billable) is certified separately and remains PENDING until a live
+  carrier is attached.
+
+## 7. Synthetic TEST interconnect (Workstream L closure)
+
+Sandbox / test environments get only Numbering's SYNTHETIC inventory, and Calling's paid
+public routes require PRODUCTION with `live_telecom_allowed` (Part E). Rather than weaken
+that gate, test-only execution is a separate **interconnect class** decided at the
+route-policy boundary:
+
+* **Telephony route class.** `telecom_routes.interconnect_class` is `PUBLIC` (default) or
+  `SYNTHETIC_TEST`; immutable; a SYNTHETIC_TEST route costs 0 (CHECK). The operator CLI
+  admits one only in a local / test runtime, on a SIP_TRUNK provider whose peers are
+  loopback-only; the service refuses any non-PUBLIC route outside local / test at load,
+  and uses one only with `TELEPHONY_SYNTHETIC_INTERCONNECT_ENABLED` (refused at start-up
+  outside local / test). It can therefore never reach a real PSTN destination, carrier
+  trunk or billable route.
+* **Numbering marks the inventory.** Resolutions, current-assignment views and grant
+  verifications carry `inventoryClass` (`SYNTHETIC` / `REAL`); Telephony and Calling read
+  it from Numbering, never from the offer.
+* **No mixing.** A synthetic DCN travels only a SYNTHETIC_TEST route and a SYNTHETIC_TEST
+  route carries only a synthetic DCN (inbound: `INTERCONNECT_MISMATCH` at the edge and in
+  Calling; outbound: `INTERCONNECT_MISMATCH` before any provider request). A relay number
+  never uses a synthetic route.
+* **Calling's route policy.** `RouteInputs.interconnect`: PUBLIC keeps the live-telecom
+  gate exactly as before; SYNTHETIC_TEST is never allowed where live telecom is
+  (`SYNTHETIC_INTERCONNECT_NOT_ALLOWED`), needs `CALLING_SYNTHETIC_INTERCONNECT_ENABLED`
+  (refused at start-up outside local / test) and an ACTIVE SANDBOX / TEST environment,
+  and every other policy gate (authorization, permitted classes, flags, spend, incidents,
+  verified contacts) still applies; candidate routes are filtered by class. The class is
+  recorded on the route plan and sent with the originate command.
+* **Numbering keeps its authority.** Ownership, active assignment, voice capability,
+  routing authorization, the routing revision and single-use caller grants apply
+  unchanged. A sandbox call without a DCN is still a paid public call and is refused
+  (`LIVE_TELECOM_NOT_ALLOWED`).
+
+The communications journeys (`services/numbering/tests/communications_e2e.rs`) prove
+both directions over real SIP: Scenario A — SIPp carrier → Asterisk edge → Telephony →
+Numbering → Privacy Relay → Calling rings the current owner's endpoint, the application
+accepts and joins media (real WebRTC client), LiveKit SIP bridges into the edge with the
+single-use join code, the call is CONNECTED and completes at zero cost; Scenario B —
+the application calls out presenting its DCN, Numbering's caller grant is consumed by
+Telephony and the SIPp carrier receives the DCN as `From`. An application-media channel
+that presents its join code before the edge bridge exists is held and attached by the
+bridge command (exactly once), not refused.

@@ -451,7 +451,7 @@ impl CallingPort for HttpCalling {
             .post_json(&outbound, "/internal/v1/telephony/inbound-calls", offer)
             .await
             .map_err(port_error)?;
-        response.json().map_err(|_| PortError::Unavailable)
+        Ok(response.json().unwrap_or(Value::Null))
     }
 
     async fn offer_dcn_inbound(&self, offer: &Value) -> Result<Value, PortError> {
@@ -466,7 +466,9 @@ impl CallingPort for HttpCalling {
             .post_json(&outbound, "/internal/v1/telephony/dcn-inbound-calls", offer)
             .await
             .map_err(port_error)?;
-        response.json().map_err(|_| PortError::Unavailable)
+        // Calling answered: a body that is not JSON is an invalid answer (classified by
+        // the caller), never mistaken for Calling being unavailable.
+        Ok(response.json().unwrap_or(Value::Null))
     }
 
     async fn offer_enterprise(&self, offer: &Value) -> Result<Value, PortError> {
@@ -547,6 +549,14 @@ pub struct DcnRouting {
     pub target_ref: Uuid,
     pub grant: String,
     pub grant_id: Uuid,
+    /// Numbering's inventory class of the dialled number (`SYNTHETIC` / `REAL`).
+    pub inventory_class: Option<String>,
+}
+
+impl DcnRouting {
+    pub fn synthetic(&self) -> bool {
+        self.inventory_class.as_deref() == Some("SYNTHETIC")
+    }
 }
 
 impl fmt::Debug for DcnRouting {
@@ -578,6 +588,15 @@ pub struct VerifiedDcnIdentity {
     pub routing_revision: i64,
     pub grant_id: Uuid,
     pub scope: DcnScope,
+    /// Numbering's inventory class of the number (`SYNTHETIC` / `REAL`; None when an
+    /// older Numbering does not say — never treated as synthetic).
+    pub inventory_class: Option<String>,
+}
+
+impl VerifiedDcnIdentity {
+    pub fn synthetic(&self) -> bool {
+        self.inventory_class.as_deref() == Some("SYNTHETIC")
+    }
 }
 
 impl fmt::Debug for VerifiedDcnIdentity {
@@ -730,6 +749,7 @@ impl NumberingPort for HttpNumbering {
                     .ok_or(PortError::Unavailable)?
                     .to_string(),
                 grant_id: uuid_at(&v["grant"], "grantId")?,
+                inventory_class: v["inventoryClass"].as_str().map(str::to_string),
             }))),
             Some("NOT_ROUTED") => Ok(DcnInbound::NotRouted),
             Some("UNAVAILABLE") => Ok(DcnInbound::Unavailable(
@@ -782,6 +802,7 @@ impl NumberingPort for HttpNumbering {
                 .ok_or(PortError::Unavailable)?,
             grant_id: uuid_at(&v, "grantId")?,
             scope: scope_at(&v["scope"])?,
+            inventory_class: v["inventoryClass"].as_str().map(str::to_string),
         }))
     }
 

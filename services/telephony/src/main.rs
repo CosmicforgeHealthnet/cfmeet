@@ -62,6 +62,10 @@ async fn main() -> anyhow::Result<()> {
         }
     };
     let runtime_environment = service_auth.signer().runtime_environment();
+    if let Err(err) = config.check_runtime(runtime_environment) {
+        tracing::error!(error = %err, "telephony configuration error");
+        std::process::exit(2);
+    }
     tracing::info!(
         service = %service_auth.signer().issuer(),
         runtime_environment = %runtime_environment,
@@ -120,6 +124,7 @@ async fn main() -> anyhow::Result<()> {
         public_outbound_enabled = flags.public_outbound.enabled(),
         public_inbound_enabled = flags.public_inbound.enabled(),
         callback_relay_enabled = flags.callback_relay.enabled(),
+        synthetic_interconnect_enabled = flags.synthetic_interconnect.enabled(),
         interconnects = providers.ids().count(),
         sip_edge = edge.name(),
         "telephony configuration"

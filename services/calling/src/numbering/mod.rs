@@ -61,6 +61,8 @@ pub struct VerifiedInboundGrant {
     pub routing_revision: i64,
     pub scope: DcnScope,
     pub target: DcnTarget,
+    /// Numbering's inventory class is SYNTHETIC (synthetic test inventory).
+    pub synthetic: bool,
 }
 
 /// The delegated scope's current assignment of a DCN (no number).
@@ -75,6 +77,8 @@ pub struct DcnAssignmentView {
     pub routing_revision: i64,
     pub number_active: bool,
     pub voice_outbound: bool,
+    /// Numbering's inventory class is SYNTHETIC (synthetic test inventory).
+    pub synthetic: bool,
 }
 
 /// A single-use CALLER_IDENTITY grant for Telephony (a bearer token: never logged).
@@ -240,6 +244,7 @@ impl NumberingPort for HttpNumbering {
                 environment_id: uuid_at(scope, "environmentId")?,
             },
             target: target_at(&v["target"]).ok_or(NumberingError::Unavailable)?,
+            synthetic: v["inventoryClass"] == "SYNTHETIC",
         })
     }
 
@@ -280,6 +285,7 @@ impl NumberingPort for HttpNumbering {
                 .ok_or(NumberingError::Unavailable)?,
             number_active: v["numberActive"] == true,
             voice_outbound: v["outbound"]["voice"] == true,
+            synthetic: v["inventoryClass"] == "SYNTHETIC",
         })
     }
 

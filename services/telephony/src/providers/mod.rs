@@ -380,6 +380,9 @@ pub enum RegistryError {
     TestAdapterRefused(String, String),
     #[error("provider {0}: {1}")]
     Invalid(String, String),
+    /// Part IV L: a SYNTHETIC_TEST route exists in a staging / production database.
+    #[error("route {0}: SYNTHETIC_TEST routes are refused in the {1} runtime environment")]
+    SyntheticRouteRefused(String, String),
 }
 
 #[derive(Debug, Clone, sea_orm::FromQueryResult)]
@@ -536,6 +539,26 @@ pub async fn registry_from_database(
     .all(db)
     .await
     .map_err(|e| RegistryError::Database(crate::error::summarize_db_error(&e).0))?;
+    // A synthetic test interconnect never exists next to real ones (Part IV L).
+    if !environment.allows_insecure_transport() {
+        #[derive(FromQueryResult)]
+        struct Synthetic {
+            id: String,
+        }
+        if let Some(r) = Synthetic::find_by_statement(crate::db::stmt(
+            "SELECT id FROM telecom_routes WHERE interconnect_class <> 'PUBLIC' ORDER BY id LIMIT 1",
+            vec![],
+        ))
+        .one(db)
+        .await
+        .map_err(|e| RegistryError::Database(crate::error::summarize_db_error(&e).0))?
+        {
+            return Err(RegistryError::SyntheticRouteRefused(
+                r.id,
+                environment.to_string(),
+            ));
+        }
+    }
     let secrets_dir = std::env::var("TELECOM_PROVIDER_SECRETS_DIR").ok();
     registry_from_rows(rows, environment, secrets_dir.as_deref(), edge)
 }

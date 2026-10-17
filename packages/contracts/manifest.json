@@ -236,25 +236,25 @@
     },
     {
       "id": "cfmeet.numbering.internal-api",
-      "version": "1.10.0",
+      "version": "1.11.0",
       "kind": "openapi",
       "path": "numbering/internal/v1.openapi.json",
       "owner": "numbering",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface of services/numbering: GET /health, /ready, /openapi.json (the served contract); customer reads of the caller's own DCN assignments / history / reservations, the catalog, KYC / eligibility (F); 1.4.0 provider-neutral inventory search, countries and number types, reservations (create with Idempotency-Key, list, cancel) (H); 1.5.0 acquisitions (provisioning with eligibility re-evaluation and hold read-back) and provider route configuration (I); provider callbacks (G); and the service-authenticated internal Number Resource view (/internal/v1, number-resource.read). 1.5.0 internal route view and consumer route readiness (number-route.acknowledge). 1.6.0 ownership and assignment: assignment creation / activation on proven readiness, routing revisions, employee offboarding, same-owner transfers, organizational pools and the operator assignment history (J). 1.7.0 routing grants: inbound resolution (number-route.resolve), caller-identity / SMS-sender grants (delegated scope) and authoritative verification (number-grant.verify) (K). 1.8.0 delegated current-assignment view for Calling's caller-identity policy (L). 1.9.0 dedicated SMS destination resolver (number-sms-route.resolve); inbound-resolutions is voice only (M); 1.10.0 the SMS Gateway's sender re-check on number-assignments (Part IV O)."
+      "description": "HTTP surface of services/numbering: GET /health, /ready, /openapi.json (the served contract); customer reads of the caller's own DCN assignments / history / reservations, the catalog, KYC / eligibility (F); 1.4.0 provider-neutral inventory search, countries and number types, reservations (create with Idempotency-Key, list, cancel) (H); 1.5.0 acquisitions (provisioning with eligibility re-evaluation and hold read-back) and provider route configuration (I); provider callbacks (G); and the service-authenticated internal Number Resource view (/internal/v1, number-resource.read). 1.5.0 internal route view and consumer route readiness (number-route.acknowledge). 1.6.0 ownership and assignment: assignment creation / activation on proven readiness, routing revisions, employee offboarding, same-owner transfers, organizational pools and the operator assignment history (J). 1.7.0 routing grants: inbound resolution (number-route.resolve), caller-identity / SMS-sender grants (delegated scope) and authoritative verification (number-grant.verify) (K). 1.8.0 delegated current-assignment view for Calling's caller-identity policy (L). 1.9.0 dedicated SMS destination resolver (number-sms-route.resolve); inbound-resolutions is voice only (M); 1.10.0 the SMS Gateway's sender re-check on number-assignments (Part IV O). 1.11.0 inventoryClass on voice inbound resolutions, grant verifications and current-assignment views (L closure: synthetic test interconnects)."
     },
     {
       "id": "cfmeet.numbering.routing-grant",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "json-schema",
       "path": "numbering/routing-grant/v1.schema.json",
       "owner": "numbering",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Number routing grants (Part IV Workstream K): inbound resolution, caller-identity / SMS-sender grant requests and verification bodies, the grant claims (typ cf-number-grant+jwt, Numbering's dedicated grant key, no telephone number, revision-bound) and the receiver-authoritative grant trust bundle. 1.1.0 CurrentAssignment (L). 1.2.0 SmsDestinationResolutionRequest (M)."
+      "description": "Number routing grants (Part IV Workstream K): inbound resolution, caller-identity / SMS-sender grant requests and verification bodies, the grant claims (typ cf-number-grant+jwt, Numbering's dedicated grant key, no telephone number, revision-bound) and the receiver-authoritative grant trust bundle. 1.1.0 CurrentAssignment (L). 1.2.0 SmsDestinationResolutionRequest (M). 1.3.0 inventoryClass (SYNTHETIC / REAL) on voice resolutions, valid verifications and the current-assignment view (L closure)."
     },
     {
       "id": "cfmeet.privacy-relay.http-api",
@@ -412,14 +412,14 @@
     },
     {
       "id": "cfmeet.telephony.common",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "telephony/common/v1.schema.json",
       "owner": "telephony",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Provider-neutral vocabulary of public-network execution (Part E): leg statuses (UNKNOWN is never a failure), public route classes, directions, end reasons, failure categories, normalized event types, bridge kinds, route health, country / currency codes. No provider, carrier, SIP or telephone-number concept. Part F: ENTERPRISE_INTERNAL legs of enterprise SIP devices; ANSWER / PROMPT (built-in prompts) on them."
+      "description": "Provider-neutral vocabulary of public-network execution (Part E): leg statuses (UNKNOWN is never a failure), public route classes, directions, end reasons, failure categories, normalized event types, bridge kinds, route health, country / currency codes. No provider, carrier, SIP or telephone-number concept. Part F: ENTERPRISE_INTERNAL legs of enterprise SIP devices; ANSWER / PROMPT (built-in prompts) on them. 1.2.0 InterconnectClass (Part IV L closure)."
     },
     {
       "id": "cfmeet.telephony.event",
@@ -434,14 +434,14 @@
     },
     {
       "id": "cfmeet.telephony.inbound-offer",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "telephony/inbound/v1.schema.json",
       "owner": "telephony",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Phone-to-app inbound offer from Telephony to Calling and Calling's answer (canonical Call / CallLeg). References only: never the called relay number or the caller's number. 1.1.0 DcnInboundOffer: inbound calls to Digital Communications Numbers with Numbering's grant (Part IV L)."
+      "description": "Phone-to-app inbound offer from Telephony to Calling and Calling's answer (canonical Call / CallLeg). References only: never the called relay number or the caller's number. 1.1.0 DcnInboundOffer: inbound calls to Digital Communications Numbers with Numbering's grant (Part IV L). 1.2.0 DcnInboundOffer.interconnectClass (L closure)."
     },
     {
       "id": "cfmeet.telephony.enterprise",
@@ -467,25 +467,25 @@
     },
     {
       "id": "cfmeet.telephony.command",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "kind": "json-schema",
       "path": "telephony/commands/v1.schema.json",
       "owner": "telephony",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Calling -> Telephony commands (ORIGINATE, TERMINATE / HOLD / RESUME, BRIDGE) and their answers (leg / bridge views, the error envelope). Versioned; commandId, idempotencyKey, correlationId, Call / CallLeg / attempt / route ids, authorization evidence, spend reservation and expected generation. No caller identity, number, provider, carrier or SIP field. Part F: ENTERPRISE_INTERNAL legs of enterprise SIP devices; ANSWER / PROMPT (built-in prompts) on them. Part F: CAPTURE (edge voicemail capture into a transient spool) on them. 1.3.0 presentedIdentity: a DCN caller identity under Numbering's single-use grant (Part IV L)."
+      "description": "Calling -> Telephony commands (ORIGINATE, TERMINATE / HOLD / RESUME, BRIDGE) and their answers (leg / bridge views, the error envelope). Versioned; commandId, idempotencyKey, correlationId, Call / CallLeg / attempt / route ids, authorization evidence, spend reservation and expected generation. No caller identity, number, provider, carrier or SIP field. Part F: ENTERPRISE_INTERNAL legs of enterprise SIP devices; ANSWER / PROMPT (built-in prompts) on them. Part F: CAPTURE (edge voicemail capture into a transient spool) on them. 1.3.0 presentedIdentity: a DCN caller identity under Numbering's single-use grant (Part IV L). 1.4.0 OriginateCommand.interconnectClass (L closure: synthetic test interconnects)."
     },
     {
       "id": "cfmeet.telephony.routes",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "telephony/routes/v1.schema.json",
       "owner": "telephony",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Normalized route availability for Calling's Routing Engine: opaque route references with health and KNOWN / UNKNOWN evidence of capacity, cost estimate and quality. Provider-neutral."
+      "description": "Normalized route availability for Calling's Routing Engine: opaque route references with health and KNOWN / UNKNOWN evidence of capacity, cost estimate and quality. Provider-neutral. 1.1.0 RouteCandidate.interconnectClass (L closure)."
     },
     {
       "id": "cfmeet.telephony.usage",

@@ -277,6 +277,10 @@
           "type": "integer",
           "minimum": 30,
           "maximum": 86400
+        },
+        "interconnectClass": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/InterconnectClass",
+          "description": "The class of the route the call arrived on (default PUBLIC)."
         }
       }
     }

@@ -65,6 +65,7 @@ fn pstn_inputs(contact: Uuid) -> RouteInputs {
         relay_session_id: Some(Uuid::new_v4()),
         context_id: Some(Uuid::new_v4()),
         live_telecom_allowed: true,
+        interconnect: calling::routing::engine::InterconnectClass::Public,
         flags: TelecomFlags {
             public_outbound: true,
             public_inbound: false,

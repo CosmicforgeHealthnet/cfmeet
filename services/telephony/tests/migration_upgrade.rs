@@ -54,12 +54,13 @@ async fn previous_head_with_data_upgrades_rolls_back_one_step_and_upgrades_again
     let conn = &db.conn;
     let total = Migrator::migrations().len();
     assert!(total >= 2);
-    // Migration 15 is the second newest (16 is Workstream L, tested below).
-    let previous_head = (total - 2) as u32;
+    // Migration 15 (16 is Workstream L, 17 its closure: tested below).
+    let previous_head = position("m20261015_000015_outbox_dead_letter") as u32;
+    let later = total - previous_head as usize;
     Migrator::up(conn, Some(previous_head)).await.unwrap();
     assert_eq!(
         Migrator::get_pending_migrations(conn).await.unwrap().len(),
-        2
+        later
     );
     assert!(!has_column(conn, "telephony_outbox", "correlation_id").await);
 
@@ -124,11 +125,11 @@ async fn previous_head_with_data_upgrades_rolls_back_one_step_and_upgrades_again
     Migrator::up(conn, Some(1)).await.unwrap();
     assert_eq!(
         Migrator::get_pending_migrations(conn).await.unwrap().len(),
-        1
+        later - 1
     );
     assert_eq!(
         Migrator::get_applied_migrations(conn).await.unwrap().len(),
-        total - 1
+        total - later + 1
     );
     assert!(has_column(conn, "telephony_outbox", "correlation_id").await);
     assert!(has_column(conn, "telephony_outbox", "dead_lettered_at").await);
@@ -201,7 +202,7 @@ async fn previous_head_with_data_upgrades_rolls_back_one_step_and_upgrades_again
     Migrator::down(conn, Some(1)).await.unwrap();
     assert_eq!(
         Migrator::get_pending_migrations(conn).await.unwrap().len(),
-        2
+        later
     );
     assert!(!has_column(conn, "telephony_outbox", "correlation_id").await);
     assert!(!has_column(conn, "telephony_outbox", "dead_lettered_at").await);
@@ -248,7 +249,7 @@ async fn previous_head_with_data_upgrades_rolls_back_one_step_and_upgrades_again
     Migrator::up(conn, Some(1)).await.unwrap();
     assert_eq!(
         Migrator::get_pending_migrations(conn).await.unwrap().len(),
-        1
+        later - 1
     );
     assert!(has_column(conn, "telephony_outbox", "correlation_id").await);
     assert_eq!(
@@ -276,7 +277,8 @@ async fn the_dcn_voice_migration_upgrades_live_data_and_refuses_a_lossy_rollback
     };
     let conn = &db.conn;
     let total = Migrator::migrations().len();
-    Migrator::up(conn, Some((total - 1) as u32)).await.unwrap();
+    let before = position("m20261024_000016_dcn_voice");
+    Migrator::up(conn, Some(before as u32)).await.unwrap();
     assert!(!has_column(conn, "telecom_number_bindings", "number_kind").await);
     let ts = Utc::now().to_rfc3339();
     exec(
@@ -292,11 +294,11 @@ async fn the_dcn_voice_migration_upgrades_live_data_and_refuses_a_lossy_rollback
         ),
     )
     .await;
-    Migrator::up(conn, None).await.unwrap();
-    assert!(Migrator::get_pending_migrations(conn)
-        .await
-        .unwrap()
-        .is_empty());
+    Migrator::up(conn, Some(1)).await.unwrap();
+    assert_eq!(
+        Migrator::get_pending_migrations(conn).await.unwrap().len(),
+        total - before - 1
+    );
     assert_eq!(
         scalar(
             conn,
@@ -343,7 +345,7 @@ async fn the_dcn_voice_migration_upgrades_live_data_and_refuses_a_lossy_rollback
         "append-only across the rollback"
     );
     // Up again, record a DCN binding: the rollback is refused and nothing changes.
-    Migrator::up(conn, None).await.unwrap();
+    Migrator::up(conn, Some(1)).await.unwrap();
     exec(
         conn,
         &format!(
@@ -359,4 +361,68 @@ async fn the_dcn_voice_migration_upgrades_live_data_and_refuses_a_lossy_rollback
         scalar(conn, "SELECT count(*) FROM telecom_number_bindings").await,
         2
     );
+}
+
+/// The position of migration `name` in the migrator.
+fn position(name: &str) -> usize {
+    Migrator::migrations()
+        .iter()
+        .position(|m| m.name() == name)
+        .unwrap_or_else(|| panic!("{name} is registered"))
+}
+
+/// Migration 17 (Part IV L closure, synthetic test interconnects): every existing route
+/// becomes PUBLIC, a synthetic route costs nothing and keeps its class; a rollback without
+/// synthetic routes keeps every route, one with a synthetic route is refused.
+#[tokio::test]
+async fn the_synthetic_interconnect_migration_upgrades_routes_and_refuses_a_lossy_rollback() {
+    let Some(db) = TestDb::empty().await else {
+        return;
+    };
+    let conn = &db.conn;
+    let before = position("m20261027_000017_synthetic_interconnect");
+    Migrator::up(conn, Some(before as u32)).await.unwrap();
+    assert!(!has_column(conn, "telecom_routes", "interconnect_class").await);
+    let ts = Utc::now().to_rfc3339();
+    exec(
+        conn,
+        &format!(
+            "INSERT INTO telecom_providers (id, adapter, capabilities, status, credential_ref, max_concurrent_legs, created_at, updated_at) \
+             VALUES ('sip-a', 'SIP_TRUNK', ARRAY['OUTBOUND_VOICE','INBOUND_VOICE'], 'ENABLED', NULL, 10, '{ts}', '{ts}'); \
+             INSERT INTO telecom_routes (id, provider_id, countries, capabilities, priority, status, max_concurrent_legs, \
+               estimated_leg_cost_minor, cost_currency, max_call_seconds, created_at, updated_at) \
+             VALUES ('ng-a', 'sip-a', ARRAY['NG'], ARRAY['VOICE_OUTBOUND'], 10, 'ENABLED', 5, 100, 'NGN', 3600, '{ts}', '{ts}')"
+        ),
+    )
+    .await;
+    Migrator::up(conn, Some(1)).await.unwrap();
+    assert_eq!(
+        scalar(conn, "SELECT count(*) FROM telecom_routes WHERE id = 'ng-a' AND interconnect_class = 'PUBLIC'").await,
+        1
+    );
+    let synthetic = |id: &str, cost: i64| {
+        format!(
+            "INSERT INTO telecom_routes (id, provider_id, countries, capabilities, priority, status, max_concurrent_legs, \
+               estimated_leg_cost_minor, cost_currency, max_call_seconds, created_at, updated_at, interconnect_class) \
+             VALUES ('{id}', 'sip-a', ARRAY['NG'], ARRAY['VOICE_OUTBOUND'], 90, 'ENABLED', 5, {cost}, 'NGN', 3600, '{ts}', '{ts}', 'SYNTHETIC_TEST')"
+        )
+    };
+    for bad in [
+        synthetic("syn-paid", 1),
+        "UPDATE telecom_routes SET interconnect_class = 'SYNTHETIC_TEST' WHERE id = 'ng-a'"
+            .to_string(),
+        "UPDATE telecom_routes SET interconnect_class = 'LAB' WHERE id = 'ng-a'".to_string(),
+    ] {
+        assert!(conn.execute_unprepared(&bad).await.is_err(), "{bad}");
+    }
+    // Rollback without synthetic routes keeps every route.
+    Migrator::down(conn, Some(1)).await.unwrap();
+    assert!(!has_column(conn, "telecom_routes", "interconnect_class").await);
+    assert_eq!(scalar(conn, "SELECT count(*) FROM telecom_routes").await, 1);
+    // With a synthetic route the rollback is refused and nothing changes.
+    Migrator::up(conn, Some(1)).await.unwrap();
+    exec(conn, &synthetic("syn-a", 0)).await;
+    assert!(Migrator::down(conn, Some(1)).await.is_err());
+    assert!(has_column(conn, "telecom_routes", "interconnect_class").await);
+    assert_eq!(scalar(conn, "SELECT count(*) FROM telecom_routes").await, 2);
 }

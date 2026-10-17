@@ -16,5 +16,6 @@
   "operationRef": "call-7f3a9c2e1b4d",
   "e164": "+15550100008",
   "consumed": true,
-  "expiresAt": "2031-03-01T10:06:00Z"
+  "expiresAt": "2031-03-01T10:06:00Z",
+  "inventoryClass": "SYNTHETIC"
 }

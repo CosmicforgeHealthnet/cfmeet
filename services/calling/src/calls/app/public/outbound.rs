@@ -37,8 +37,8 @@ use crate::{
     routing::{
         engine::{
             ContactFacts, ContactVerification, DestinationFacts, DuplicateRisk, EndpointClass,
-            Evidence, RouteCapability, RouteDecision, RouteDenial, RouteDirection, RouteInputs,
-            PAID_PLAN_VALIDITY_SECONDS,
+            Evidence, InterconnectClass, RouteCapability, RouteDecision, RouteDenial,
+            RouteDirection, RouteInputs, PAID_PLAN_VALIDITY_SECONDS,
         },
         RoutingClass,
     },
@@ -312,6 +312,37 @@ impl AppCallService {
             None => Evidence::Known(0),
         };
         let live = live_telecom_allowed(self.db(), environment).await?;
+        // Part IV L: a DCN the initiator is entitled to present (checked again at
+        // dispatch, when Numbering issues the single-use caller-identity grant). No relay
+        // identity is lent: the called party sees the customer's own number. Its inventory
+        // class decides the interconnect: a SYNTHETIC number runs over the synthetic test
+        // interconnect only when that is permitted here (sandbox / test environment,
+        // Calling's synthetic switch); otherwise it is an ordinary paid public call.
+        let presented = match request.presented_number_resource_id {
+            Some(number_resource_id) => {
+                let delegated =
+                    delegated_context(ctx, Some(&initiator)).map_err(|_| CallError::NotFound)?;
+                Some(
+                    self.dcn_presentation(
+                        &delegated,
+                        ctx.correlation_id(),
+                        scope,
+                        initiator.id().as_uuid(),
+                        number_resource_id,
+                    )
+                    .await?,
+                )
+            }
+            None => None,
+        };
+        let interconnect = match &presented {
+            Some(view)
+                if view.synthetic && self.synthetic_interconnect_permitted(environment).await? =>
+            {
+                InterconnectClass::SyntheticTest
+            }
+            _ => InterconnectClass::Public,
+        };
         let policy = crate::routing::store::load_policy(self.db(), environment).await?;
         let inputs = RouteInputs {
             direction: RouteDirection::Outbound,
@@ -335,6 +366,7 @@ impl AppCallService {
             relay_session_id: Some(decision.relay_session_id),
             context_id: Some(decision.context_id),
             live_telecom_allowed: live,
+            interconnect,
             flags: self.public.flags,
             routes,
             spend_headroom_minor: headroom,
@@ -357,31 +389,14 @@ impl AppCallService {
             }
         };
         plan.policy_version = policy.version_label();
-        match request.presented_number_resource_id {
-            // Part IV L: a DCN the initiator is entitled to present (checked again at
-            // dispatch, when Numbering issues the single-use caller-identity grant). No
-            // relay identity is lent: the called party sees the customer's own number.
-            Some(number_resource_id) => {
-                let delegated =
-                    delegated_context(ctx, Some(&initiator)).map_err(|_| CallError::NotFound)?;
-                self.dcn_presentation(
-                    &delegated,
-                    ctx.correlation_id(),
-                    scope,
-                    initiator.id().as_uuid(),
-                    number_resource_id,
-                )
-                .await?;
-            }
-            None => {
-                self.ensure_relay_identity(
-                    ctx,
-                    &initiator,
-                    decision.relay_session_id,
-                    fact.country.as_deref(),
-                )
-                .await?
-            }
+        if presented.is_none() {
+            self.ensure_relay_identity(
+                ctx,
+                &initiator,
+                decision.relay_session_id,
+                fact.country.as_deref(),
+            )
+            .await?
         }
 
         let cmd = CallCommandContext::customer(ctx);
@@ -485,6 +500,7 @@ impl AppCallService {
             snapshot.insert("destination_country", SafeValue::Text(c.clone()))?;
         }
         let candidate_routes = plan.candidate_routes.clone();
+        let route_interconnect = plan.interconnect_class;
         let route_policy_version = plan.policy_version.clone();
         let route = self
             .calls
@@ -627,6 +643,7 @@ impl AppCallService {
                 correlation_id: cmd.correlation_id().as_str(),
                 generation: 1,
                 presented_number_resource_id: request.presented_number_resource_id,
+                interconnect: route_interconnect,
             },
             now,
         )
@@ -673,6 +690,8 @@ pub(crate) struct OriginateSpec<'a> {
     /// Part IV L: the DCN presented as caller identity (Calling-internal; replaced by
     /// Telephony's `presentedIdentity` with a fresh grant at every submission).
     pub presented_number_resource_id: Option<Uuid>,
+    /// Part IV L closure: the plan's interconnect class (Telephony uses only routes of it).
+    pub interconnect: InterconnectClass,
 }
 
 /// Writes the durable ORIGINATE command of one public leg (inside the caller's
@@ -737,6 +756,7 @@ pub(crate) async fn enqueue_originate_in<C: ConnectionTrait>(
         },
         "media": spec.media,
         "candidateRoutes": spec.candidate_routes,
+        "interconnectClass": spec.interconnect.as_str(),
     });
     let mut payload = payload;
     if let Some(id) = spec.presented_number_resource_id {

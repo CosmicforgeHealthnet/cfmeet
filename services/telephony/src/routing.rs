@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 
 use crate::{
     db,
-    domain::{CircuitState, Health, RouteCapability},
+    domain::{CircuitState, Health, InterconnectClass, RouteCapability},
     error::{ErrorCode, TelephonyError, TelephonyResult},
     incidents::{self, Incident, Severity},
     service::TelephonyService,
@@ -45,11 +45,13 @@ pub struct RouteRow {
     pub provider_health: String,
     pub provider_circuit_state: String,
     pub provider_circuit_opened_at: Option<DateTime<Utc>>,
+    /// Part IV L: `PUBLIC` or `SYNTHETIC_TEST`.
+    pub interconnect_class: String,
 }
 
 const ROUTE_SELECT: &str = "SELECT r.id, r.provider_id, r.priority, r.sip_peer_config_ref_id, \
     r.max_concurrent_legs, r.estimated_leg_cost_minor, r.cost_currency, r.max_call_seconds, \
-    r.circuit_state, r.circuit_opened_at, r.health, p.health AS provider_health, \
+    r.circuit_state, r.circuit_opened_at, r.health, r.interconnect_class, p.health AS provider_health, \
     p.circuit_state AS provider_circuit_state, p.circuit_opened_at AS provider_circuit_opened_at \
     FROM telecom_routes r JOIN telecom_providers p ON p.id = r.provider_id \
     WHERE r.status = 'ENABLED' AND p.status = 'ENABLED'";
@@ -70,6 +72,11 @@ pub(crate) fn circuit_allows(
 }
 
 impl RouteRow {
+    pub fn interconnect(&self) -> InterconnectClass {
+        // CHECK-constrained; an unknown value is never treated as a test route.
+        InterconnectClass::parse(&self.interconnect_class).unwrap_or(InterconnectClass::Public)
+    }
+
     /// Whether both circuits allow an attempt now (an expired OPEN allows one probe).
     pub fn circuit_allows(&self, now: DateTime<Utc>) -> bool {
         circuit_allows(&self.circuit_state, self.circuit_opened_at, now)
@@ -102,15 +109,26 @@ impl RouteRow {
 }
 
 impl TelephonyService {
-    /// Enabled routes for `country` / `capability`, best first (Calling's candidate order
-    /// when given, then priority), restricted to registered providers.
+    /// Whether a route of `class` exists for Telephony at all: SYNTHETIC_TEST routes only
+    /// while the synthetic test interconnect is enabled (local / test runtimes).
+    pub fn interconnect_usable(&self, class: InterconnectClass) -> bool {
+        class == InterconnectClass::Public || self.flags.synthetic_interconnect.enabled()
+    }
+
+    /// Enabled routes of `interconnect` class for `country` / `capability`, best first
+    /// (Calling's candidate order when given, then priority), restricted to registered
+    /// providers. A synthetic test route never serves a public call, nor the reverse.
     pub async fn eligible_routes<C: ConnectionTrait>(
         &self,
         db_: &C,
         country: &str,
         capability: RouteCapability,
         candidates: &[String],
+        interconnect: InterconnectClass,
     ) -> TelephonyResult<Vec<RouteRow>> {
+        if !self.interconnect_usable(interconnect) {
+            return Ok(Vec::new());
+        }
         let rows: Vec<RouteRow> = db::all(
             db_,
             &format!(
@@ -124,6 +142,7 @@ impl TelephonyService {
         let mut rows: Vec<RouteRow> = rows
             .into_iter()
             .filter(|r| self.providers.get(&r.provider_id).is_some())
+            .filter(|r| r.interconnect() == interconnect)
             .filter(|r| r.circuit_allows(now))
             .filter(|r| r.effective_health(now) != Health::Unavailable)
             .filter(|r| candidates.is_empty() || candidates.contains(&r.id))
@@ -282,6 +301,7 @@ impl TelephonyService {
         for r in rows
             .iter()
             .filter(|r| self.providers.get(&r.provider_id).is_some())
+            .filter(|r| self.interconnect_usable(r.interconnect()))
         {
             let live = db::scalar_i64(
                 &self.db,
@@ -317,6 +337,7 @@ impl TelephonyService {
                 "costCurrency": r.cost_currency,
                 "qualityPermille": quality,
                 "maxCallSeconds": r.max_call_seconds,
+                "interconnectClass": r.interconnect().as_str(),
             }));
         }
         Ok(json!({

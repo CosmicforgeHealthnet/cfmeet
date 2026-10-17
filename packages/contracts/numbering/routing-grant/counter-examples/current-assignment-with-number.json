@@ -13,5 +13,6 @@
     "voice": true,
     "sms": false
   },
-  "e164": "+15550100123"
+  "e164": "+15550100123",
+  "inventoryClass": "REAL"
 }

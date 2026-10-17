@@ -21,7 +21,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
-    domain::{MediaAttachment, PublicRouteClass},
+    domain::{InterconnectClass, MediaAttachment, PublicRouteClass},
     error::{ErrorCode, TelephonyError, TelephonyResult},
 };
 
@@ -116,6 +116,11 @@ pub struct OriginateCommand {
     /// learns the identity only from Numbering's verification at execution time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presented_identity: Option<PresentedIdentity>,
+    /// Part IV L closure: the interconnect class Calling's route policy selected. PUBLIC
+    /// (default) never uses a synthetic test route; SYNTHETIC_TEST uses ONLY synthetic test
+    /// routes, presents a synthetic DCN and needs the synthetic interconnect enabled.
+    #[serde(default)]
+    pub interconnect_class: InterconnectClass,
 }
 
 /// A DCN presented as the caller identity (Part IV L).
@@ -213,6 +218,15 @@ impl OriginateCommand {
         if g.grant_expires_at <= now {
             return Err(refuse(ErrorCode::AuthorizationProofExpired));
         }
+        // A synthetic test interconnect carries a synthetic DCN only (Numbering decides
+        // whether the number is synthetic at execution time).
+        if self.interconnect_class == InterconnectClass::SyntheticTest
+            && self.presented_identity.is_none()
+        {
+            return Err(TelephonyError::Validation(
+                "a SYNTHETIC_TEST interconnect needs a presented DCN",
+            ));
+        }
         if let Some(p) = &self.presented_identity {
             if p.grant.is_empty()
                 || p.grant.len() > 4096
@@ -268,6 +282,7 @@ impl OriginateCommand {
             "media": self.media.as_str(),
             "destinationCountry": self.destination.country,
             "presentedNumberResourceId": self.presented_identity.as_ref().map(|p| p.number_resource_id),
+            "interconnectClass": self.interconnect_class.as_str(),
         })
     }
 }
@@ -279,6 +294,7 @@ mod tests {
     pub(crate) fn command(now: DateTime<Utc>) -> OriginateCommand {
         OriginateCommand {
             presented_identity: None,
+            interconnect_class: InterconnectClass::Public,
             schema_version: "1".into(),
             command_id: Uuid::new_v4(),
             idempotency_key: "leg-1-attempt-1".into(),

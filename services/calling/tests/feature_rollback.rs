@@ -38,6 +38,7 @@ fn redeploy(x: &mut PublicWorld, adjust: impl FnOnce(&mut CallingRuntime)) {
     let mut runtime = common::test_runtime(Some(old.media.clone()), old.bus.clone());
     runtime.privacy_relay = x.privacy.clone();
     runtime.public_network = PublicNetwork {
+        synthetic_interconnect: false,
         telephony: x.telephony.clone(),
         media: Some(x.media.clone()),
         flags: ALL_ON,

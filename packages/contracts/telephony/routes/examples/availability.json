@@ -18,7 +18,8 @@
       "qualityPermille": {
         "evidence": "UNKNOWN"
       },
-      "routeRef": "ng-a"
+      "routeRef": "ng-a",
+      "interconnectClass": "PUBLIC"
     }
   ]
 }

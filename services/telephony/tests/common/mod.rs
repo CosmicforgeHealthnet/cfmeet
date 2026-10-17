@@ -371,6 +371,8 @@ pub struct FakeDcn {
     pub target: Option<(String, Uuid)>,
     /// `Some(reason)`: Numbering answers UNAVAILABLE.
     pub unavailable: Option<String>,
+    /// Numbering's inventory class (`SYNTHETIC` / `REAL`).
+    pub inventory_class: Option<String>,
 }
 
 #[derive(Clone)]
@@ -462,6 +464,7 @@ impl NumberingPort for FakeNumbering {
                 Uuid::new_v4().simple()
             ),
             grant_id: Uuid::new_v4(),
+            inventory_class: dcn.inventory_class.clone(),
         })))
     }
 
@@ -499,6 +502,7 @@ impl NumberingPort for FakeNumbering {
             routing_revision: g.dcn.routing_revision,
             grant_id: Uuid::new_v4(),
             scope: g.dcn.scope,
+            inventory_class: g.dcn.inventory_class.clone(),
         }))
     }
 
@@ -548,6 +552,8 @@ pub struct FakeCalling {
     /// Part IV L: DCN inbound offers; `dcn_refusal` makes Calling refuse them.
     pub dcn_offers: StdMutex<Vec<Value>>,
     pub dcn_refusal: StdMutex<Option<&'static str>>,
+    /// Part IV L closure: Calling's 2xx answer to DCN offers (`None`: a valid acceptance).
+    pub dcn_answer: StdMutex<Option<Value>>,
     /// Part F: enterprise dialog offers and capture reports received.
     pub enterprise_offers: StdMutex<Vec<Value>>,
     pub captures: StdMutex<Vec<Value>>,
@@ -572,6 +578,7 @@ impl FakeCalling {
             offer_route_class: StdMutex::new("PSTN_TO_APP".into()),
             dcn_offers: StdMutex::default(),
             dcn_refusal: StdMutex::new(None),
+            dcn_answer: StdMutex::new(None),
             enterprise_offers: StdMutex::default(),
             captures: StdMutex::default(),
             capture_mode: StdMutex::new("OK"),
@@ -682,6 +689,9 @@ impl CallingPort for FakeCalling {
         }
         if let Some(code) = *self.dcn_refusal.lock().unwrap() {
             return Err(PortError::Denied(code.into()));
+        }
+        if let Some(answer) = self.dcn_answer.lock().unwrap().clone() {
+            return Ok(answer);
         }
         self.dcn_offers.lock().unwrap().push(offer.clone());
         Ok(json!({

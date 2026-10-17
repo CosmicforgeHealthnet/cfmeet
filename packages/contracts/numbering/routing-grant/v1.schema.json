@@ -483,6 +483,17 @@
               "type": "null"
             }
           ]
+        },
+        "inventoryClass": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/InventoryClass"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Voice resolutions: the resolved number's inventory class (null when nothing was resolved). Absent on SMS destination resolutions."
         }
       },
       "allOf": [
@@ -738,6 +749,10 @@
         },
         "expiresAt": {
           "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "inventoryClass": {
+          "$ref": "#/$defs/InventoryClass",
+          "description": "Valid verifications: the granted number's inventory class."
         }
       },
       "allOf": [
@@ -813,7 +828,8 @@
         "sms",
         "routingRevision",
         "numberActive",
-        "outbound"
+        "outbound",
+        "inventoryClass"
       ],
       "properties": {
         "numberResourceId": {
@@ -918,6 +934,9 @@
               "type": "boolean"
             }
           }
+        },
+        "inventoryClass": {
+          "$ref": "#/$defs/InventoryClass"
         }
       }
     },
@@ -934,6 +953,14 @@
           "pattern": "^\\+[1-9][0-9]{6,14}$"
         }
       }
+    },
+    "InventoryClass": {
+      "type": "string",
+      "enum": [
+        "SYNTHETIC",
+        "REAL"
+      ],
+      "description": "The Number Resource's inventory class: SYNTHETIC test inventory (fictional, synthetic test interconnects only) or REAL. Never inferred from the number's format. Part IV L closure."
     }
   }
 }

@@ -88,6 +88,9 @@ text_enum!(
         CallbackRelayDisabled = "CALLBACK_RELAY_DISABLED",
         TelecomFeatureDisabled = "TELECOM_FEATURE_DISABLED",
         LiveTelecomNotAllowed = "LIVE_TELECOM_NOT_ALLOWED",
+        // Part IV L closure: a synthetic test interconnect in an environment allowed live
+        // telecom (never a test route next to real calls).
+        SyntheticInterconnectNotAllowed = "SYNTHETIC_INTERCONNECT_NOT_ALLOWED",
         DestinationCountryDenied = "DESTINATION_COUNTRY_DENIED",
         DestinationCountryUnknown = "DESTINATION_COUNTRY_UNKNOWN",
         ContactNotVerified = "CONTACT_NOT_VERIFIED",
@@ -104,6 +107,32 @@ text_enum!(
         UnsupportedShape = "UNSUPPORTED_SHAPE",
     }
 );
+
+text_enum!(
+    /// What the public leg runs over (Part IV L closure): a real interconnect (PUBLIC), or
+    /// a local synthetic TEST interconnect (Telephony's loopback SIP edge with a simulated
+    /// carrier, zero cost) that carries synthetic DCNs only. Only the caller decides
+    /// SYNTHETIC_TEST, after proving every condition (Calling's synthetic switch in a local
+    /// / test runtime, a sandbox / test environment, Numbering's SYNTHETIC inventory, a
+    /// synthetic route); the engine never infers it.
+    InterconnectClass {
+        Public = "PUBLIC",
+        SyntheticTest = "SYNTHETIC_TEST",
+    }
+);
+
+#[allow(clippy::derivable_impls)]
+impl Default for InterconnectClass {
+    fn default() -> Self {
+        InterconnectClass::Public
+    }
+}
+
+impl InterconnectClass {
+    pub fn is_public(&self) -> bool {
+        *self == InterconnectClass::Public
+    }
+}
 
 text_enum!(
     /// Voice capability a public route must provide.
@@ -154,6 +183,9 @@ pub struct CandidateRoute {
     pub estimated_leg_cost_minor: Evidence<i64>,
     /// Recent answer-seizure ratio in permille, when Telephony has evidence.
     pub quality_permille: Evidence<u16>,
+    /// Part IV L closure: what the route connects to (PUBLIC when Telephony says nothing).
+    #[serde(default)]
+    pub interconnect_class: InterconnectClass,
 }
 
 /// The outcome of earlier paid attempts toward the same destination of this Call.
@@ -192,6 +224,10 @@ pub struct RouteInputs {
     pub context_id: Option<Uuid>,
     /// The application environment may produce real telecom effects.
     pub live_telecom_allowed: bool,
+    /// Part IV L closure: the interconnect the public leg runs over. PUBLIC needs live
+    /// telecom; SYNTHETIC_TEST (decided by the caller) never may, and uses synthetic routes
+    /// only.
+    pub interconnect: InterconnectClass,
     pub flags: TelecomFlags,
     pub routes: Evidence<Vec<CandidateRoute>>,
     /// Remaining telecom spend headroom (minor units), when limits are configured.
@@ -233,6 +269,10 @@ pub struct RoutePlan {
     pub context_id: Option<Uuid>,
     /// Ordered candidate Telephony route references (opaque; best first).
     pub candidate_routes: Vec<String>,
+    /// Part IV L closure: SYNTHETIC_TEST for a synthetic test interconnect (absent =
+    /// PUBLIC, so every earlier plan keeps its fingerprint).
+    #[serde(default, skip_serializing_if = "InterconnectClass::is_public")]
+    pub interconnect_class: InterconnectClass,
     pub failover: FailoverPolicy,
     /// Inputs that had no evidence (recorded, never invented).
     pub unknown_inputs: Vec<String>,
@@ -367,8 +407,17 @@ fn select_inner(
     let mut country = None;
     let paid = class.is_paid();
     if paid {
-        if !inputs.live_telecom_allowed {
-            return Err(RouteDenial::LiveTelecomNotAllowed);
+        // A real interconnect needs an environment allowed live telecom; a synthetic test
+        // interconnect is the opposite: never in such an environment. Every other gate
+        // below applies to both.
+        match inputs.interconnect {
+            InterconnectClass::Public if !inputs.live_telecom_allowed => {
+                return Err(RouteDenial::LiveTelecomNotAllowed)
+            }
+            InterconnectClass::SyntheticTest if inputs.live_telecom_allowed => {
+                return Err(RouteDenial::SyntheticInterconnectNotAllowed)
+            }
+            _ => {}
         }
         if !policy.public_calling_enabled {
             return Err(RouteDenial::PublicCallingDisabled);
@@ -469,8 +518,18 @@ fn select_inner(
             _ if !dials_out => {}
             Evidence::Unknown => unknown.push("route_health".to_string()),
             Evidence::Known(routes) => {
+                // Only routes of the decided interconnect class (a test route never
+                // serves a real call, nor a real route a synthetic one).
+                let routes: Vec<&CandidateRoute> = routes
+                    .iter()
+                    .filter(|r| r.interconnect_class == inputs.interconnect)
+                    .collect();
+                if routes.is_empty() {
+                    return Err(RouteDenial::RouteUnavailable);
+                }
                 let mut usable: Vec<&CandidateRoute> = routes
                     .iter()
+                    .copied()
                     .filter(|r| r.health != RouteHealth::Unavailable)
                     .filter(|r| r.capacity_available != Evidence::Known(false))
                     .collect();
@@ -585,6 +644,11 @@ fn select_inner(
         relay_session_id: inputs.relay_session_id,
         context_id: inputs.context_id,
         candidate_routes: candidates.iter().map(|r| r.route_ref.clone()).collect(),
+        interconnect_class: if paid {
+            inputs.interconnect
+        } else {
+            InterconnectClass::Public
+        },
         failover: FailoverPolicy {
             max_attempts,
             on_definite_failure: paid && policy.max_failover_attempts > 0,
@@ -711,6 +775,7 @@ mod tests {
             capacity_available: Evidence::Known(true),
             estimated_leg_cost_minor: Evidence::Known(100),
             quality_permille: Evidence::Known(600),
+            interconnect_class: Default::default(),
         }
     }
 
@@ -742,6 +807,7 @@ mod tests {
             relay_session_id: Some(Uuid::nil()),
             context_id: None,
             live_telecom_allowed: true,
+            interconnect: crate::routing::engine::InterconnectClass::Public,
             flags: TelecomFlags {
                 public_outbound: true,
                 public_inbound: true,
@@ -757,6 +823,113 @@ mod tests {
 
     fn class(d: &RouteDecision) -> RoutingClass {
         d.plan().expect("selected").route_class
+    }
+
+    fn synthetic(r: &str) -> CandidateRoute {
+        let mut c = route(r, RouteHealth::Healthy);
+        c.estimated_leg_cost_minor = Evidence::Known(0);
+        c.interconnect_class = InterconnectClass::SyntheticTest;
+        c
+    }
+
+    /// Part IV L closure: an outbound DCN call in a sandbox (no live telecom) over a
+    /// public route and a synthetic test route.
+    fn sandbox_inputs(interconnect: InterconnectClass) -> RouteInputs {
+        let mut i = pstn_inputs();
+        i.live_telecom_allowed = false;
+        i.interconnect = interconnect;
+        i.routes = Evidence::Known(vec![route("r-a", RouteHealth::Healthy), synthetic("syn-a")]);
+        i
+    }
+
+    #[test]
+    fn the_synthetic_test_interconnect_is_separate_from_paid_public_execution() {
+        // A real interconnect without live telecom: refused, exactly as before.
+        assert_eq!(
+            select(
+                &public_policy(),
+                &sandbox_inputs(InterconnectClass::Public),
+                now()
+            )
+            .denial(),
+            Some(RouteDenial::LiveTelecomNotAllowed)
+        );
+        // The synthetic test interconnect (decided by the caller): selected, over the
+        // synthetic route only, and the plan says so.
+        let d = select(
+            &public_policy(),
+            &sandbox_inputs(InterconnectClass::SyntheticTest),
+            now(),
+        );
+        let plan = d.plan().expect("selected");
+        assert_eq!(plan.route_class, RoutingClass::AppToPstn);
+        assert_eq!(plan.candidate_routes, vec!["syn-a".to_string()]);
+        assert_eq!(plan.interconnect_class, InterconnectClass::SyntheticTest);
+        assert!(serde_json::to_string(plan)
+            .unwrap()
+            .contains("\"interconnectClass\":\"SYNTHETIC_TEST\""));
+        // Never in an environment allowed live telecom.
+        let mut live = sandbox_inputs(InterconnectClass::SyntheticTest);
+        live.live_telecom_allowed = true;
+        assert_eq!(
+            select(&public_policy(), &live, now()).denial(),
+            Some(RouteDenial::SyntheticInterconnectNotAllowed)
+        );
+        // A real call never selects a synthetic route; a synthetic call never a real one.
+        let mut real = sandbox_inputs(InterconnectClass::Public);
+        real.live_telecom_allowed = true;
+        let plan = select(&public_policy(), &real, now())
+            .plan()
+            .cloned()
+            .expect("selected");
+        assert_eq!(plan.candidate_routes, vec!["r-a".to_string()]);
+        assert!(plan.interconnect_class.is_public());
+        assert!(
+            !serde_json::to_string(&plan)
+                .unwrap()
+                .contains("interconnectClass"),
+            "a PUBLIC plan serializes (and fingerprints) exactly as before"
+        );
+        let mut only_public = sandbox_inputs(InterconnectClass::SyntheticTest);
+        only_public.routes = Evidence::Known(vec![route("r-a", RouteHealth::Healthy)]);
+        assert_eq!(
+            select(&public_policy(), &only_public, now()).denial(),
+            Some(RouteDenial::RouteUnavailable)
+        );
+    }
+
+    #[test]
+    fn every_other_route_policy_gate_still_applies_to_the_synthetic_test_interconnect() {
+        let mut p = public_policy();
+        p.public_calling_enabled = false;
+        assert_eq!(
+            select(&p, &sandbox_inputs(InterconnectClass::SyntheticTest), now()).denial(),
+            Some(RouteDenial::PublicCallingDisabled)
+        );
+        let mut i = sandbox_inputs(InterconnectClass::SyntheticTest);
+        i.flags.public_outbound = false;
+        assert_eq!(
+            select(&public_policy(), &i, now()).denial(),
+            Some(RouteDenial::TelecomFeatureDisabled)
+        );
+        let mut i = sandbox_inputs(InterconnectClass::SyntheticTest);
+        i.destinations[0].contact = Some(contact(ContactVerification::Verified, "GH"));
+        assert_eq!(
+            select(&public_policy(), &i, now()).denial(),
+            Some(RouteDenial::DestinationCountryDenied)
+        );
+        let mut i = sandbox_inputs(InterconnectClass::SyntheticTest);
+        i.spend_headroom_minor = Evidence::Known(0);
+        assert_eq!(
+            select(&public_policy(), &i, now()).denial(),
+            Some(RouteDenial::SpendLimitExceeded)
+        );
+        let mut i = sandbox_inputs(InterconnectClass::SyntheticTest);
+        i.authorized = false;
+        assert_eq!(
+            select(&public_policy(), &i, now()).denial(),
+            Some(RouteDenial::NotAuthorized)
+        );
     }
 
     #[test]

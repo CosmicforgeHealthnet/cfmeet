@@ -96,6 +96,7 @@ async fn current_assignment(
         "routingRevision": c.routing_revision,
         "numberActive": c.number_active,
         "outbound": { "voice": c.voice_outbound, "sms": c.sms_outbound },
+        "inventoryClass": inventory_class(&s, a.number_resource_id).await?,
     })))
 }
 
@@ -148,7 +149,25 @@ async fn resolve_inbound(
     let out = g
         .resolve_inbound(&ctx(), &caller_id(&caller), body.family, &body.e164)
         .await?;
-    Ok(Json(resolution_view(body.family, out)))
+    // Part IV L closure: the carrier learns whether the number is synthetic test
+    // inventory (only a synthetic number may arrive on a synthetic test interconnect).
+    let class = match &out {
+        InboundResolution::Routed { assignment, .. }
+        | InboundResolution::NotRouted { assignment, .. } => {
+            Some(inventory_class(&s, assignment.number_resource_id).await?)
+        }
+        InboundResolution::Unavailable { .. } => None,
+    };
+    let mut view = resolution_view(body.family, out);
+    view["inventoryClass"] = json!(class);
+    Ok(Json(view))
+}
+
+/// `SYNTHETIC` (synthetic test inventory) or `REAL` — the Number Resource's inventory
+/// class, never inferred from the number's format.
+async fn inventory_class(s: &AppState, number_resource_id: Uuid) -> Result<&'static str, ApiError> {
+    let resource = s.numbers.resource(number_resource_id).await?;
+    Ok(crate::numbers::InventoryClass::of(resource.inventory()).as_str())
 }
 
 #[derive(Debug, Deserialize)]
@@ -360,5 +379,6 @@ async fn verify(
         "e164": v.e164,
         "consumed": v.consumed,
         "expiresAt": record.expires_at,
+        "inventoryClass": inventory_class(&s, verified.number_resource_id).await?,
     })))
 }

@@ -420,6 +420,15 @@ application, relay-number and enterprise calls are unaffected.
   CALLER_IDENTITY grant for exactly that origination (`leg:{callLegId}:{commandId}`);
   Telephony receives it as `presentedIdentity` and consumes it before transmission. No
   relay identity is lent for such a call and none is ever substituted for a refused DCN.
+* **Synthetic TEST interconnect** (ADR 0041 decision 7). Numbering's `inventoryClass`
+  decides the interconnect class at the route-policy boundary: a REAL DCN uses PUBLIC
+  routes under the unchanged PRODUCTION + `live_telecom_allowed` gate; a SYNTHETIC DCN
+  uses `SYNTHETIC_TEST` routes only, and only with `CALLING_SYNTHETIC_INTERCONNECT_ENABLED`
+  (refused at start-up outside local / test) in an ACTIVE SANDBOX / TEST environment —
+  never where live telecom is allowed (`SYNTHETIC_INTERCONNECT_NOT_ALLOWED`). Every other
+  routing gate still applies. An offer whose class does not match Numbering's inventory
+  is refused (`INTERCONNECT_MISMATCH`); a sandbox call without a DCN is still a paid
+  public call and is refused (`LIVE_TELECOM_NOT_ALLOWED`).
 
 ## Internal service authentication
 
@@ -549,6 +558,7 @@ consult a switch (`tests/feature_rollback.rs`).
 | `CALLING_PUBLIC_OUTBOUND_ENABLED` | `false` | App-to-phone calls (and the outbound legs of every public class) |
 | `CALLING_PUBLIC_INBOUND_ENABLED` | `false` | Phone-to-app / phone-to-phone inbound calls |
 | `CALLING_CALLBACK_RELAY_ENABLED` | `false` | Callback relay (requires public outbound too) |
+| `CALLING_SYNTHETIC_INTERCONNECT_ENABLED` | `false` | Synthetic DCN voice over Telephony's SYNTHETIC_TEST interconnect (local / test runtimes only; refused at start-up elsewhere) |
 | `ENTERPRISE_CALLING_ENABLED` | `false` | New enterprise routing (extensions, SIP desk offers) |
 | `VOICEMAIL_ENABLED` | `false` | New voicemail routing / capture |
 | `CALL_RECORDING_ENABLED` | `false` | New call recordings |

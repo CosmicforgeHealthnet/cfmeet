@@ -1513,6 +1513,34 @@ const ARI_APP: &str = "cfmeet-cert";
 const EDGE: &str = "127.0.0.1:5070";
 /// Simulated carrier A (pjsip endpoint `peer-ng-a`, identified by source address).
 const CARRIER: &str = "127.0.0.2";
+/// The edge's application-media peer (pjsip endpoint `app-media`): LiveKit SIP.
+const APP_MEDIA: &str = "127.0.0.3";
+
+/// A LiveKit API access token (HS256) with `grants`.
+fn livekit_token(key: &str, secret: &str, grants: Value) -> String {
+    use sha2::{Digest, Sha256};
+    let b64 = |b: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b);
+    let now = Utc::now().timestamp();
+    let mut claims = json!({ "iss": key, "nbf": now - 5, "exp": now + 600 });
+    for (k, v) in grants.as_object().unwrap() {
+        claims[k] = v.clone();
+    }
+    let input = format!(
+        "{}.{}",
+        b64(br#"{"alg":"HS256","typ":"JWT"}"#),
+        b64(claims.to_string().as_bytes())
+    );
+    // HMAC-SHA256 (RFC 2104) over the signing input.
+    let mut k = secret.as_bytes().to_vec();
+    if k.len() > 64 {
+        k = Sha256::digest(&k).to_vec();
+    }
+    k.resize(64, 0);
+    let pad = |byte: u8| k.iter().map(|b| b ^ byte).collect::<Vec<u8>>();
+    let inner = Sha256::digest([pad(0x36), input.as_bytes().to_vec()].concat());
+    let mac = Sha256::digest([pad(0x5c), inner.to_vec()].concat());
+    format!("{input}.{}", b64(&mac))
+}
 
 struct VoiceBins {
     calling: PathBuf,
@@ -1525,6 +1553,13 @@ struct VoiceBins {
     relay_migration: PathBuf,
     relay_admin: PathBuf,
     livekit: PathBuf,
+    /// LiveKit SIP: Calling's media gateway dials the edge's application-media peer.
+    livekit_sip: PathBuf,
+    /// Redis for LiveKit's SIP service.
+    redis: PathBuf,
+    /// A Python with the LiveKit RTC SDK: the accepting application's real media client
+    /// (Calling's `tests/rtc/rtc_client.py`).
+    rtc_python: PathBuf,
 }
 
 fn tool_available(binary: &str) -> bool {
@@ -1556,6 +1591,11 @@ fn voice_bins() -> Option<VoiceBins> {
             relay: relay.clone()?,
             relay_migration: get("PRIVACY_RELAY_MIGRATION_BIN")?,
             livekit: get("LIVEKIT_SERVER_BIN")?,
+            livekit_sip: get("LIVEKIT_SIP_BIN")?,
+            redis: get("REDIS_SERVER_BIN").or_else(|| {
+                tool_available("redis-server").then(|| PathBuf::from("redis-server"))
+            })?,
+            rtc_python: get("CALLING_RTC_CERT_PYTHON")?,
         })
     })()
     .filter(|_| tool_available("asterisk") && tool_available("sipp"));
@@ -1565,8 +1605,9 @@ fn voice_bins() -> Option<VoiceBins> {
             "CFMEET_REQUIRE_VOICE_E2E=1 but asterisk / sipp or a voice binary is missing"
         );
         eprintln!(
-            "SKIPPED: voice journeys (asterisk, sipp, LIVEKIT_SERVER_BIN, CALLING_BIN, \
-             TELEPHONY_BIN, PRIVACY_RELAY_BIN and their migration binaries are required)"
+            "SKIPPED: voice journeys (asterisk, sipp, redis-server, LIVEKIT_SERVER_BIN, \
+             LIVEKIT_SIP_BIN, CALLING_RTC_CERT_PYTHON, CALLING_BIN, TELEPHONY_BIN, PRIVACY_RELAY_BIN and their \
+             migration binaries are required)"
         );
     }
     found
@@ -1662,6 +1703,59 @@ impl Asterisk {
     }
 }
 
+/// The application's real WebRTC media client (Calling's RTC certification client), driven
+/// one JSON line at a time: it joins LiveKit through Calling's media gateway with a
+/// Calling-issued credential, exactly as an application endpoint does.
+struct RtcApp {
+    _child: Child,
+    stdin: tokio::process::ChildStdin,
+    lines: tokio::io::Lines<tokio::io::BufReader<tokio::process::ChildStdout>>,
+}
+
+impl RtcApp {
+    fn spawn(python: &PathBuf) -> Self {
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../calling/tests/rtc/rtc_client.py");
+        let mut child = tokio::process::Command::new(python)
+            .arg("-I")
+            .arg(script)
+            .env_remove("HTTPS_PROXY")
+            .env_remove("HTTP_PROXY")
+            .env_remove("https_proxy")
+            .env_remove("http_proxy")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("the RTC client starts");
+        let stdin = child.stdin.take().unwrap();
+        let lines = tokio::io::AsyncBufReadExt::lines(tokio::io::BufReader::new(
+            child.stdout.take().unwrap(),
+        ));
+        Self {
+            _child: child,
+            stdin,
+            lines,
+        }
+    }
+
+    async fn cmd(&mut self, v: Value) -> Value {
+        use tokio::io::AsyncWriteExt;
+        self.stdin
+            .write_all(format!("{v}\n").as_bytes())
+            .await
+            .unwrap();
+        self.stdin.flush().await.unwrap();
+        let line = tokio::time::timeout(Duration::from_secs(60), self.lines.next_line())
+            .await
+            .expect("the RTC client answers")
+            .unwrap()
+            .expect("the RTC client is alive");
+        serde_json::from_str(&line).unwrap()
+    }
+}
+
 /// One SIPp carrier call from carrier A to `called`.
 struct Sipp {
     child: std::process::Child,
@@ -1677,18 +1771,39 @@ impl Drop for Sipp {
 }
 
 impl Sipp {
+    /// Carrier A calling `called` from `caller` (UAC, to the edge).
     fn call(scenario: &str, called: &str, caller: &str) -> Self {
+        Self::run(
+            scenario,
+            Some(EDGE),
+            "5081",
+            &[("called", called), ("caller", caller)],
+        )
+    }
+
+    /// Carrier A answering calls the edge sends it (UAS on its trunk address).
+    fn serve(scenario: &str) -> Self {
+        Self::run(scenario, None, "5080", &[])
+    }
+
+    fn run(scenario: &str, remote: Option<&str>, port: &str, keys: &[(&str, &str)]) -> Self {
         let log_dir = std::env::temp_dir().join(format!("cf-e2e-sipp-{}", Uuid::new_v4().simple()));
         std::fs::create_dir_all(&log_dir).unwrap();
-        let child = std::process::Command::new("sipp")
-            .arg(EDGE)
+        let mut command = std::process::Command::new("sipp");
+        if let Some(remote) = remote {
+            command.arg(remote);
+        }
+        for (k, v) in keys {
+            command.args(["-key", k, v]);
+        }
+        let child = command
             .args([
                 "-sf",
                 cert_dir().join("sipp").join(scenario).to_str().unwrap(),
                 "-i",
                 CARRIER,
                 "-p",
-                "5081",
+                port,
                 "-mi",
                 CARRIER,
                 "-min_rtp_port",
@@ -1700,17 +1815,11 @@ impl Sipp {
                 "-l",
                 "1",
                 "-timeout",
-                "30s",
+                "60s",
                 "-timeout_error",
                 "-nostdin",
                 "-trace_err",
                 "-trace_msg",
-                "-key",
-                "called",
-                called,
-                "-key",
-                "caller",
-                caller,
             ])
             .current_dir(&log_dir)
             .stdout(std::process::Stdio::null())
@@ -1722,7 +1831,7 @@ impl Sipp {
 
     /// Waits for the scenario's end; true = SIPp reported success.
     async fn finished_ok(&mut self) -> bool {
-        for _ in 0..400 {
+        for _ in 0..700 {
             if let Ok(Some(status)) = self.child.try_wait() {
                 return status.success();
             }
@@ -1754,6 +1863,7 @@ struct VoiceStack {
     telephony_db: DatabaseConnection,
     telephony_admin_env: Vec<(&'static str, String)>,
     relay_db: DatabaseConnection,
+    relay_url: String,
     http: reqwest::Client,
     asterisk: Asterisk,
     _procs: Vec<Proc>,
@@ -1790,7 +1900,34 @@ impl VoiceStack {
         let telephony_url = format!("http://127.0.0.1:{telephony_port}");
         let mut procs = Vec::new();
 
-        // LiveKit: Calling's application media provider (loopback, test-only key pair).
+        // Redis, LiveKit (Calling's application media; its webhooks reach Calling) and LiveKit
+        // SIP (Calling's public-bridge media gateway), loopback only, test-only key pair.
+        let redis_port = free_port();
+        let redis = tokio::process::Command::new(&bins.redis)
+            .args([
+                "--port",
+                &redis_port.to_string(),
+                "--bind",
+                "127.0.0.1",
+                "--save",
+                "",
+                "--appendonly",
+                "no",
+            ])
+            .stdout(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("redis starts");
+        procs.push(Proc(redis));
+        for _ in 0..100 {
+            if tokio::net::TcpStream::connect(("127.0.0.1", redis_port))
+                .await
+                .is_ok()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
         let (lk_port, lk_tcp) = (free_port(), free_port());
         let lk_secret = format!("e2e-livekit-{}", Uuid::new_v4().simple());
         let lk_config = file(
@@ -1798,7 +1935,9 @@ impl VoiceStack {
             &format!(
                 "port: {lk_port}\nbind_addresses: [\"127.0.0.1\"]\nrtc:\n  tcp_port: {lk_tcp}\n  \
                  port_range_start: 51000\n  port_range_end: 51100\n  use_external_ip: false\n  \
-                 node_ip: 127.0.0.1\nkeys:\n  cfmeet-e2e: {lk_secret}\nroom:\n  auto_create: false\n\
+                 node_ip: 127.0.0.1\nredis:\n  address: 127.0.0.1:{redis_port}\n\
+                 keys:\n  cfmeet-e2e: {lk_secret}\nwebhook:\n  api_key: cfmeet-e2e\n  urls:\n    \
+                 - {calling_url}/internal/provider/media/events\nroom:\n  auto_create: false\n\
                  logging:\n  level: warn\n"
             ),
         );
@@ -1811,10 +1950,45 @@ impl VoiceStack {
             )
             .await,
         );
+        // LiveKit SIP sends from the edge's application-media peer address (pjsip.conf).
+        let sip_health = free_port();
+        let sip_config = file(
+            "livekit-sip.yaml",
+            &format!(
+                "api_key: cfmeet-e2e\napi_secret: {lk_secret}\nws_url: ws://127.0.0.1:{lk_port}\n\
+                 redis:\n  address: 127.0.0.1:{redis_port}\nsip_port: 5060\nlisten_ip: {APP_MEDIA}\n\
+                 nat_1_to_1_ip: {APP_MEDIA}\nuse_external_ip: false\nrtp_port: 52000-52200\n\
+                 health_port: {sip_health}\nlogging:\n  level: warn\n"
+            ),
+        );
+        procs.push(
+            spawn_args(
+                &bins.livekit_sip,
+                &["--config", &sip_config],
+                &[("HOME", dir.display().to_string())],
+                &format!("http://127.0.0.1:{sip_health}/"),
+            )
+            .await,
+        );
+        // The outbound trunk LiveKit SIP dials: the edge's application-media entry.
+        let http = reqwest::Client::builder().no_proxy().build().unwrap();
+        let trunk: Value = http
+            .post(format!("http://127.0.0.1:{lk_port}/twirp/livekit.SIP/CreateSIPOutboundTrunk"))
+            .bearer_auth(livekit_token("cfmeet-e2e", &lk_secret, json!({ "sip": { "admin": true } })))
+            .json(&json!({ "trunk": { "name": "cfmeet-edge", "address": EDGE, "numbers": ["cfmeet-edge"], "transport": 1 } }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let trunk_id = trunk["sip_trunk_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no trunk: {trunk}"))
+            .to_string();
 
         // The SIP edge, and its ARI.
         let asterisk = Asterisk::start();
-        let http = reqwest::Client::builder().no_proxy().build().unwrap();
         let password = ari_password();
         let mut up = false;
         for _ in 0..300 {
@@ -2020,9 +2194,11 @@ impl VoiceStack {
                 "--sip-peer",
                 "peer-ng-a",
                 "--estimated-leg-cost-minor",
-                "100",
+                "0",
                 "--cost-currency",
                 "USD",
+                "--interconnect-class",
+                "SYNTHETIC_TEST",
             ],
             vec!["route", "enable", "ng-a"],
         ] {
@@ -2051,6 +2227,10 @@ impl VoiceStack {
                 file("ari.password", &password),
             ),
             ("TELEPHONY_ARI_APP", ARI_APP.to_string()),
+            (
+                "TELEPHONY_SYNTHETIC_INTERCONNECT_ENABLED",
+                "true".to_string(),
+            ),
             ("CF_INTERNAL_HTTP_TIMEOUT_MS", "2000".to_string()),
             ("RUST_LOG", "telephony=warn".to_string()),
         ]);
@@ -2131,6 +2311,8 @@ impl VoiceStack {
             ("CF_TELEPHONY_BASE_URL", telephony_url.clone()),
             ("CALLING_PUBLIC_INBOUND_ENABLED", "true".to_string()),
             ("CALLING_PUBLIC_OUTBOUND_ENABLED", "true".to_string()),
+            ("CALLING_SYNTHETIC_INTERCONNECT_ENABLED", "true".to_string()),
+            ("CALLING_LIVEKIT_SIP_TRUNK_ID", trunk_id),
             (
                 "CONTACT_DELEGATION_KEY_ID",
                 "calling-contact-test-1".to_string(),
@@ -2199,6 +2381,7 @@ impl VoiceStack {
             telephony_db,
             telephony_admin_env,
             relay_db,
+            relay_url,
             http,
             asterisk,
             _procs: procs,
@@ -2267,6 +2450,13 @@ impl VoiceStack {
             "principals.write",
             "calls.read",
             "calls.write",
+            "privacy.contexts.read",
+            "privacy.contexts.write",
+            "privacy.sessions.read",
+            "privacy.sessions.write",
+            "privacy.contacts.read",
+            "privacy.contacts.write",
+            "privacy.contacts.verify",
         ];
         self.pa.customer("SANDBOX", &scopes, &scopes).await
     }
@@ -2560,59 +2750,280 @@ impl VoiceStack {
         .parse()
         .unwrap()
     }
+}
 
-    /// Nothing executed: no Call in Calling, no leg in Telephony.
-    async fn nothing_executed(&self) {
-        assert_eq!(
-            one(
-                &self.calling_db,
-                "SELECT count(*)::text FROM calls WHERE origin = 'PUBLIC_INBOUND'"
-            )
-            .await,
-            "0"
+impl VoiceStack {
+    async fn call(&self, token: &str, id: &str) -> Value {
+        let (status, view) = self
+            .api(token, Method::GET, &format!("/v1/calls/{id}"), None)
+            .await;
+        assert_eq!(status, StatusCode::OK, "{view}");
+        view
+    }
+
+    /// Waits until the call satisfies `done` (polling Calling's public API).
+    async fn until_call(
+        &self,
+        token: &str,
+        id: &str,
+        what: &str,
+        done: impl Fn(&Value) -> bool,
+    ) -> Value {
+        for _ in 0..400 {
+            let view = self.call(token, id).await;
+            if done(&view) {
+                return view;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!(
+            "call {id} never reached: {what}: {}\n--- edge ---\n{}",
+            self.call(token, id).await,
+            self.asterisk.console()
         );
-        assert_eq!(
-            one(
-                &self.telephony_db,
-                "SELECT count(*)::text FROM telephony_legs"
-            )
-            .await,
-            "0"
+    }
+
+    /// The newest PUBLIC_INBOUND call's id, once Calling has one more than `before`.
+    async fn next_inbound_call(&self, before: i64, caller: &Sipp) -> String {
+        for _ in 0..300 {
+            if self.inbound_calls().await > before {
+                return one(
+                    &self.calling_db,
+                    "SELECT id::text FROM calls WHERE origin = 'PUBLIC_INBOUND' ORDER BY created_at DESC LIMIT 1",
+                )
+                .await;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let incidents = rows(
+            &self.telephony_db,
+            "SELECT category FROM telephony_incidents ORDER BY 1",
+        )
+        .await;
+        panic!(
+            "no inbound call reached Calling\n--- carrier ---\n{}\n--- incidents ---\n{incidents:?}\n--- edge ---\n{}",
+            caller.messages(),
+            self.asterisk.console()
         );
+    }
+
+    async fn inbound_calls(&self) -> i64 {
+        one(
+            &self.calling_db,
+            "SELECT count(*)::text FROM calls WHERE origin = 'PUBLIC_INBOUND'",
+        )
+        .await
+        .parse()
+        .unwrap()
+    }
+
+    async fn telephony_legs(&self) -> i64 {
+        one(
+            &self.telephony_db,
+            "SELECT count(*)::text FROM telephony_legs",
+        )
+        .await
+        .parse()
+        .unwrap()
+    }
+
+    /// `endpoint`'s RINGING invitation of the call view, if any.
+    fn invitation(view: &Value, endpoint: Uuid) -> Option<Value> {
+        view["invitations"]
+            .as_array()?
+            .iter()
+            .find(|i| i["endpointId"] == endpoint.to_string() && i["status"] == "RINGING")
+            .cloned()
+    }
+
+    /// The application accepts the call on `endpoint` (the existing invitation path).
+    async fn accept(&self, token: &str, id: &str, endpoint: Uuid) -> (StatusCode, Value) {
+        let view = self.call(token, id).await;
+        let invitation =
+            Self::invitation(&view, endpoint).unwrap_or_else(|| panic!("no invitation: {view}"));
+        self.api(
+            token,
+            Method::POST,
+            &format!("/v1/calls/{id}/accept"),
+            Some(json!({
+                "invitationId": invitation["invitationId"],
+                "endpointId": endpoint,
+                "expectedVersion": view["version"],
+            })),
+        )
+        .await
+    }
+
+    /// The application endpoint joins the call's media with a Calling-issued credential
+    /// (its session on `endpoint`), over a real WebRTC client.
+    async fn join_media(&self, token: &str, id: &str, endpoint: Uuid) -> RtcApp {
+        let view = self.call(token, id).await;
+        let session = view["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["endpointId"] == endpoint.to_string())
+            .unwrap_or_else(|| panic!("no session on the endpoint: {view}"))["sessionId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let (status, credential) = self
+            .api(
+                token,
+                Method::POST,
+                &format!("/v1/calls/{id}/sessions/{session}/media-credentials"),
+                Some(json!({})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{credential}");
+        let mut app = RtcApp::spawn(&self.bins.rtc_python);
+        let joined = app
+            .cmd(
+                json!({ "cmd": "connect", "url": credential["url"], "token": credential["token"] }),
+            )
+            .await;
+        if joined["ok"] != true {
+            let metrics = self
+                .http
+                .get(&self.calling_metrics)
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap();
+            let admission: Vec<&str> = metrics
+                .lines()
+                .filter(|l| l.contains("admission") || l.contains("gateway"))
+                .collect();
+            panic!(
+                "the application joins media: {joined}\n{}",
+                admission.join("\n")
+            );
+        }
+        app
+    }
+
+    async fn end(&self, token: &str, id: &str) -> (StatusCode, Value) {
+        let view = self.call(token, id).await;
+        self.api(
+            token,
+            Method::POST,
+            &format!("/v1/calls/{id}/end"),
+            Some(json!({ "expectedVersion": view["version"] })),
+        )
+        .await
+    }
+
+    /// A protected, VERIFIED contact for `number` (Calling's Contact Vault access grant,
+    /// then Privacy Relay's vault API).
+    async fn protected_contact(&self, token: &str, number: &str) -> String {
+        let (status, grant) = self
+            .api(
+                token,
+                Method::POST,
+                "/v1/privacy-relay/contact-access-grants",
+                Some(json!({ "scopes": ["privacy.contacts.read", "privacy.contacts.write", "privacy.contacts.verify"] })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{grant}");
+        let bearer = format!("Bearer {}", grant["grant"]["accessToken"].as_str().unwrap());
+        let created: Value = self
+            .http
+            .post(format!("{}/v1/privacy-relay/contacts", self.relay_url))
+            .header("X-CF-Contact-Authorization", &bearer)
+            .json(&json!({ "telephoneNumber": number }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let contact = created["contact"]["contactReference"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{created}"))
+            .to_string();
+        let verified = self
+            .http
+            .post(format!("{}/v1/privacy-relay/contacts/{contact}/verification", self.relay_url))
+            .header("X-CF-Contact-Authorization", &bearer)
+            .json(&json!({ "expectedVersion": 1, "targetState": "VERIFIED", "trustSource": "OTP_PROVIDER" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(verified.status().as_u16(), 200);
+        contact
+    }
+
+    /// A communication context of `principal` and `contact` with a PUBLIC_RELAY_ALLOWED
+    /// session (Privacy Relay's authority over the public leg).
+    async fn public_session(&self, token: &str, principal: Uuid, contact: &str) -> Uuid {
+        let now = Utc::now();
+        let (status, context) = self
+            .api(
+                token,
+                Method::POST,
+                "/v1/privacy-relay/contexts",
+                Some(json!({
+                    "externalContextReference": format!("e2e-{}", Uuid::new_v4().simple()),
+                    "participants": [{ "principalId": principal }, { "contactReferenceId": contact }],
+                    "allowedChannels": ["VOICE"],
+                    "directionPolicy": "BIDIRECTIONAL",
+                    "allowedRelayStrategies": ["APP_ONLY", "PUBLIC_RELAY_ALLOWED"],
+                    "startsAt": (now - chrono::Duration::minutes(1)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                    "expiresAt": (now + chrono::Duration::hours(1)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{context}");
+        let id = context["context"]["contextId"].as_str().unwrap();
+        let (status, session) = self
+            .api(
+                token,
+                Method::POST,
+                &format!("/v1/privacy-relay/contexts/{id}/sessions"),
+                Some(json!({ "relayStrategy": "PUBLIC_RELAY_ALLOWED" })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{session}");
+        session["session"]["relaySessionId"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap()
     }
 }
 
-/// Scenarios A, E and the voice parts of F and G: carrier calls over real SIP (SIPp ->
+/// Scenarios A, B, E and the voice parts of F and G — carrier calls over real SIP (SIPp ->
 /// the Asterisk edge) into the real Telephony, Privacy Relay, Numbering and Calling
-/// processes.
+/// processes, Calling's media on a real LiveKit server whose SIP service bridges the
+/// application into the edge.
 ///
-/// The environment is a SANDBOX: Numbering assigns synthetic DCNs only to sandbox / test
-/// environments, and Calling's Part E policy carries paid public-network routes
-/// (PSTN_TO_APP, APP_TO_PSTN) only in a PRODUCTION environment allowed live telecom. A
-/// routed DCN call therefore travels the whole chain — edge, Telephony's local allowlist,
-/// Numbering's per-call resolution and grant, Privacy Relay's grant-verified caller
-/// protection, Calling's grant verification with Numbering and routing to the verified
-/// target — and is then refused by Calling's live-telecom gate, never rung. Ringing an
-/// application from a real DCN needs a production number and a live carrier.
+/// The environment is a SANDBOX and every number is Numbering's SYNTHETIC inventory: the
+/// calls run over Telephony's synthetic TEST interconnect (`ng-a`: the loopback edge, SIPp
+/// as the carrier, zero cost), enabled in Telephony and Calling for this local / test
+/// runtime only. Paid public routes stay refused for the sandbox. Nothing reaches a carrier.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn voice_journeys_across_the_sip_edge_telephony_privacy_relay_numbering_and_calling() {
     let Some(st) = VoiceStack::start().await else {
         return;
     };
     let me = st.customer().await;
+    let token = me.secret.clone();
     let s = scope_of(&me);
     let employee = st.pa.principal(me.environment_id).await;
     let replacement = st.pa.principal(me.environment_id).await;
     st.configure_calling(&me).await;
-    let employee_endpoint = st.endpoint(&me.secret, employee, "employee-desk").await;
-    st.endpoint(&me.secret, replacement, "replacement-desk")
-        .await;
+    let employee_endpoint = st.endpoint(&token, employee, "employee-desk").await;
+    let replacement_endpoint = st.endpoint(&token, replacement, "replacement-desk").await;
     const LIVE_TELECOM: &str =
         "calling_public_route_denials_total{reason=\"LIVE_TELECOM_NOT_ALLOWED\"}";
     const MISMATCH: &str = "calling_dcn_refusals_total{reason=\"GRANT_MISMATCH\"}";
     const REFUSED: &str = "calling_dcn_refusals_total{reason=\"GRANT_REFUSED\"}";
+    const INTERCONNECT: &str = "calling_dcn_refusals_total{reason=\"INTERCONNECT_MISMATCH\"}";
 
-    // ---- Scenario A: an inbound call to an employee's direct DCN.
+    // ---- Scenario A: an inbound call to an employee's direct DCN rings the employee's
+    //      application endpoint; the application accepts; the caller hangs up.
     let (dcn, assignment) = st
         .voice_dcn(
             &s,
@@ -2627,23 +3038,256 @@ async fn voice_journeys_across_the_sip_edge_telephony_privacy_relay_numbering_an
         )
         .await;
     let e164 = st.numbers.e164(dcn).await;
-    let denied = st.metric(LIVE_TELECOM).await;
-    let sip = st.refused_call(&e164, "+2348035557001").await;
-    // Numbering resolved THIS call: an INBOUND_VOICE grant for the routed employee.
+    let before = st.inbound_calls().await;
+    let mut caller = Sipp::call("carrier_uac_inbound.xml", &e164, "+2348035557001");
+    let call_a = st.next_inbound_call(before, &caller).await;
+    let ringing = st
+        .until_call(&token, &call_a, "ringing the employee", |v| {
+            VoiceStack::invitation(v, employee_endpoint).is_some()
+        })
+        .await;
+    assert!(
+        VoiceStack::invitation(&ringing, replacement_endpoint).is_none(),
+        "only the current owner's endpoint rings: {ringing}"
+    );
+    // Numbering resolved THIS call (grant for the employee at the current revision);
+    // Privacy Relay protected the caller under it; Telephony's leg carries the DCN
+    // evidence and the synthetic route.
     assert_eq!(st.grants_for(dcn, employee).await, 1);
-    // Privacy Relay protected the caller under that grant (sealed in the vault).
     assert_eq!(st.protected_callers().await, 1);
-    // Calling verified the grant with Numbering, routed to the verified employee and
-    // refused the paid route in a sandbox: nothing rang, nothing was charged.
-    st.metric_above(LIVE_TELECOM, denied).await;
-    st.nothing_executed().await;
-    assert!(!sip.contains("SIP/2.0 200"), "never answered");
-    println!("A: SIP edge -> Telephony -> Numbering grant -> Privacy Relay -> Calling (grant verified, routed to the employee) -> refused in sandbox (403)");
+    let revision = one(
+        st.numbers.h.conn(),
+        &format!("SELECT routing_revision::text FROM number_resources WHERE id = '{dcn}'"),
+    )
+    .await;
+    assert_eq!(
+        one(
+            &st.telephony_db,
+            &format!(
+                "SELECT l.status || '/' || l.route_class || '/' || l.dcn_number_resource_id::text || '/' || \
+                 l.dcn_routing_revision || '/' || r.interconnect_class FROM telephony_legs l \
+                 JOIN telecom_routes r ON r.id = l.route_id WHERE l.calling_call_id = '{call_a}'"
+            )
+        )
+        .await,
+        format!("RINGING/PSTN_TO_APP/{dcn}/{revision}/SYNTHETIC_TEST")
+    );
+    assert_eq!(
+        one(
+            &st.calling_db,
+            &format!("SELECT route_plan ->> 'interconnectClass' FROM call_routes WHERE call_id = '{call_a}'")
+        )
+        .await,
+        "SYNTHETIC_TEST"
+    );
+    let (status, accepted) = st.accept(&token, &call_a, employee_endpoint).await;
+    assert!(status.is_success(), "{status}: {accepted}");
+    let mut app_a = st.join_media(&token, &call_a, employee_endpoint).await;
+    // Telephony answers the carrier, LiveKit SIP joins the edge bridge with the single-use
+    // code, and Calling records the call connected only on Telephony's evidence.
+    st.until_call(&token, &call_a, "connected", |v| v["state"] == "CONNECTED")
+        .await;
+    // The application hears the carrier: LiveKit SIP publishes the public leg's audio.
+    let heard = app_a
+        .cmd(json!({ "cmd": "wait_subscribed", "count": 1, "timeout": 10 }))
+        .await;
+    assert_eq!(
+        heard["ok"], true,
+        "the application subscribes the bridged audio: {heard}"
+    );
+    assert_eq!(
+        one(
+            &st.telephony_db,
+            &format!("SELECT count(*)::text FROM telephony_bridges WHERE calling_call_id = '{call_a}' AND status = 'ACTIVE'")
+        )
+        .await,
+        "1"
+    );
+    println!("A: ringing -> accepted -> connected (LiveKit SIP bridged into the edge)");
+    // The caller hangs up after a few seconds of audio: the call completes.
+    assert!(
+        caller.finished_ok().await,
+        "{}\n--- edge ---\n{}",
+        caller.messages(),
+        st.asterisk.console()
+    );
+    let sip = caller.messages();
+    let (r180, r200) = (
+        sip.find("SIP/2.0 180").unwrap(),
+        sip.find("SIP/2.0 200").unwrap(),
+    );
+    assert!(r180 < r200, "ringing before the answer");
+    let ended = st
+        .until_call(&token, &call_a, "ended", |v| v["state"] == "ENDED")
+        .await;
+    println!("A: completed: {}", ended["terminalReason"]);
+    // Records: Calling's public and application legs; Telephony's leg ended, one usage
+    // record on the zero-cost synthetic route — no carrier, no charge.
+    assert_eq!(
+        one(
+            &st.calling_db,
+            &format!("SELECT string_agg(leg_kind::text, ',' ORDER BY leg_kind::text) FROM call_legs WHERE call_id = '{call_a}'")
+        )
+        .await,
+        "APPLICATION,PUBLIC_NETWORK"
+    );
+    eventually(
+        &st.telephony_db,
+        &format!(
+            "SELECT count(*)::text FROM telephony_usage_records WHERE calling_call_id = '{call_a}' \
+             AND coalesce(estimated_cost_minor, 0) = 0 AND coalesce(provider_cost_minor, 0) = 0 AND route_id = 'ng-a'"
+        ),
+        "1",
+    )
+    .await;
+    println!("A: inbound DCN call completed end to end over the synthetic test interconnect");
 
-    // ---- Untrusted claims: the offer's scope / target must be exactly Numbering's grant.
+    // ---- Scenario B: the employee calls out presenting the DCN.
+    let mut carrier = Sipp::serve("carrier_uas_answer_simple.xml");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let contact = st.protected_contact(&token, "+2348031234567").await;
+    let session = st.public_session(&token, employee, &contact).await;
+    let outbound = |presented: Option<Uuid>, extra: Option<(&'static str, Value)>| {
+        let mut body = json!({
+            "kind": "VOICE",
+            "initiatorPrincipalId": employee,
+            "initiatorEndpointId": employee_endpoint,
+            "targetContactReference": contact,
+            "privacyRelaySessionId": session,
+        });
+        if let Some(n) = presented {
+            body["presentedNumberResourceId"] = json!(n);
+        }
+        if let Some((k, v)) = extra {
+            body[k] = v;
+        }
+        body
+    };
+    // Arbitrary caller-ID substitution is refused at the API.
+    let legs = st.telephony_legs().await;
+    let (status, r) = st
+        .api(
+            &token,
+            Method::POST,
+            "/v1/calls",
+            Some(outbound(
+                Some(dcn),
+                Some(("callerId", json!("+15550109999"))),
+            )),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{r}");
+    // Without a DCN, the call is a paid public call: a sandbox may not make it.
+    let denied = st.metric(LIVE_TELECOM).await;
+    let (status, r) = st
+        .api(
+            &token,
+            Method::POST,
+            "/v1/calls",
+            Some(outbound(None, None)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{r}");
+    st.metric_above(LIVE_TELECOM, denied).await;
+    assert_eq!(st.telephony_legs().await, legs, "nothing reached Telephony");
+    // The authorized DCN: Numbering's caller-identity grant, verified and consumed by
+    // Telephony, presented to the carrier on the synthetic route.
+    let (status, created) = st
+        .api(
+            &token,
+            Method::POST,
+            "/v1/calls",
+            Some(outbound(Some(dcn), None)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let call_b = created["call"]["callId"].as_str().unwrap().to_string();
+    let _app_b = st.join_media(&token, &call_b, employee_endpoint).await;
+    st.until_call(&token, &call_b, "connected", |v| v["state"] == "CONNECTED")
+        .await;
+    let invite = carrier.messages();
+    let from = invite
+        .lines()
+        .find(|l| l.to_ascii_lowercase().starts_with("from:"))
+        .unwrap_or_else(|| panic!("no INVITE reached the carrier: {invite}"));
+    let digits = e164.trim_start_matches('+');
+    assert!(
+        from.contains(&format!("sip:{e164}@")) || from.contains(&format!("sip:{digits}@")),
+        "the carrier sees the authorized DCN as the caller: {from}"
+    );
+    println!("B: carrier received {}", from.trim());
+    assert_eq!(
+        one(
+            &st.numbers.h.conn().clone(),
+            &format!(
+                "SELECT count(*)::text FROM number_routing_grants WHERE number_resource_id = '{dcn}' \
+                 AND grant_kind = 'CALLER_IDENTITY' AND principal_id = '{employee}' AND consumed_at IS NOT NULL"
+            )
+        )
+        .await,
+        "1",
+        "one caller-identity grant, consumed by Telephony"
+    );
+    assert_eq!(
+        one(
+            &st.telephony_db,
+            &format!(
+                "SELECT l.direction || '/' || l.dcn_number_resource_id::text || '/' || (l.dcn_grant_id IS NOT NULL) || '/' || \
+                 (l.relay_assignment_ref IS NULL) || '/' || r.interconnect_class FROM telephony_legs l \
+                 JOIN telecom_routes r ON r.id = l.route_id WHERE l.calling_call_id = '{call_b}'"
+            )
+        )
+        .await,
+        format!("OUTBOUND/{dcn}/true/true/SYNTHETIC_TEST")
+    );
+    println!("B: application -> Calling -> Numbering caller grant -> Telephony -> SIP carrier sees the DCN");
+    let (status, r) = st.end(&token, &call_b).await;
+    assert!(status.is_success(), "{status}: {r}");
+    assert!(
+        carrier.finished_ok().await,
+        "{}\n--- edge ---\n{}",
+        carrier.messages(),
+        st.asterisk.console()
+    );
+    st.until_call(&token, &call_b, "ended", |v| v["state"] == "ENDED")
+        .await;
+    eventually(
+        &st.telephony_db,
+        &format!(
+            "SELECT count(*)::text FROM telephony_usage_records WHERE calling_call_id = '{call_b}' \
+             AND coalesce(estimated_cost_minor, 0) = 0 AND coalesce(provider_cost_minor, 0) = 0"
+        ),
+        "1",
+    )
+    .await;
+    // Someone the number does not route to may not present it (no grant, nothing sent).
+    let other_session = st.public_session(&token, replacement, &contact).await;
+    let legs = st.telephony_legs().await;
+    let (status, r) = st
+        .api(
+            &token,
+            Method::POST,
+            "/v1/calls",
+            Some(json!({
+                "kind": "VOICE",
+                "initiatorPrincipalId": replacement,
+                "initiatorEndpointId": replacement_endpoint,
+                "targetContactReference": contact,
+                "privacyRelaySessionId": other_session,
+                "presentedNumberResourceId": dcn,
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{r}");
+    assert_eq!(r["error"]["code"], "PUBLIC_ROUTE_DENIED");
+    assert_eq!(st.telephony_legs().await, legs);
+    println!("B: completed; caller-ID substitution, an unentitled presenter and a paid sandbox call are refused");
+
+    // ---- Untrusted claims: the offer's scope / target must be exactly Numbering's grant,
+    //      and a synthetic number never runs over a (claimed) public route.
     let live = st.resolve(&e164).await;
     assert_eq!(live["outcome"], "ROUTED", "{live}");
-    assert_eq!(live["target"]["ref"], employee.to_string());
+    assert_eq!(live["inventoryClass"], "SYNTHETIC");
     let stranger = st.customer().await;
     let mismatches = st.metric(MISMATCH).await;
     let mut forged = offer_of(&live);
@@ -2655,11 +3299,16 @@ async fn voice_journeys_across_the_sip_edge_telephony_privacy_relay_numbering_an
     forged["dcnResolution"]["target"]["ref"] = json!(replacement);
     assert_eq!(st.offer(&forged).await, StatusCode::FORBIDDEN);
     assert_eq!(st.metric(MISMATCH).await, mismatches + 2.0);
-    let denied = st.metric(LIVE_TELECOM).await;
-    assert!(!st.offer(&offer_of(&live)).await.is_success());
-    st.metric_above(LIVE_TELECOM, denied).await;
-    st.nothing_executed().await;
-    println!("G: a substituted scope (wrong tenant) or target is refused; the genuine grant still verifies");
+    let calls = st.inbound_calls().await;
+    let mismatched = st.metric(INTERCONNECT).await;
+    assert_eq!(
+        st.offer(&offer_of(&live)).await,
+        StatusCode::FORBIDDEN,
+        "PUBLIC claimed"
+    );
+    st.metric_above(INTERCONNECT, mismatched).await;
+    assert_eq!(st.inbound_calls().await, calls);
+    println!("G: a substituted scope (wrong tenant) or target, and a synthetic number on a public route, are refused");
 
     // ---- Scenario F (voice): an expired grant is refused by Numbering's verification.
     let refused = st.metric(REFUSED).await;
@@ -2676,7 +3325,7 @@ async fn voice_journeys_across_the_sip_edge_telephony_privacy_relay_numbering_an
     println!("F: an expired routing grant is refused");
 
     // ---- Scenario E: the employee leaves; the number stays the organization's and now
-    //      routes to the replacement. Grants for the old routing stop verifying.
+    //      rings the replacement. Grants and presentation for the old routing stop.
     let moved = st
         .numbers
         .a
@@ -2698,26 +3347,54 @@ async fn voice_journeys_across_the_sip_edge_telephony_privacy_relay_numbering_an
     let refused = st.metric(REFUSED).await;
     assert!(!st.offer(&offer_of(&live)).await.is_success());
     assert_eq!(st.metric(REFUSED).await, refused + 1.0);
-    let denied = st.metric(LIVE_TELECOM).await;
-    st.refused_call(&e164, "+2348035557002").await;
+    let before = st.inbound_calls().await;
+    let mut caller = Sipp::call("carrier_uac_cancel.xml", &e164, "+2348035557002");
+    let call_e = st.next_inbound_call(before, &caller).await;
+    let ringing = st
+        .until_call(&token, &call_e, "ringing the replacement", |v| {
+            VoiceStack::invitation(v, replacement_endpoint).is_some()
+        })
+        .await;
+    assert!(
+        VoiceStack::invitation(&ringing, employee_endpoint).is_none(),
+        "never the former employee"
+    );
     assert_eq!(st.grants_for(dcn, replacement).await, 1);
-    assert_eq!(st.protected_callers().await, 2);
-    st.metric_above(LIVE_TELECOM, denied).await;
-    let after = st.resolve(&e164).await;
-    assert_eq!(after["target"]["ref"], replacement.to_string());
-    assert!(after["routingRevision"].as_i64() > live["routingRevision"].as_i64());
-    st.nothing_executed().await;
-    println!("E: offboarded -> the old grant is refused, the next call is resolved to the replacement, ownership stays organizational");
+    assert!(caller.finished_ok().await, "{}", caller.messages());
+    let cancelled = st
+        .until_call(&token, &call_e, "cancelled by the caller", |v| {
+            v["state"] == "NO_ANSWER"
+        })
+        .await;
+    assert_eq!(
+        cancelled["invitations"][0]["status"], "CANCELLED",
+        "{cancelled}"
+    );
+    // The former employee can no longer present the number.
+    let legs = st.telephony_legs().await;
+    let (status, r) = st
+        .api(
+            &token,
+            Method::POST,
+            "/v1/calls",
+            Some(outbound(Some(dcn), None)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{r}");
+    assert_eq!(st.telephony_legs().await, legs);
+    println!("E: offboarded -> old grant refused, the next call rings the replacement only, the former employee cannot present the number, ownership stays organizational");
 
     // ---- Numbering unavailable: DCN calls fail closed at the edge (before Privacy Relay
     //      or Calling), while application calls keep working.
+    let calls = st.inbound_calls().await;
+    let callers = st.protected_callers().await;
     st.numbering_offline
         .store(true, std::sync::atomic::Ordering::SeqCst);
     st.refused_call(&e164, "+2348035557003").await;
-    assert_eq!(st.protected_callers().await, 2);
+    assert_eq!(st.protected_callers().await, callers);
     let (status, call) = st
         .api(
-            &me.secret,
+            &token,
             Method::POST,
             "/v1/calls",
             Some(json!({
@@ -2739,7 +3416,7 @@ async fn voice_journeys_across_the_sip_edge_telephony_privacy_relay_numbering_an
         .await,
         "1"
     );
-    st.nothing_executed().await;
+    assert_eq!(st.inbound_calls().await, calls);
     println!("G: Numbering down -> DCN call refused at the edge (incident), app-to-app call still created");
 
     // ---- Scenario F (voice): capability downgrade — inbound voice revoked mid-life.
@@ -2762,7 +3439,7 @@ async fn voice_journeys_across_the_sip_edge_telephony_privacy_relay_numbering_an
         grants,
         "no grant after the downgrade"
     );
-    assert_eq!(st.protected_callers().await, 2);
+    assert_eq!(st.protected_callers().await, callers);
     println!("F: inbound voice capability revoked -> refused at the edge, no grant, caller never reaches Privacy Relay");
 
     // ---- Scenario G (voice): suspended, releasing and quarantined numbers.
@@ -2851,8 +3528,8 @@ async fn voice_journeys_across_the_sip_edge_telephony_privacy_relay_numbering_an
         grants,
         "no grant while suspended / releasing / quarantined"
     );
-    assert_eq!(st.protected_callers().await, 2);
-    st.nothing_executed().await;
+    assert_eq!(st.protected_callers().await, callers);
+    assert_eq!(st.inbound_calls().await, calls);
     println!("G: suspended / releasing / quarantined DCN -> refused at the edge, no grant, nothing offered");
 
     // ---- Unsupported: a DCN without voice capability is never carried for voice.
@@ -2877,27 +3554,36 @@ async fn voice_journeys_across_the_sip_edge_telephony_privacy_relay_numbering_an
     st.bind(sms_only).unwrap();
     st.refused_call(&st.numbers.e164(sms_only).await, "+2348035557008")
         .await;
-    assert_eq!(st.protected_callers().await, 2);
-    st.nothing_executed().await;
+    assert_eq!(st.protected_callers().await, callers);
+    assert_eq!(st.inbound_calls().await, calls);
     println!("G: an SMS-only DCN is refused for voice");
 
-    // ---- Privacy: Calling never holds a DCN or caller number; Telephony never stores a
-    //      caller; Privacy Relay holds callers only sealed in the vault.
+    // ---- Privacy: Calling never holds a DCN, caller or destination number; Telephony
+    //      never stores a caller or destination; Privacy Relay holds them only sealed.
     let calling = dump(&st.calling_db).await;
     let telephony = dump(&st.telephony_db).await;
     let relay = dump(&st.relay_db).await;
     for number in [e164.as_str(), geo_e164.as_str()] {
-        let digits = number.trim_start_matches('+');
-        assert!(!calling.contains(digits), "Calling stores a DCN");
-    }
-    for caller in 1..=8 {
-        let digits = format!("234803555700{caller}");
-        assert!(!calling.contains(&digits), "Calling stores a caller");
-        assert!(!telephony.contains(&digits), "Telephony stores a caller");
         assert!(
-            !relay.contains(&digits),
-            "Privacy Relay stores a caller in clear"
+            !calling.contains(number.trim_start_matches('+')),
+            "Calling stores a DCN"
         );
     }
-    println!("privacy: no DCN or caller number outside its authority; callers sealed in the vault");
+    let mut private: Vec<String> = (1..=8).map(|c| format!("234803555700{c}")).collect();
+    private.push("2348031234567".to_string());
+    for digits in &private {
+        assert!(
+            !calling.contains(digits.as_str()),
+            "Calling stores {digits}"
+        );
+        assert!(
+            !telephony.contains(digits.as_str()),
+            "Telephony stores {digits}"
+        );
+        assert!(
+            !relay.contains(digits.as_str()),
+            "Privacy Relay stores {digits} in clear"
+        );
+    }
+    println!("privacy: no DCN, caller or destination number outside its authority");
 }

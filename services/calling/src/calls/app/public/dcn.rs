@@ -50,7 +50,7 @@ use crate::{
     routing::{
         engine::{
             ContactFacts, ContactVerification, DestinationFacts, DuplicateRisk, EndpointClass,
-            Evidence, RouteDecision, RouteDirection, RouteInputs,
+            Evidence, InterconnectClass, RouteDecision, RouteDirection, RouteInputs,
         },
         RoutingClass,
     },
@@ -109,6 +109,10 @@ pub struct DcnInboundOffer {
     pub dcn_resolution: DcnResolution,
     pub caller_contact_reference: Uuid,
     pub max_duration_seconds: i32,
+    /// Part IV L closure: the class of the Telephony route the call arrived on (PUBLIC
+    /// when absent).
+    #[serde(default)]
+    pub interconnect_class: InterconnectClass,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -216,6 +220,13 @@ impl AppCallService {
             ApplicationId::from_uuid(s.application_id),
             EnvironmentId::from_uuid(s.environment_id),
         );
+        let interconnect = self
+            .dcn_interconnect(
+                s.environment_id,
+                offer.interconnect_class,
+                verified.synthetic,
+            )
+            .await?;
         let owner = self.dcn_owner(scope).await?;
         if super::super::blocks::contact_blocked_by_application(
             self.db(),
@@ -239,8 +250,16 @@ impl AppCallService {
             .map_err(|_| CallError::TargetUnavailable)?;
         match verified.target.kind.as_str() {
             "PRINCIPAL" => {
-                self.accept_dcn_principal(offer, &verified, scope, &owner, &caller, correlation)
-                    .await
+                self.accept_dcn_principal(
+                    offer,
+                    &verified,
+                    scope,
+                    &owner,
+                    &caller,
+                    correlation,
+                    interconnect,
+                )
+                .await
             }
             kind => match enterprise_target(kind) {
                 Some(destination_type) => {
@@ -257,6 +276,57 @@ impl AppCallService {
                 None => Err(refuse("DCN_TARGET_UNSUPPORTED")),
             },
         }
+    }
+
+    /// The interconnect a DCN call runs over (Part IV L closure). The synthetic test
+    /// interconnect needs ALL of: the route it uses is Telephony's synthetic test route,
+    /// Numbering's inventory class of the number is SYNTHETIC, Calling's synthetic switch
+    /// is on (local / test runtimes only) and the environment is a SANDBOX / TEST one. A
+    /// synthetic number never runs over a real interconnect, nor a real number over a test
+    /// route. A real number over a real route is an ordinary paid public call (live
+    /// telecom required, unchanged).
+    pub(crate) async fn dcn_interconnect(
+        &self,
+        environment_id: Uuid,
+        route: InterconnectClass,
+        synthetic_number: bool,
+    ) -> CallResult<InterconnectClass> {
+        match (route, synthetic_number) {
+            (InterconnectClass::Public, false) => Ok(InterconnectClass::Public),
+            (InterconnectClass::SyntheticTest, true) => {
+                if self
+                    .synthetic_interconnect_permitted(environment_id)
+                    .await?
+                {
+                    Ok(InterconnectClass::SyntheticTest)
+                } else {
+                    Err(refuse("SYNTHETIC_INTERCONNECT_NOT_ALLOWED"))
+                }
+            }
+            _ => Err(refuse("INTERCONNECT_MISMATCH")),
+        }
+    }
+
+    /// Calling's synthetic switch is on and `environment_id` is an ACTIVE sandbox / test
+    /// environment (never a production one, whatever its live-telecom setting).
+    pub(crate) async fn synthetic_interconnect_permitted(
+        &self,
+        environment_id: Uuid,
+    ) -> CallResult<bool> {
+        if !self.public.synthetic_interconnect {
+            return Ok(false);
+        }
+        let row = self
+            .db()
+            .query_one(stmt(
+                "SELECT (kind IN ('SANDBOX', 'TEST') AND status = 'ACTIVE') FROM platform_environments WHERE id = $1",
+                vec![environment_id.into()],
+            ))
+            .await?;
+        Ok(row
+            .map(|r| r.try_get_by_index::<bool>(0))
+            .transpose()?
+            .unwrap_or(false))
     }
 
     /// The environment's explicit inbound owner (opt-in; its whole chain ACTIVE).
@@ -290,6 +360,7 @@ impl AppCallService {
     }
 
     /// PSTN_TO_APP to the principal Numbering routes the DCN to.
+    #[allow(clippy::too_many_arguments)]
     async fn accept_dcn_principal(
         &self,
         offer: &DcnInboundOffer,
@@ -298,6 +369,7 @@ impl AppCallService {
         owner: &DcnOwner,
         caller: &ResolvedPrincipal,
         correlation: CorrelationId,
+        interconnect: InterconnectClass,
     ) -> CallResult<Value> {
         let provider = self.provider()?.clone();
         let target = self
@@ -359,6 +431,7 @@ impl AppCallService {
             context_id: None,
             live_telecom_allowed: super::outbound::live_telecom_allowed(self.db(), environment)
                 .await?,
+            interconnect,
             flags: self.public.flags,
             routes: Evidence::Known(Vec::new()),
             spend_headroom_minor: headroom,

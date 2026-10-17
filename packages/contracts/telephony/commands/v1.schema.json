@@ -262,6 +262,10 @@
               "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
             }
           }
+        },
+        "interconnectClass": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/InterconnectClass",
+          "description": "The interconnect class Calling's route policy selected (default PUBLIC). SYNTHETIC_TEST requires presentedIdentity and uses synthetic test routes only."
         }
       }
     },

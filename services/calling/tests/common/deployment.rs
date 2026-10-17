@@ -128,6 +128,7 @@ impl Externals {
         let mut runtime = super::test_runtime(Some(self.media.clone()), self.bus.clone());
         runtime.privacy_relay = self.gated_privacy.clone();
         runtime.public_network = calling::calls::app::public::PublicNetwork {
+            synthetic_interconnect: false,
             telephony: self.gated_telephony.clone(),
             media: Some(self.public_media.clone()),
             flags: calling::routing::engine::TelecomFlags {

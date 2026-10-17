@@ -181,8 +181,10 @@ telephony-integration: platform-access-bins ## Calling <-> Telephony <-> Privacy
 
 # Part IV Step 20: SMS and voice journeys across real processes of Platform Access, Numbering,
 # the SMS Gateway, Calling, Telephony and Privacy Relay. The voice journeys also need
-# asterisk + sipp (the certification SIP edge) and LIVEKIT_SERVER_BIN (Calling's media).
-communications-e2e: platform-access-bins ## Cross-service SMS + voice journeys (requires TEST_DATABASE_URL; voice: asterisk, sipp, LIVEKIT_SERVER_BIN)
+# asterisk + sipp (the certification SIP edge), redis-server, LIVEKIT_SERVER_BIN (Calling's
+# media), LIVEKIT_SIP_BIN (its SIP bridge) and CALLING_RTC_CERT_PYTHON (a Python with the
+# LiveKit RTC SDK: the application's media client); without them they are SKIPPED.
+communications-e2e: platform-access-bins ## Cross-service SMS + voice journeys (requires TEST_DATABASE_URL; voice: asterisk, sipp, redis-server, LIVEKIT_SERVER_BIN, LIVEKIT_SIP_BIN, CALLING_RTC_CERT_PYTHON)
 	cd $(SMS_GATEWAY) && cargo build --workspace --bins
 	cd $(CALLING) && cargo build --workspace --bins
 	cd $(PRIVACY_RELAY) && cargo build --workspace --bins

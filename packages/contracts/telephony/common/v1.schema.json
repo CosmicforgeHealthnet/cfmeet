@@ -7,41 +7,104 @@
     "TelephonyLegStatus": {
       "description": "Normalized status of a Telephony execution leg. UNKNOWN is not terminal and never a failure: the provider may or may not have created a paid call; only evidence resolves it.",
       "type": "string",
-      "enum": ["PLANNED", "ORIGINATING", "RINGING", "ANSWERED", "CONNECTED", "HELD", "ENDING", "ENDED", "FAILED", "UNKNOWN"]
+      "enum": [
+        "PLANNED",
+        "ORIGINATING",
+        "RINGING",
+        "ANSWERED",
+        "CONNECTED",
+        "HELD",
+        "ENDING",
+        "ENDED",
+        "FAILED",
+        "UNKNOWN"
+      ]
     },
     "PublicRouteClass": {
       "description": "Public-network route classes Telephony executes (Calling's Routing Engine classes; APP_RTC never reaches Telephony). Part F: ENTERPRISE_INTERNAL is an internal dialog of an enterprise SIP device on CF Meet's own edge (no carrier, no provider, no spend, no usage fact).",
       "type": "string",
-      "enum": ["APP_TO_PSTN", "PSTN_TO_APP", "PSTN_RELAY", "CALLBACK_RELAY", "ENTERPRISE_INTERNAL"]
+      "enum": [
+        "APP_TO_PSTN",
+        "PSTN_TO_APP",
+        "PSTN_RELAY",
+        "CALLBACK_RELAY",
+        "ENTERPRISE_INTERNAL"
+      ]
     },
     "LegDirection": {
       "type": "string",
-      "enum": ["OUTBOUND", "INBOUND"]
+      "enum": [
+        "OUTBOUND",
+        "INBOUND"
+      ]
     },
     "EndReason": {
       "type": "string",
-      "enum": ["COMPLETED", "BUSY", "NO_ANSWER", "DECLINED", "FAILED", "CANCELLED", "TIMEOUT", "DURATION_LIMIT", "ORPHANED", "NOT_SENT", "ABSENT_AT_PROVIDER"]
+      "enum": [
+        "COMPLETED",
+        "BUSY",
+        "NO_ANSWER",
+        "DECLINED",
+        "FAILED",
+        "CANCELLED",
+        "TIMEOUT",
+        "DURATION_LIMIT",
+        "ORPHANED",
+        "NOT_SENT",
+        "ABSENT_AT_PROVIDER"
+      ]
     },
     "FailureCategory": {
       "description": "The same vocabulary as Calling's failure categories.",
       "type": "string",
-      "enum": ["POLICY", "TARGET_UNAVAILABLE", "ROUTING", "TIMEOUT", "MEDIA", "NETWORK", "EXECUTION", "INTERNAL", "UNKNOWN"]
+      "enum": [
+        "POLICY",
+        "TARGET_UNAVAILABLE",
+        "ROUTING",
+        "TIMEOUT",
+        "MEDIA",
+        "NETWORK",
+        "EXECUTION",
+        "INTERNAL",
+        "UNKNOWN"
+      ]
     },
     "NormalizedEventType": {
       "type": "string",
       "enum": [
-        "LEG_ACCEPTED", "LEG_RINGING", "LEG_ANSWERED", "LEG_CONNECTED", "LEG_HELD", "LEG_RESUMED",
-        "LEG_ENDED", "LEG_FAILED", "LEG_BUSY", "LEG_NO_ANSWER", "LEG_DECLINED", "LEG_STATUS_UNKNOWN",
-        "LEG_DTMF", "BRIDGE_ESTABLISHED", "BRIDGE_ENDED", "USAGE_FINALIZED"
+        "LEG_ACCEPTED",
+        "LEG_RINGING",
+        "LEG_ANSWERED",
+        "LEG_CONNECTED",
+        "LEG_HELD",
+        "LEG_RESUMED",
+        "LEG_ENDED",
+        "LEG_FAILED",
+        "LEG_BUSY",
+        "LEG_NO_ANSWER",
+        "LEG_DECLINED",
+        "LEG_STATUS_UNKNOWN",
+        "LEG_DTMF",
+        "BRIDGE_ESTABLISHED",
+        "BRIDGE_ENDED",
+        "USAGE_FINALIZED"
       ]
     },
     "BridgeKind": {
       "type": "string",
-      "enum": ["APPLICATION_MEDIA", "PUBLIC_LEGS"]
+      "enum": [
+        "APPLICATION_MEDIA",
+        "PUBLIC_LEGS"
+      ]
     },
     "RouteHealth": {
       "type": "string",
-      "enum": ["HEALTHY", "DEGRADED", "UNAVAILABLE", "UNKNOWN"]
+      "enum": [
+        "HEALTHY",
+        "DEGRADED",
+        "UNAVAILABLE",
+        "UNKNOWN"
+      ]
     },
     "CountryCode": {
       "type": "string",
@@ -54,6 +117,14 @@
     "Timestamp": {
       "type": "string",
       "format": "date-time"
+    },
+    "InterconnectClass": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "SYNTHETIC_TEST"
+      ],
+      "description": "What a Telephony route connects to (Part IV L closure): PUBLIC, a real interconnect; SYNTHETIC_TEST, a local synthetic test interconnect (loopback SIP edge, simulated carrier, zero cost) that carries synthetic DCNs only, in local / test runtimes only."
     }
   }
 }

@@ -8,5 +8,6 @@
   "target": null,
   "routingRevision": null,
   "grant": null,
-  "reason": "UNKNOWN_NUMBER"
+  "reason": "UNKNOWN_NUMBER",
+  "inventoryClass": null
 }

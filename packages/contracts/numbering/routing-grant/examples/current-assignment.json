@@ -15,5 +15,6 @@
   "outbound": {
     "voice": true,
     "sms": false
-  }
+  },
+  "inventoryClass": "REAL"
 }

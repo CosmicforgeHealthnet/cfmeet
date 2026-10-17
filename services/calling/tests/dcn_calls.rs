@@ -64,6 +64,8 @@ struct FakeNumbering {
     numbers: Mutex<NumberTable>,
     /// issued caller-identity grants: (initiating principal, number, operation ref)
     issued: Mutex<Vec<(Option<Uuid>, Uuid, String)>>,
+    /// Part IV L closure: every number is SYNTHETIC inventory.
+    synthetic: Mutex<bool>,
 }
 
 #[async_trait]
@@ -118,6 +120,7 @@ impl NumberingPort for FakeNumbering {
             routing_revision: 2,
             number_active: true,
             voice_outbound: true,
+            synthetic: *self.synthetic.lock().unwrap(),
         })
     }
 
@@ -157,21 +160,31 @@ struct World {
 }
 
 async fn world() -> Option<World> {
+    world_in(EnvironmentKind::Production, false).await
+}
+
+/// A world in an environment of `kind`; `synthetic`: Calling's synthetic test
+/// interconnect switch (Part IV L closure).
+async fn world_in(kind: EnvironmentKind, synthetic: bool) -> Option<World> {
     let numbering = Arc::new(FakeNumbering::default());
     let privacy = Arc::new(FakePrivacyRelay::new(Vec::new()));
     let telephony = Arc::new(FakeTelephony::healthy());
     let media = Arc::new(FakePublicMedia::default());
     let n = numbering.clone();
-    let a = AppWorld::with_public_network_configured(
+    let a = AppWorld::with_public_network_in(
+        kind,
         privacy.clone(),
         telephony.clone(),
         Some(media),
-        move |runtime| runtime.numbering = n,
+        move |runtime| {
+            runtime.numbering = n;
+            runtime.public_network.synthetic_interconnect = synthetic;
+        },
     )
     .await?;
     privacy.allow(a.w.initiator.id().as_uuid());
     let scope = a.w.scope();
-    let env = a.w.consumer.env(EnvironmentKind::Production).id.as_uuid();
+    let env = a.w.consumer.env(kind).id.as_uuid();
     calling::routing::store::store_policy(
         a.h().conn(),
         scope.tenant_id().as_uuid(),
@@ -273,6 +286,7 @@ impl World {
                 kind: kind.into(),
                 target_ref: target,
             },
+            synthetic: *self.numbering.synthetic.lock().unwrap(),
         };
         self.numbering
             .inbound
@@ -726,4 +740,212 @@ async fn a_numbering_outage_fails_dcn_calls_closed_but_not_app_calls() {
         )
         .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
+}
+
+// ---------------------------------------------------------------------------------------
+// Part IV L closure: the synthetic test interconnect at the route-policy boundary
+// ---------------------------------------------------------------------------------------
+
+fn synthetic_offer(
+    x: &World,
+    kind: &str,
+    target: Uuid,
+    class: &str,
+) -> (Value, VerifiedInboundGrant) {
+    let (token, v) = x.grant(kind, target);
+    let mut offer = x.offer(Uuid::new_v4(), &token, &v);
+    offer["interconnectClass"] = json!(class);
+    (offer, v)
+}
+
+#[tokio::test]
+async fn a_synthetic_dcn_over_the_synthetic_test_interconnect_rings_the_principal_in_a_sandbox() {
+    let Some(x) = world_in(EnvironmentKind::Sandbox, true).await else {
+        return;
+    };
+    *x.numbering.synthetic.lock().unwrap() = true;
+    let (offer, v) = synthetic_offer(
+        &x,
+        "PRINCIPAL",
+        x.a().w.recipient.id().as_uuid(),
+        "SYNTHETIC_TEST",
+    );
+    let r = x.offer_as_telephony(offer).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["routeClass"], "PSTN_TO_APP");
+    let call: Uuid = r.json["callId"].as_str().unwrap().parse().unwrap();
+    assert_eq!(x.a().state(call).await.0, CallState::Ringing);
+    assert!(x
+        .a()
+        .invitation_for(call, x.callee.endpoint)
+        .await
+        .is_some());
+    let conn = x.a().h().conn();
+    // The route records the synthetic test interconnect; the authorization Numbering's
+    // verified routing; a spend reservation still covers the (zero-cost) leg.
+    assert_eq!(
+        scalar_i64(
+            conn,
+            &format!(
+                "SELECT count(*) FROM call_routes WHERE call_id = '{call}' \
+                 AND route_plan ->> 'interconnectClass' = 'SYNTHETIC_TEST'"
+            )
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        scalar_i64(
+            conn,
+            &format!(
+                "SELECT count(*) FROM call_authorizations WHERE call_id = '{call}' \
+                 AND policy_snapshot ->> 'dcn_grant_id' = '{}'",
+                v.grant_id
+            )
+        )
+        .await,
+        1
+    );
+}
+
+#[tokio::test]
+async fn the_synthetic_test_interconnect_needs_every_condition_and_never_mixes_with_real_ones() {
+    // Sandbox with the switch OFF: a synthetic route is refused; a real route is a paid
+    // public call, which a sandbox can never make.
+    let Some(off) = world_in(EnvironmentKind::Sandbox, false).await else {
+        return;
+    };
+    let callee = off.a().w.recipient.id().as_uuid();
+    *off.numbering.synthetic.lock().unwrap() = true;
+    let (offer, _) = synthetic_offer(&off, "PRINCIPAL", callee, "SYNTHETIC_TEST");
+    let r = off.offer_as_telephony(offer).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    assert_eq!(r.json["error"]["code"], "PUBLIC_ROUTE_DENIED");
+    *off.numbering.synthetic.lock().unwrap() = false;
+    let (offer, _) = synthetic_offer(&off, "PRINCIPAL", callee, "PUBLIC");
+    let r = off.offer_as_telephony(offer).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    assert_eq!(
+        r.json["error"]["code"], "CALL_NOT_AUTHORIZED",
+        "LIVE_TELECOM_NOT_ALLOWED"
+    );
+    assert_eq!(off.calls().await, 0);
+
+    // Sandbox with the switch ON: a synthetic number over a PUBLIC route, a real number
+    // over the synthetic route, and a real number over a real route (paid) are refused.
+    let Some(on) = world_in(EnvironmentKind::Sandbox, true).await else {
+        return;
+    };
+    let callee = on.a().w.recipient.id().as_uuid();
+    for (synthetic, class) in [
+        (true, "PUBLIC"),
+        (false, "SYNTHETIC_TEST"),
+        (false, "PUBLIC"),
+    ] {
+        *on.numbering.synthetic.lock().unwrap() = synthetic;
+        let (offer, _) = synthetic_offer(&on, "PRINCIPAL", callee, class);
+        let r = on.offer_as_telephony(offer).await;
+        assert_eq!(
+            r.status,
+            StatusCode::FORBIDDEN,
+            "{synthetic}/{class}: {}",
+            r.text
+        );
+    }
+    assert_eq!(on.calls().await, 0);
+
+    // PRODUCTION (live telecom allowed) never uses the synthetic test interconnect, even
+    // with the switch on.
+    let Some(prod) = world_in(EnvironmentKind::Production, true).await else {
+        return;
+    };
+    *prod.numbering.synthetic.lock().unwrap() = true;
+    let (offer, _) = synthetic_offer(
+        &prod,
+        "PRINCIPAL",
+        prod.a().w.recipient.id().as_uuid(),
+        "SYNTHETIC_TEST",
+    );
+    let r = prod.offer_as_telephony(offer).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    assert_eq!(prod.calls().await, 0);
+}
+
+fn routes_with_synthetic(
+) -> calling::routing::engine::Evidence<Vec<calling::routing::engine::CandidateRoute>> {
+    use calling::routing::engine::{CandidateRoute, Evidence, InterconnectClass, RouteHealth};
+    let route = |r: &str, cost: i64, class: InterconnectClass| CandidateRoute {
+        route_ref: r.into(),
+        health: RouteHealth::Healthy,
+        capacity_available: Evidence::Known(true),
+        estimated_leg_cost_minor: Evidence::Known(cost),
+        quality_permille: Evidence::Unknown,
+        interconnect_class: class,
+    };
+    Evidence::Known(vec![
+        route("ng-a", 100, InterconnectClass::Public),
+        route("syn-a", 0, InterconnectClass::SyntheticTest),
+    ])
+}
+
+#[tokio::test]
+async fn a_synthetic_dcn_is_presented_over_the_synthetic_test_interconnect_only() {
+    let Some(x) = world_in(EnvironmentKind::Sandbox, true).await else {
+        return;
+    };
+    x.telephony.set_routes(routes_with_synthetic());
+    let me = x.a().w.initiator.id().as_uuid();
+    *x.numbering.synthetic.lock().unwrap() = true;
+    let number = x.own_number("PRINCIPAL", me, Some(("PRINCIPAL", me)));
+    let r = x.dcn_call(number, "dcn-syn-1").await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let originates = x.telephony.originates();
+    assert_eq!(originates.len(), 1);
+    let command = &originates[0].1;
+    // Telephony is told the class and offered the synthetic route only.
+    assert_eq!(command["interconnectClass"], "SYNTHETIC_TEST");
+    assert_eq!(command["candidateRoutes"], json!(["syn-a"]));
+    assert_eq!(
+        command["presentedIdentity"]["numberResourceId"],
+        json!(number)
+    );
+    assert_eq!(x.numbering.issued.lock().unwrap().len(), 1);
+
+    // Not entitled: refused before any route or grant (organizational scope never suffices).
+    let other = x.own_number("PRINCIPAL", x.a().w.recipient.id().as_uuid(), None);
+    let r = x.dcn_call(other, "dcn-syn-2").await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    assert_eq!(r.json["error"]["code"], "PUBLIC_ROUTE_DENIED");
+    // No synthetic route available: refused, never "upgraded" to a real route.
+    x.telephony.set_routes(common::telephony::healthy_routes());
+    let r = x.dcn_call(number, "dcn-syn-3").await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE, "{}", r.text);
+    assert_eq!(x.telephony.originates().len(), 1);
+}
+
+#[tokio::test]
+async fn sandbox_callers_still_cannot_use_paid_public_routes() {
+    // Switch off: a synthetic number is an ordinary paid public call in a sandbox.
+    let Some(off) = world_in(EnvironmentKind::Sandbox, false).await else {
+        return;
+    };
+    off.telephony.set_routes(routes_with_synthetic());
+    let me = off.a().w.initiator.id().as_uuid();
+    *off.numbering.synthetic.lock().unwrap() = true;
+    let number = off.own_number("PRINCIPAL", me, Some(("PRINCIPAL", me)));
+    let r = off.dcn_call(number, "dcn-sbx-1").await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    assert_eq!(r.json["error"]["code"], "CALL_NOT_AUTHORIZED");
+    // Switch on: a REAL number presented from a sandbox is still a paid public call.
+    let Some(on) = world_in(EnvironmentKind::Sandbox, true).await else {
+        return;
+    };
+    on.telephony.set_routes(routes_with_synthetic());
+    let me = on.a().w.initiator.id().as_uuid();
+    let real = on.own_number("PRINCIPAL", me, Some(("PRINCIPAL", me)));
+    let r = on.dcn_call(real, "dcn-sbx-2").await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    assert_eq!(r.json["error"]["code"], "CALL_NOT_AUTHORIZED");
+    assert!(off.telephony.originates().is_empty());
+    assert!(on.telephony.originates().is_empty());
 }
