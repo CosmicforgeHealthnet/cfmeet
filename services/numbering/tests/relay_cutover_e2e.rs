@@ -410,7 +410,7 @@ async fn relay_numbers_move_to_numbering_leases_with_identical_routing_and_a_saf
     let port = free_port();
     let url = format!("http://127.0.0.1:{port}");
     let env = |authority: &str| -> Vec<(String, String)> {
-        let mut e: Vec<(&str, String)> = vec![
+        let e: Vec<(&str, String)> = vec![
             ("DATABASE_URL", relay_db_url.clone()),
             ("PRIVACY_RELAY_BIND_ADDRESS", format!("127.0.0.1:{port}")),
             ("PRIVACY_RELAY_ENABLED", "true".into()),

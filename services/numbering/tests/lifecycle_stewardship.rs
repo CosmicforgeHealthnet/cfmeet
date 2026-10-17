@@ -11,7 +11,8 @@
 //! * U — portability (feature flag, unsupported, uncertain, port-out keeps routing until
 //!   completion);
 //! * V — recurring lifecycle drift reconciliation (fail closed);
-//! * W — kill switches.
+//! * W — kill switches, and backup / restore resuming release, quarantine and usage
+//!   without a duplicate provider action.
 mod common;
 
 use std::sync::Arc;
@@ -2102,4 +2103,201 @@ async fn http_internal_usage_signals_and_relay_leases_enforce_their_permissions(
         )
         .await;
     assert_eq!(r.body["error"]["reason"], "OPERATION_DISABLED");
+}
+
+// ---------------------------------------------------------------------------------------
+// W — backup / restore: a restored database resumes stewardship without duplicate paid
+// actions. Requires pg_dump / pg_restore / psql (SKIPPED otherwise, unless
+// DISASTER_RECOVERY_CERT_REQUIRED=1).
+// ---------------------------------------------------------------------------------------
+
+fn dr_tools() -> bool {
+    let ok = ["pg_dump", "pg_restore", "psql", "sha256sum"]
+        .iter()
+        .all(|t| {
+            std::process::Command::new("sh")
+                .args(["-c", &format!("command -v {t}")])
+                .output()
+                .is_ok_and(|o| o.status.success())
+        });
+    if !ok {
+        assert!(
+            std::env::var("DISASTER_RECOVERY_CERT_REQUIRED").as_deref() != Ok("1"),
+            "disaster-recovery certification REQUIRED but pg_dump / pg_restore / psql are missing"
+        );
+        eprintln!("SKIPPED: disaster-recovery certification (pg_dump not found)");
+    }
+    ok
+}
+
+fn dr_script(name: &str, args: &[&str]) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../infra/deployment/backup")
+        .join(name);
+    let out = std::process::Command::new("bash")
+        .arg(path)
+        .args(args)
+        .output()
+        .expect("run backup script");
+    assert!(
+        out.status.success(),
+        "{name} failed: {}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[tokio::test]
+async fn w_a_restored_database_resumes_release_and_quarantine_without_duplicate_provider_actions() {
+    if !dr_tools() {
+        return;
+    }
+    let Some(t) = setup().await else { return };
+    let s = scope(EnvironmentKind::Sandbox);
+    let (number, a) = t.active(&s).await;
+    // A carrier usage report, and a relinquishing release whose provider command is
+    // queued but not yet dispatched when the backup is taken.
+    let usage = NewUsage {
+        source_key: "sms-msg-dr-0001".into(),
+        number_resource_id: number,
+        assignment_id: Some(a.id),
+        kind: UsageKind::SmsInboundSegments,
+        quantity: 2,
+        provider_cost_minor: Some(300),
+        currency: Some("USD".into()),
+        period_start: t.h.now(),
+        period_end: t.h.now(),
+    };
+    assert!(
+        t.st.report_usage(&ctx(), "cfmeet.sms-gateway", usage.clone())
+            .await
+            .unwrap()
+            .1
+    );
+    let (release, _) =
+        t.st.request_release(
+            &ctx(),
+            Some(&s),
+            customer_actor(&s),
+            NewRelease {
+                assignment_id: a.id,
+                reason_code: "CUSTOMER_RELEASE".into(),
+                policy: ReleasePolicy::ProviderRelinquish,
+                effective_at: None,
+            },
+            "release-key-dr-01",
+        )
+        .await
+        .unwrap();
+    assert_eq!(release.status, "PROVIDER_RELEASE_PENDING");
+    let releases = || {
+        t.p.sim
+            .calls()
+            .iter()
+            .filter(|c| c.0 == Op::Release)
+            .count()
+    };
+    assert_eq!(releases(), 0);
+
+    // Backup with the release tooling, restore into an empty database.
+    let dir = std::env::temp_dir().join(format!("nb-dr-{}", Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let dump = dir.join("numbering.dump");
+    dr_script(
+        "backup.sh",
+        &[
+            "--service",
+            "numbering",
+            "--database-url",
+            &t.h.db.url,
+            "--out",
+            dump.to_str().unwrap(),
+        ],
+    );
+    let target = common::TestDb::empty().await.unwrap();
+    dr_script(
+        "restore.sh",
+        &[
+            "--database-url",
+            &target.url,
+            "--in",
+            dump.to_str().unwrap(),
+        ],
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    {
+        use numbering_migration::{Migrator, MigratorTrait};
+        assert!(Migrator::get_pending_migrations(&target.conn)
+            .await
+            .unwrap()
+            .is_empty());
+        Migrator::up(&target.conn, None).await.unwrap();
+    }
+
+    // The restarted service: same provider (external state), restored database, two
+    // worker instances at once.
+    let h2 = Harness::build(Arc::new(target), None, t.h.clock.clone());
+    let mut registry = numbering::providers::registry::ProviderRegistry::new(
+        cf_service_auth::RuntimeEnvironment::Test,
+    );
+    registry.register(Arc::new(t.p.sim.clone())).unwrap();
+    let commands = numbering::providers::commands::ProviderCommands::new(
+        h2.numbers.clone(),
+        Arc::new(registry),
+        numbering::providers::commands::CommandSettings::default(),
+    );
+    let h2 = h2.with_providers(commands.clone());
+    let steward = || {
+        Stewardship::new(
+            h2.numbers.clone(),
+            Some(commands.clone()),
+            Arc::new(EligibilityPolicy::default()),
+            StewardshipSettings::default(),
+        )
+    };
+    let (st1, st2) = (steward(), steward());
+    let (c1, c2) = (ctx(), ctx());
+    let (r1, r2) = (
+        px::runner(&h2, &commands, "dr-worker-1"),
+        px::runner(&h2, &commands, "dr-worker-2"),
+    );
+    tokio::join!(ax::drain(&r1), ax::drain(&r2));
+    let (x, y) = tokio::join!(st1.advance_releases(&c1, 10), st2.advance_releases(&c2, 10));
+    x.unwrap();
+    y.unwrap();
+    // Exactly one provider RELEASE across the restart and both workers.
+    assert_eq!(releases(), 1);
+    let r = st1.release_request(Some(&s), release.id).await.unwrap();
+    assert_eq!(r.status, "QUARANTINED", "{r:?}");
+    assert_eq!(
+        h2.scalar(&format!(
+            "SELECT count(*) FROM number_quarantines WHERE number_resource_id = '{number}'"
+        ))
+        .await,
+        1
+    );
+    // The carrier's report replayed after the restart counts once.
+    assert!(
+        !st1.report_usage(&ctx(), "cfmeet.sms-gateway", usage)
+            .await
+            .unwrap()
+            .1
+    );
+    assert_eq!(
+        h2.scalar("SELECT count(*) FROM number_usage_records WHERE source_key = 'cfmeet.sms-gateway:sms-msg-dr-0001'")
+            .await,
+        1
+    );
+    // Quarantine completion after the cooldown: once, whichever worker wins.
+    t.advance(Duration::days(8));
+    let (x, y) = tokio::join!(
+        st1.complete_quarantines(&c1, 10),
+        st2.complete_quarantines(&c2, 10)
+    );
+    assert_eq!(x.unwrap() + y.unwrap(), 1);
+    assert_eq!(
+        h2.numbers.resource(number).await.unwrap().lifecycle_state(),
+        S::Released
+    );
+    assert_eq!(releases(), 1);
 }

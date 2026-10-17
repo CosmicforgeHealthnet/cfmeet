@@ -145,6 +145,12 @@ jobs:
         run: cargo test --locked --test routing_grants
       - name: DCN lifecycle milestone, Scenarios A-D (Part IV Step 21)
         run: cargo test --locked --test dcn_lifecycle
+      - name: Lifecycle stewardship (Part IV P-W)
+        env:
+          # The runner image ships pg_dump / pg_restore / psql: the backup / restore
+          # case of this suite must run here, never skip.
+          DISASTER_RECOVERY_CERT_REQUIRED: "1"
+        run: cargo test --locked --test lifecycle_stewardship
       - name: cargo test (whole workspace)
         run: cargo test --workspace --no-fail-fast --locked
 

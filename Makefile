@@ -185,7 +185,7 @@ telephony-integration: platform-access-bins ## Calling <-> Telephony <-> Privacy
 # media), LIVEKIT_SIP_BIN (its SIP bridge) and CALLING_RTC_CERT_PYTHON (a Python with the
 # LiveKit RTC SDK: the application's media client, run from Calling's RTC certification
 # client, CALLING_RTC_CLIENT, set below); without them they are SKIPPED.
-communications-e2e: platform-access-bins ## Cross-service SMS + voice journeys (requires TEST_DATABASE_URL; voice: asterisk, sipp, redis-server, LIVEKIT_SERVER_BIN, LIVEKIT_SIP_BIN, CALLING_RTC_CERT_PYTHON)
+communications-e2e: platform-access-bins ## Cross-service SMS + voice journeys and the Part P relay-number cutover (requires TEST_DATABASE_URL; voice: asterisk, sipp, redis-server, LIVEKIT_SERVER_BIN, LIVEKIT_SIP_BIN, CALLING_RTC_CERT_PYTHON)
 	cd $(SMS_GATEWAY) && cargo build --workspace --bins
 	cd $(CALLING) && cargo build --workspace --bins
 	cd $(PRIVACY_RELAY) && cargo build --workspace --bins
@@ -200,7 +200,7 @@ communications-e2e: platform-access-bins ## Cross-service SMS + voice journeys (
 		TELEPHONY_BIN=$(call bin_dir,$(TELEPHONY))/telephony \
 		TELEPHONY_MIGRATION_BIN=$(call bin_dir,$(TELEPHONY))/telephony-migration \
 		CALLING_RTC_CLIENT=$(CURDIR)/$(CALLING)/tests/rtc/rtc_client.py \
-		cargo test --test communications_e2e -- --nocapture
+		cargo test --test communications_e2e --test relay_cutover_e2e -- --nocapture
 
 service-auth-test: ## Test packages/service-auth (core and client feature sets)
 	cd $(SERVICE_AUTH) && cargo test --no-fail-fast

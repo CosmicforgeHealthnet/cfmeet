@@ -114,6 +114,11 @@ jobs:
         run: cargo test --locked --test inbound
       - name: Outbound SMS (O) — authorization, idempotency, durable submission, unknown outcomes, receipts, controls
         run: cargo test --locked --test outbound
+      # The runner image ships pg_dump / pg_restore / psql: never skip here.
+      - name: Disaster recovery (W) — backup.sh / restore.sh, restart without duplicate sends
+        env:
+          DISASTER_RECOVERY_CERT_REQUIRED: "1"
+        run: cargo test --locked --test disaster_recovery -- --nocapture
       - name: cargo test (whole workspace)
         run: cargo test --workspace --no-fail-fast --locked
 
