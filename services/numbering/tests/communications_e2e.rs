@@ -1950,7 +1950,8 @@ impl VoiceStack {
             )
             .await,
         );
-        // LiveKit SIP sends from the edge's application-media peer address (pjsip.conf).
+        // LiveKit SIP sends from the edge's application-media peer address (pjsip.conf). Its
+        // CPU admission guard is opened fully: a busy test host must not refuse the bridge.
         let sip_health = free_port();
         let sip_config = file(
             "livekit-sip.yaml",
@@ -1958,7 +1959,7 @@ impl VoiceStack {
                 "api_key: cfmeet-e2e\napi_secret: {lk_secret}\nws_url: ws://127.0.0.1:{lk_port}\n\
                  redis:\n  address: 127.0.0.1:{redis_port}\nsip_port: 5060\nlisten_ip: {APP_MEDIA}\n\
                  nat_1_to_1_ip: {APP_MEDIA}\nuse_external_ip: false\nrtp_port: 52000-52200\n\
-                 health_port: {sip_health}\nlogging:\n  level: warn\n"
+                 health_port: {sip_health}\nmax_cpu_utilization: 1.0\nlogging:\n  level: warn\n"
             ),
         );
         procs.push(
@@ -2875,7 +2876,17 @@ impl VoiceStack {
                 Some(json!({})),
             )
             .await;
-        assert_eq!(status, StatusCode::OK, "{credential}");
+        if status != StatusCode::OK {
+            panic!(
+                "media credential refused: {status} {credential}\ncall: {}\nbridges: {:?}",
+                self.call(token, id).await,
+                rows(
+                    &self.telephony_db,
+                    &format!("SELECT status || '/' || coalesce(end_reason, '') FROM telephony_bridges WHERE calling_call_id = '{id}'")
+                )
+                .await
+            );
+        }
         let mut app = RtcApp::spawn(&self.bins.rtc_python, &self.bins.rtc_client);
         let joined = app
             .cmd(
