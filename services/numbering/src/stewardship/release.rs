@@ -5,9 +5,9 @@
 //!
 //! 1. new grants and SMS submissions stop: the assignment leaves ACTIVE / SUSPENDED
 //!    (RELEASE_REQUESTED) and every outstanding grant is revoked;
-//! 2. + 3. the previous owner's voice and SMS routing is removed: the assignment is
-//!    ROUTING_REMOVED, the number RELEASING, its CONFIGURED routes retired (no consumer
-//!    readiness survives for a later owner);
+//! 2. (and 3.) the previous owner's voice and SMS routing is removed: the assignment
+//!    is ROUTING_REMOVED, the number RELEASING, its CONFIGURED routes retired (no
+//!    consumer readiness survives for a later owner);
 //! 4. the previous owner's organizational resources are detached (pool memberships);
 //! 5. the routing-removal evidence is confirmed (no live grant, no ready route, the
 //!    resolver refuses) — otherwise the release fails closed with an incident;

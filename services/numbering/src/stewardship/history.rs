@@ -138,6 +138,7 @@ impl Stewardship {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn audit_access<C: ConnectionTrait>(
         db: &C,
         ctx: &RequestContext,
