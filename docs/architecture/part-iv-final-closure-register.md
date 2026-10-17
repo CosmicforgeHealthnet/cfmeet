@@ -124,7 +124,7 @@ Dispatched with `workflow_dispatch` on this branch (no pull request was opened):
 | Dependency and image security | success (`448d6a2`) |
 | Calling service | success (`448d6a2`) |
 | Telephony service | failure on `448d6a2` (Calling e2e job without Platform Access binaries — a CI wiring gap since Workstream B); success on `97c201a` after the fix |
-| Privacy Relay service | failure on `448d6a2` (smoke table count 26 → 27; same Calling e2e wiring gap); on `97c201a` everything passed except one intermittent pre-existing assertion in `dcn_caller` (a random UUID can contain the digits `7946`), fixed in the following commit and re-dispatched |
+| Privacy Relay service | failure on `448d6a2` (smoke table count 26 → 27; same Calling e2e wiring gap); on `97c201a` everything passed except one intermittent pre-existing assertion in `dcn_caller` (a random UUID can contain the digits `7946`), fixed in `a817e74` — **success** on `a817e74` (all five jobs) |
 | Numbering, SMS Gateway, Communications e2e, Platform Access | **not executed remotely**: `workflow_dispatch` returns 404 for them (these workflow files are not on the default branch, which GitHub requires for dispatch); they run on push to main / staging or on a pull request. Their table-count smoke steps were run locally against the real migrations (Numbering 50 tables, Privacy Relay 27, SMS Gateway checks pass) |
 
 
