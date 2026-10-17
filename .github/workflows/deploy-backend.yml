@@ -118,7 +118,14 @@ jobs:
           set -euo pipefail
           # Shell-quote remote arguments so a deployment path is never interpreted as code.
           printf -v remote_cmd 'bash -s -- %q %q %q' "$COMMIT_SHA" "$DEPLOY_PATH" "$RUN_ID"
-          ssh -o BatchMode=yes "$VPS_USER@$VPS_HOST" "$remote_cmd" <<'DEPLOY_SCRIPT'
+          # The Contabo Rust release build can exceed 30 minutes; keep SSH alive
+          # through otherwise quiet compile/link phases rather than losing the
+          # session before container switch and smoke certification.
+          ssh -o BatchMode=yes \
+            -o ServerAliveInterval=20 \
+            -o ServerAliveCountMax=90 \
+            -o TCPKeepAlive=yes \
+            "$VPS_USER@$VPS_HOST" "$remote_cmd" <<'DEPLOY_SCRIPT'
             set -Eeuo pipefail
             COMMIT="$1"
             DEPLOY_PATH="$2"
@@ -138,8 +145,22 @@ jobs:
             }
             git reset --hard "$COMMIT"
 
+            # Emit output while Rust compiles without logging; many SSH/network
+            # intermediaries drop an otherwise silent connection near 30 minutes.
+            # The heartbeat runs only during this build and is always reaped.
+            ( while sleep 25; do
+                printf '[deploy] Docker build still running at %s\n' "$(date -u +%FT%TZ)"
+              done ) &
+            BUILD_HEARTBEAT_PID=$!
+            BUILD_RESULT=0
             docker build -f services/meeting-service/Dockerfile \
-              -t "$IMAGE" -t cfmeet-meeting-service:prod-latest .
+              -t "$IMAGE" -t cfmeet-meeting-service:prod-latest . || BUILD_RESULT=$?
+            kill "$BUILD_HEARTBEAT_PID" 2>/dev/null || true
+            wait "$BUILD_HEARTBEAT_PID" 2>/dev/null || true
+            if [ "$BUILD_RESULT" -ne 0 ]; then
+              echo "Docker build failed (exit $BUILD_RESULT); existing production container untouched."
+              exit "$BUILD_RESULT"
+            fi
 
             # Migrations are required to be backward-compatible. This step is
             # intentionally before cutover and is not rolled back automatically.
