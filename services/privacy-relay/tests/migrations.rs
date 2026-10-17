@@ -96,6 +96,8 @@ async fn up_down_up_creates_exactly_the_privacy_relay_tables() {
         "privacy_relay_seaql_migrations",
         "relay_number_inventory",
         "relay_number_events",
+        // Numbering's lease of a platform number; scoped only through its assignment.
+        "relay_number_leases",
         // Unresolved inbound attempts have no scope (a scoped row names all of it).
         "relay_inbound_resolutions",
         // Retention evidence is platform-level (a hold MAY name a scope; its columns are
