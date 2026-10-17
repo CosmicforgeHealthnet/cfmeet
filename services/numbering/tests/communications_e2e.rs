@@ -1651,6 +1651,14 @@ async fn sms_suspend_restore_release_quarantine_and_reassignment_across_real_bou
         ))
         .await
         .unwrap();
+    st.numbers
+        .h
+        .conn()
+        .execute_unprepared(&format!(
+            "UPDATE number_resources SET quarantine_until = now(), revision = revision + 1 WHERE id = '{dcn}'"
+        ))
+        .await
+        .unwrap();
     // Numbering's domain clock follows the system clock every 50 ms.
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(steward.complete_quarantines(&ctx(), 10).await.unwrap(), 1);
