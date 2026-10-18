@@ -7,12 +7,17 @@
 //! that every conversation references, so a conversation's policy can be reproduced.
 //!
 //! Platform defaults are deliberately conservative and assume nothing about features that
-//! do not exist yet: PRIVATE_E2EE is the default for every private context except
-//! SUPPORT (support conversations commonly involve server-side agents / bots, so the
-//! application must choose); MANAGED is NEVER available unless the application's policy
-//! enables it for a context; attachments, moderation, retention, presence and read
-//! receipts are unset / disabled until their workstreams; legal hold is eligible only
-//! where MANAGED is allowed; the SMS Bridge is never eligible.
+//! do not exist yet: PRIVATE_E2EE is the default for every context class — direct, group,
+//! meeting, transaction, consultation, support, enterprise and developer-defined (Part V
+//! Appendix G: "unless tenant policy requires managed mode"); MANAGED is NEVER available
+//! unless the application's policy enables it for a context, and never becomes a default
+//! by itself; replies, threads, reactions, pins, attachments, moderation, retention,
+//! presence and read receipts are unset / disabled until their workstreams; legal hold is
+//! eligible only where MANAGED is allowed; the SMS Bridge is never eligible.
+//!
+//! Platform policy version 2 (Part V specification review): SUPPORT defaults to
+//! PRIVATE_E2EE like every other context (version 1 left it without a default) and the
+//! snapshot names the message features of §28 (`messages`).
 
 use std::collections::BTreeMap;
 
@@ -31,7 +36,7 @@ use crate::{
 };
 
 /// Version of the platform defaults below.
-pub const PLATFORM_POLICY_VERSION: i32 = 1;
+pub const PLATFORM_POLICY_VERSION: i32 = 2;
 /// Version of the policy document schema.
 pub const POLICY_SCHEMA_VERSION: i32 = 1;
 /// Version of the security policy persisted with every conversation (profile rules).
@@ -64,6 +69,7 @@ pub struct EffectivePolicy {
     pub contexts: BTreeMap<ContextClass, ContextPolicy>,
     pub sending_enabled: bool,
     /// Features of later workstreams: present, explicit, and off / unset.
+    pub messages: Value,
     pub attachments: Value,
     pub editing: Value,
     pub privacy: Value,
@@ -76,13 +82,10 @@ pub fn platform_defaults() -> EffectivePolicy {
     let contexts = ContextClass::ALL
         .iter()
         .map(|c| {
-            let (allowed, default) = match c {
-                ContextClass::Support => (vec![], None),
-                _ => (
-                    vec![SecurityProfile::PrivateE2ee],
-                    Some(SecurityProfile::PrivateE2ee),
-                ),
-            };
+            let (allowed, default) = (
+                vec![SecurityProfile::PrivateE2ee],
+                Some(SecurityProfile::PrivateE2ee),
+            );
             (
                 *c,
                 ContextPolicy {
@@ -108,6 +111,7 @@ pub fn platform_defaults() -> EffectivePolicy {
         application_policy_version: 0,
         contexts,
         sending_enabled: true,
+        messages: json!({ "replies": null, "threads": null, "reactions": null, "pins": null }),
         attachments: json!({ "enabled": false, "maxBytes": null, "allowedMediaTypes": [] }),
         editing: json!({ "editWindowSeconds": null, "deleteWindowSeconds": null }),
         privacy: json!({ "presence": null, "readReceipts": null }),
@@ -385,14 +389,12 @@ mod tests {
                 "{class:?}"
             );
             assert!(!c.sms_bridge_eligible && !c.legal_hold_eligible);
-            if *class == ContextClass::Support {
-                assert_eq!(
-                    c.default_profile, None,
-                    "support needs an explicit application choice"
-                );
-            } else {
-                assert_eq!(c.default_profile, Some(SecurityProfile::PrivateE2ee));
-            }
+            assert_eq!(
+                c.default_profile,
+                Some(SecurityProfile::PrivateE2ee),
+                "{class:?}: PRIVATE_E2EE is the default for every context (Appendix G)"
+            );
+            assert_eq!(c.allowed_profiles, vec![SecurityProfile::PrivateE2ee]);
         }
         assert_eq!(p.context(ContextClass::Direct).max_members, Some(2));
     }

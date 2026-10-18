@@ -5,13 +5,27 @@
 mod common;
 
 use axum::http::StatusCode;
-use cf_messaging_crypto::transparency::{leaf_hash, verify_consistency, verify_inclusion, Hash};
+use cf_messaging_crypto::transparency::{
+    leaf_hash, tree_head_signing_input, verify_consistency, verify_inclusion,
+    verify_tree_head_signature, Hash,
+};
 use common::*;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
 fn hash(v: &Value) -> Hash {
     unb64(v).try_into().unwrap()
+}
+
+/// Verifies a served tree head against the log key a client pinned (Part V G.5).
+fn signed_by(head: &Value, pinned: &[u8; 32]) -> bool {
+    let input = tree_head_signing_input(
+        head["logId"].as_str().unwrap(),
+        head["treeSize"].as_u64().unwrap(),
+        &hash(&head["rootHash"]),
+        head["timestampMicros"].as_i64().unwrap(),
+    );
+    verify_tree_head_signature(pinned, &input, &unb64(&head["signature"]))
 }
 
 #[tokio::test]
@@ -40,6 +54,10 @@ async fn device_entries_have_verifiable_inclusion_and_consistency_proofs() {
         hash(&p0.json["treeHead"]["rootHash"]),
     );
     assert_eq!(old_size, 1);
+    let pinned = h.state.tree_heads.as_ref().unwrap().public_key();
+    assert!(signed_by(&p0.json["treeHead"], &pinned));
+    assert_eq!(p0.json["treeHead"]["logId"], "cfmeet-messaging:test");
+    assert_eq!(p0.json["treeHead"]["signatureAlgorithm"], "Ed25519");
     // More history: other devices, and a revocation of the first.
     for _ in 0..5 {
         h.active_device(&c, bob).await;
@@ -67,6 +85,25 @@ async fn device_entries_have_verifiable_inclusion_and_consistency_proofs() {
         &p.json,
     );
     assert_eq!(p.json["treeHead"]["witnessStatus"], "UNWITNESSED");
+    assert!(signed_by(&p.json["treeHead"], &pinned));
+    // A head presented with another root, size, log or time does not verify (a client
+    // holding two validly signed heads for one size has proof of equivocation).
+    for (field, value) in [
+        ("rootHash", json!(b64(&[9u8; 32]))),
+        ("treeSize", json!(6)),
+        ("logId", json!("cfmeet-messaging:other")),
+        (
+            "timestampMicros",
+            json!(p.json["treeHead"]["timestampMicros"].as_i64().unwrap() + 1),
+        ),
+    ] {
+        let mut forged = p.json["treeHead"].clone();
+        forged[field] = value;
+        assert!(!signed_by(&forged, &pinned), "{field}");
+    }
+    // Another key (e.g. a substituted log) is not the pinned one.
+    let other = messaging::transparency::TreeHeadSigner::generate("cfmeet-messaging:test");
+    assert!(!signed_by(&p.json["treeHead"], &other.public_key()));
     let size = p.json["treeHead"]["treeSize"].as_u64().unwrap();
     let root = hash(&p.json["treeHead"]["rootHash"]);
     assert_eq!(size, 7);
@@ -192,5 +229,32 @@ async fn the_log_is_append_only_in_the_database() {
         "UPDATE messaging_audit SET action = 'NOTHING_HAPPENED'",
     ] {
         assert!(h.sql(sql).await.is_err(), "{sql} was allowed");
+    }
+}
+
+#[tokio::test]
+async fn without_a_signing_key_no_tree_head_is_served() {
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let h = Harness::on(std::sync::Arc::new(db), |state| state.tree_heads = None);
+    let c = h.customer(&["messages.send", "messages.read"]);
+    let alice = h.principal(&c);
+    let device = h.active_device(&c, alice).await;
+    for path in [
+        format!(
+            "/v1/messaging/key-transparency/proofs?deviceId={}",
+            device.device_id()
+        ),
+        format!("/v1/messaging/principals/{alice}/devices"),
+    ] {
+        let r = h.get(&c, Some(alice), &path).await;
+        assert_eq!(
+            r.status,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{path}: {}",
+            r.text
+        );
+        assert!(!r.text.contains("rootHash"));
     }
 }

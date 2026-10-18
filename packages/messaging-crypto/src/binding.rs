@@ -12,14 +12,21 @@
 //!   single-use server challenge) without any custom signature construction.
 //!
 //! * **Application-message AAD** — the MLS `authenticated_data` of every application
-//!   message: `cfmeet-messaging-aad:v1:<conversation id>:<client message id>:<sender
-//!   device id>`. Only client-known values: the server's canonical sequence / message id
-//!   are bound separately by the server's acceptance record (services/messaging).
+//!   message (Part V Appendix H.1):
+//!   `cfmeet-messaging-aad:v2:<security profile>:<protocol>:<cipher suite>:<tenant id>:
+//!   <application id>:<environment id>:<conversation id>:<client message id>:<sender
+//!   device id>` (one line). It binds the security boundary (profile, protocol, pinned
+//!   suite), the authorization scope and the message identity, so a ciphertext cannot be
+//!   transplanted across tenants, applications, environments, conversations, profiles or
+//!   devices. Only client-known values: the server's canonical sequence / message id are
+//!   bound separately by the server's acceptance record (services/messaging).
 //!
 //! All are ASCII, versioned and parsed strictly (lower-case hyphenated UUIDs, 64
 //! lower-case hex nonce characters).
 
 use uuid::Uuid;
+
+use crate::profile;
 
 const DEVICE_PREFIX: &str = "cfmeet-messaging-device:v1:";
 const REGISTRATION_PREFIX: &str = "cfmeet-messaging-registration:v1:";
@@ -65,33 +72,67 @@ pub fn parse_registration_binding(binding: &[u8]) -> Option<(Uuid, [u8; NONCE_LE
     Some((id, nonce))
 }
 
-const AAD_PREFIX: &str = "cfmeet-messaging-aad:v1:";
+const AAD_PREFIX: &str = "cfmeet-messaging-aad:v2:";
 
-/// The MLS authenticated data of an application message.
-pub fn application_message_aad(
-    conversation_id: Uuid,
-    client_message_id: Uuid,
-    sender_device_id: Uuid,
-) -> Vec<u8> {
-    format!(
-        "{AAD_PREFIX}{}:{}:{}",
-        conversation_id.hyphenated(),
-        client_message_id.hyphenated(),
-        sender_device_id.hyphenated()
-    )
-    .into_bytes()
+/// What the MLS authenticated data of an application message binds. The security profile,
+/// protocol and cipher suite are fixed by [`crate::profile`] (the only E2EE profile).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ApplicationMessageBinding {
+    pub tenant_id: Uuid,
+    pub application_id: Uuid,
+    pub environment_id: Uuid,
+    pub conversation_id: Uuid,
+    pub client_message_id: Uuid,
+    pub sender_device_id: Uuid,
 }
 
-/// `(conversation, client message, sender device)` of a canonical AAD.
-pub fn parse_application_message_aad(aad: &[u8]) -> Option<(Uuid, Uuid, Uuid)> {
+impl ApplicationMessageBinding {
+    fn ids(&self) -> [Uuid; 6] {
+        [
+            self.tenant_id,
+            self.application_id,
+            self.environment_id,
+            self.conversation_id,
+            self.client_message_id,
+            self.sender_device_id,
+        ]
+    }
+}
+
+fn aad_header() -> String {
+    format!(
+        "{AAD_PREFIX}{}:{}:{}:",
+        profile::SECURITY_PROFILE,
+        profile::PROTOCOL_ID,
+        profile::CIPHERSUITE_NAME
+    )
+}
+
+/// The MLS authenticated data of an application message.
+pub fn application_message_aad(binding: &ApplicationMessageBinding) -> Vec<u8> {
+    let ids: Vec<String> = binding
+        .ids()
+        .iter()
+        .map(|id| id.hyphenated().to_string())
+        .collect();
+    format!("{}{}", aad_header(), ids.join(":")).into_bytes()
+}
+
+/// The binding of a canonical AAD; `None` for any other profile, protocol, suite, version
+/// or encoding.
+pub fn parse_application_message_aad(aad: &[u8]) -> Option<ApplicationMessageBinding> {
     let text = std::str::from_utf8(aad).ok()?;
-    let mut parts = text.strip_prefix(AAD_PREFIX)?.split(':');
-    let ids = (
-        canonical_uuid(parts.next()?)?,
-        canonical_uuid(parts.next()?)?,
-        canonical_uuid(parts.next()?)?,
-    );
-    parts.next().is_none().then_some(ids)
+    let mut parts = text.strip_prefix(aad_header().as_str())?.split(':');
+    let mut next = || canonical_uuid(parts.next()?);
+    let binding = ApplicationMessageBinding {
+        tenant_id: next()?,
+        application_id: next()?,
+        environment_id: next()?,
+        conversation_id: next()?,
+        client_message_id: next()?,
+        sender_device_id: next()?,
+    };
+    parts.next().is_none().then_some(binding)
 }
 
 fn canonical_uuid(text: &str) -> Option<Uuid> {
@@ -124,24 +165,79 @@ mod tests {
         }
     }
 
+    fn binding() -> ApplicationMessageBinding {
+        ApplicationMessageBinding {
+            tenant_id: Uuid::new_v4(),
+            application_id: Uuid::new_v4(),
+            environment_id: Uuid::new_v4(),
+            conversation_id: Uuid::new_v4(),
+            client_message_id: Uuid::new_v4(),
+            sender_device_id: Uuid::new_v4(),
+        }
+    }
+
     #[test]
     fn application_aad_round_trips_and_is_strict() {
-        let (c, m, d) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
-        let aad = application_message_aad(c, m, d);
-        assert_eq!(parse_application_message_aad(&aad), Some((c, m, d)));
+        let b = binding();
+        let aad = application_message_aad(&b);
+        assert_eq!(parse_application_message_aad(&aad), Some(b));
         let text = String::from_utf8(aad).unwrap();
-        assert_eq!(
-            parse_application_message_aad(format!("{text}:extra").as_bytes()),
-            None
-        );
-        assert_eq!(
-            parse_application_message_aad(text.to_uppercase().as_bytes()),
-            None
-        );
-        assert_ne!(
-            application_message_aad(c, m, d),
-            application_message_aad(m, c, d)
-        );
+        assert!(text.starts_with(
+            "cfmeet-messaging-aad:v2:PRIVATE_E2EE:MLS_1_0:MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519:"
+        ));
+        for bad in [
+            format!("{text}:extra"),
+            text.to_uppercase(),
+            text.replace(":v2:", ":v1:"),
+            text.replace("PRIVATE_E2EE", "MANAGED"),
+            text.replace("MLS_1_0", "MLS_2_0"),
+            text.replace("AES128GCM", "CHACHA20POLY1305"),
+            text[..text.len() - 1].to_string(),
+        ] {
+            assert_eq!(parse_application_message_aad(bad.as_bytes()), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn every_bound_field_changes_the_aad() {
+        let b = binding();
+        let aad = application_message_aad(&b);
+        let other = Uuid::new_v4();
+        let variants = [
+            ApplicationMessageBinding {
+                tenant_id: other,
+                ..b
+            },
+            ApplicationMessageBinding {
+                application_id: other,
+                ..b
+            },
+            ApplicationMessageBinding {
+                environment_id: other,
+                ..b
+            },
+            ApplicationMessageBinding {
+                conversation_id: other,
+                ..b
+            },
+            ApplicationMessageBinding {
+                client_message_id: other,
+                ..b
+            },
+            ApplicationMessageBinding {
+                sender_device_id: other,
+                ..b
+            },
+            // Swapping two ids is a different binding, not the same bytes.
+            ApplicationMessageBinding {
+                tenant_id: b.application_id,
+                application_id: b.tenant_id,
+                ..b
+            },
+        ];
+        for v in variants {
+            assert_ne!(application_message_aad(&v), aad, "{v:?}");
+        }
     }
 
     #[test]

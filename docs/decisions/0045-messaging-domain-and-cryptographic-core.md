@@ -12,11 +12,14 @@ never holds decryption keys) and `MANAGED` (server-processable enterprise / regu
 messaging, never presented as E2EE). The proposed protocol is MLS 1.0 (RFC 9420) with
 OpenMLS and the mandatory cipher suite `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`.
 
-The 60-page Part V specification document itself was not available in the implementation
-session; this record is derived from the implementation directive that restates its
-requirements (Parts A–C, I–L, Appendices G, H, L, N). Where the directive refers to
-AD-01 … AD-10 owner decisions, their approval status could not be verified, so every one
-is treated as **not yet approved**.
+The 60-page Part V specification document was not available when this record was first
+written; it was derived from the implementation directive that restates its requirements.
+Revision (18 October 2026): the record has since been reviewed against the specification
+itself (Version 2.0, Appendices G, H, L, N). The exact AD-01 … AD-10 positions, their
+pending status, the threat model, the protocol / version registry and the downgrade rules
+are in `docs/architecture/messaging-security-architecture.md`; the requirement matrix and
+the corrections it led to are in `docs/phases/phase-05/workstreams-a-d-evidence.md`. No
+AD is recorded as approved, so every one is treated as **not yet approved**.
 
 ## Decisions
 

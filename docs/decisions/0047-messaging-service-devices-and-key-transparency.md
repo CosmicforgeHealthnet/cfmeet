@@ -40,6 +40,14 @@ Status: Accepted for the foundation (Part V Workstream C). Builds on ADR 0045 / 
    sharding is a later capacity decision), append-only by trigger. Proofs come from
    O(log² n) stored nodes; clients verify with `cf-messaging-crypto`. Status is reported
    as `UNWITNESSED`: verifiable, NOT anti-equivocation, NOT certified key transparency.
+   Revision (18 October 2026, after the specification review — Part V G.5 "clients cache
+   signed tree heads", §142): every served tree head is signed with a dedicated Ed25519
+   key (`MESSAGING_KT_SIGNING_KEY_FILE`, required; never the service-authentication key)
+   over a length-prefixed encoding of log id, size, root and timestamp
+   (`cf_messaging_crypto::transparency::tree_head_signing_input`). Deterministic Ed25519
+   makes two signed heads with different roots for one size portable evidence of
+   equivocation; detecting it still needs witnesses (AD-05). Without a key the directory
+   and proof routes answer 503 — an unsigned head is never served.
 9. **Content boundary.** `OpaqueCiphertext` (no text accessor, no Display, length-only
    Debug) vs `ManagedContent`, admitted only through the persisted profile
    (`MessagePayload::accept`); bounded `TransportMetadata`. The send engine is Workstream F.

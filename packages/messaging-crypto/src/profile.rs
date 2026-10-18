@@ -2,6 +2,10 @@
 
 use openmls::prelude::{Ciphersuite, ProtocolVersion};
 
+/// The security profile every MLS conversation has (Part V Appendix G). MANAGED
+/// conversations never use this crate's E2EE bindings.
+pub const SECURITY_PROFILE: &str = "PRIVATE_E2EE";
+
 /// Protocol identifier persisted with E2EE conversations and devices: MLS 1.0, RFC 9420.
 pub const PROTOCOL_ID: &str = "MLS_1_0";
 

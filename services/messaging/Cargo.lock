@@ -2279,6 +2279,7 @@ dependencies = [
  "cf-service-auth",
  "chrono",
  "dotenvy",
+ "ed25519-dalek",
  "hex",
  "http-body-util",
  "jsonschema",

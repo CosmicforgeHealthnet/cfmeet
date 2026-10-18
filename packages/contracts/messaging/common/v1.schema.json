@@ -388,12 +388,23 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "logId",
         "treeSize",
         "rootHash",
+        "timestamp",
+        "timestampMicros",
         "hashAlgorithm",
+        "signatureAlgorithm",
+        "keyId",
+        "signature",
         "witnessStatus"
       ],
       "properties": {
+        "logId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.:-]{2,63}$",
+          "description": "The deployment's key-transparency log (stable across key rotation); signed."
+        },
         "treeSize": {
           "type": "integer",
           "minimum": 0
@@ -403,14 +414,39 @@
           "pattern": "^[A-Za-z0-9_-]{43}$",
           "description": "base64url SHA-256 (32 bytes)"
         },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When this head was produced (RFC 3339, microseconds)."
+        },
+        "timestampMicros": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "The same instant in Unix microseconds: exactly what the signature covers."
+        },
         "hashAlgorithm": {
           "const": "RFC9162_SHA256"
+        },
+        "signatureAlgorithm": {
+          "const": "Ed25519"
+        },
+        "keyId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$",
+          "description": "First 8 bytes (hex) of SHA-256 of the log's Ed25519 public key, which clients pin out of band."
+        },
+        "signature": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{86}$",
+          "description": "base64url Ed25519 signature (64 bytes) over the length-prefixed encoding of label 'cfmeet-messaging-kt-tree-head:v1', logId, treeSize (u64 BE), rootHash and timestampMicros (i64 BE) — packages/messaging-crypto transparency::tree_head_signing_input / verify_tree_head_signature (Part V G.5)."
         },
         "witnessStatus": {
           "const": "UNWITNESSED",
           "description": "The log is verifiable but not independently witnessed: not anti-equivocation, not production-certified key transparency."
         }
-      }
+      },
+      "description": "A SIGNED tree head (Part V G.5). The signing key is a server secret distinct from the service-authentication key. Signed but not independently witnessed (AD-05): two valid signatures over different roots for one log and size prove equivocation, but nothing yet forces a log to show every client the same view."
     },
     "DeviceDirectory": {
       "type": "object",
@@ -1221,6 +1257,16 @@
         },
         "sendingEnabled": {
           "type": "boolean"
+        },
+        "messages": {
+          "type": "object",
+          "description": "Message features of later workstreams (replies, threads, reactions, pins): null = not yet available. Platform policy version 2.",
+          "additionalProperties": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
         }
       },
       "description": "Platform defaults merged with the application's overrides (deterministic; stored as an immutable content-addressed snapshot)."

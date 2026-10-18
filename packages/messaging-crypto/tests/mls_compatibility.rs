@@ -203,10 +203,15 @@ fn mls_authenticates_the_application_message_aad_between_two_devices() {
             .unwrap();
     assert_eq!(bob.group_id().as_slice(), group_id);
 
-    let conversation = Uuid::new_v4();
-    let client_message = Uuid::new_v4();
-    let sender_device = Uuid::new_v4();
-    let aad = binding::application_message_aad(conversation, client_message, sender_device);
+    let bound = binding::ApplicationMessageBinding {
+        tenant_id: Uuid::new_v4(),
+        application_id: Uuid::new_v4(),
+        environment_id: Uuid::new_v4(),
+        conversation_id: Uuid::new_v4(),
+        client_message_id: Uuid::new_v4(),
+        sender_device_id: Uuid::new_v4(),
+    };
+    let aad = binding::application_message_aad(&bound);
     let send = |alice: &mut MlsGroup, text: &[u8]| -> Vec<u8> {
         alice.set_aad(aad.clone());
         alice
@@ -227,23 +232,45 @@ fn mls_authenticates_the_application_message_aad_between_two_devices() {
     assert_eq!(processed.aad(), aad.as_slice());
     assert_eq!(
         binding::parse_application_message_aad(processed.aad()),
-        Some((conversation, client_message, sender_device))
+        Some(bound)
     );
     let ProcessedMessageContent::ApplicationMessage(app) = processed.into_content() else {
         panic!("not an application message")
     };
     assert_eq!(app.into_bytes(), b"hello bob");
-    // A server (or anyone) rewriting the AAD — e.g. re-attributing the message to another
-    // conversation — is detected by the recipient.
-    let next = send(&mut alice, b"second");
-    let at = next
-        .windows(aad.len())
-        .position(|w| w == aad.as_slice())
-        .expect("the AAD travels in the clear (authenticated, not encrypted)");
-    let mut forged = next.clone();
-    forged[at + aad.len() - 1] ^= 0x01;
-    assert!(
-        receive(&mut bob, &forged).is_err(),
-        "a rewritten AAD was accepted"
-    );
+    // A server (or anyone) rewriting the AAD is detected by the recipient: re-attributing
+    // the message to another device, transplanting it into another tenant (same length,
+    // still a well-formed AAD) or relabelling its security profile.
+    let tamper = |bob: &mut MlsGroup, alice: &mut MlsGroup, edit: &dyn Fn(&str) -> String| {
+        let next = send(alice, b"next");
+        let at = next
+            .windows(aad.len())
+            .position(|w| w == aad.as_slice())
+            .expect("the AAD travels in the clear (authenticated, not encrypted)");
+        let edited = edit(std::str::from_utf8(&aad).unwrap()).into_bytes();
+        assert_eq!(edited.len(), aad.len(), "same-length rewrite");
+        assert_ne!(edited, aad);
+        let mut forged = next.clone();
+        forged[at..at + aad.len()].copy_from_slice(&edited);
+        assert!(
+            receive(bob, &forged).is_err(),
+            "a rewritten AAD was accepted"
+        );
+        // OpenMLS consumes the generation's key on the failed attempt, so the genuine
+        // copy of THIS message can no longer be decrypted (an injected forgery is a
+        // denial of service, never a confidentiality or integrity break), but the group
+        // is not desynchronised: the next message decrypts.
+        assert!(receive(bob, &next).is_err());
+        let after = send(alice, b"after");
+        assert!(receive(bob, &after).is_ok());
+    };
+    let other_tenant = Uuid::new_v4().hyphenated().to_string();
+    let tenant = bound.tenant_id.hyphenated().to_string();
+    tamper(&mut bob, &mut alice, &|a| a.replace(&tenant, &other_tenant));
+    let device = bound.sender_device_id.hyphenated().to_string();
+    let other_device = Uuid::new_v4().hyphenated().to_string();
+    tamper(&mut bob, &mut alice, &|a| a.replace(&device, &other_device));
+    tamper(&mut bob, &mut alice, &|a| {
+        a.replace("PRIVATE_E2EE", "MANAGED_E2EE")
+    });
 }

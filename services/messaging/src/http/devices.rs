@@ -129,17 +129,30 @@ async fn directory(
     Ok(Json(json!({
         "principalId": principal_id,
         "devices": rows.iter().map(devices::device_view).collect::<Vec<_>>(),
-        "treeHead": tree_head_view(&head),
+        "treeHead": tree_head_view(&state, &head)?,
     })))
 }
 
-fn tree_head_view(head: &transparency::TreeHead) -> Value {
-    json!({
+/// The signed tree head (Part V G.5). Fails closed without a configured signer.
+fn tree_head_view(state: &AppState, head: &transparency::TreeHead) -> Result<Value, ApiError> {
+    let Some(signer) = &state.tree_heads else {
+        tracing::error!("key-transparency tree-head signer not configured");
+        return Err(ApiError::code(ErrorCode::ServiceUnavailable));
+    };
+    let signed = signer.sign(head);
+    Ok(json!({
+        "logId": signed.log_id,
         "treeSize": head.tree_size,
         "rootHash": URL_SAFE_NO_PAD.encode(head.root_hash),
+        "timestamp": head.timestamp.to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+        // Exactly what the signature covers (Unix microseconds; JSON-safe).
+        "timestampMicros": head.timestamp.timestamp_micros(),
         "hashAlgorithm": "RFC9162_SHA256",
+        "signatureAlgorithm": "Ed25519",
+        "keyId": signed.key_id,
+        "signature": URL_SAFE_NO_PAD.encode(signed.signature),
         "witnessStatus": transparency::WITNESS_STATUS,
-    })
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -194,7 +207,7 @@ async fn proofs(
     };
     Ok(Json(json!({
         "deviceId": q.device_id,
-        "treeHead": tree_head_view(&head),
+        "treeHead": tree_head_view(&state, &head)?,
         "entries": entries,
         "consistency": consistency,
     })))

@@ -11,6 +11,7 @@ use crate::{
     },
     domain::SharedClock,
     identity::{cache::CachingAuthority, PrincipalDirectory, Unconfigured},
+    transparency::TreeHeadSigner,
 };
 
 #[derive(Clone)]
@@ -24,6 +25,9 @@ pub struct AppState {
     pub devices: DeviceSettings,
     pub conversations: ConversationSettings,
     pub workers: WorkerSettings,
+    /// Signs every served key-transparency tree head. `None` (not configured): the
+    /// directory / proof endpoints fail closed instead of serving an unsigned head.
+    pub tree_heads: Option<Arc<TreeHeadSigner>>,
 }
 
 impl AppState {
@@ -42,6 +46,7 @@ impl AppState {
             devices: DeviceSettings::default(),
             conversations: ConversationSettings::default(),
             workers: WorkerSettings::default(),
+            tree_heads: None,
         }
     }
 
@@ -62,6 +67,11 @@ impl AppState {
 
     pub fn with_workers(mut self, workers: WorkerSettings) -> Self {
         self.workers = workers;
+        self
+    }
+
+    pub fn with_tree_head_signer(mut self, signer: Arc<TreeHeadSigner>) -> Self {
+        self.tree_heads = Some(signer);
         self
     }
 

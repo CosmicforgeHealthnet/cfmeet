@@ -176,6 +176,88 @@ fn e2ee_content_is_opaque_to_the_backend() {
     assert!(!production.contains("impl From<OpaqueCiphertext>"));
 }
 
+/// Part V §145: managed-content code is never reachable from E2EE storage / delivery
+/// paths. Server-readable content ([`ManagedContent`], `MessagePayload::Managed`) may be
+/// named only by the profile module that separates the two payload kinds; the device,
+/// key-transparency, sequencing and conversation modules (the E2EE paths that exist
+/// today) never name it. The managed message store of Workstream F must be its own
+/// module listed here, never one of the E2EE paths.
+#[test]
+fn managed_content_never_enters_e2ee_paths() {
+    const MANAGED_MODULES: &[&str] = &["src/domain/profile.rs", "src/domain/mod.rs"];
+    for (file, code) in sources() {
+        if MANAGED_MODULES.contains(&file.as_str()) {
+            continue;
+        }
+        for term in ["ManagedContent", "MessagePayload::Managed", "Payload::Managed"] {
+            assert!(
+                !code.contains(term),
+                "{file}: `{term}` — managed (server-readable) content in a non-managed module"
+            );
+        }
+    }
+    // The guard sees the real sources (it would otherwise pass vacuously).
+    let profile = sources()
+        .into_iter()
+        .find(|(f, _)| f == "src/domain/profile.rs")
+        .expect("profile module");
+    assert!(profile.1.contains("pub struct ManagedContent"));
+}
+
+/// Part V §145 / §22: no provider or carrier identifier in Messaging's public contracts
+/// (property names of every schema and OpenAPI document under packages/contracts/messaging).
+#[test]
+fn no_provider_identifiers_in_the_public_contracts() {
+    fn keys(v: &serde_json::Value, out: &mut Vec<String>) {
+        match v {
+            serde_json::Value::Object(m) => {
+                for (k, v) in m {
+                    if let Some(props) = v.as_object().filter(|_| k == "properties") {
+                        out.extend(props.keys().cloned());
+                    }
+                    keys(v, out);
+                }
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|v| keys(v, out)),
+            _ => {}
+        }
+    }
+    fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+        for e in fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "json") {
+                out.push(p);
+            }
+        }
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/contracts/messaging");
+    let mut files = Vec::new();
+    walk(&root, &mut files);
+    assert!(files.len() >= 3, "the Messaging contracts are present");
+    let forbidden = [
+        "provider", "carrier", "twilio", "vonage", "plivo", "sinch", "messagebird",
+        "sendbird", "firebase", "livekit", "telnyx", "bandwidth",
+    ];
+    let mut names = Vec::new();
+    for f in &files {
+        let doc: serde_json::Value = serde_json::from_str(&fs::read_to_string(f).unwrap()).unwrap();
+        let mut ks = Vec::new();
+        keys(&doc, &mut ks);
+        for k in ks {
+            let lower = k.to_lowercase();
+            assert!(
+                !forbidden.iter().any(|w| lower.contains(w)),
+                "{}: property `{k}` names a provider / carrier",
+                f.display()
+            );
+            names.push(k);
+        }
+    }
+    assert!(names.iter().any(|n| n == "securityProfile"), "walked real schemas");
+}
+
 #[test]
 fn keys_tokens_and_content_are_never_logged() {
     for (file, code) in sources() {

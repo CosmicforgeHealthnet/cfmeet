@@ -544,25 +544,25 @@
     },
     {
       "id": "cfmeet.messaging.common",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "messaging/common/v1.schema.json",
       "owner": "messaging",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Messaging vocabulary and messages (Part V C): error envelope, security profiles, protocol and the single accepted MLS cipher suite, devices and their PUBLIC MLS material, registration challenges, KeyPackage publication, revocation, the key-transparency tree head and RFC 9162 proofs (UNWITNESSED). Never a private key, group secret, ciphertext or plaintext. 1.1.0 conversations (eight generic context classes, opaque context references, persisted security profile with MLS binding, lifecycle), the application messaging policy and its effective snapshot (Part V D)."
+      "description": "Messaging vocabulary and messages (Part V C): error envelope, security profiles, protocol and the single accepted MLS cipher suite, devices and their PUBLIC MLS material, registration challenges, KeyPackage publication, revocation, the key-transparency tree head and RFC 9162 proofs (UNWITNESSED). Never a private key, group secret, ciphertext or plaintext. 1.1.0 conversations (eight generic context classes, opaque context references, persisted security profile with MLS binding, lifecycle), the application messaging policy and its effective snapshot (Part V D). 1.2.0 signed key-transparency tree heads (log id, timestamp, Ed25519 signature, key id; Part V G.5) and the effective policy's message features (§28; platform policy version 2: SUPPORT defaults to PRIVATE_E2EE, Appendix G)."
     },
     {
       "id": "cfmeet.messaging.http-api",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "openapi",
       "path": "messaging/http/v1.openapi.json",
       "owner": "messaging",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface of services/messaging, served at /openapi.json: health, readiness and the device / key-directory API under /v1/messaging (Platform Access credential, scopes messages.send / messages.read, verified acting principal). 1.1.0 /v1/conversations (create with Idempotency-Key, list, get, lifecycle PATCH) and /v1/messaging/policy (Part V D)."
+      "description": "HTTP surface of services/messaging, served at /openapi.json: health, readiness and the device / key-directory API under /v1/messaging (Platform Access credential, scopes messages.send / messages.read, verified acting principal). 1.1.0 /v1/conversations (create with Idempotency-Key, list, get, lifecycle PATCH) and /v1/messaging/policy (Part V D). 1.2.0 tree heads in the device directory and transparency proofs are signed; without a configured signing key those routes answer 503 (never an unsigned head)."
     },
     {
       "id": "cfmeet.messaging.event",

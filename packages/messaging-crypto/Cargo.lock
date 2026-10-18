@@ -141,6 +141,7 @@ dependencies = [
  "openmls",
  "openmls_basic_credential",
  "openmls_rust_crypto",
+ "serde_json",
  "sha2 0.10.9",
  "thiserror",
  "uuid",

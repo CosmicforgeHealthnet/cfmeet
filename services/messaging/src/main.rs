@@ -50,6 +50,12 @@ async fn main() -> anyhow::Result<()> {
     let service_auth = settings
         .load(Arc::new(cf_service_auth::SystemClock))
         .unwrap_or_else(|e| fatal("service authentication configuration error", e));
+    let tree_heads = Arc::new(
+        config
+            .transparency
+            .load()
+            .unwrap_or_else(|e| fatal("key-transparency configuration error", e)),
+    );
     let runtime = service_auth.signer().runtime_environment();
     if !config.devices.enabled {
         tracing::warn!("E2EE device registration and KeyPackage publication are disabled (MESSAGING_E2EE_DEVICES_ENABLED)");
@@ -104,7 +110,8 @@ async fn main() -> anyhow::Result<()> {
         )))
         .with_devices(config.devices)
         .with_conversations(config.conversations)
-        .with_workers(config.workers);
+        .with_workers(config.workers)
+        .with_tree_head_signer(tree_heads);
     tokio::spawn(messaging::conversations::service::run_expiry(
         state.clone(),
         config.conversations.expiry_interval,

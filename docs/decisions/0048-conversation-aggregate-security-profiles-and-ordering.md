@@ -23,8 +23,9 @@ Status: Accepted (Part V Workstream D). Builds on ADR 0045–0047.
    immutable; the API refuses a change with `SECURITY_PROFILE_IMMUTABLE`. Changing profile
    requires a new (successor) conversation — the successor workflow is a later workstream.
 4. **Profile selection, never a fallback.** Effective policy = explicit platform defaults
-   (PRIVATE_E2EE default for every context except SUPPORT, which needs an application
-   choice; MANAGED never available by default; later-workstream features explicitly
+   (PRIVATE_E2EE default for every context class, SUPPORT included — Appendix G;
+   platform policy version 2 — MANAGED never available by default and never a default
+   by itself; later-workstream features explicitly
    off / unset; legal hold eligible only where MANAGED is allowed; SMS Bridge never) merged
    with validated, versioned application overrides (`PUT /v1/messaging/policy`,
    `conversations.manage`, optimistic concurrency, audited, evented). A PRIVATE_E2EE
@@ -53,17 +54,25 @@ Status: Accepted (Part V Workstream D). Builds on ADR 0045–0047.
 9. **Ordering foundation.** A transactional per-conversation counter in its own table
    (`allocate_sequence`; gap-free per committed transaction, never Redis-only; capacity
    certification later). Because MLS messages are encrypted before the server assigns
-   sequence / id, the client authenticates only what it knows — the AAD
-   `cfmeet-messaging-aad:v1:<conversation>:<client message id>:<sender device>`
-   (proven with a real two-device OpenMLS group: delivered intact, rewritten AAD rejected)
-   — and the server binds its sequence and message id to the SHA-256 of the exact
-   ciphertext in a length-prefixed acceptance record (`AcceptanceRecord::digest`).
+   sequence / id, the client authenticates only what it knows — the AAD (Appendix H.1)
+   `cfmeet-messaging-aad:v2:PRIVATE_E2EE:MLS_1_0:<suite>:<tenant>:<application>:<environment>:<conversation>:<client message id>:<sender device>`
+   (proven with a real two-device OpenMLS group: delivered intact; rewritten tenant,
+   device or profile rejected) — and the server binds its sequence and message id to the
+   SHA-256 of the exact ciphertext, the same scope and the profile / protocol / suite in a
+   length-prefixed acceptance record (`AcceptanceRecord::digest`, label
+   `cfmeet-messaging-acceptance:v2`). Revision 2 (18 October 2026, after the
+   specification review): v1 bound only conversation / client message / device, short of
+   H.1; no v1 value was ever persisted (the send path is Workstream F). A forged copy
+   injected before the genuine message makes OpenMLS consume that generation's key, so
+   the genuine copy fails too: a denial of service consistent with the G.2 threat model,
+   never a confidentiality or integrity break.
    Storing acceptance records and the send path are Workstream F.
 10. **Events.** `messaging.conversation.created`, `.lifecycle-changed`, `.updated` and
     `messaging.policy.updated` commit atomically with their state (transactional outbox).
 
 ## Open items (owner decisions / later workstreams)
 
-The platform default profile per context (notably SUPPORT, MEETING and TRANSACTION) is
-this record's proposal pending the specification owner's AD approvals; successor
+The per-context defaults now follow Part V Appendix G (reviewed 18 October 2026; version 1
+of the platform policy left SUPPORT without a default, which the specification does not
+allow). Successor
 conversations for profile changes; membership (E), send engine (F), realtime (I).

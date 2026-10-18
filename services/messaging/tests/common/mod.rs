@@ -372,7 +372,10 @@ impl Harness {
         ));
         let mut state = AppState::new(db.conn.clone(), Arc::new(clock.clone()), caching, runtime)
             .with_principals(principals.clone())
-            .with_devices(DeviceSettings::default());
+            .with_devices(DeviceSettings::default())
+            .with_tree_head_signer(Arc::new(messaging::transparency::TreeHeadSigner::generate(
+                "cfmeet-messaging:test",
+            )));
         configure(&mut state);
         Self {
             db,

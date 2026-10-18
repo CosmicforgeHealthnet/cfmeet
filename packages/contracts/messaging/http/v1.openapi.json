@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging API",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are refused with CLIENT_TOKENS_NOT_ENABLED). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB."
   },
   "paths": {
@@ -340,7 +340,7 @@
             "customerCredential": []
           }
         ],
-        "description": "Scope messages.read. The ACTIVE devices (public keys) of an ACTIVE messaging principal of the credential's own environment; any other principal is NOT_FOUND. Rate-limited per credential.",
+        "description": "Scope messages.read. The ACTIVE devices (public keys) of an ACTIVE messaging principal of the credential's own environment; any other principal is NOT_FOUND. Rate-limited per credential. The tree head is signed with the log's Ed25519 key (Part V G.5); without a configured signing key the route answers 503, never an unsigned head.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -400,7 +400,7 @@
             "customerCredential": []
           }
         ],
-        "description": "Scope messages.read. Inclusion proofs (RFC 9162) of a device's log entries against the current tree head and, with fromTreeSize, a consistency proof. The log is UNWITNESSED: verifiable, not anti-equivocation.",
+        "description": "Scope messages.read. Inclusion proofs (RFC 9162) of a device's log entries against the current tree head and, with fromTreeSize, a consistency proof. The log is UNWITNESSED: verifiable, not anti-equivocation. The tree head is signed with the log's Ed25519 key (Part V G.5); without a configured signing key the route answers 503, never an unsigned head.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",

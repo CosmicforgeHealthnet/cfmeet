@@ -66,3 +66,10 @@ Its own image (`services/messaging/Dockerfile`, repository-root context) and its
 release. Nothing deploys it automatically, and it is never part of the Meeting Service
 deployment. E2EE device operations are disabled in staging / production until
 `MESSAGING_E2EE_DEVICES_ENABLED=true` is set after the owner decisions of ADR 0045.
+
+Key-transparency tree heads are signed (Part V G.5) with the Ed25519 key in
+`MESSAGING_KT_SIGNING_KEY_FILE` for the log `MESSAGING_KT_LOG_ID`; both are required.
+The key is a server secret separate from the service-authentication key; its public key
+is what clients pin (the `keyId` of every head is the first 8 bytes of its SHA-256).
+Signed heads are still `UNWITNESSED` (AD-05). Security architecture, AD register and
+threat model: `docs/architecture/messaging-security-architecture.md`.

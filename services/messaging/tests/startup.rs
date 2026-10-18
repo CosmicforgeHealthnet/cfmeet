@@ -22,6 +22,9 @@ impl Files {
         std::fs::create_dir_all(&dir).unwrap();
         let key = common::key("messaging-test-1");
         std::fs::write(dir.join("key.pem"), key.to_pkcs8_pem().as_bytes()).unwrap();
+        // A separate Ed25519 key signs key-transparency tree heads (never the service key).
+        let kt = common::key("messaging-kt-1");
+        std::fs::write(dir.join("kt.pem"), kt.to_pkcs8_pem().as_bytes()).unwrap();
         std::fs::write(
             dir.join("trust.json"),
             serde_json::json!({
@@ -60,6 +63,11 @@ impl Files {
             ),
             ("MESSAGING_BIND_ADDRESS".into(), bind.into()),
             ("MESSAGING_AUTH_CACHE_TTL_SECONDS".into(), "0".into()),
+            (
+                "MESSAGING_KT_LOG_ID".into(),
+                "cfmeet-messaging:startup".into(),
+            ),
+            ("MESSAGING_KT_SIGNING_KEY_FILE".into(), self.path("kt.pem")),
         ]
     }
 }
@@ -133,6 +141,22 @@ async fn configuration_fails_closed() {
         without(&env, "DATABASE_URL"),
         &cwd,
         "DATABASE_URL is not set",
+    )
+    .await;
+    refuses(
+        without(&env, "MESSAGING_KT_SIGNING_KEY_FILE"),
+        &cwd,
+        "MESSAGING_KT_SIGNING_KEY_FILE is not set",
+    )
+    .await;
+    refuses(
+        with(
+            &env,
+            "MESSAGING_KT_SIGNING_KEY_FILE",
+            &files.path("trust.json"),
+        ),
+        &cwd,
+        "MESSAGING_KT_SIGNING_KEY_FILE is invalid",
     )
     .await;
     refuses(

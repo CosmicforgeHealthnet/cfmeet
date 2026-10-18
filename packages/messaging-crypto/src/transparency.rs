@@ -11,15 +11,64 @@
 //! * [`verify_inclusion`] and [`verify_consistency`] are the RFC 9162 §2.1.3.2 /
 //!   §2.1.4.2 verification algorithms, for clients and auditors.
 //!
+//! * Signed tree heads (Part V G.5): the log operator signs
+//!   [`tree_head_signing_input`] — a length-prefixed encoding of the log id, tree size,
+//!   root hash and timestamp — with an Ed25519 key that is a SERVER secret (§142), and
+//!   clients verify it with [`verify_tree_head_signature`] (OpenMLS's RustCrypto
+//!   `verify_strict`; no primitive is implemented here). Ed25519 is deterministic, so two
+//!   valid signatures over different roots for the same log and size are portable
+//!   evidence of equivocation.
+//!
 //! This is a verifiable append-only structure. On its own it does NOT prevent a
 //! malicious log from showing different views to different clients (equivocation): that
-//! needs independent witnesses / gossip, an open architecture decision (ADR 0045).
+//! needs independent witnesses / gossip (AD-05), an open architecture decision
+//! (ADR 0045).
 
 use std::collections::BTreeSet;
 
+use openmls::prelude::{OpenMlsCrypto, SignatureScheme};
+use openmls_rust_crypto::RustCrypto;
 use sha2::{Digest, Sha256};
 
 pub type Hash = [u8; 32];
+
+/// Domain separation of the signed tree head.
+pub const TREE_HEAD_LABEL: &[u8] = b"cfmeet-messaging-kt-tree-head:v1";
+
+/// Length of an Ed25519 tree-head signature.
+pub const TREE_HEAD_SIGNATURE_LEN: usize = 64;
+
+/// The bytes a log operator signs for one tree head: every field length-prefixed
+/// (u32 big-endian), in order — label, log id (UTF-8), tree size (u64 BE), root hash,
+/// timestamp (Unix microseconds, i64 BE).
+pub fn tree_head_signing_input(
+    log_id: &str,
+    tree_size: u64,
+    root_hash: &Hash,
+    timestamp_micros: i64,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(128);
+    for field in [
+        TREE_HEAD_LABEL,
+        log_id.as_bytes(),
+        &tree_size.to_be_bytes(),
+        root_hash,
+        &timestamp_micros.to_be_bytes(),
+    ] {
+        out.extend_from_slice(&(field.len() as u32).to_be_bytes());
+        out.extend_from_slice(field);
+    }
+    out
+}
+
+/// Whether `signature` is a valid Ed25519 signature of `input` under `public_key`
+/// (32 bytes). Strict verification; any malformed key or signature is `false`.
+pub fn verify_tree_head_signature(public_key: &[u8], input: &[u8], signature: &[u8]) -> bool {
+    signature.len() == TREE_HEAD_SIGNATURE_LEN
+        && RustCrypto::default()
+            .verify_signature(SignatureScheme::ED25519, input, public_key, signature)
+            .is_ok()
+}
 
 /// Coordinates of a stored perfect subtree.
 pub type NodeId = (u32, u64);
@@ -319,6 +368,59 @@ pub fn verify_consistency(
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+
+    fn hex(s: &str) -> Vec<u8> {
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    /// RFC 8032 §7.1 TEST 1 and TEST 2 (Ed25519 known answers).
+    #[test]
+    fn tree_head_verification_accepts_rfc_8032_vectors_and_nothing_else() {
+        let cases = [
+            (
+                "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+                "",
+                "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b",
+            ),
+            (
+                "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+                "72",
+                "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00",
+            ),
+        ];
+        for (pk, msg, sig) in cases {
+            let (pk, msg, sig) = (hex(pk), hex(msg), hex(sig));
+            assert!(verify_tree_head_signature(&pk, &msg, &sig));
+            let mut bad = sig.clone();
+            bad[0] ^= 1;
+            assert!(!verify_tree_head_signature(&pk, &msg, &bad));
+            let mut other = msg.clone();
+            other.push(0);
+            assert!(!verify_tree_head_signature(&pk, &other, &sig));
+            assert!(!verify_tree_head_signature(&pk[..31], &msg, &sig));
+            assert!(!verify_tree_head_signature(&pk, &msg, &sig[..63]));
+        }
+    }
+
+    #[test]
+    fn tree_head_signing_input_is_unambiguous() {
+        let root = [7u8; 32];
+        let base = tree_head_signing_input("log-a", 5, &root, 1_800_000_000_000_000);
+        assert!(base.starts_with(&(TREE_HEAD_LABEL.len() as u32).to_be_bytes()));
+        for other in [
+            tree_head_signing_input("log-b", 5, &root, 1_800_000_000_000_000),
+            tree_head_signing_input("log-a", 6, &root, 1_800_000_000_000_000),
+            tree_head_signing_input("log-a", 5, &[8u8; 32], 1_800_000_000_000_000),
+            tree_head_signing_input("log-a", 5, &root, 1_800_000_000_000_001),
+            // A longer log id cannot absorb the size field.
+            tree_head_signing_input("log-a\0\0\0\x08", 5, &root, 1_800_000_000_000_000),
+        ] {
+            assert_ne!(other, base);
+        }
+    }
 
     use super::*;
 

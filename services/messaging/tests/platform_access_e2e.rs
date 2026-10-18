@@ -73,6 +73,8 @@ struct World {
     operator: Arc<ServiceTokenSigner>,
     messaging_bin: PathBuf,
     messaging_env: Vec<(String, String)>,
+    /// The key-transparency log key a client pins (out of band).
+    kt_public_key: [u8; 32],
 }
 
 impl World {
@@ -235,6 +237,17 @@ async fn setup(admin: &str) -> Option<World> {
         messaging_key.to_pkcs8_pem().as_bytes(),
     )
     .unwrap();
+    // A SEPARATE Ed25519 key signs key-transparency tree heads (Part V G.5 / §142).
+    let kt_key = ServiceSigningKey::generate(KeyId::parse("messaging-kt-1").unwrap());
+    let kt_pem = kt_key.to_pkcs8_pem();
+    std::fs::write(dir.join("messaging-kt.pem"), kt_pem.as_bytes()).unwrap();
+    let kt_public_key = {
+        use ed25519_dalek::pkcs8::DecodePrivateKey as _;
+        ed25519_dalek::SigningKey::from_pkcs8_pem(&kt_pem)
+            .unwrap()
+            .verifying_key()
+            .to_bytes()
+    };
     // Platform Access trusts Messaging with EXACTLY its three permissions (ADR 0046).
     std::fs::write(
         dir.join("pa-trust.json"),
@@ -304,6 +317,11 @@ async fn setup(admin: &str) -> Option<World> {
         ("CF_PLATFORM_ACCESS_BASE_URL".into(), pa_url.clone()),
         ("MESSAGING_AUTH_CACHE_TTL_SECONDS".into(), "30".into()),
         ("MESSAGING_IDENTITY_FEED_INTERVAL_MS".into(), "250".into()),
+        ("MESSAGING_KT_LOG_ID".into(), "cfmeet-messaging:e2e".into()),
+        (
+            "MESSAGING_KT_SIGNING_KEY_FILE".into(),
+            dir.join("messaging-kt.pem").display().to_string(),
+        ),
     ];
     Some(World {
         dir,
@@ -314,6 +332,7 @@ async fn setup(admin: &str) -> Option<World> {
         operator,
         messaging_bin: PathBuf::from(env!("CARGO_BIN_EXE_messaging")),
         messaging_env,
+        kt_public_key,
     })
 }
 
@@ -483,6 +502,58 @@ async fn a_to_d_foundation_certification_across_real_services() {
         .try_get_by_index(0)
         .unwrap();
     assert_eq!(stored_key, alice_device.signature_public_key());
+    // The device's key-transparency entry is included under a tree head signed by the log
+    // key the client pinned (Part V G.5); the head is still UNWITNESSED (AD-05).
+    let (s, proofs) = m
+        .call(
+            M::GET,
+            &token,
+            Some(bob),
+            &format!(
+                "/v1/messaging/key-transparency/proofs?deviceId={}",
+                alice_device.device_id()
+            ),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(s, 200, "{proofs}");
+    let head = &proofs["treeHead"];
+    assert_eq!(head["witnessStatus"], "UNWITNESSED");
+    let unb64 = |v: &Value| {
+        use base64::Engine as _;
+        base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(v.as_str().unwrap())
+            .unwrap()
+    };
+    let root: [u8; 32] = unb64(&head["rootHash"]).try_into().unwrap();
+    let input = cf_messaging_crypto::transparency::tree_head_signing_input(
+        head["logId"].as_str().unwrap(),
+        head["treeSize"].as_u64().unwrap(),
+        &root,
+        head["timestampMicros"].as_i64().unwrap(),
+    );
+    assert!(
+        cf_messaging_crypto::transparency::verify_tree_head_signature(
+            &world.kt_public_key,
+            &input,
+            &unb64(&head["signature"])
+        )
+    );
+    let entry = &proofs["entries"][0];
+    let proof: Vec<[u8; 32]> = entry["inclusionProof"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| unb64(h).try_into().unwrap())
+        .collect();
+    assert!(cf_messaging_crypto::transparency::verify_inclusion(
+        entry["leafIndex"].as_u64().unwrap(),
+        head["treeSize"].as_u64().unwrap(),
+        &cf_messaging_crypto::transparency::leaf_hash(&unb64(&entry["leafData"])),
+        &proof,
+        &root
+    ));
     // 7-8. A conversation with an approved context and profile, durable in Messaging's DB.
     let (s, conv) = m
         .call(

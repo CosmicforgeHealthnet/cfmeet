@@ -384,14 +384,18 @@ async fn every_context_class_follows_its_persisted_policy() {
     };
     let c = h.customer(ALL);
     let (alice, bob) = h.pair(&c).await;
-    // SUPPORT has no platform default profile: the application must choose.
+    // Every context — SUPPORT included — defaults to PRIVATE_E2EE (Appendix G).
     let r = h
-        .create(&c, alice, json!({ "contextClass": "SUPPORT" }), &key())
+        .create(
+            &c,
+            alice,
+            json!({ "contextClass": "SUPPORT", "context": { "namespace": "cases", "reference": "case:1" } }),
+            &key(),
+        )
         .await;
-    assert_eq!(
-        (r.code(), r.reason()),
-        ("SECURITY_PROFILE_NOT_ALLOWED", "NO_DEFAULT_PROFILE")
-    );
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    assert_eq!(r.json["securityProfile"], "PRIVATE_E2EE");
+    assert_eq!(r.json["policy"]["platformPolicyVersion"], 2);
     let r = h
         .create(&c, alice, json!({ "contextClass": "ORDER" }), &key())
         .await;
@@ -400,7 +404,6 @@ async fn every_context_class_follows_its_persisted_policy() {
         &c,
         0,
         json!({ "contexts": {
-            "SUPPORT": { "allowedProfiles": ["PRIVATE_E2EE"], "defaultProfile": "PRIVATE_E2EE" },
             "MEETING": { "enabled": false }
         } }),
     )
@@ -453,6 +456,32 @@ async fn every_context_class_follows_its_persisted_policy() {
         8,
         "all eight context classes"
     );
+    // A context allowing only MANAGED has no default: the creator must choose it
+    // explicitly — never a fallback from PRIVATE_E2EE to MANAGED.
+    let r = h
+        .put_policy(
+            &c,
+            2,
+            json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED"] } } }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let r = h
+        .create(&c, alice, json!({ "contextClass": "GROUP" }), &key())
+        .await;
+    assert_eq!(
+        (r.code(), r.reason()),
+        ("SECURITY_PROFILE_NOT_ALLOWED", "NO_DEFAULT_PROFILE")
+    );
+    let r = h
+        .create(
+            &c,
+            alice,
+            json!({ "contextClass": "GROUP", "securityProfile": "PRIVATE_E2EE" }),
+            &key(),
+        )
+        .await;
+    assert_eq!(r.code(), "SECURITY_PROFILE_NOT_ALLOWED");
 }
 
 #[tokio::test]

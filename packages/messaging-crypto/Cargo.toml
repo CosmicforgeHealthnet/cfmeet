@@ -37,4 +37,6 @@ thiserror = "2"
 uuid = "1"
 
 [dev-dependencies]
+# Reads the RFC 9420 published test vectors (tests/rfc9420_vectors.rs).
+serde_json = "1"
 uuid = { version = "1", features = ["v4"] }

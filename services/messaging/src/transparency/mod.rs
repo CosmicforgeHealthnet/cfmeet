@@ -6,9 +6,14 @@
 //!   order is the commit order. (One head serializes all appends — sufficient for the
 //!   foundation; a sharded / batched log is a later capacity decision.)
 //! * Proofs are computed from O(log² n) stored nodes, never by rehashing the log.
+//! * Every tree head served is SIGNED ([`TreeHeadSigner`], Part V G.5): Ed25519 over
+//!   [`cf_messaging_crypto::transparency::tree_head_signing_input`] with a dedicated
+//!   server key (§142) — never the service-authentication key. Without a configured
+//!   signer the proof / directory endpoints fail closed; an unsigned head is never served.
 //! * Status is explicit: [`WITNESS_STATUS`] — the log is verifiable (inclusion /
-//!   consistency) but NOT independently witnessed, so it does not by itself prevent
-//!   equivocation and is not production-certified key transparency (ADR 0045 / 0047).
+//!   consistency, signed heads) but NOT independently witnessed, so it does not by itself
+//!   prevent equivocation and is not production-certified key transparency (AD-05,
+//!   ADR 0045 / 0047).
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -17,6 +22,7 @@ use cf_messaging_crypto::transparency::{self as kt, Hash, NodeId};
 use chrono::{DateTime, SecondsFormat, Utc};
 use sea_orm::{ConnectionTrait, FromQueryResult};
 use serde::Serialize;
+use sha2::Digest as _;
 use uuid::Uuid;
 
 use crate::{
@@ -98,17 +104,115 @@ impl LeafEntry {
     }
 }
 
-/// A signed-off view of the log.
+/// The log's current state (signed when served: [`TreeHeadSigner::sign`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TreeHead {
     pub tree_size: u64,
     pub root_hash: Hash,
+    /// When this head was produced (the append that last changed it), microseconds.
+    pub timestamp: DateTime<Utc>,
 }
 
 #[derive(FromQueryResult)]
 struct HeadRow {
     tree_size: i64,
     root_hash: Vec<u8>,
+    updated_at: DateTime<Utc>,
+}
+
+/// Truncates to the microsecond precision PostgreSQL stores (and the signature covers).
+fn micros(t: DateTime<Utc>) -> DateTime<Utc> {
+    DateTime::from_timestamp_micros(t.timestamp_micros()).unwrap_or(t)
+}
+
+/// Signs tree heads for one log with a dedicated Ed25519 key (a server secret, §142).
+pub struct TreeHeadSigner {
+    log_id: String,
+    key: ed25519_dalek::SigningKey,
+    key_id: String,
+}
+
+impl std::fmt::Debug for TreeHeadSigner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TreeHeadSigner")
+            .field("log_id", &self.log_id)
+            .field("key_id", &self.key_id)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A tree head with its signature.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignedTreeHead {
+    pub head: TreeHead,
+    pub log_id: String,
+    pub key_id: String,
+    pub signature: [u8; 64],
+}
+
+/// Whether `log_id` is an acceptable log identifier (`[a-z0-9][a-z0-9.:-]{2,63}`).
+pub fn valid_log_id(log_id: &str) -> bool {
+    (3..=64).contains(&log_id.len())
+        && log_id.bytes().enumerate().all(|(i, b)| {
+            b.is_ascii_lowercase()
+                || b.is_ascii_digit()
+                || (i > 0 && matches!(b, b'.' | b':' | b'-'))
+        })
+}
+
+impl TreeHeadSigner {
+    /// `None` when `log_id` is not a valid log identifier.
+    pub fn new(log_id: &str, key: ed25519_dalek::SigningKey) -> Option<Self> {
+        if !valid_log_id(log_id) {
+            return None;
+        }
+        let public = key.verifying_key().to_bytes();
+        let digest: [u8; 32] = sha2::Sha256::digest(public).into();
+        let key_id = digest[..8].iter().map(|b| format!("{b:02x}")).collect();
+        Some(Self {
+            log_id: log_id.to_owned(),
+            key,
+            key_id,
+        })
+    }
+
+    /// A signer with a fresh random key (tests and local tooling only).
+    pub fn generate(log_id: &str) -> Self {
+        use rand::RngCore;
+        let mut seed = zeroize::Zeroizing::new([0u8; 32]);
+        rand::rngs::OsRng.fill_bytes(seed.as_mut());
+        Self::new(log_id, ed25519_dalek::SigningKey::from_bytes(&seed)).expect("valid log id")
+    }
+
+    pub fn log_id(&self) -> &str {
+        &self.log_id
+    }
+
+    /// First 8 bytes (hex) of SHA-256 of the public key: which pinned key signed.
+    pub fn key_id(&self) -> &str {
+        &self.key_id
+    }
+
+    /// The 32-byte Ed25519 public key clients pin.
+    pub fn public_key(&self) -> [u8; 32] {
+        self.key.verifying_key().to_bytes()
+    }
+
+    pub fn sign(&self, head: &TreeHead) -> SignedTreeHead {
+        use ed25519_dalek::Signer as _;
+        let input = kt::tree_head_signing_input(
+            &self.log_id,
+            head.tree_size,
+            &head.root_hash,
+            head.timestamp.timestamp_micros(),
+        );
+        SignedTreeHead {
+            head: *head,
+            log_id: self.log_id.clone(),
+            key_id: self.key_id.clone(),
+            signature: self.key.sign(&input).to_bytes(),
+        }
+    }
 }
 
 #[derive(FromQueryResult)]
@@ -126,9 +230,9 @@ fn hash32(bytes: &[u8]) -> Result<Hash> {
 
 async fn head<C: ConnectionTrait>(db: &C, lock: bool) -> Result<TreeHead> {
     let sql = if lock {
-        "SELECT tree_size, root_hash FROM messaging_transparency_head WHERE id = 1 FOR UPDATE"
+        "SELECT tree_size, root_hash, updated_at FROM messaging_transparency_head WHERE id = 1 FOR UPDATE"
     } else {
-        "SELECT tree_size, root_hash FROM messaging_transparency_head WHERE id = 1"
+        "SELECT tree_size, root_hash, updated_at FROM messaging_transparency_head WHERE id = 1"
     };
     let row: HeadRow = db::one(db, sql, vec![])
         .await?
@@ -136,6 +240,7 @@ async fn head<C: ConnectionTrait>(db: &C, lock: bool) -> Result<TreeHead> {
     Ok(TreeHead {
         tree_size: row.tree_size as u64,
         root_hash: hash32(&row.root_hash)?,
+        timestamp: micros(row.updated_at),
     })
 }
 
@@ -222,7 +327,7 @@ pub async fn append<C: ConnectionTrait>(
     db::exec(
         db,
         "UPDATE messaging_transparency_head SET tree_size = $1, root_hash = $2, updated_at = $3 WHERE id = 1",
-        vec![(size as i64).into(), root.to_vec().into(), now.into()],
+        vec![(size as i64).into(), root.to_vec().into(), micros(now).into()],
     )
     .await?;
     Ok(index)
