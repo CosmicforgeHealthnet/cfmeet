@@ -810,6 +810,36 @@ mod tests {
     }
 
     #[test]
+    fn messaging_flows_are_least_privilege() {
+        // Part V A–D: no service calls Messaging internally, and Messaging holds nothing
+        // beyond what the registry lists for it explicitly (never a sensitive grant).
+        let receiving: Vec<_> = REGISTRY
+            .iter()
+            .filter(|d| d.receiver == services::MESSAGING)
+            .map(|d| d.name)
+            .collect();
+        assert!(
+            receiving.is_empty(),
+            "no service may call Messaging internally yet: {receiving:?}"
+        );
+        let granted: Vec<_> = REGISTRY
+            .iter()
+            .filter(|d| d.grantable_to.contains(&services::MESSAGING))
+            .map(|d| d.name)
+            .collect();
+        assert_eq!(
+            granted, MESSAGING_GRANTS,
+            "Messaging's grantable permissions"
+        );
+        for d in REGISTRY.iter().filter(|d| d.sensitive) {
+            assert!(!d.grantable_to.contains(&services::MESSAGING), "{}", d.name);
+        }
+    }
+
+    /// Every permission Messaging may ever be granted (registry order).
+    const MESSAGING_GRANTS: &[&str] = &[];
+
+    #[test]
     fn wildcard_like_values_are_detected() {
         for bad in [
             "*",

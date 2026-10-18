@@ -93,14 +93,14 @@
     },
     {
       "id": "cfmeet.platform.common",
-      "version": "1.9.0",
+      "version": "1.9.1",
       "kind": "json-schema",
       "path": "platform/common/v1.schema.json",
       "owner": "platform",
       "visibility": "internal",
       "lifecycle": "stable",
       "authority": "contract-first",
-      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M). 1.9.0 number-usage.report, number-risk.report and number-relay.lease (Part IV S, T and P §§119–120)."
+      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M). 1.9.0 number-usage.report, number-risk.report and number-relay.lease (Part IV S, T and P §§119–120). 1.9.1 cfmeet.messaging named as a service identity (Part V A)."
     },
     {
       "id": "cfmeet.platform.service-token-header",

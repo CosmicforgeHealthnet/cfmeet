@@ -1,6 +1,7 @@
 name: Dependency and image security
 
-# Part K section 109 / Part J section 97: supply-chain gates for the Part III services.
+# Part K section 109 / Part J section 97: supply-chain gates for the Part III services
+# (and the Part V Messaging cryptographic core).
 #
 #  * RustSec advisories for every Calling / Privacy Relay / Telephony / shared-package
 #    lockfile (cargo-audit). A vulnerability fails the job; an advisory is ignored only
@@ -54,6 +55,7 @@ jobs:
           - packages/webhooks
           - packages/object-storage
           - packages/contracts/validator
+          - packages/messaging-crypto
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -63,9 +65,26 @@ jobs:
       # linked only through jsonwebtoken's rust_crypto backend. No Part III code loads,
       # accepts or uses an RSA key: service tokens are EdDSA-only (RS256 is rejected by
       # packages/service-auth, tested), signaling / media credentials are HS256.
+      #
+      # RUSTSEC-2026-0330 / RUSTSEC-2026-0331 (libcrux-kem 0.0.9; packages/messaging-crypto
+      # only): hpke-rs 0.7.0 pins its optional libcrux backend (hpke-rs-libcrux =0.7.0 ->
+      # libcrux-kem 0.0.9), so the crate is in the lockfile, but the backend is never
+      # enabled: OpenMLS uses the RustCrypto HPKE backend. The step below proves
+      # libcrux-kem is in no build graph (any target, all features); the ignore is lifted
+      # when hpke-rs releases a fixed pin (ADR 0045).
+      - name: libcrux-kem is never compiled into the Messaging crypto core
+        if: matrix.lockfile == 'packages/messaging-crypto'
+        working-directory: ${{ matrix.lockfile }}
+        run: |
+          set -euo pipefail
+          out="$(cargo tree --locked -e all --all-features --target all -i libcrux-kem 2>&1 || true)"
+          echo "$out" | grep -q "nothing to print" \
+            || { echo "$out"; echo "::error::libcrux-kem is linked; the advisory ignore no longer holds"; exit 1; }
       - name: cargo audit
         working-directory: ${{ matrix.lockfile }}
-        run: cargo audit --ignore RUSTSEC-2023-0071
+        run: >-
+          cargo audit --ignore RUSTSEC-2023-0071
+          ${{ matrix.lockfile == 'packages/messaging-crypto' && '--ignore RUSTSEC-2026-0330 --ignore RUSTSEC-2026-0331' || '' }}
 
   image:
     name: image security (${{ matrix.service }})
