@@ -148,7 +148,9 @@ pub fn encrypt_attachment(
     OsRng.fill_bytes(&mut prefix);
     let cipher = XChaCha20Poly1305::new(key.as_bytes().into());
     let mut encryptor = EncryptorBE32::from_aead(cipher, prefix.as_slice().into());
-    let content_id = Uuid::new_v4();
+    let mut random = [0u8; 16];
+    OsRng.fill_bytes(&mut random);
+    let content_id = uuid::Builder::from_random_bytes(random).into_uuid();
     let aad = chunk_aad(content_id);
     let mut out = Vec::with_capacity(ciphertext_size(plaintext.len() as u64) as usize);
     out.extend_from_slice(MAGIC);

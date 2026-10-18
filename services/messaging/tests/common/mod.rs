@@ -673,29 +673,51 @@ pub fn uuid(v: &Value) -> Uuid {
 /// (e.g. `messaging/common/v1.schema.json#/$defs/Device`).
 #[track_caller]
 pub fn conforms(reference: &str, value: &Value) {
-    use jsonschema::{Registry, Resource};
-    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/contracts");
-    let read = |rel: &str| -> Value {
-        serde_json::from_str(&std::fs::read_to_string(dir.join(rel)).unwrap()).unwrap()
+    use jsonschema::{Registry, Resource, Validator};
+    use std::{
+        collections::HashMap,
+        sync::{Mutex, OnceLock},
     };
-    let manifest = read("manifest.json");
-    let mut builder = Registry::new();
-    for c in manifest["contracts"].as_array().unwrap() {
-        if c["kind"] == "json-schema" {
-            let doc = read(c["path"].as_str().unwrap());
-            let id = doc["$id"].as_str().unwrap().to_string();
-            builder = builder.add(id, Resource::from_contents(doc)).unwrap();
+    // Compiled once per schema reference and process (the contracts do not change while
+    // tests run); every frame and response is still validated.
+    static CACHE: OnceLock<Mutex<HashMap<String, Arc<Validator>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let cached = cache.lock().unwrap().get(reference).cloned();
+    let validator = match cached {
+        Some(v) => v,
+        None => {
+            let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../packages/contracts");
+            let read = |rel: &str| -> Value {
+                serde_json::from_str(&std::fs::read_to_string(dir.join(rel)).unwrap()).unwrap()
+            };
+            let manifest = read("manifest.json");
+            let mut builder = Registry::new();
+            for c in manifest["contracts"].as_array().unwrap() {
+                if c["kind"] == "json-schema" {
+                    let doc = read(c["path"].as_str().unwrap());
+                    let id = doc["$id"].as_str().unwrap().to_string();
+                    builder = builder.add(id, Resource::from_contents(doc)).unwrap();
+                }
+            }
+            let registry = builder.prepare().unwrap();
+            let v = Arc::new(
+                jsonschema::options()
+                    .with_registry(&registry)
+                    .should_validate_formats(true)
+                    .build(&json!({
+                        "$schema": "https://json-schema.org/draft/2020-12/schema",
+                        "$ref": format!("https://schemas.cfmeet.com/{reference}")
+                    }))
+                    .unwrap(),
+            );
+            cache
+                .lock()
+                .unwrap()
+                .insert(reference.to_string(), v.clone());
+            v
         }
-    }
-    let registry = builder.prepare().unwrap();
-    let validator = jsonschema::options()
-        .with_registry(&registry)
-        .should_validate_formats(true)
-        .build(&json!({
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "$ref": format!("https://schemas.cfmeet.com/{reference}")
-        }))
-        .unwrap();
+    };
     let errors: Vec<String> = validator
         .iter_errors(value)
         .map(|e| format!("{e} at {}", e.instance_path()))

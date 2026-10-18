@@ -36,13 +36,15 @@ fn report(name: &str, v: serde_json::Value) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 #[ignore]
 async fn managed_send_throughput() {
-    let Some(h) = Harness::new().await else {
+    let Some(h) =
+        Harness::build(|s| s.conversations.environment_messages_per_minute = 1_000_000).await
+    else {
         return;
     };
     let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 20).await;
     h.set_policy(&c, json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
         "abuse": { "messagesPerMinute": 100000 } })).await;
-    let (conv, people) = h.managed_group(&c, 20).await;
     let per_sender = 50;
     let started = Instant::now();
     let futures = people.iter().map(|p| {
@@ -93,7 +95,9 @@ async fn managed_send_throughput() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 #[ignore]
 async fn e2ee_send_throughput_with_real_mls() {
-    let Some(h) = Harness::new().await else {
+    let Some(h) =
+        Harness::build(|s| s.conversations.environment_messages_per_minute = 1_000_000).await
+    else {
         return;
     };
     let c = h.customer(ALL_SCOPES);
@@ -118,7 +122,14 @@ async fn e2ee_send_throughput_with_real_mls() {
     }
     let elapsed = started.elapsed();
     let t = Instant::now();
-    let got = h.receive(&c, &conv, &mut bob).await;
+    let mut got = Vec::new();
+    loop {
+        let page = h.receive(&c, &conv, &mut bob).await;
+        if page.is_empty() {
+            break;
+        }
+        got.extend(page);
+    }
     let receive = t.elapsed();
     assert_eq!(got.len(), total);
     report(
@@ -141,10 +152,10 @@ async fn realtime_fanout_latency() {
     };
     let h = &rt.h;
     let c = h.customer(ALL_SCOPES);
-    h.set_policy(&c, json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
-        "abuse": { "messagesPerMinute": 100000 } })).await;
     let receivers = 50;
     let (conv, people) = h.managed_group(&c, receivers + 1).await;
+    h.set_policy(&c, json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
+        "abuse": { "messagesPerMinute": 100000 } })).await;
     let mut sockets = Vec::new();
     for p in &people[1..] {
         let m = Member {
@@ -158,6 +169,28 @@ async fn realtime_fanout_latency() {
         sockets.push(ws);
     }
     let messages = 100;
+    // Receivers read concurrently from the start; every receiver gets every message
+    // once, in order. Latency = start of the send request → receipt on the socket.
+    let readers: Vec<_> = sockets
+        .into_iter()
+        .map(|mut ws| {
+            tokio::spawn(async move {
+                let mut out = Vec::new();
+                let mut last = 0i64;
+                while out.len() < messages {
+                    let f = ws.next_of("event").await;
+                    if f["event"]["data"]["message"].is_null() {
+                        continue;
+                    }
+                    let seq = f["event"]["data"]["message"]["sequence"].as_i64().unwrap();
+                    assert!(seq > last, "in order, no duplicates");
+                    last = seq;
+                    out.push((seq, Instant::now()));
+                }
+                out
+            })
+        })
+        .collect();
     let started = Instant::now();
     let mut sent_at = Vec::new();
     for i in 0..messages {
@@ -167,24 +200,8 @@ async fn realtime_fanout_latency() {
             .await;
         assert_eq!(r.status, StatusCode::CREATED);
     }
-    // Every receiver gets every message once, in order; latency = commit request start →
-    // receipt on the socket.
     let mut lat = Vec::new();
-    let futures = sockets.into_iter().map(|mut ws| async move {
-        let mut out = Vec::new();
-        let mut last = 0i64;
-        while out.len() < messages {
-            let f = ws.next_of("event").await;
-            if f["event"]["data"]["message"].is_null() {
-                continue;
-            }
-            let seq = f["event"]["data"]["message"]["sequence"].as_i64().unwrap();
-            assert!(seq > last, "in order, no duplicates");
-            last = seq;
-            out.push((seq, Instant::now()));
-        }
-        out
-    });
+    let futures = readers.into_iter().map(|t| async move { t.await.unwrap() });
     let all: Vec<Vec<(i64, Instant)>> = futures_util::future::join_all(futures).await;
     let first_seq = all[0][0].0;
     for per in &all {
@@ -205,13 +222,15 @@ async fn realtime_fanout_latency() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 #[ignore]
 async fn managed_search_latency() {
-    let Some(h) = Harness::new().await else {
+    let Some(h) =
+        Harness::build(|s| s.conversations.environment_messages_per_minute = 1_000_000).await
+    else {
         return;
     };
     let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
     h.set_policy(&c, json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
         "abuse": { "messagesPerMinute": 100000 } })).await;
-    let (conv, people) = h.managed_group(&c, 2).await;
     let words = [
         "invoice", "delivery", "meeting", "budget", "contract", "holiday", "report", "review",
     ];
@@ -224,10 +243,8 @@ async fn managed_search_latency() {
             words[(i / 7) % words.len()]
         );
         async move {
-            assert_eq!(
-                h.send_managed(c, conv, p, &text).await.status,
-                StatusCode::CREATED
-            )
+            let r = h.send_managed(c, conv, p, &text).await;
+            assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
         }
     });
     futures_util::stream::iter(futures)
@@ -255,5 +272,58 @@ async fn managed_search_latency() {
     report(
         "managed_search_latency",
         json!({ "indexed_messages": n, "queries": lat.len(), "latency": percentiles(lat) }),
+    );
+}
+
+/// The same load spread over independent conversations (each conversation's canonical
+/// order is a per-conversation lock; this separates that cost from overall throughput).
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore]
+async fn managed_send_throughput_independent_conversations() {
+    let Some(h) =
+        Harness::build(|s| s.conversations.environment_messages_per_minute = 1_000_000).await
+    else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let mut convs = Vec::new();
+    for _ in 0..20 {
+        convs.push(h.managed_group(&c, 1).await);
+    }
+    h.set_policy(
+        &c,
+        json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
+                "abuse": { "messagesPerMinute": 100000 } }),
+    )
+    .await;
+    let per_sender = 50;
+    let started = Instant::now();
+    let futures = convs.iter().map(|(conv, people)| {
+        let (h, c) = (&h, &c);
+        async move {
+            let mut lat = Vec::new();
+            for i in 0..per_sender {
+                let t = Instant::now();
+                let r = h
+                    .send_managed(c, conv, people[0], &format!("independent {i}"))
+                    .await;
+                assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+                lat.push(t.elapsed());
+            }
+            lat
+        }
+    });
+    let lat: Vec<Duration> = futures_util::future::join_all(futures)
+        .await
+        .into_iter()
+        .flatten()
+        .collect();
+    let elapsed = started.elapsed();
+    report(
+        "managed_send_throughput_independent_conversations",
+        json!({
+            "conversations": convs.len(), "messages": lat.len(), "seconds": elapsed.as_secs_f64(),
+            "messages_per_second": lat.len() as f64 / elapsed.as_secs_f64(), "latency": percentiles(lat),
+        }),
     );
 }
