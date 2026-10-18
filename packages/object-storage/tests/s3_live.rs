@@ -86,3 +86,94 @@ async fn protected_objects_on_a_real_s3_compatible_server() {
     assert!(store.head(&key).await.unwrap().is_none());
     assert_eq!(store.get(&key, 1024).await.unwrap(), None);
 }
+
+/// Presigned uploads (Part V §70): the store itself enforces the signed size, SHA-256 and
+/// media type; stored checksums are readable; listing works; signed reads force safe
+/// download headers.
+#[tokio::test]
+async fn presigned_uploads_are_bound_to_size_digest_and_type() {
+    let Some(store) = store() else { return };
+    store.ensure_bucket().await.unwrap();
+    let key = format!(
+        "upload/{}-{}.bin",
+        std::process::id(),
+        chrono::Utc::now().timestamp_micros()
+    );
+    let body = b"opaque ciphertext of an attachment".to_vec();
+    let digest = cf_object_storage::sha256_hex(&body);
+    let now = chrono::Utc::now();
+    let w = store
+        .signed_write(
+            &key,
+            Duration::from_secs(300),
+            now,
+            body.len() as u64,
+            &digest,
+            "application/octet-stream",
+        )
+        .unwrap();
+    let client = reqwest::Client::new();
+    let send = |bytes: Vec<u8>, size_override: Option<usize>| {
+        let mut rb = client.put(&w.url);
+        for (k, v) in &w.headers {
+            if k == "content-length" {
+                continue;
+            }
+            rb = rb.header(k, v);
+        }
+        let len = size_override.unwrap_or(bytes.len());
+        rb.header("content-length", len.to_string())
+            .body(bytes)
+            .send()
+    };
+    // Another body of the same size (digest mismatch) is refused by the store.
+    let mut forged = body.clone();
+    forged[0] ^= 1;
+    let r = send(forged, None).await.unwrap();
+    assert!(
+        r.status().is_client_error(),
+        "forged body accepted: {}",
+        r.status()
+    );
+    // A different size is refused (signature over content-length).
+    let r = send(b"short".to_vec(), None).await.unwrap();
+    assert!(
+        r.status().is_client_error(),
+        "wrong size accepted: {}",
+        r.status()
+    );
+    let r = send(body.clone(), None).await.unwrap();
+    assert!(
+        r.status().is_success(),
+        "{}",
+        r.text().await.unwrap_or_default()
+    );
+    match store.stored_sha256(&key).await.unwrap() {
+        Some(d) => assert_eq!(d, digest),
+        None => eprintln!("NOTE: the store does not report checksums (callers verify by reading)"),
+    }
+    let listed = store.list("upload/", None, 1000).await.unwrap();
+    assert!(listed
+        .iter()
+        .any(|o| o.key == key && o.size == body.len() as u64));
+    let read = store
+        .signed_read_as(
+            &key,
+            Duration::from_secs(60),
+            chrono::Utc::now(),
+            &cf_object_storage::ResponseOverrides {
+                content_type: Some("application/octet-stream".into()),
+                content_disposition: Some("attachment; filename=\"attachment.bin\"".into()),
+            },
+        )
+        .unwrap();
+    let got = reqwest::get(&read.url).await.unwrap();
+    assert!(got.status().is_success());
+    assert!(got
+        .headers()
+        .get("content-disposition")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("attachment")));
+    assert_eq!(got.bytes().await.unwrap().to_vec(), body);
+    store.delete(&key).await.unwrap();
+}

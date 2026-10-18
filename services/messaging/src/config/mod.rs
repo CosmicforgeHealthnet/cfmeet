@@ -35,6 +35,12 @@
 //! | `MESSAGING_REALTIME_MAX_CONNECTIONS` / `_PER_TENANT_CONNECTIONS` / `_PER_PRINCIPAL_CONNECTIONS` / `_PER_DEVICE_CONNECTIONS` | no | per instance: defaults 50000 / 10000 / 20 / 5 |
 //! | `MESSAGING_REALTIME_FRAMES_PER_SECOND` / `_DRAIN_SECONDS` | no | defaults 20 / 10 |
 //! | `MESSAGING_PUSH_PROVIDER` | no | `none` (default) or `local-test` (local / test runtimes only). APNs / FCM adapters are not implemented: jobs end `NOT_CONFIGURED` |
+//! | `MESSAGING_ATTACHMENTS_S3_ENDPOINT` … | no | the PRIVATE attachment bucket (`ENDPOINT`, `PUBLIC_ENDPOINT`, `REGION`, `BUCKET`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY[_FILE]`, `PATH_STYLE`, `SERVER_SIDE_ENCRYPTION`; see `packages/object-storage`). Unset: attachments fail closed |
+//! | `MESSAGING_CLAMAV_ADDRESS` | no | self-hosted clamd `host:port` scanning MANAGED attachments. Unset: scans stay pending (never READY where policy requires scanning) |
+//! | `MESSAGING_UPLOAD_INTENT_SECONDS` / `MESSAGING_DOWNLOAD_GRANT_SECONDS` | no | defaults 900 / 60 (residual access window of a grant) |
+//! | `MESSAGING_STORAGE_BUDGET_BYTES` | no | deployment cap of stored bytes per environment (default: none; policies may set lower) |
+//! | `MESSAGING_MANAGED_SCAN_MAX_BYTES` / `MESSAGING_VERIFY_READ_MAX_BYTES` / `MESSAGING_PROXY_DOWNLOAD_MAX_BYTES` | no | defaults 50 MiB / 64 MiB / 32 MiB |
+//! | `MESSAGING_UNLINKED_ATTACHMENT_HOURS` | no | READY uploads never referenced by a message are deleted after (default 24) |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
 //! Service authentication (`CF_*`) is read by [`service_auth`].
@@ -149,6 +155,36 @@ impl Default for ConversationSettings {
     }
 }
 
+/// Attachment storage, verification and download settings (§69–§80).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AttachmentSettings {
+    pub intent_ttl: chrono::Duration,
+    pub grant_ttl: Duration,
+    /// Deployment cap of stored bytes per application environment (`None`: policy only).
+    pub storage_budget_bytes: Option<i64>,
+    pub managed_scan_max_bytes: usize,
+    /// Largest object finalization reads to hash when the store reports no checksum.
+    pub verify_read_max_bytes: usize,
+    pub proxy_max_bytes: usize,
+    pub unlinked_ttl: chrono::Duration,
+    pub scan_retry_max: i32,
+}
+
+impl Default for AttachmentSettings {
+    fn default() -> Self {
+        Self {
+            intent_ttl: chrono::Duration::minutes(15),
+            grant_ttl: Duration::from_secs(60),
+            storage_budget_bytes: None,
+            managed_scan_max_bytes: 50 * 1024 * 1024,
+            verify_read_max_bytes: 64 * 1024 * 1024,
+            proxy_max_bytes: 32 * 1024 * 1024,
+            unlinked_ttl: chrono::Duration::hours(24),
+            scan_retry_max: 10,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorkerSettings {
     pub interval: Duration,
@@ -205,6 +241,9 @@ pub struct MessagingConfig {
     pub client_token_key_file: Option<std::path::PathBuf>,
     pub realtime_redis_url: Option<SecretString>,
     pub push_provider: PushProviderKind,
+    pub attachments: AttachmentSettings,
+    pub attachment_store: Option<cf_object_storage::S3Config>,
+    pub clamav_address: Option<String>,
     pub log_format: LogFormat,
 }
 
@@ -559,6 +598,75 @@ impl MessagingConfig {
                 ))
             }
         };
+        let attachments = AttachmentSettings {
+            intent_ttl: chrono::Duration::seconds(bounded(
+                &get,
+                "MESSAGING_UPLOAD_INTENT_SECONDS",
+                900,
+                60,
+                3_600,
+            )?),
+            grant_ttl: Duration::from_secs(bounded(
+                &get,
+                "MESSAGING_DOWNLOAD_GRANT_SECONDS",
+                60,
+                5,
+                900,
+            )? as u64),
+            storage_budget_bytes: match get("MESSAGING_STORAGE_BUDGET_BYTES") {
+                None => None,
+                Some(_) => Some(bounded(
+                    &get,
+                    "MESSAGING_STORAGE_BUDGET_BYTES",
+                    0,
+                    0,
+                    i64::MAX,
+                )?),
+            },
+            managed_scan_max_bytes: bounded(
+                &get,
+                "MESSAGING_MANAGED_SCAN_MAX_BYTES",
+                50 * 1024 * 1024,
+                1024,
+                1024 * 1024 * 1024,
+            )? as usize,
+            verify_read_max_bytes: bounded(
+                &get,
+                "MESSAGING_VERIFY_READ_MAX_BYTES",
+                64 * 1024 * 1024,
+                1024,
+                1024 * 1024 * 1024,
+            )? as usize,
+            proxy_max_bytes: bounded(
+                &get,
+                "MESSAGING_PROXY_DOWNLOAD_MAX_BYTES",
+                32 * 1024 * 1024,
+                1024,
+                512 * 1024 * 1024,
+            )? as usize,
+            unlinked_ttl: chrono::Duration::hours(bounded(
+                &get,
+                "MESSAGING_UNLINKED_ATTACHMENT_HOURS",
+                24,
+                1,
+                720,
+            )?),
+            scan_retry_max: 10,
+        };
+        let attachment_store =
+            cf_object_storage::S3Config::from_lookup("MESSAGING_ATTACHMENTS_S3_", &|k: &str| {
+                get(k)
+            })
+            .map_err(|e| ConfigError::invalid("MESSAGING_ATTACHMENTS_S3_*", e))?;
+        let clamav_address = get("MESSAGING_CLAMAV_ADDRESS");
+        if let Some(a) = &clamav_address {
+            if a.parse::<SocketAddr>().is_err() && !a.contains(':') {
+                return Err(ConfigError::invalid(
+                    "MESSAGING_CLAMAV_ADDRESS",
+                    "must be host:port",
+                ));
+            }
+        }
         let log_format = match get("LOG_FORMAT").as_deref() {
             None | Some("pretty") => LogFormat::Pretty,
             Some("json") => LogFormat::Json,
@@ -592,6 +700,9 @@ impl MessagingConfig {
                 .map(std::path::PathBuf::from),
             realtime_redis_url: get("MESSAGING_REALTIME_REDIS_URL").map(SecretString::from),
             push_provider,
+            attachments,
+            attachment_store,
+            clamav_address,
             log_format,
         })
     }

@@ -7,7 +7,8 @@ use sea_orm::DatabaseConnection;
 
 use crate::{
     config::{
-        service_auth::ServiceAuthRuntime, ConversationSettings, DeviceSettings, WorkerSettings,
+        service_auth::ServiceAuthRuntime, AttachmentSettings, ConversationSettings, DeviceSettings,
+        WorkerSettings,
     },
     domain::SharedClock,
     identity::{cache::CachingAuthority, PrincipalDirectory, Unconfigured},
@@ -34,6 +35,11 @@ pub struct AppState {
     pub managed_keys: Option<Arc<ManagedKeyring>>,
     /// The realtime gateway runtime of this instance.
     pub realtime: Arc<Realtime>,
+    /// Protected attachment storage (unconfigured: attachments fail closed).
+    pub storage: Arc<dyn cf_object_storage::ObjectStore>,
+    /// Self-hosted scanner of MANAGED attachments (unconfigured: scans stay pending).
+    pub scanner: Arc<dyn crate::attachments::scanner::AttachmentScanner>,
+    pub attachments: AttachmentSettings,
 }
 
 impl AppState {
@@ -55,6 +61,9 @@ impl AppState {
             tree_heads: None,
             managed_keys: None,
             realtime: Arc::new(Realtime::disabled()),
+            storage: Arc::new(cf_object_storage::UnconfiguredStore),
+            scanner: Arc::new(crate::attachments::scanner::UnconfiguredScanner),
+            attachments: AttachmentSettings::default(),
         }
     }
 

@@ -125,6 +125,29 @@ async fn main() -> anyhow::Result<()> {
         .with_workers(config.workers)
         .with_tree_head_signer(tree_heads);
     state.managed_keys = managed_keys;
+    // Protected attachment storage and self-hosted scanning (Part F). Both fail closed
+    // when unconfigured: no upload intent is issued, no MANAGED scan reports CLEAN.
+    state.attachments = config.attachments;
+    match &config.attachment_store {
+        Some(s3) => match cf_object_storage::S3ObjectStore::new(s3.clone()) {
+            Ok(store) => state.storage = Arc::new(store),
+            Err(e) => anyhow::bail!("MESSAGING_ATTACHMENTS_S3_*: {e}"),
+        },
+        None => {
+            tracing::warn!("no attachment object storage is configured: attachments are disabled");
+        }
+    }
+    match &config.clamav_address {
+        Some(a) => {
+            state.scanner = Arc::new(messaging::attachments::scanner::ClamAvScanner::new(
+                a.clone(),
+                std::time::Duration::from_secs(60),
+            ))
+        }
+        None => {
+            tracing::warn!("no attachment scanner is configured: MANAGED attachments requiring scanning stay pending");
+        }
+    }
     // Realtime gateway runtime (Part E).
     let realtime = {
         use messaging::realtime::{broker, ephemeral, push, token::ClientTokenKeys, Realtime};
@@ -209,6 +232,10 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(messaging::realtime::push::run(
         state.clone(),
         config.workers.interval,
+    ));
+    tokio::spawn(messaging::attachments::lifecycle::run(
+        state.clone(),
+        std::time::Duration::from_secs(30),
     ));
     tokio::spawn(messaging::workers::run_maintenance(
         state.clone(),

@@ -44,6 +44,7 @@ pub fn customer_routes() -> Router<AppState> {
         .merge(crate::mls::http::device_routes())
         .merge(crate::safety::http::routes())
         .merge(crate::realtime::http::customer_routes())
+        .merge(crate::compliance::http::routes())
 }
 
 pub fn app(state: AppState) -> Router {
@@ -69,6 +70,7 @@ pub fn app(state: AppState) -> Router {
                 .merge(crate::membership::http::routes())
                 .merge(crate::messages::http::routes())
                 .merge(crate::mls::http::conversation_routes())
+                .merge(crate::attachments::http::routes())
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )

@@ -76,6 +76,83 @@ pub struct SignedRead {
 
 /// Longest signed read the stores issue.
 pub const MAX_SIGNED_READ: Duration = Duration::from_secs(900);
+/// Longest signed write (upload) the stores issue.
+pub const MAX_SIGNED_WRITE: Duration = Duration::from_secs(3600);
+
+/// A short-lived, single-object upload: the client sends `method` to `url` with exactly
+/// `headers` (they are signed: the object's size, SHA-256 and media type cannot be
+/// changed) and the body. Never stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignedWrite {
+    pub method: &'static str,
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// Response headers a signed read forces (safe browser handling of downloads).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResponseOverrides {
+    pub content_type: Option<String>,
+    pub content_disposition: Option<String>,
+}
+
+/// One listed object.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedObject {
+    pub key: String,
+    pub size: u64,
+    pub last_modified: Option<DateTime<Utc>>,
+}
+
+/// Lower-case hex of a base64 (standard) SHA-256, as S3 checksum headers carry it.
+pub fn checksum_b64_to_hex(b64: &str) -> Option<String> {
+    let bytes = base64_decode(b64.trim())?;
+    (bytes.len() == 32).then(|| hex::encode(bytes))
+}
+
+/// Standard base64 of the bytes of a lower-case hex SHA-256 (`x-amz-checksum-sha256`).
+pub fn checksum_hex_to_b64(hex_digest: &str) -> Option<String> {
+    let bytes = hex::decode(hex_digest).ok().filter(|b| b.len() == 32)?;
+    Some(base64_encode(&bytes))
+}
+
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn base64_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = (chunk[0] as u32) << 16
+            | (*chunk.get(1).unwrap_or(&0) as u32) << 8
+            | *chunk.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(B64[((n >> (18 - 6 * i)) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+fn base64_decode(text: &str) -> Option<Vec<u8>> {
+    let text = text.trim_end_matches('=');
+    let mut out = Vec::with_capacity(text.len() * 3 / 4);
+    let mut acc = 0u32;
+    let mut bits = 0;
+    for c in text.bytes() {
+        let v = B64.iter().position(|b| *b == c)? as u32;
+        acc = (acc << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
+}
 
 /// Lower-case hex SHA-256.
 pub fn sha256_hex(data: &[u8]) -> String {
@@ -119,6 +196,49 @@ pub trait ObjectStore: Send + Sync {
         ttl: Duration,
         now: DateTime<Utc>,
     ) -> StorageResult<SignedRead>;
+
+    /// A read-only URL that also forces the response's media type / disposition (safe
+    /// downloads). Stores that cannot force headers refuse (never a silent plain read).
+    fn signed_read_as(
+        &self,
+        _key: &str,
+        _ttl: Duration,
+        _now: DateTime<Utc>,
+        _overrides: &ResponseOverrides,
+    ) -> StorageResult<SignedRead> {
+        Err(StorageError::NotConfigured)
+    }
+
+    /// A short-lived upload of exactly `size` bytes with SHA-256 `sha256_hex` and media
+    /// type `content_type` to `key` (capped at [`MAX_SIGNED_WRITE`]). The store rejects
+    /// a body of another size or digest. Callers authorize the uploader first.
+    fn signed_write(
+        &self,
+        _key: &str,
+        _ttl: Duration,
+        _now: DateTime<Utc>,
+        _size: u64,
+        _sha256_hex: &str,
+        _content_type: &str,
+    ) -> StorageResult<SignedWrite> {
+        Err(StorageError::NotConfigured)
+    }
+
+    /// The SHA-256 (lower-case hex) the store recorded and verified for `key`, when it
+    /// reports one (`Ok(None)`: not reported — the caller verifies another way).
+    async fn stored_sha256(&self, _key: &str) -> StorageResult<Option<String>> {
+        Ok(None)
+    }
+
+    /// Objects under `prefix` after `start_after` (lexicographic), at most `max`.
+    async fn list(
+        &self,
+        _prefix: &str,
+        _start_after: Option<&str>,
+        _max: usize,
+    ) -> StorageResult<Vec<ListedObject>> {
+        Err(StorageError::NotConfigured)
+    }
 }
 
 /// No store configured: every operation is [`StorageError::NotConfigured`].
@@ -510,24 +630,58 @@ impl S3ObjectStore {
 
     /// The query-signed read URL (pure: `now` given).
     pub fn presign_get(&self, key: &str, ttl: Duration, now: DateTime<Utc>) -> String {
+        self.presign("GET", key, ttl, now, &[], &[])
+    }
+
+    /// A query-signed URL for `method` on `key`. `headers` (lower-case names) are signed
+    /// and must be sent unchanged; `params` are extra signed query parameters.
+    fn presign(
+        &self,
+        method: &str,
+        key: &str,
+        ttl: Duration,
+        now: DateTime<Utc>,
+        headers: &[(&str, String)],
+        params: &[(&str, String)],
+    ) -> String {
         let (host, path) = self.host_and_path(&self.public_endpoint, Some(key));
         let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
         let date = now.format("%Y%m%d").to_string();
         let credential = format!("{}/{}", self.config.access_key, self.scope(&date));
-        let mut params: Vec<(String, String)> = vec![
+        let mut signed: Vec<(String, String)> = vec![("host".into(), host.clone())];
+        for (k, v) in headers {
+            signed.push((k.to_string(), v.trim().to_string()));
+        }
+        signed.sort();
+        let signed_names = signed
+            .iter()
+            .map(|(k, _)| k.as_str())
+            .collect::<Vec<_>>()
+            .join(";");
+        let mut query_params: Vec<(String, String)> = vec![
             ("X-Amz-Algorithm".into(), "AWS4-HMAC-SHA256".into()),
             ("X-Amz-Credential".into(), credential),
             ("X-Amz-Date".into(), amz_date.clone()),
             ("X-Amz-Expires".into(), ttl.as_secs().to_string()),
-            ("X-Amz-SignedHeaders".into(), "host".into()),
+            ("X-Amz-SignedHeaders".into(), signed_names.clone()),
         ];
-        params.sort();
-        let query = params
+        for (k, v) in params {
+            query_params.push((k.to_string(), v.clone()));
+        }
+        let mut encoded: Vec<(String, String)> = query_params
             .iter()
-            .map(|(k, v)| format!("{}={}", uri_encode(k, false), uri_encode(v, false)))
+            .map(|(k, v)| (uri_encode(k, false), uri_encode(v, false)))
+            .collect();
+        encoded.sort();
+        let query = encoded
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
             .collect::<Vec<_>>()
             .join("&");
-        let canonical = format!("GET\n{path}\n{query}\nhost:{host}\n\nhost\nUNSIGNED-PAYLOAD");
+        let canonical_headers: String = signed.iter().map(|(k, v)| format!("{k}:{v}\n")).collect();
+        let canonical = format!(
+            "{method}\n{path}\n{query}\n{canonical_headers}\n{signed_names}\nUNSIGNED-PAYLOAD"
+        );
         let to_sign = format!(
             "AWS4-HMAC-SHA256\n{amz_date}\n{}\n{}",
             self.scope(&date),
@@ -538,6 +692,48 @@ impl S3ObjectStore {
             "{}://{host}{path}?{query}&X-Amz-Signature={signature}",
             self.public_endpoint.scheme
         )
+    }
+
+    /// A header-signed request with a canonical query string (pure: `now` given).
+    fn sign_query(&self, method: &str, query: &[(&str, String)], now: DateTime<Utc>) -> Signed {
+        let (host, path) = self.host_and_path(&self.endpoint, None);
+        let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
+        let date = now.format("%Y%m%d").to_string();
+        let payload = sha256_hex(b"");
+        let mut encoded: Vec<(String, String)> = query
+            .iter()
+            .map(|(k, v)| (uri_encode(k, false), uri_encode(v, false)))
+            .collect();
+        encoded.sort();
+        let qs = encoded
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join("&");
+        let canonical = format!(
+            "{method}\n{path}\n{qs}\nhost:{host}\nx-amz-content-sha256:{payload}\nx-amz-date:{amz_date}\n\nhost;x-amz-content-sha256;x-amz-date\n{payload}"
+        );
+        let to_sign = format!(
+            "AWS4-HMAC-SHA256\n{amz_date}\n{}\n{}",
+            self.scope(&date),
+            sha256_hex(canonical.as_bytes())
+        );
+        let signature = hex::encode(hmac(&self.signing_key(&date), to_sign.as_bytes()));
+        Signed {
+            url: format!("{}://{host}{path}?{qs}", self.endpoint.scheme),
+            headers: vec![
+                ("x-amz-content-sha256".into(), payload),
+                ("x-amz-date".into(), amz_date),
+                (
+                    "authorization".into(),
+                    format!(
+                        "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature={signature}",
+                        self.config.access_key,
+                        self.scope(&date)
+                    ),
+                ),
+            ],
+        }
     }
 
     /// Creates the bucket if missing (local / certification setup only).
@@ -693,6 +889,145 @@ impl ObjectStore for S3ObjectStore {
             expires_at: now + chrono::Duration::seconds(ttl.as_secs() as i64),
         })
     }
+
+    fn signed_read_as(
+        &self,
+        key: &str,
+        ttl: Duration,
+        now: DateTime<Utc>,
+        overrides: &ResponseOverrides,
+    ) -> StorageResult<SignedRead> {
+        if !valid_key(key) {
+            return Err(StorageError::Rejected(400));
+        }
+        let ttl = ttl.min(MAX_SIGNED_READ).max(Duration::from_secs(1));
+        let mut params = Vec::new();
+        if let Some(ct) = &overrides.content_type {
+            params.push(("response-content-type", ct.clone()));
+        }
+        if let Some(cd) = &overrides.content_disposition {
+            params.push(("response-content-disposition", cd.clone()));
+        }
+        Ok(SignedRead {
+            url: self.presign("GET", key, ttl, now, &[], &params),
+            expires_at: now + chrono::Duration::seconds(ttl.as_secs() as i64),
+        })
+    }
+
+    fn signed_write(
+        &self,
+        key: &str,
+        ttl: Duration,
+        now: DateTime<Utc>,
+        size: u64,
+        sha256_hex: &str,
+        content_type: &str,
+    ) -> StorageResult<SignedWrite> {
+        if !valid_key(key) || content_type.is_empty() || content_type.len() > 255 {
+            return Err(StorageError::Rejected(400));
+        }
+        let checksum = checksum_hex_to_b64(sha256_hex).ok_or(StorageError::Rejected(400))?;
+        let ttl = ttl.min(MAX_SIGNED_WRITE).max(Duration::from_secs(1));
+        let mut headers: Vec<(&str, String)> = vec![
+            ("content-length", size.to_string()),
+            ("content-type", content_type.to_string()),
+            ("x-amz-checksum-sha256", checksum),
+        ];
+        if let Some(sse) = &self.config.server_side_encryption {
+            headers.push(("x-amz-server-side-encryption", sse.clone()));
+        }
+        let url = self.presign("PUT", key, ttl, now, &headers, &[]);
+        Ok(SignedWrite {
+            method: "PUT",
+            url,
+            headers: headers
+                .into_iter()
+                .filter(|(k, _)| *k != "content-length")
+                .map(|(k, v)| (k.to_string(), v))
+                .chain(std::iter::once((
+                    "content-length".to_string(),
+                    size.to_string(),
+                )))
+                .collect(),
+            expires_at: now + chrono::Duration::seconds(ttl.as_secs() as i64),
+        })
+    }
+
+    async fn stored_sha256(&self, key: &str) -> StorageResult<Option<String>> {
+        let empty = sha256_hex(b"");
+        let res = self
+            .request(
+                reqwest::Method::HEAD,
+                Some(key),
+                &empty,
+                &[("x-amz-checksum-mode", "ENABLED")],
+            )
+            .send()
+            .await
+            .map_err(|_| StorageError::Unavailable)?;
+        match res.status().as_u16() {
+            404 => Ok(None),
+            s if (200..300).contains(&s) => Ok(res
+                .headers()
+                .get("x-amz-checksum-sha256")
+                .and_then(|v| v.to_str().ok())
+                .and_then(checksum_b64_to_hex)),
+            s => Err(status_error(s)),
+        }
+    }
+
+    async fn list(
+        &self,
+        prefix: &str,
+        start_after: Option<&str>,
+        max: usize,
+    ) -> StorageResult<Vec<ListedObject>> {
+        let mut query: Vec<(&str, String)> = vec![
+            ("list-type", "2".into()),
+            ("prefix", prefix.to_string()),
+            ("max-keys", max.clamp(1, 1000).to_string()),
+        ];
+        if let Some(a) = start_after {
+            query.push(("start-after", a.to_string()));
+        }
+        let signed = self.sign_query("GET", &query, Utc::now());
+        let mut rb = self.client.get(&signed.url);
+        for (k, v) in signed.headers {
+            rb = rb.header(k, v);
+        }
+        let res = rb.send().await.map_err(|_| StorageError::Unavailable)?;
+        if !res.status().is_success() {
+            return Err(status_error(res.status().as_u16()));
+        }
+        let text = res.text().await.map_err(|_| StorageError::Unavailable)?;
+        Ok(parse_list(&text))
+    }
+}
+
+/// Extracts `<Contents><Key>…</Key><Size>…</Size><LastModified>…</LastModified></Contents>`
+/// from a ListObjectsV2 response (keys are restricted to [`valid_key`] characters, so no
+/// XML entity can appear in a key the stores accept).
+fn parse_list(xml: &str) -> Vec<ListedObject> {
+    let tag = |s: &str, name: &str| -> Option<String> {
+        let open = format!("<{name}>");
+        let close = format!("</{name}>");
+        let a = s.find(&open)? + open.len();
+        let b = s[a..].find(&close)? + a;
+        Some(s[a..b].to_string())
+    };
+    xml.split("<Contents>")
+        .skip(1)
+        .filter_map(|c| {
+            let key = tag(c, "Key")?;
+            valid_key(&key).then(|| ListedObject {
+                size: tag(c, "Size").and_then(|s| s.parse().ok()).unwrap_or(0),
+                last_modified: tag(c, "LastModified")
+                    .and_then(|t| DateTime::parse_from_rfc3339(&t).ok())
+                    .map(|t| t.with_timezone(&Utc)),
+                key,
+            })
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -760,6 +1095,56 @@ impl MemoryObjectStore {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Plays the client's part of a [`SignedWrite`] against this store, enforcing what an
+    /// S3 store enforces: unexpired, the signed size, digest and media type.
+    pub fn upload_signed(
+        &self,
+        write: &SignedWrite,
+        now: DateTime<Utc>,
+        bytes: Vec<u8>,
+    ) -> StorageResult<()> {
+        self.check()?;
+        if now > write.expires_at {
+            return Err(StorageError::Rejected(403));
+        }
+        let header = |n: &str| {
+            write
+                .headers
+                .iter()
+                .find(|(k, _)| k == n)
+                .map(|(_, v)| v.clone())
+        };
+        let key = write
+            .url
+            .strip_prefix("memory://upload/")
+            .and_then(|r| r.split('?').next())
+            .ok_or(StorageError::Rejected(400))?
+            .to_string();
+        if header("content-length").and_then(|v| v.parse::<u64>().ok()) != Some(bytes.len() as u64)
+        {
+            return Err(StorageError::Rejected(400));
+        }
+        if header("x-amz-checksum-sha256").and_then(|v| checksum_b64_to_hex(&v))
+            != Some(sha256_hex(&bytes))
+        {
+            return Err(StorageError::Integrity);
+        }
+        let ct = header("content-type").unwrap_or_default();
+        self.objects
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(key, (bytes, ct));
+        Ok(())
+    }
+
+    /// Writes raw bytes without any check (simulates a misbehaving client or store).
+    pub fn put_raw(&self, key: &str, bytes: Vec<u8>) {
+        self.objects
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(key.to_string(), (bytes, "application/octet-stream".into()));
     }
 
     fn check(&self) -> StorageResult<()> {
@@ -858,12 +1243,188 @@ impl ObjectStore for MemoryObjectStore {
             expires_at,
         })
     }
+
+    fn signed_read_as(
+        &self,
+        key: &str,
+        ttl: Duration,
+        now: DateTime<Utc>,
+        overrides: &ResponseOverrides,
+    ) -> StorageResult<SignedRead> {
+        let mut r = self.signed_read(key, ttl, now)?;
+        if let Some(ct) = &overrides.content_type {
+            r.url
+                .push_str(&format!("&response-content-type={}", uri_encode(ct, false)));
+        }
+        if let Some(cd) = &overrides.content_disposition {
+            r.url.push_str(&format!(
+                "&response-content-disposition={}",
+                uri_encode(cd, false)
+            ));
+        }
+        Ok(r)
+    }
+
+    fn signed_write(
+        &self,
+        key: &str,
+        ttl: Duration,
+        now: DateTime<Utc>,
+        size: u64,
+        sha256_hex: &str,
+        content_type: &str,
+    ) -> StorageResult<SignedWrite> {
+        self.check()?;
+        if !valid_key(key) {
+            return Err(StorageError::Rejected(400));
+        }
+        let checksum = checksum_hex_to_b64(sha256_hex).ok_or(StorageError::Rejected(400))?;
+        let ttl = ttl.min(MAX_SIGNED_WRITE);
+        let expires_at = now + chrono::Duration::seconds(ttl.as_secs() as i64);
+        Ok(SignedWrite {
+            method: "PUT",
+            url: format!("memory://upload/{key}?expires={}", expires_at.timestamp()),
+            headers: vec![
+                ("content-type".into(), content_type.to_string()),
+                ("x-amz-checksum-sha256".into(), checksum),
+                ("content-length".into(), size.to_string()),
+            ],
+            expires_at,
+        })
+    }
+
+    async fn stored_sha256(&self, key: &str) -> StorageResult<Option<String>> {
+        self.check()?;
+        Ok(self.get_raw(key).map(|b| sha256_hex(&b)))
+    }
+
+    async fn list(
+        &self,
+        prefix: &str,
+        start_after: Option<&str>,
+        max: usize,
+    ) -> StorageResult<Vec<ListedObject>> {
+        self.check()?;
+        let objects = self.objects.lock().unwrap_or_else(|p| p.into_inner());
+        let mut keys: Vec<(&String, u64)> = objects
+            .iter()
+            .filter(|(k, _)| k.starts_with(prefix) && start_after.is_none_or(|a| k.as_str() > a))
+            .map(|(k, (b, _))| (k, b.len() as u64))
+            .collect();
+        keys.sort();
+        Ok(keys
+            .into_iter()
+            .take(max)
+            .map(|(k, size)| ListedObject {
+                key: k.clone(),
+                size,
+                last_modified: None,
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[test]
+    fn checksum_encodings_round_trip_and_reject_garbage() {
+        let hex_digest = sha256_hex(b"hello");
+        let b64 = checksum_hex_to_b64(&hex_digest).unwrap();
+        assert_eq!(b64, "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=");
+        assert_eq!(
+            checksum_b64_to_hex(&b64).as_deref(),
+            Some(hex_digest.as_str())
+        );
+        assert_eq!(checksum_hex_to_b64("abcd"), None);
+        assert_eq!(checksum_b64_to_hex("!!!"), None);
+        assert_eq!(checksum_b64_to_hex("aGVsbG8="), None, "not 32 bytes");
+        for n in 0..10 {
+            let data: Vec<u8> = (0..n).collect();
+            assert_eq!(base64_decode(&base64_encode(&data)).unwrap(), data);
+        }
+    }
+
+    #[test]
+    fn list_responses_parse_only_valid_keys() {
+        let xml = "<ListBucketResult><Contents><Key>a/1.bin</Key><Size>12</Size><LastModified>2026-10-18T10:00:00.000Z</LastModified></Contents>\
+                   <Contents><Key>bad key&amp;</Key><Size>1</Size></Contents><Contents><Key>a/2.bin</Key><Size>3</Size></Contents></ListBucketResult>";
+        let l = parse_list(xml);
+        assert_eq!(
+            l.iter().map(|o| o.key.as_str()).collect::<Vec<_>>(),
+            vec!["a/1.bin", "a/2.bin"]
+        );
+        assert_eq!(l[0].size, 12);
+        assert!(l[0].last_modified.is_some());
+    }
+
+    #[tokio::test]
+    async fn memory_signed_writes_enforce_size_digest_and_expiry() {
+        let store = MemoryObjectStore::new();
+        let now = Utc::now();
+        let body = b"ciphertext-bytes".to_vec();
+        let w = store
+            .signed_write(
+                "x/obj",
+                Duration::from_secs(60),
+                now,
+                body.len() as u64,
+                &sha256_hex(&body),
+                "application/octet-stream",
+            )
+            .unwrap();
+        assert!(
+            store
+                .upload_signed(&w, now, b"other-bytes-xxxx".to_vec())
+                .is_err(),
+            "wrong digest"
+        );
+        assert!(
+            store.upload_signed(&w, now, b"short".to_vec()).is_err(),
+            "wrong size"
+        );
+        assert!(
+            store
+                .upload_signed(&w, now + chrono::Duration::seconds(61), body.clone())
+                .is_err(),
+            "expired"
+        );
+        store.upload_signed(&w, now, body.clone()).unwrap();
+        assert_eq!(
+            store.stored_sha256("x/obj").await.unwrap(),
+            Some(sha256_hex(&body))
+        );
+        assert_eq!(store.list("x/", None, 10).await.unwrap().len(), 1);
+        assert!(store.list("y/", None, 10).await.unwrap().is_empty());
+        let r = store
+            .signed_read_as(
+                "x/obj",
+                Duration::from_secs(60),
+                now,
+                &ResponseOverrides {
+                    content_type: Some("application/octet-stream".into()),
+                    content_disposition: Some("attachment".into()),
+                },
+            )
+            .unwrap();
+        assert!(r.url.contains("response-content-disposition=attachment"));
+        // Unconfigured stores refuse instead of silently ignoring.
+        assert_eq!(
+            UnconfiguredStore
+                .signed_write(
+                    "k",
+                    Duration::from_secs(1),
+                    now,
+                    1,
+                    &sha256_hex(b"x"),
+                    "a/b"
+                )
+                .unwrap_err(),
+            StorageError::NotConfigured
+        );
+    }
 
     fn aws_example() -> S3ObjectStore {
         S3ObjectStore::new(S3Config {

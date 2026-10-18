@@ -2821,6 +2821,797 @@
         "deviceId",
         "enabled"
       ]
+    },
+    "Attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "attachmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "enum": [
+            "IMAGE",
+            "DOCUMENT",
+            "FILE",
+            "VOICE_NOTE",
+            "VIDEO"
+          ]
+        },
+        "state": {
+          "enum": [
+            "INTENT_CREATED",
+            "VERIFYING",
+            "READY",
+            "QUARANTINED",
+            "REJECTED",
+            "EXPIRED",
+            "DELETED"
+          ]
+        },
+        "stateReason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "securityProfile": {
+          "enum": [
+            "PRIVATE_E2EE",
+            "MANAGED"
+          ]
+        },
+        "uploaderPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Exact byte size of the stored object (ciphertext for PRIVATE_E2EE)."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "mediaType": {
+          "type": "string",
+          "maxLength": 127,
+          "description": "PRIVATE_E2EE: always application/octet-stream (the real type is protected inside MLS)."
+        },
+        "fileName": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 255,
+              "description": "MANAGED only: sanitized presentation name (never a storage key)."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "media": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "durationMs": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "durationVerified": {
+                  "const": false
+                },
+                "codec": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "waveform": {
+                  "type": "array",
+                  "maxItems": 256,
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255
+                  }
+                }
+              },
+              "description": "MANAGED only, client-declared presentation metadata (durations are NOT verified by the server)."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cryptoFormat": {
+          "oneOf": [
+            {
+              "const": "CFMEET_ATTACHMENT_XCHACHA20POLY1305_STREAM_V1"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scan": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "enum": [
+                "NOT_REQUIRED",
+                "PENDING",
+                "CLEAN",
+                "INFECTED",
+                "FAILED",
+                "NOT_APPLICABLE_ENCRYPTED"
+              ]
+            },
+            "engine": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "finding": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "status",
+            "engine",
+            "finding"
+          ],
+          "description": "PRIVATE_E2EE attachments are ciphertext: never scanned and never reported as scanned (NOT_APPLICABLE_ENCRYPTED)."
+        },
+        "messageId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finalizedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "intentExpiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "attachmentId",
+        "conversationId",
+        "kind",
+        "state",
+        "stateReason",
+        "securityProfile",
+        "uploaderPrincipalId",
+        "size",
+        "sha256",
+        "mediaType",
+        "fileName",
+        "media",
+        "cryptoFormat",
+        "scan",
+        "messageId",
+        "createdAt",
+        "finalizedAt",
+        "intentExpiresAt"
+      ],
+      "description": "An attachment's authorized metadata and lifecycle. Bytes live in protected object storage under a server-generated key."
+    },
+    "AttachmentUploadIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "attachmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "enum": [
+            "IMAGE",
+            "DOCUMENT",
+            "FILE",
+            "VOICE_NOTE",
+            "VIDEO"
+          ]
+        },
+        "state": {
+          "enum": [
+            "INTENT_CREATED",
+            "VERIFYING",
+            "READY",
+            "QUARANTINED",
+            "REJECTED",
+            "EXPIRED",
+            "DELETED"
+          ]
+        },
+        "stateReason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "securityProfile": {
+          "enum": [
+            "PRIVATE_E2EE",
+            "MANAGED"
+          ]
+        },
+        "uploaderPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Exact byte size of the stored object (ciphertext for PRIVATE_E2EE)."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "mediaType": {
+          "type": "string",
+          "maxLength": 127,
+          "description": "PRIVATE_E2EE: always application/octet-stream (the real type is protected inside MLS)."
+        },
+        "fileName": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 255,
+              "description": "MANAGED only: sanitized presentation name (never a storage key)."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "media": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "durationMs": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "durationVerified": {
+                  "const": false
+                },
+                "codec": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "waveform": {
+                  "type": "array",
+                  "maxItems": 256,
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255
+                  }
+                }
+              },
+              "description": "MANAGED only, client-declared presentation metadata (durations are NOT verified by the server)."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cryptoFormat": {
+          "oneOf": [
+            {
+              "const": "CFMEET_ATTACHMENT_XCHACHA20POLY1305_STREAM_V1"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scan": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "enum": [
+                "NOT_REQUIRED",
+                "PENDING",
+                "CLEAN",
+                "INFECTED",
+                "FAILED",
+                "NOT_APPLICABLE_ENCRYPTED"
+              ]
+            },
+            "engine": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "finding": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "status",
+            "engine",
+            "finding"
+          ],
+          "description": "PRIVATE_E2EE attachments are ciphertext: never scanned and never reported as scanned (NOT_APPLICABLE_ENCRYPTED)."
+        },
+        "messageId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finalizedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "intentExpiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "upload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "PUT"
+            },
+            "url": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "headers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "value"
+                ]
+              }
+            },
+            "expiresAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": [
+            "method",
+            "url",
+            "headers",
+            "expiresAt"
+          ],
+          "description": "A signed single-object upload bound to the exact size (content-length), SHA-256 (x-amz-checksum-sha256) and content type: the store rejects any other bytes. Send exactly these headers."
+        }
+      },
+      "required": [
+        "attachmentId",
+        "conversationId",
+        "kind",
+        "state",
+        "stateReason",
+        "securityProfile",
+        "uploaderPrincipalId",
+        "size",
+        "sha256",
+        "mediaType",
+        "fileName",
+        "media",
+        "cryptoFormat",
+        "scan",
+        "messageId",
+        "createdAt",
+        "finalizedAt",
+        "intentExpiresAt",
+        "upload"
+      ]
+    },
+    "AttachmentIntentRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "IMAGE",
+            "DOCUMENT",
+            "FILE",
+            "VOICE_NOTE",
+            "VIDEO"
+          ]
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "mediaType": {
+          "type": "string",
+          "maxLength": 127,
+          "description": "MANAGED: required, in the kind's allow-list. PRIVATE_E2EE: omit (or application/octet-stream)."
+        },
+        "fileName": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "MANAGED only (sanitized). Refused for PRIVATE_E2EE."
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "codec": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "waveform": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          }
+        },
+        "deviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "PRIVATE_E2EE: the uploading device (the acting principal's)."
+        },
+        "cryptoFormat": {
+          "const": "CFMEET_ATTACHMENT_XCHACHA20POLY1305_STREAM_V1"
+        }
+      },
+      "required": [
+        "kind",
+        "size",
+        "sha256"
+      ]
+    },
+    "AttachmentDownloadGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "attachmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "method": {
+          "const": "GET"
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "cryptoFormat": {
+          "oneOf": [
+            {
+              "const": "CFMEET_ATTACHMENT_XCHACHA20POLY1305_STREAM_V1"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "residualAccessSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "A grant issued before a revocation stays usable at most this long; GET .../content re-checks authorization on every request."
+        }
+      },
+      "required": [
+        "attachmentId",
+        "method",
+        "url",
+        "expiresAt",
+        "size",
+        "sha256",
+        "cryptoFormat",
+        "residualAccessSeconds"
+      ],
+      "description": "A short-lived signed read of one object forcing Content-Disposition: attachment and the stored content type. Issued only after authorization (current membership, history window, message ACTIVE, attachment READY)."
+    },
+    "LegalHold": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "holdId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "CONVERSATION",
+                "PRINCIPAL",
+                "ENVIRONMENT"
+              ]
+            },
+            "conversationId": {
+              "oneOf": [
+                {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "principalId": {
+              "oneOf": [
+                {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "conversationId",
+            "principalId"
+          ]
+        },
+        "reasonCategory": {
+          "enum": [
+            "LITIGATION",
+            "REGULATORY",
+            "INVESTIGATION",
+            "INTERNAL_POLICY"
+          ]
+        },
+        "caseReference": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "ACTIVE",
+            "RELEASED"
+          ]
+        },
+        "effective": {
+          "type": "boolean"
+        },
+        "preserves": {
+          "const": "MESSAGES_ATTACHMENTS_AND_METADATA_AS_STORED"
+        },
+        "decryptionCapability": {
+          "const": "NONE"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "releasedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "releaseReason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "holdId",
+        "scope",
+        "reasonCategory",
+        "caseReference",
+        "status",
+        "effective",
+        "preserves",
+        "decryptionCapability",
+        "createdAt",
+        "expiresAt",
+        "releasedAt",
+        "releaseReason"
+      ],
+      "description": "A legal / compliance hold: held items are never purged or deleted. For PRIVATE_E2EE it preserves ciphertext and metadata only; it never creates a decryption capability."
+    },
+    "LegalHoldRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scopeKind": {
+          "enum": [
+            "CONVERSATION",
+            "PRINCIPAL",
+            "ENVIRONMENT"
+          ]
+        },
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "reasonCategory": {
+          "enum": [
+            "LITIGATION",
+            "REGULATORY",
+            "INVESTIGATION",
+            "INTERNAL_POLICY"
+          ]
+        },
+        "caseReference": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "scopeKind",
+        "reasonCategory"
+      ]
+    },
+    "LegalHoldRelease": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        }
+      },
+      "required": [
+        "reason"
+      ]
+    },
+    "LegalHoldList": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "holds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/LegalHold"
+          }
+        }
+      },
+      "required": [
+        "holds"
+      ]
     }
   }
 }

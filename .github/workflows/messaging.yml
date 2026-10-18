@@ -4,8 +4,8 @@ name: Messaging
 # foundation (conversations, devices and their PUBLIC MLS material, key-transparency log,
 # outbox; its own PostgreSQL database) — and the shared cryptographic core
 # packages/messaging-crypto (MLS 1.0 / OpenMLS, RFC 9162 transparency proofs).
-# Messaging depends only on packages/service-auth, packages/messaging-crypto and its
-# contracts; at runtime on Platform Access (the test job runs the REAL Platform Access
+# Messaging depends only on packages/service-auth, packages/messaging-crypto,
+# packages/object-storage (protected attachment storage) and its contracts; at runtime on Platform Access (the test job runs the REAL Platform Access
 # binaries for the cross-service certification).
 # Independent of every other service: this workflow never builds, starts or deploys the
 # Meeting Service, Calling, Numbering, the SMS Gateway or any other service, and nothing
@@ -24,6 +24,7 @@ on:
       - "services/messaging/**"
       - "services/platform-access/**"
       - "packages/messaging-crypto/**"
+      - "packages/object-storage/**"
       - "packages/service-auth/**"
       - "packages/contracts/**"
       - "infra/deployment/**"
@@ -34,6 +35,7 @@ on:
       - "services/messaging/**"
       - "services/platform-access/**"
       - "packages/messaging-crypto/**"
+      - "packages/object-storage/**"
       - "packages/service-auth/**"
       - "packages/contracts/**"
       - "infra/deployment/**"
@@ -175,7 +177,7 @@ jobs:
           fi
 
   test:
-    name: service test (PostgreSQL, Redis, real Platform Access)
+    name: service test (PostgreSQL, Redis, MinIO, ClamAV, real Platform Access)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -197,6 +199,14 @@ jobs:
       TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
       MESSAGING_TEST_REDIS_URL: redis://127.0.0.1:6379/
       MESSAGING_REDIS_REQUIRED: "1"
+      # Private S3-compatible attachment storage (MinIO without a KMS: no SSE-S3).
+      OBJECT_STORAGE_TEST_ENDPOINT: http://127.0.0.1:9000
+      OBJECT_STORAGE_TEST_ACCESS_KEY: cfmeet-ci
+      OBJECT_STORAGE_TEST_SECRET_KEY: cfmeet-ci-only-not-a-secret
+      OBJECT_STORAGE_TEST_SSE: ""
+      OBJECT_STORAGE_TEST_REQUIRED: "1"
+      MESSAGING_TEST_CLAMAV_ADDRESS: 127.0.0.1:3310
+      MESSAGING_CLAMAV_REQUIRED: "1"
     defaults:
       run:
         working-directory: services/messaging
@@ -211,6 +221,34 @@ jobs:
             services/messaging -> target
             services/platform-access -> target
           key: test
+
+      # Service containers cannot take a command, so MinIO starts here (the pgsty/minio build
+      # pinned by digest, as in phase2-backend-certification.yml).
+      - name: Start MinIO (private attachment bucket)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=cfmeet-ci -e MINIO_ROOT_PASSWORD=cfmeet-ci-only-not-a-secret \
+            pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372 server /data
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:9000/minio/health/ready && exit 0; sleep 1; done
+          docker logs minio; exit 1
+
+      # The real clamd engine and INSTREAM protocol, loaded with a single test signature
+      # (the EICAR test file's MD5) so the run is deterministic and offline. Production
+      # loads the freshclam-maintained databases; nothing here claims their coverage.
+      - name: Start clamd (self-hosted scanner, EICAR test signature)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq clamav-daemon netcat-openbsd >/dev/null
+          sudo systemctl stop clamav-daemon clamav-freshclam 2>/dev/null || true
+          d="$RUNNER_TEMP/clamav"; mkdir -p "$d/db"
+          echo '44d88612fea8a8f36de82e1278abb02f:68:Eicar-Test-Signature' > "$d/db/eicar.hdb"
+          printf 'DatabaseDirectory %s\nTCPSocket 3310\nTCPAddr 127.0.0.1\nForeground yes\nStreamMaxLength 100M\n' "$d/db" > "$d/clamd.conf"
+          nohup clamd -c "$d/clamd.conf" > "$d/clamd.log" 2>&1 &
+          for i in $(seq 1 60); do [ "$(printf 'zPING\0' | nc -w 2 127.0.0.1 3310 | tr -d '\0')" = "PONG" ] && exit 0; sleep 1; done
+          cat "$d/clamd.log"; exit 1
 
       - name: Build Platform Access
         working-directory: services/platform-access
@@ -229,6 +267,8 @@ jobs:
         run: cargo test --locked --test realtime
       - name: Realtime across two gateway instances through real Redis (fan-out, presence, revocation)
         run: cargo test --locked --test realtime_redis
+      - name: Attachments (Part F) — intents, signed uploads, verification, content security, scanning (real clamd), quotas, grants, E2EE client encryption, lifecycle, legal holds, real MinIO
+        run: cargo test --locked --test attachments
       - name: cargo test (whole workspace, incl. the Platform Access certification)
         env:
           PLATFORM_ACCESS_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access

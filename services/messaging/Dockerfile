@@ -18,6 +18,7 @@ FROM rust:1-bookworm AS builder
 WORKDIR /src
 COPY packages/service-auth packages/service-auth
 COPY packages/messaging-crypto packages/messaging-crypto
+COPY packages/object-storage packages/object-storage
 COPY packages/contracts/messaging packages/contracts/messaging
 COPY services/messaging services/messaging
 WORKDIR /src/services/messaging

@@ -10,14 +10,19 @@
 //!    random 19-byte nonce prefix under a single-use key means no (key, nonce) pair ever
 //!    repeats;
 //! 3. uploads only the ciphertext ([`EncryptedAttachment::ciphertext`]) through an upload
-//!    intent; the server sees its size and SHA-256 and nothing else;
-//! 4. sends the [`AttachmentDescriptor`] (key, ciphertext digest, sizes, media type,
-//!    file name …) INSIDE an MLS application message, so only group members learn it.
+//!    intent declaring its size and SHA-256; the server sees those and nothing else, and
+//!    assigns the attachment id;
+//! 4. records that id ([`AttachmentDescriptor::for_attachment`]) and sends the
+//!    [`AttachmentDescriptor`] (key, ciphertext digest, sizes, media type, file name …)
+//!    INSIDE an MLS application message, so only group members learn it.
 //!
 //! A recipient downloads the ciphertext with a server-issued grant and calls
 //! [`decrypt_attachment`]: the ciphertext digest is checked first, then every chunk.
-//! Every chunk's associated data binds the server-assigned attachment id, so a ciphertext
-//! cannot be presented as another attachment.
+//! Every chunk's associated data binds a random client-generated content id carried in
+//! the descriptor (the ciphertext digest must be known BEFORE the server assigns the
+//! attachment id), so a ciphertext cannot be presented under another descriptor; the
+//! descriptor itself names the server attachment id and the ciphertext digest the
+//! download must match, all integrity-protected by MLS.
 //!
 //! No primitive is implemented here; the format is versioned
 //! ([`ATTACHMENT_FORMAT_V1`]). Key bytes are zeroized on drop and never printed.
@@ -91,6 +96,9 @@ impl AttachmentKey {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachmentDescriptor {
     pub format: String,
+    /// Random id chosen by the encrypting client, bound into every chunk.
+    pub content_id: Uuid,
+    /// The server-assigned attachment id (nil until [`Self::for_attachment`]).
     pub attachment_id: Uuid,
     pub key: AttachmentKey,
     /// Lower-case hex SHA-256 of the uploaded ciphertext.
@@ -109,9 +117,9 @@ pub struct EncryptedAttachment {
     pub descriptor: AttachmentDescriptor,
 }
 
-fn chunk_aad(attachment_id: Uuid) -> Vec<u8> {
+fn chunk_aad(content_id: Uuid) -> Vec<u8> {
     let mut aad = b"cfmeet-attachment:v1:".to_vec();
-    aad.extend_from_slice(attachment_id.hyphenated().to_string().as_bytes());
+    aad.extend_from_slice(content_id.hyphenated().to_string().as_bytes());
     aad
 }
 
@@ -126,9 +134,8 @@ pub fn ciphertext_size(plaintext_size: u64) -> u64 {
     HEADER as u64 + plaintext_size + chunks * TAG as u64
 }
 
-/// Encrypts `plaintext` for the server-assigned `attachment_id` under a fresh key.
+/// Encrypts `plaintext` under a fresh key and a fresh content id.
 pub fn encrypt_attachment(
-    attachment_id: Uuid,
     plaintext: &[u8],
     media_type: &str,
     file_name: &str,
@@ -141,7 +148,8 @@ pub fn encrypt_attachment(
     OsRng.fill_bytes(&mut prefix);
     let cipher = XChaCha20Poly1305::new(key.as_bytes().into());
     let mut encryptor = EncryptorBE32::from_aead(cipher, prefix.as_slice().into());
-    let aad = chunk_aad(attachment_id);
+    let content_id = Uuid::new_v4();
+    let aad = chunk_aad(content_id);
     let mut out = Vec::with_capacity(ciphertext_size(plaintext.len() as u64) as usize);
     out.extend_from_slice(MAGIC);
     out.extend_from_slice(&prefix);
@@ -176,7 +184,8 @@ pub fn encrypt_attachment(
     }
     let descriptor = AttachmentDescriptor {
         format: ATTACHMENT_FORMAT_V1.to_string(),
-        attachment_id,
+        content_id,
+        attachment_id: Uuid::nil(),
         key,
         ciphertext_sha256: hex(&Sha256::digest(&out)),
         ciphertext_size: out.len() as u64,
@@ -209,7 +218,7 @@ pub fn decrypt_attachment(
     let prefix = &ciphertext[MAGIC.len()..HEADER];
     let cipher = XChaCha20Poly1305::new(descriptor.key.as_bytes().into());
     let mut decryptor = DecryptorBE32::from_aead(cipher, prefix.into());
-    let aad = chunk_aad(descriptor.attachment_id);
+    let aad = chunk_aad(descriptor.content_id);
     let body = &ciphertext[HEADER..];
     let mut out = Vec::with_capacity(descriptor.plaintext_size as usize);
     let mut chunks = body.chunks(CHUNK_SIZE + TAG).peekable();
@@ -240,6 +249,12 @@ pub fn decrypt_attachment(
 }
 
 impl AttachmentDescriptor {
+    /// Records the attachment id the server assigned to the upload intent.
+    pub fn for_attachment(mut self, attachment_id: Uuid) -> Self {
+        self.attachment_id = attachment_id;
+        self
+    }
+
     /// Canonical length-prefixed encoding (what the client places in the MLS message).
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = b"CFAD1".to_vec();
@@ -248,6 +263,7 @@ impl AttachmentDescriptor {
             out.extend_from_slice(b);
         };
         field(self.format.as_bytes());
+        field(self.content_id.as_bytes());
         field(self.attachment_id.as_bytes());
         field(self.key.as_bytes());
         field(self.ciphertext_sha256.as_bytes());
@@ -275,7 +291,7 @@ impl AttachmentDescriptor {
             fields.push(rest.get(at..at + len).ok_or(AttachmentError::Malformed)?);
             at += len;
         }
-        if fields.len() != 8 {
+        if fields.len() != 9 {
             return Err(AttachmentError::Malformed);
         }
         let text = |b: &[u8]| String::from_utf8(b.to_vec()).map_err(|_| AttachmentError::Malformed);
@@ -284,19 +300,26 @@ impl AttachmentDescriptor {
                 b.try_into().map_err(|_| AttachmentError::Malformed)?,
             ))
         };
+        let id = |b: &[u8]| Uuid::from_slice(b).map_err(|_| AttachmentError::Malformed);
+        let attachment_id = id(fields[2])?;
+        if attachment_id.is_nil() {
+            // A descriptor travels only once the server assigned the attachment id.
+            return Err(AttachmentError::Malformed);
+        }
         Ok(Self {
             format: text(fields[0])?,
-            attachment_id: Uuid::from_slice(fields[1]).map_err(|_| AttachmentError::Malformed)?,
+            content_id: id(fields[1])?,
+            attachment_id,
             key: AttachmentKey::from_bytes(
-                fields[2]
+                fields[3]
                     .try_into()
                     .map_err(|_| AttachmentError::Malformed)?,
             ),
-            ciphertext_sha256: text(fields[3])?,
-            ciphertext_size: u64_of(fields[4])?,
-            plaintext_size: u64_of(fields[5])?,
-            media_type: text(fields[6])?,
-            file_name: text(fields[7])?,
+            ciphertext_sha256: text(fields[4])?,
+            ciphertext_size: u64_of(fields[5])?,
+            plaintext_size: u64_of(fields[6])?,
+            media_type: text(fields[7])?,
+            file_name: text(fields[8])?,
         })
     }
 }
@@ -319,28 +342,31 @@ mod tests {
             CHUNK_SIZE + 1,
             3 * CHUNK_SIZE + 7,
         ] {
-            let id = Uuid::new_v4();
             let plain: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
-            let enc = encrypt_attachment(id, &plain, "image/png", "cat.png").unwrap();
+            let enc = encrypt_attachment(&plain, "image/png", "cat.png").unwrap();
             assert_eq!(
                 enc.ciphertext.len() as u64,
                 ciphertext_size(len as u64),
                 "{len}"
             );
-            let d = AttachmentDescriptor::from_bytes(&enc.descriptor.to_bytes()).unwrap();
-            assert_eq!(d, enc.descriptor);
+            assert!(
+                AttachmentDescriptor::from_bytes(&enc.descriptor.to_bytes()).is_err(),
+                "unassigned id"
+            );
+            let assigned = enc.descriptor.clone().for_attachment(Uuid::new_v4());
+            let d = AttachmentDescriptor::from_bytes(&assigned.to_bytes()).unwrap();
+            assert_eq!(d, assigned);
             assert_eq!(decrypt_attachment(&d, &enc.ciphertext).unwrap(), plain);
         }
     }
 
     #[test]
     fn the_ciphertext_reveals_nothing_and_resists_tampering() {
-        let id = Uuid::new_v4();
         let plain = b"top secret scan of a passport ".repeat(5000);
-        let enc = encrypt_attachment(id, &plain, "application/pdf", "passport.pdf").unwrap();
+        let enc = encrypt_attachment(&plain, "application/pdf", "passport.pdf").unwrap();
         assert!(!enc.ciphertext.windows(10).any(|w| w == b"top secret"));
         // Fresh key and nonce every time.
-        let again = encrypt_attachment(id, &plain, "application/pdf", "passport.pdf").unwrap();
+        let again = encrypt_attachment(&plain, "application/pdf", "passport.pdf").unwrap();
         assert_ne!(again.ciphertext, enc.ciphertext);
         assert_ne!(again.descriptor.key, enc.descriptor.key);
         // A flipped byte fails the digest; with a matching digest it fails AEAD.
@@ -366,9 +392,9 @@ mod tests {
             decrypt_attachment(&d, &cut),
             Err(AttachmentError::Authentication)
         );
-        // The same ciphertext presented as another attachment fails.
+        // The same ciphertext presented under another content id fails.
         let mut d = enc.descriptor.clone();
-        d.attachment_id = Uuid::new_v4();
+        d.content_id = Uuid::new_v4();
         assert_eq!(
             decrypt_attachment(&d, &enc.ciphertext),
             Err(AttachmentError::Authentication)

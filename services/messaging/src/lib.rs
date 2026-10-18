@@ -17,6 +17,7 @@
 
 pub mod attachments;
 pub mod audit;
+pub mod compliance;
 pub mod config;
 pub mod conversations;
 pub mod db;

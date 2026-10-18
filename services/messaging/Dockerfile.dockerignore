@@ -3,6 +3,7 @@
 *
 !packages/service-auth
 !packages/messaging-crypto
+!packages/object-storage
 !packages/contracts/messaging
 !services/messaging
 

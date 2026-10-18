@@ -427,6 +427,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cf-object-storage"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "hex",
+ "hmac 0.12.1",
+ "reqwest",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "url",
+]
+
+[[package]]
 name = "cf-service-auth"
 version = "0.1.0"
 dependencies = [
@@ -2305,6 +2319,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "cf-messaging-crypto",
+ "cf-object-storage",
  "cf-service-auth",
  "chacha20poly1305",
  "chrono",

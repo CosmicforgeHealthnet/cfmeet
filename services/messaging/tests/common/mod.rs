@@ -330,6 +330,7 @@ pub struct Response {
     pub headers: HeaderMap,
     pub json: Value,
     pub text: String,
+    pub bytes: Vec<u8>,
 }
 
 impl Response {
@@ -481,6 +482,7 @@ impl Harness {
             headers,
             json,
             text,
+            bytes: bytes.to_vec(),
         }
     }
 
