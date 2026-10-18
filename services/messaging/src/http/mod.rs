@@ -43,6 +43,7 @@ pub fn customer_routes() -> Router<AppState> {
         .merge(crate::conversations::http::policy_routes())
         .merge(crate::mls::http::device_routes())
         .merge(crate::safety::http::routes())
+        .merge(crate::realtime::http::customer_routes())
 }
 
 pub fn app(state: AppState) -> Router {
@@ -50,6 +51,7 @@ pub fn app(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/ready", get(ready))
         .route("/openapi.json", get(openapi))
+        .merge(crate::realtime::http::device_routes())
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
         .with_state(state.clone())
@@ -109,8 +111,10 @@ async fn health() -> impl IntoResponse {
 
 async fn ready(State(state): State<AppState>) -> impl IntoResponse {
     let pending = messaging_migration::Migrator::get_pending_migrations(&state.db).await;
+    let draining = state.realtime.hub.is_draining();
     let (ok, database, migrations) = match pending {
-        Ok(p) if p.is_empty() => (true, "ok", "current"),
+        Ok(p) if p.is_empty() && !draining => (true, "ok", "current"),
+        Ok(p) if p.is_empty() => (false, "ok", "current"),
         Ok(_) => (false, "ok", "pending"),
         Err(_) => (false, "unavailable", "unknown"),
     };
@@ -148,6 +152,13 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
             "authorizationCache": if state.authority.is_caching() { "active" } else { "inactive" },
             "outboxPending": outbox,
             "outboxDeadLetter": dead,
+            "realtime": {
+                "draining": state.realtime.hub.is_draining(),
+                "connections": state.realtime.hub.connections(),
+                "broker": state.realtime.broker.backend(),
+                "presence": state.realtime.presence.backend(),
+                "clientTokens": if state.realtime.keys.is_some() { "enabled" } else { "disabled" },
+            },
         })),
     )
 }

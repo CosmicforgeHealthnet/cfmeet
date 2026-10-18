@@ -877,6 +877,10 @@ pub async fn revoke(
                 // groups accept only a removal commit until one is accepted.
                 crate::mls::device_revoked(txn, ctx.scope.environment_id, acting.principal_id, device.id, now)
                     .await?;
+                // Its client sessions end and it receives no further notifications; the
+                // gateways close its connections when the event below is published.
+                crate::realtime::sessions::revoke_device_sessions(txn, device.id, now).await?;
+                crate::realtime::push::disable_device(txn, device.id, now).await?;
                 crate::metrics::inc("messaging_devices_revoked_total", &[]);
                 load_device(txn, &ctx, device.id, false)
                     .await?

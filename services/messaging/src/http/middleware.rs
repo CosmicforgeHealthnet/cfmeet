@@ -157,8 +157,15 @@ pub async fn require_customer(
             match state.authority.authenticate_with(&token, freshness).await {
                 Ok(Authentication::Authenticated(ctx)) if ctx.full_authority => {
                     drop(token);
+                    let mutation =
+                        request.method() != Method::GET && request.method() != Method::HEAD;
                     request.extensions_mut().insert(CustomerCaller(*ctx));
-                    next.run(request).await
+                    let response = next.run(request).await;
+                    if mutation && response.status().is_success() {
+                        // A committed change may have queued events: publish them now.
+                        state.wake_outbox();
+                    }
+                    response
                 }
                 Ok(Authentication::Authenticated(_)) => {
                     tracing::info!("customer authentication refused (suspended scope)");

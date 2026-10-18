@@ -28,7 +28,11 @@ cf-service-auth = { path = "../../packages/service-auth", features = ["client"] 
 cf-messaging-crypto = { path = "../../packages/messaging-crypto" }
 tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync", "net"] }
 sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono", "with-json", "postgres-array"] }
-axum = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio", "query", "matched-path"] }
+axum = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio", "query", "matched-path", "ws"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# Self-hosted realtime broker / ephemeral presence (pub/sub and TTL sets only; never the
+# message store).
+redis = { version = "0.27", default-features = false, features = ["tokio-comp", "aio"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1.11", features = ["v4", "serde"] }
@@ -61,3 +65,5 @@ tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1.42", features = ["process"] }
+# A real WebSocket client for the realtime gateway tests (same tungstenite as axum).
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "handshake"] }

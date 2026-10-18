@@ -12,6 +12,7 @@ use crate::{
     domain::SharedClock,
     identity::{cache::CachingAuthority, PrincipalDirectory, Unconfigured},
     messages::managed::ManagedKeyring,
+    realtime::Realtime,
     transparency::TreeHeadSigner,
 };
 
@@ -31,6 +32,8 @@ pub struct AppState {
     pub tree_heads: Option<Arc<TreeHeadSigner>>,
     /// Seals MANAGED message text at rest. `None`: MANAGED sending fails closed.
     pub managed_keys: Option<Arc<ManagedKeyring>>,
+    /// The realtime gateway runtime of this instance.
+    pub realtime: Arc<Realtime>,
 }
 
 impl AppState {
@@ -51,6 +54,7 @@ impl AppState {
             workers: WorkerSettings::default(),
             tree_heads: None,
             managed_keys: None,
+            realtime: Arc::new(Realtime::disabled()),
         }
     }
 
@@ -82,6 +86,16 @@ impl AppState {
     pub fn with_managed_keys(mut self, keys: Arc<ManagedKeyring>) -> Self {
         self.managed_keys = Some(keys);
         self
+    }
+
+    pub fn with_realtime(mut self, realtime: Arc<Realtime>) -> Self {
+        self.realtime = realtime;
+        self
+    }
+
+    /// Wakes this instance's outbox publisher after a commit (realtime latency).
+    pub fn wake_outbox(&self) {
+        self.realtime.outbox_wakeup.notify_one();
     }
 
     pub fn now(&self) -> chrono::DateTime<chrono::Utc> {

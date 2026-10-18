@@ -25,6 +25,16 @@
 //! | `MESSAGING_ENVIRONMENT_MESSAGES_PER_MINUTE` | no | tenant-fairness bound per application environment (default 60000) |
 //! | `MESSAGING_ABUSE_SIGNAL_THRESHOLD` / `MESSAGING_ABUSE_RESTRICTION_SECONDS` | no | automatic temporary sending restriction (defaults 10 per hour / 900 s) |
 //! | `MESSAGING_MANAGED_KEYRING_FILE` | no | key-ring FILE sealing MANAGED message text at rest (`<id> <base64url 32-byte key>` per line, first = active). Without it MANAGED sending fails closed |
+//! | `MESSAGING_CLIENT_TOKEN_SIGNING_KEY_FILE` | no | PKCS#8 PEM Ed25519 key FILE signing Messaging Client Access Tokens (a Messaging-only secret). Without it no client token is issued: realtime is disabled (fail closed) |
+//! | `MESSAGING_CLIENT_TOKEN_TTL_SECONDS` / `MESSAGING_REALTIME_TICKET_TTL_SECONDS` | no | token lifetime (60–86400, default 900) / single-use ticket lifetime (5–300, default 30) |
+//! | `MESSAGING_REALTIME_ALLOWED_ORIGINS` | no | comma-separated exact browser origins allowed to connect (default: none; native clients send no Origin) |
+//! | `MESSAGING_REALTIME_REQUIRE_TLS` | no | refuse handshakes not forwarded as `https` (default `true` outside local / test) |
+//! | `MESSAGING_REALTIME_REDIS_URL` | no | self-hosted Redis for cross-instance fan-out and presence (secret; default: single-instance in-process broker) |
+//! | `MESSAGING_REALTIME_HEARTBEAT_SECONDS` / `_IDLE_TIMEOUT_SECONDS` / `_REVALIDATE_SECONDS` | no | defaults 20 / 60 / 30 |
+//! | `MESSAGING_REALTIME_MAX_FRAME_BYTES` / `_SEND_QUEUE` / `_MAX_SUBSCRIPTIONS` / `_MAX_REPLAY` | no | defaults 65536 / 512 / 200 / 500 |
+//! | `MESSAGING_REALTIME_MAX_CONNECTIONS` / `_PER_TENANT_CONNECTIONS` / `_PER_PRINCIPAL_CONNECTIONS` / `_PER_DEVICE_CONNECTIONS` | no | per instance: defaults 50000 / 10000 / 20 / 5 |
+//! | `MESSAGING_REALTIME_FRAMES_PER_SECOND` / `_DRAIN_SECONDS` | no | defaults 20 / 10 |
+//! | `MESSAGING_PUSH_PROVIDER` | no | `none` (default) or `local-test` (local / test runtimes only). APNs / FCM adapters are not implemented: jobs end `NOT_CONFIGURED` |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
 //! Service authentication (`CF_*`) is read by [`service_auth`].
@@ -191,7 +201,18 @@ pub struct MessagingConfig {
     pub workers: WorkerSettings,
     pub transparency: TransparencySettings,
     pub managed_keyring_file: Option<std::path::PathBuf>,
+    pub realtime: crate::realtime::RealtimeSettings,
+    pub client_token_key_file: Option<std::path::PathBuf>,
+    pub realtime_redis_url: Option<SecretString>,
+    pub push_provider: PushProviderKind,
     pub log_format: LogFormat,
+}
+
+/// Which push adapter dispatches notification jobs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PushProviderKind {
+    None,
+    LocalTest,
 }
 
 impl fmt::Debug for MessagingConfig {
@@ -389,6 +410,12 @@ impl MessagingConfig {
             )?),
             outbox_max_attempts: bounded(&get, "MESSAGING_OUTBOX_MAX_ATTEMPTS", 12, 1, 100)? as i32,
         };
+        if get("MESSAGING_CLIENT_TOKEN_SIGNING_KEY").is_some() {
+            return Err(ConfigError::invalid(
+                "MESSAGING_CLIENT_TOKEN_SIGNING_KEY",
+                "inline private keys are not accepted; set MESSAGING_CLIENT_TOKEN_SIGNING_KEY_FILE",
+            ));
+        }
         if get("MESSAGING_KT_SIGNING_KEY").is_some() {
             return Err(ConfigError::invalid(
                 "MESSAGING_KT_SIGNING_KEY",
@@ -411,6 +438,126 @@ impl MessagingConfig {
                 .ok_or(ConfigError::Missing {
                     var: "MESSAGING_KT_SIGNING_KEY_FILE",
                 })?,
+        };
+        let secs = |var: &'static str,
+                    default: i64,
+                    min: i64,
+                    max: i64|
+         -> Result<Duration, ConfigError> {
+            Ok(Duration::from_secs(
+                bounded(&get, var, default, min, max)? as u64
+            ))
+        };
+        let count =
+            |var: &'static str, default: i64, min: i64, max: i64| -> Result<usize, ConfigError> {
+                Ok(bounded(&get, var, default, min, max)? as usize)
+            };
+        let heartbeat = secs("MESSAGING_REALTIME_HEARTBEAT_SECONDS", 20, 5, 120)?;
+        let idle = secs("MESSAGING_REALTIME_IDLE_TIMEOUT_SECONDS", 60, 10, 600)?;
+        if idle < heartbeat * 2 {
+            return Err(ConfigError::invalid(
+                "MESSAGING_REALTIME_IDLE_TIMEOUT_SECONDS",
+                "must be at least twice the heartbeat interval",
+            ));
+        }
+        let allowed_origins: Vec<String> = get("MESSAGING_REALTIME_ALLOWED_ORIGINS")
+            .map(|v| {
+                v.split(',')
+                    .map(|o| o.trim().to_string())
+                    .filter(|o| !o.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for o in &allowed_origins {
+            let ok = (o.starts_with("https://")
+                || (runtime.allows_insecure_transport() && o.starts_with("http://")))
+                && !o.ends_with('/')
+                && o.len() <= 200
+                && !o.contains(['*', ' ']);
+            if !ok {
+                return Err(ConfigError::invalid(
+                    "MESSAGING_REALTIME_ALLOWED_ORIGINS",
+                    "each origin must be an exact https://host[:port] (no wildcard, no path)",
+                ));
+            }
+        }
+        let require_tls = match get("MESSAGING_REALTIME_REQUIRE_TLS").as_deref() {
+            None => !runtime.allows_insecure_transport(),
+            Some("true") => true,
+            Some("false") if runtime.allows_insecure_transport() => false,
+            Some(_) => {
+                return Err(ConfigError::invalid(
+                    "MESSAGING_REALTIME_REQUIRE_TLS",
+                    "must be `true` (or `false` in local / test runtimes only)",
+                ))
+            }
+        };
+        let realtime = crate::realtime::RealtimeSettings {
+            token_ttl: chrono::Duration::seconds(bounded(
+                &get,
+                "MESSAGING_CLIENT_TOKEN_TTL_SECONDS",
+                900,
+                60,
+                86_400,
+            )?),
+            ticket_ttl: chrono::Duration::seconds(bounded(
+                &get,
+                "MESSAGING_REALTIME_TICKET_TTL_SECONDS",
+                30,
+                5,
+                300,
+            )?),
+            allowed_origins,
+            require_tls,
+            heartbeat_interval: heartbeat,
+            idle_timeout: idle,
+            revalidate_interval: secs("MESSAGING_REALTIME_REVALIDATE_SECONDS", 30, 5, 600)?,
+            max_frame_bytes: count(
+                "MESSAGING_REALTIME_MAX_FRAME_BYTES",
+                65_536,
+                1_024,
+                1_048_576,
+            )?,
+            send_queue: count("MESSAGING_REALTIME_SEND_QUEUE", 512, 16, 65_536)?,
+            send_timeout: Duration::from_secs(10),
+            max_subscriptions: count("MESSAGING_REALTIME_MAX_SUBSCRIPTIONS", 200, 1, 10_000)?,
+            max_connections: count("MESSAGING_REALTIME_MAX_CONNECTIONS", 50_000, 1, 1_000_000)?,
+            per_tenant_connections: count(
+                "MESSAGING_REALTIME_PER_TENANT_CONNECTIONS",
+                10_000,
+                1,
+                1_000_000,
+            )?,
+            per_principal_connections: count(
+                "MESSAGING_REALTIME_PER_PRINCIPAL_CONNECTIONS",
+                20,
+                1,
+                1_000,
+            )?,
+            per_device_connections: count("MESSAGING_REALTIME_PER_DEVICE_CONNECTIONS", 5, 1, 100)?,
+            inbound_frames_per_second: bounded(
+                &get,
+                "MESSAGING_REALTIME_FRAMES_PER_SECOND",
+                20,
+                1,
+                1_000,
+            )? as u32,
+            max_replay: bounded(&get, "MESSAGING_REALTIME_MAX_REPLAY", 500, 10, 100_000)?,
+            typing_ttl: Duration::from_secs(8),
+            drain: secs("MESSAGING_REALTIME_DRAIN_SECONDS", 10, 0, 300)?,
+            publisher_interval: Duration::from_millis(250),
+        };
+        let push_provider = match get("MESSAGING_PUSH_PROVIDER").as_deref() {
+            None | Some("none") => PushProviderKind::None,
+            Some("local-test") if runtime.allows_insecure_transport() => {
+                PushProviderKind::LocalTest
+            }
+            Some(_) => {
+                return Err(ConfigError::invalid(
+                    "MESSAGING_PUSH_PROVIDER",
+                    "must be `none` (or `local-test` in local / test runtimes only)",
+                ))
+            }
         };
         let log_format = match get("LOG_FORMAT").as_deref() {
             None | Some("pretty") => LogFormat::Pretty,
@@ -440,6 +587,11 @@ impl MessagingConfig {
             transparency,
             managed_keyring_file: get("MESSAGING_MANAGED_KEYRING_FILE")
                 .map(std::path::PathBuf::from),
+            realtime,
+            client_token_key_file: get("MESSAGING_CLIENT_TOKEN_SIGNING_KEY_FILE")
+                .map(std::path::PathBuf::from),
+            realtime_redis_url: get("MESSAGING_REALTIME_REDIS_URL").map(SecretString::from),
+            push_provider,
             log_format,
         })
     }

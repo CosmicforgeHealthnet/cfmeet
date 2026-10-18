@@ -31,7 +31,7 @@ macro_rules! error_codes {
 error_codes! {
     ValidationError = "VALIDATION_ERROR" => BAD_REQUEST, "The request is invalid.";
     AuthenticationFailed = "AUTHENTICATION_FAILED" => UNAUTHORIZED, "Authentication failed.";
-    ClientTokensNotEnabled = "CLIENT_TOKENS_NOT_ENABLED" => UNAUTHORIZED, "Client tokens are not enabled for Messaging yet; use a server API credential.";
+    ClientTokensNotEnabled = "CLIENT_TOKENS_NOT_ENABLED" => UNAUTHORIZED, "Client tokens are accepted only by the realtime routes (/v1/realtime); use a server API credential here.";
     AuthoritySuspended = "AUTHORITY_SUSPENDED" => FORBIDDEN, "The tenant, application or environment is suspended.";
     InsufficientScope = "INSUFFICIENT_SCOPE" => FORBIDDEN, "The credential lacks the required scope.";
     ActingPrincipalRequired = "ACTING_PRINCIPAL_REQUIRED" => BAD_REQUEST, "The CF-Acting-Principal header is required.";

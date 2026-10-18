@@ -743,6 +743,44 @@
               "type": "null"
             }
           ]
+        },
+        "realtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "draining": {
+              "type": "boolean"
+            },
+            "connections": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "broker": {
+              "enum": [
+                "local",
+                "redis"
+              ]
+            },
+            "presence": {
+              "enum": [
+                "memory",
+                "redis"
+              ]
+            },
+            "clientTokens": {
+              "enum": [
+                "enabled",
+                "disabled"
+              ]
+            }
+          },
+          "required": [
+            "draining",
+            "connections",
+            "broker",
+            "presence",
+            "clientTokens"
+          ]
         }
       }
     },
@@ -2563,6 +2601,225 @@
       "required": [
         "blockedPrincipalId",
         "removed"
+      ]
+    },
+    "ClientTokenRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "deviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "ttlSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400
+        }
+      },
+      "required": [
+        "deviceId"
+      ]
+    },
+    "ClientToken": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "token": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "tokenType": {
+          "const": "CF-Client-Token"
+        },
+        "sessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "deviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "messages.read",
+              "messages.send"
+            ]
+          }
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "token",
+        "tokenType",
+        "sessionId",
+        "deviceId",
+        "scopes",
+        "expiresAt"
+      ],
+      "description": "A short-lived Messaging Client Access Token (compact JWS, EdDSA, typ cfmeet-mcat+jwt) bound to tenant, application, environment, principal, device and session. Device-direct use only: POST /v1/realtime/tickets."
+    },
+    "RealtimeTicket": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ticket": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "const": "/v1/realtime"
+        },
+        "subprotocol": {
+          "const": "cfmeet.messaging.v1"
+        },
+        "ticketSubprotocolPrefix": {
+          "const": "cfmeet.ticket."
+        }
+      },
+      "required": [
+        "ticket",
+        "expiresAt",
+        "path",
+        "subprotocol",
+        "ticketSubprotocolPrefix"
+      ],
+      "description": "Single-use, seconds-long WebSocket ticket, presented as a Sec-WebSocket-Protocol entry (never in the URL)."
+    },
+    "ClientSessionRevoked": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "const": "REVOKED"
+        }
+      },
+      "required": [
+        "sessionId",
+        "status"
+      ]
+    },
+    "PresenceSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "visibility": {
+          "enum": [
+            "CONVERSATION_MEMBERS",
+            "HIDDEN"
+          ]
+        },
+        "shareLastSeen": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "visibility",
+        "shareLastSeen"
+      ]
+    },
+    "PresenceSettingsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "visibility": {
+          "enum": [
+            "CONVERSATION_MEMBERS",
+            "HIDDEN"
+          ]
+        },
+        "shareLastSeen": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "visibility"
+      ]
+    },
+    "PushRegistrationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "platform": {
+          "enum": [
+            "APNS",
+            "FCM",
+            "WEB_PUSH",
+            "LOCAL_TEST"
+          ]
+        },
+        "handle": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 4096
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "platform",
+        "handle"
+      ]
+    },
+    "PushRegistration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "deviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "platform": {
+          "enum": [
+            "APNS",
+            "FCM",
+            "WEB_PUSH",
+            "LOCAL_TEST"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "pushDeliveryConfigured": {
+          "type": "boolean",
+          "description": "false: no push adapter / credentials for this platform in this deployment; jobs end NOT_CONFIGURED (never reported delivered)."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "deviceId",
+        "platform",
+        "enabled",
+        "pushDeliveryConfigured",
+        "updatedAt"
+      ]
+    },
+    "PushUnregistered": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "deviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "enabled": {
+          "const": false
+        }
+      },
+      "required": [
+        "deviceId",
+        "enabled"
       ]
     }
   }

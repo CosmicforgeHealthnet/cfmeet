@@ -412,7 +412,7 @@ async fn managed_messages_are_sealed_at_rest_editable_and_deletable() {
     let mid = r.json["messageId"].as_str().unwrap().to_string();
     // Sealed at rest: the text is not in any column (only the search index's words are).
     let raw = h
-        .scalar(&format!("SELECT count(*) FROM messaging_messages WHERE id = '{mid}' AND position('quarterly numbers' in convert_from(managed_sealed, 'LATIN1')) > 0"))
+        .scalar(&format!("SELECT count(*) FROM messaging_messages WHERE id = '{mid}' AND position(convert_to('quarterly numbers', 'UTF8') in managed_sealed) > 0"))
         .await;
     assert_eq!(raw, 0);
     // Ciphertext is refused in MANAGED.

@@ -29,6 +29,16 @@ pub fn inc(name: &'static str, labels: &[(&'static str, &'static str)]) {
         .or_default() += 1;
 }
 
+static GAUGES: LazyLock<Mutex<BTreeMap<&'static str, i64>>> = LazyLock::new(Mutex::default);
+
+/// Sets an in-process gauge (this instance's value, e.g. open realtime connections).
+pub fn gauge(name: &'static str, value: i64) {
+    GAUGES
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(name, value);
+}
+
 /// The current value of a counter (tests).
 pub fn counter(name: &'static str, labels: &[(&'static str, &'static str)]) -> u64 {
     COUNTERS
@@ -59,6 +69,12 @@ pub async fn render(state: &AppState) -> String {
                 last = name;
             }
             let _ = writeln!(out, "{name}{} {value}", label_text(labels));
+        }
+    }
+    {
+        let gauges = GAUGES.lock().unwrap_or_else(|p| p.into_inner());
+        for (name, value) in gauges.iter() {
+            let _ = writeln!(out, "# TYPE {name} gauge\n{name} {value}");
         }
     }
     let db = &state.db;

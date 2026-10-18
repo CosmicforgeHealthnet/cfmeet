@@ -481,6 +481,22 @@
               "$ref": "#/$defs/WelcomeAvailable"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.client-session.revoked"
+            },
+            "payload": {
+              "$ref": "#/$defs/ClientSessionRevoked"
+            }
+          }
         }
       ]
     },
@@ -780,6 +796,22 @@
         "welcome_id",
         "device_id",
         "conversation_id"
+      ]
+    },
+    "ClientSessionRevoked": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      },
+      "required": [
+        "session_id",
+        "principal_id"
       ]
     }
   }

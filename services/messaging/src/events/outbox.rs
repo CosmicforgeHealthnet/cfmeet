@@ -364,11 +364,29 @@ impl OutboxPublisher {
 
     /// Runs publication passes every `interval` until the process stops.
     pub async fn run(self: Arc<Self>, interval: std::time::Duration) {
+        self.run_with_wakeup(interval, Arc::new(tokio::sync::Notify::new()))
+            .await
+    }
+
+    /// Like [`Self::run`], and also right after `wakeup` is notified (a commit on this
+    /// instance): realtime latency without polling hard. A full batch runs again at once.
+    pub async fn run_with_wakeup(
+        self: Arc<Self>,
+        interval: std::time::Duration,
+        wakeup: Arc<tokio::sync::Notify>,
+    ) {
         loop {
-            if let Err(e) = self.publish_due().await {
-                tracing::warn!(summary = %crate::db::summarize_db_error(&e), "outbox publication pass failed");
+            match self.publish_due().await {
+                Ok(r) if r.claimed as u64 >= self.settings.batch => continue,
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!(summary = %crate::db::summarize_db_error(&e), "outbox publication pass failed")
+                }
             }
-            tokio::time::sleep(interval).await;
+            tokio::select! {
+                _ = tokio::time::sleep(interval) => {}
+                _ = wakeup.notified() => {}
+            }
         }
     }
 }

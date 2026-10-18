@@ -125,15 +125,95 @@ async fn main() -> anyhow::Result<()> {
         .with_workers(config.workers)
         .with_tree_head_signer(tree_heads);
     state.managed_keys = managed_keys;
+    // Realtime gateway runtime (Part E).
+    let realtime = {
+        use messaging::realtime::{broker, ephemeral, push, token::ClientTokenKeys, Realtime};
+        use secrecy::ExposeSecret;
+        let keys = match &config.client_token_key_file {
+            Some(path) => Some(
+                ClientTokenKeys::load(path)
+                    .unwrap_or_else(|e| fatal("MESSAGING_CLIENT_TOKEN_SIGNING_KEY_FILE", e)),
+            ),
+            None => {
+                tracing::warn!(
+                    "no client-token signing key is configured: realtime connections are disabled"
+                );
+                None
+            }
+        };
+        let (broker, presence): (Arc<dyn broker::Broker>, Arc<dyn ephemeral::PresenceStore>) =
+            match &config.realtime_redis_url {
+                Some(url) => (
+                    Arc::new(
+                        broker::RedisBroker::new(url.expose_secret())
+                            .unwrap_or_else(|e| fatal("MESSAGING_REALTIME_REDIS_URL", e)),
+                    ),
+                    Arc::new(
+                        ephemeral::RedisPresence::new(url.expose_secret())
+                            .unwrap_or_else(|e| fatal("MESSAGING_REALTIME_REDIS_URL", e)),
+                    ),
+                ),
+                None => {
+                    tracing::warn!("no realtime Redis is configured: single-instance in-process fan-out and presence");
+                    (
+                        Arc::new(broker::LocalBroker::default()),
+                        Arc::new(ephemeral::MemoryPresence::default()),
+                    )
+                }
+            };
+        let push_provider: Arc<dyn push::PushProvider> = match config.push_provider {
+            messaging::config::PushProviderKind::LocalTest => {
+                Arc::new(push::LocalTestPush::default())
+            }
+            messaging::config::PushProviderKind::None => Arc::new(push::UnconfiguredPush),
+        };
+        let rt = Arc::new(Realtime::new(
+            config.realtime.clone(),
+            keys,
+            broker,
+            presence,
+            push_provider,
+        ));
+        rt.start();
+        rt
+    };
+    let state = state.with_realtime(realtime.clone());
     tokio::spawn(messaging::conversations::service::run_expiry(
         state.clone(),
         config.conversations.expiry_interval,
     ));
-    // No event consumer exists yet (realtime gateway / webhooks are later workstreams):
-    // the outbox publisher is not started and events stay PENDING (readiness, metrics).
-    tracing::info!(
-        "no Messaging event consumer is configured: domain events stay PENDING in the outbox"
+    // Committed events -> realtime broker pointers and push jobs (leased, multi-instance).
+    let publisher = Arc::new(messaging::events::outbox::OutboxPublisher::new(
+        db.clone(),
+        Arc::new(messaging::realtime::fanout::RealtimeTransport::new(
+            state.clone(),
+        )),
+        state.clock.clone(),
+        messaging::events::outbox::PublisherSettings {
+            lease: config.workers.lease,
+            max_attempts: config.workers.outbox_max_attempts,
+            retry: messaging::events::RetryPolicy::default(),
+            batch: 500,
+        },
+        state.runtime_environment().to_string(),
+    ));
+    tokio::spawn(
+        publisher.run_with_wakeup(
+            config
+                .realtime
+                .publisher_interval
+                .max(std::time::Duration::from_millis(50)),
+            realtime.outbox_wakeup.clone(),
+        ),
     );
+    tokio::spawn(messaging::realtime::push::run(
+        state.clone(),
+        config.workers.interval,
+    ));
+    tokio::spawn(messaging::workers::run_maintenance(
+        state.clone(),
+        std::time::Duration::from_secs(30),
+    ));
 
     if let Some(address) = config.metrics_address {
         let router = metrics::router(state.clone());
@@ -148,8 +228,19 @@ async fn main() -> anyhow::Result<()> {
     let app = http::app(state);
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "messaging listening");
+    let drain = config.realtime.drain;
+    let hub = realtime.hub.clone();
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown())
+        .with_graceful_shutdown(async move {
+            shutdown().await;
+            // Stop admitting connections, tell every connection to reconnect elsewhere
+            // (jittered), and give them the drain period before the process exits.
+            hub.drain();
+            let deadline = tokio::time::Instant::now() + drain;
+            while hub.connections() > 0 && tokio::time::Instant::now() < deadline {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        })
         .await?;
     Ok(())
 }

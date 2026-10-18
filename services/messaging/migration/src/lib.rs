@@ -13,6 +13,7 @@ pub use sea_orm_migration::prelude::*;
 mod m20261101_000001_messaging_foundation;
 mod m20261102_000002_conversations;
 mod m20261105_000003_membership_messages;
+mod m20261106_000004_realtime;
 
 /// Name of the table recording which Messaging migrations have been applied.
 pub const MIGRATION_TABLE: &str = "messaging_seaql_migrations";
@@ -26,6 +27,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261101_000001_messaging_foundation::Migration),
             Box::new(m20261102_000002_conversations::Migration),
             Box::new(m20261105_000003_membership_messages::Migration),
+            Box::new(m20261106_000004_realtime::Migration),
         ]
     }
 
