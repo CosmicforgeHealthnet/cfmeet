@@ -33,6 +33,7 @@ pub mod headers;
 pub mod identity;
 pub mod ids;
 pub mod keys;
+pub mod number_grant;
 pub mod permissions;
 pub mod signer;
 pub mod trust;

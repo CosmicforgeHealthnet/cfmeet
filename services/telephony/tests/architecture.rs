@@ -137,6 +137,9 @@ fn raw_numbers_exist_only_inside_the_execution_boundary_and_are_never_logged() {
         "src/destinations.rs",
         "src/inbound.rs",
         "src/bin/telephony-admin.rs",
+        // Part IV L: the DCN allowlist row is keyed by Numbering's canonical number
+        // (written, masked in output, never logged).
+        "src/dcn.rs",
     ];
     for (file, code) in sources() {
         if code.contains(".expose()") {

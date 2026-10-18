@@ -557,6 +557,7 @@ async fn every_gate_fails_closed_before_any_paid_action() {
             capacity_available: Evidence::Known(true),
             estimated_leg_cost_minor: Evidence::Known(100),
             quality_permille: Evidence::Unknown,
+            interconnect_class: Default::default(),
         },
     ]));
     let r = x.call("gate-route").await;

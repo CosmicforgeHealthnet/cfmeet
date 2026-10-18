@@ -1,6 +1,5 @@
 //! Platform vocabulary shared by every Calling module: typed identifiers, persisted
-//! enumerations, the clock abstraction, request identifiers, redacted secret containers
-//! and slug validation.
+//! enumerations, the clock abstraction, request identifiers and slug validation.
 
 /// String-backed enumeration persisted as PostgreSQL `TEXT` guarded by a `CHECK`
 /// constraint. The wire / database value is the SCREAMING_SNAKE_CASE literal.
@@ -54,7 +53,9 @@ macro_rules! typed_id {
         pub struct $name(uuid::Uuid);
 
         impl $name {
-            /// A fresh, server-generated identifier.
+            /// A fresh, server-generated identifier. (Platform identity ids are minted by
+            /// Platform Access, ADR 0032; Calling mints only its own.)
+            #[allow(dead_code)]
             pub(crate) fn generate() -> Self {
                 Self(uuid::Uuid::new_v4())
             }
@@ -86,7 +87,6 @@ pub mod clock;
 pub mod ids;
 pub mod kinds;
 pub mod request_id;
-pub mod secret;
 pub mod slug;
 
 pub use clock::{Clock, ManualClock, SharedClock, SystemClock};
@@ -98,5 +98,4 @@ pub use kinds::{
     PrincipalStatus, ServiceAccountStatus, TenantClassification, TenantStatus,
 };
 pub use request_id::{ClientCorrelationId, CorrelationId, RequestContext, RequestId};
-pub use secret::IssuedSecret;
 pub use slug::Slug;

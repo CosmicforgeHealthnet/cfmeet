@@ -122,6 +122,17 @@ pub trait PrivacyRelayPort: Send + Sync {
         caller: &ExecutionNumber,
         correlation_id: &str,
     ) -> Result<InboundCaller, PortError>;
+
+    /// Part IV L: protects the caller of a DCN call in the scope of Numbering's signed
+    /// INBOUND_VOICE grant (Privacy Relay verifies it; Telephony asserts no scope).
+    async fn protect_dcn_caller(
+        &self,
+        _number_grant: &str,
+        _caller: &ExecutionNumber,
+        _correlation_id: &str,
+    ) -> Result<Uuid, PortError> {
+        Err(PortError::Unavailable)
+    }
 }
 
 #[async_trait]
@@ -136,6 +147,11 @@ pub trait CallingPort: Send + Sync {
 
     /// Offers an inbound public call; Calling answers with the canonical Call and leg.
     async fn offer_inbound(&self, offer: &Value) -> Result<Value, PortError>;
+
+    /// Part IV L: offers an inbound call to a DCN (Numbering's grant, no number).
+    async fn offer_dcn_inbound(&self, _offer: &Value) -> Result<Value, PortError> {
+        Err(PortError::Unavailable)
+    }
 
     /// Part F: offers an internal enterprise SIP dialog (opaque device reference and
     /// dialled extension); Calling answers with the canonical Call and leg.
@@ -364,6 +380,34 @@ impl PrivacyRelayPort for HttpPrivacyRelay {
         let value: Value = response.json().map_err(|_| PortError::Unavailable)?;
         serde_json::from_value(value["inboundCaller"].clone()).map_err(|_| PortError::Unavailable)
     }
+
+    async fn protect_dcn_caller(
+        &self,
+        number_grant: &str,
+        caller: &ExecutionNumber,
+        correlation_id: &str,
+    ) -> Result<Uuid, PortError> {
+        let outbound = OutboundServiceRequest::continuing(
+            ServiceId::privacy_relay(),
+            &correlation(correlation_id),
+        );
+        let body = json!({ "numberGrant": number_grant, "telephoneNumber": caller.expose() });
+        let response = self
+            .auth
+            .client()
+            .post_json(
+                &outbound,
+                "/internal/v1/relay-routing/protect-dcn-caller",
+                &body,
+            )
+            .await
+            .map_err(port_error)?;
+        let value: Value = response.json().map_err(|_| PortError::Unavailable)?;
+        value["inboundCaller"]["contactReference"]
+            .as_str()
+            .and_then(|s| Uuid::parse_str(s).ok())
+            .ok_or(PortError::Unavailable)
+    }
 }
 
 /// Authenticated HTTP adapter to Calling.
@@ -407,7 +451,24 @@ impl CallingPort for HttpCalling {
             .post_json(&outbound, "/internal/v1/telephony/inbound-calls", offer)
             .await
             .map_err(port_error)?;
-        response.json().map_err(|_| PortError::Unavailable)
+        Ok(response.json().unwrap_or(Value::Null))
+    }
+
+    async fn offer_dcn_inbound(&self, offer: &Value) -> Result<Value, PortError> {
+        let correlation_id = offer["correlationId"]
+            .as_str()
+            .map(correlation)
+            .unwrap_or_else(CorrelationId::generate);
+        let outbound = OutboundServiceRequest::continuing(ServiceId::calling(), &correlation_id);
+        let response = self
+            .auth
+            .client()
+            .post_json(&outbound, "/internal/v1/telephony/dcn-inbound-calls", offer)
+            .await
+            .map_err(port_error)?;
+        // Calling answered: a body that is not JSON is an invalid answer (classified by
+        // the caller), never mistaken for Calling being unavailable.
+        Ok(response.json().unwrap_or(Value::Null))
     }
 
     async fn offer_enterprise(&self, offer: &Value) -> Result<Value, PortError> {
@@ -458,5 +519,359 @@ impl CallingPort for HttpCalling {
             .await
             .map_err(port_error)?;
         response.json().map_err(|_| PortError::Unavailable)
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Numbering (Part IV Workstream L): DCN inbound resolution, caller-identity verification,
+// voice route readiness.
+// ---------------------------------------------------------------------------------------
+
+/// The customer scope Numbering resolved a DCN to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DcnScope {
+    pub tenant_id: Uuid,
+    pub application_id: Uuid,
+    pub environment_id: Uuid,
+}
+
+/// The routing of a received DCN call (references only; the grant is a bearer token for
+/// Calling, never logged).
+#[derive(Clone)]
+pub struct DcnRouting {
+    pub number_resource_id: Uuid,
+    pub assignment_id: Uuid,
+    pub routing_revision: i64,
+    pub ownership_class: String,
+    pub scope: DcnScope,
+    pub target_kind: String,
+    pub target_ref: Uuid,
+    pub grant: String,
+    pub grant_id: Uuid,
+    /// Numbering's inventory class of the dialled number (`SYNTHETIC` / `REAL`).
+    pub inventory_class: Option<String>,
+}
+
+impl DcnRouting {
+    pub fn synthetic(&self) -> bool {
+        self.inventory_class.as_deref() == Some("SYNTHETIC")
+    }
+}
+
+impl fmt::Debug for DcnRouting {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DcnRouting")
+            .field("number_resource_id", &self.number_resource_id)
+            .field("assignment_id", &self.assignment_id)
+            .field("routing_revision", &self.routing_revision)
+            .field("target_kind", &self.target_kind)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Numbering's answer for a received DCN call.
+#[derive(Debug, Clone)]
+pub enum DcnInbound {
+    Routed(Box<DcnRouting>),
+    /// Assigned, but voice routes nowhere (e.g. an offboarded line).
+    NotRouted,
+    /// Not routable now (Numbering's stable reason).
+    Unavailable(String),
+}
+
+/// A CALLER_IDENTITY grant Numbering verified (and consumed) for one operation.
+pub struct VerifiedDcnIdentity {
+    pub identity: ExecutionNumber,
+    pub number_resource_id: Uuid,
+    pub assignment_id: Uuid,
+    pub routing_revision: i64,
+    pub grant_id: Uuid,
+    pub scope: DcnScope,
+    /// Numbering's inventory class of the number (`SYNTHETIC` / `REAL`; None when an
+    /// older Numbering does not say — never treated as synthetic).
+    pub inventory_class: Option<String>,
+}
+
+impl VerifiedDcnIdentity {
+    pub fn synthetic(&self) -> bool {
+        self.inventory_class.as_deref() == Some("SYNTHETIC")
+    }
+}
+
+impl fmt::Debug for VerifiedDcnIdentity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VerifiedDcnIdentity")
+            .field("number_resource_id", &self.number_resource_id)
+            .field("grant_id", &self.grant_id)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The current VOICE route configuration of a DCN (for Telephony's acknowledgement).
+#[derive(Debug, Clone)]
+pub struct DcnVoiceRoute {
+    pub route_ref: Uuid,
+    pub route_revision: i64,
+    pub status: String,
+}
+
+#[async_trait]
+pub trait NumberingPort: Send + Sync {
+    /// `POST /internal/v1/routing/inbound-resolutions` (VOICE).
+    async fn resolve_inbound_voice(
+        &self,
+        called: &ExecutionNumber,
+        correlation_id: &str,
+    ) -> Result<DcnInbound, PortError>;
+
+    /// `POST /internal/v1/routing/grant-verifications` (consume): a refusal is
+    /// `Ok(Err(reason))`.
+    async fn verify_caller_identity(
+        &self,
+        grant: &str,
+        operation_ref: &str,
+        correlation_id: &str,
+    ) -> Result<Result<VerifiedDcnIdentity, String>, PortError>;
+
+    /// The DCN's canonical number and its current VOICE route configuration.
+    async fn voice_route(
+        &self,
+        number_resource_id: Uuid,
+    ) -> Result<(ExecutionNumber, Option<DcnVoiceRoute>), PortError>;
+
+    /// `POST /internal/v1/number-resources/{id}/route-readiness` (VOICE).
+    async fn acknowledge_voice_route(
+        &self,
+        number_resource_id: Uuid,
+        route: &DcnVoiceRoute,
+    ) -> Result<(), PortError>;
+}
+
+/// Not configured: every DCN operation fails closed (relay-number and enterprise paths are
+/// unaffected).
+pub struct UnconfiguredNumbering;
+
+#[async_trait]
+impl NumberingPort for UnconfiguredNumbering {
+    async fn resolve_inbound_voice(
+        &self,
+        _: &ExecutionNumber,
+        _: &str,
+    ) -> Result<DcnInbound, PortError> {
+        Err(PortError::Unavailable)
+    }
+
+    async fn verify_caller_identity(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> Result<Result<VerifiedDcnIdentity, String>, PortError> {
+        Err(PortError::Unavailable)
+    }
+
+    async fn voice_route(
+        &self,
+        _: Uuid,
+    ) -> Result<(ExecutionNumber, Option<DcnVoiceRoute>), PortError> {
+        Err(PortError::Unavailable)
+    }
+
+    async fn acknowledge_voice_route(&self, _: Uuid, _: &DcnVoiceRoute) -> Result<(), PortError> {
+        Err(PortError::Unavailable)
+    }
+}
+
+/// Authenticated HTTP adapter to Numbering.
+#[derive(Clone)]
+pub struct HttpNumbering {
+    auth: ServiceAuthRuntime,
+}
+
+impl HttpNumbering {
+    pub fn new(auth: ServiceAuthRuntime) -> Self {
+        Self { auth }
+    }
+}
+
+fn uuid_at(v: &Value, k: &str) -> Result<Uuid, PortError> {
+    v[k].as_str()
+        .and_then(|s| Uuid::parse_str(s).ok())
+        .ok_or(PortError::Unavailable)
+}
+
+fn scope_at(v: &Value) -> Result<DcnScope, PortError> {
+    serde_json::from_value(v.clone()).map_err(|_| PortError::Unavailable)
+}
+
+#[async_trait]
+impl NumberingPort for HttpNumbering {
+    async fn resolve_inbound_voice(
+        &self,
+        called: &ExecutionNumber,
+        correlation_id: &str,
+    ) -> Result<DcnInbound, PortError> {
+        let outbound = OutboundServiceRequest::continuing(
+            ServiceId::numbering(),
+            &correlation(correlation_id),
+        );
+        let response = self
+            .auth
+            .client()
+            .post_json(
+                &outbound,
+                "/internal/v1/routing/inbound-resolutions",
+                &json!({ "family": "VOICE", "e164": called.expose() }),
+            )
+            .await
+            .map_err(port_error)?;
+        let v: Value = response.json().map_err(|_| PortError::Unavailable)?;
+        match v["outcome"].as_str() {
+            Some("ROUTED") => Ok(DcnInbound::Routed(Box::new(DcnRouting {
+                number_resource_id: uuid_at(&v, "numberResourceId")?,
+                assignment_id: uuid_at(&v, "assignmentId")?,
+                routing_revision: v["routingRevision"]
+                    .as_i64()
+                    .ok_or(PortError::Unavailable)?,
+                ownership_class: v["ownershipClass"]
+                    .as_str()
+                    .ok_or(PortError::Unavailable)?
+                    .to_string(),
+                scope: scope_at(&v["scope"])?,
+                target_kind: v["target"]["kind"]
+                    .as_str()
+                    .ok_or(PortError::Unavailable)?
+                    .to_string(),
+                target_ref: uuid_at(&v["target"], "ref")?,
+                grant: v["grant"]["grant"]
+                    .as_str()
+                    .ok_or(PortError::Unavailable)?
+                    .to_string(),
+                grant_id: uuid_at(&v["grant"], "grantId")?,
+                inventory_class: v["inventoryClass"].as_str().map(str::to_string),
+            }))),
+            Some("NOT_ROUTED") => Ok(DcnInbound::NotRouted),
+            Some("UNAVAILABLE") => Ok(DcnInbound::Unavailable(
+                v["reason"].as_str().unwrap_or("UNAVAILABLE").to_string(),
+            )),
+            _ => Err(PortError::Unavailable),
+        }
+    }
+
+    async fn verify_caller_identity(
+        &self,
+        grant: &str,
+        operation_ref: &str,
+        correlation_id: &str,
+    ) -> Result<Result<VerifiedDcnIdentity, String>, PortError> {
+        let outbound = OutboundServiceRequest::continuing(
+            ServiceId::numbering(),
+            &correlation(correlation_id),
+        );
+        let response = self
+            .auth
+            .client()
+            .post_json(
+                &outbound,
+                "/internal/v1/routing/grant-verifications",
+                &json!({ "grant": grant, "consume": true, "operationRef": operation_ref }),
+            )
+            .await
+            .map_err(port_error)?;
+        let v: Value = response.json().map_err(|_| PortError::Unavailable)?;
+        if v["valid"] != true {
+            return Ok(Err(v["reason"]
+                .as_str()
+                .unwrap_or("GRANT_INVALID")
+                .to_string()));
+        }
+        if v["grantKind"] != "CALLER_IDENTITY" || v["consumed"] != true {
+            return Ok(Err("GRANT_INVALID".to_string()));
+        }
+        let identity = v["e164"]
+            .as_str()
+            .and_then(ExecutionNumber::parse)
+            .ok_or(PortError::Unavailable)?;
+        Ok(Ok(VerifiedDcnIdentity {
+            identity,
+            number_resource_id: uuid_at(&v, "numberResourceId")?,
+            assignment_id: uuid_at(&v, "assignmentId")?,
+            routing_revision: v["routingRevision"]
+                .as_i64()
+                .ok_or(PortError::Unavailable)?,
+            grant_id: uuid_at(&v, "grantId")?,
+            scope: scope_at(&v["scope"])?,
+            inventory_class: v["inventoryClass"].as_str().map(str::to_string),
+        }))
+    }
+
+    async fn voice_route(
+        &self,
+        number_resource_id: Uuid,
+    ) -> Result<(ExecutionNumber, Option<DcnVoiceRoute>), PortError> {
+        let outbound = OutboundServiceRequest::new_operation(ServiceId::numbering());
+        let resource: Value = self
+            .auth
+            .client()
+            .get(
+                &outbound,
+                &format!("/internal/v1/number-resources/{number_resource_id}"),
+            )
+            .await
+            .map_err(port_error)?
+            .json()
+            .map_err(|_| PortError::Unavailable)?;
+        let e164 = resource["e164"]
+            .as_str()
+            .and_then(ExecutionNumber::parse)
+            .ok_or(PortError::Unavailable)?;
+        let outbound = OutboundServiceRequest::new_operation(ServiceId::numbering());
+        let routes: Value = self
+            .auth
+            .client()
+            .get(
+                &outbound,
+                &format!("/internal/v1/number-resources/{number_resource_id}/routes"),
+            )
+            .await
+            .map_err(port_error)?
+            .json()
+            .map_err(|_| PortError::Unavailable)?;
+        let voice = routes["routes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|r| r["family"] == "VOICE")
+            .and_then(|r| {
+                Some(DcnVoiceRoute {
+                    route_ref: Uuid::parse_str(r["routeRef"].as_str()?).ok()?,
+                    route_revision: r["routeRevision"].as_i64()?,
+                    status: r["status"].as_str()?.to_string(),
+                })
+            });
+        Ok((e164, voice))
+    }
+
+    async fn acknowledge_voice_route(
+        &self,
+        number_resource_id: Uuid,
+        route: &DcnVoiceRoute,
+    ) -> Result<(), PortError> {
+        let outbound = OutboundServiceRequest::new_operation(ServiceId::numbering());
+        self.auth
+            .client()
+            .post_json(
+                &outbound,
+                &format!("/internal/v1/number-resources/{number_resource_id}/route-readiness"),
+                &json!({
+                    "family": "VOICE",
+                    "routeRef": route.route_ref,
+                    "routeRevision": route.route_revision,
+                }),
+            )
+            .await
+            .map(|_| ())
+            .map_err(port_error)
     }
 }

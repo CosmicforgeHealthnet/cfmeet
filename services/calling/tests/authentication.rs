@@ -3,16 +3,17 @@
 
 mod common;
 
+use common::IssueCredential;
+
 use axum::http::{Method, StatusCode};
 use calling::{
     domain::{
-        ApplicationStatus, Clock, EnvironmentKind, EnvironmentStatus, ServiceAccountStatus,
+        ApplicationStatus, EnvironmentKind, EnvironmentStatus, ServiceAccountStatus,
         TenantClassification, TenantStatus,
     },
     platform::{
         authentication::{AuthFailureReason, AuthenticationError},
         context::{AuthorityMode, SuspendedLink},
-        credentials::IssueCredential,
         scopes::names,
     },
 };
@@ -185,19 +186,21 @@ async fn invalid_secret_unknown_id_and_malformed_values_fail() {
     assert_eq!(h.whoami(&token).await.status, StatusCode::OK);
 }
 
+/// Validity is decided by Platform Access on its own (wall) clock; Calling's clock plays
+/// no part (Platform Access's own tests drive expiry with a manual clock).
 #[tokio::test]
 async fn expired_and_not_yet_valid_credentials_fail() {
     let Some(h) = Harness::new().await else {
         return;
     };
     let c = h.consumer("acme", TenantClassification::External).await;
-    let now = h.clock.now();
+    let now = chrono::Utc::now();
     let short = h
         .platform
         .issue_credential(
             c.sa(EnvironmentKind::Production),
             IssueCredential {
-                expires_at: Some(now + Duration::minutes(10)),
+                expires_at: Some(now + Duration::seconds(3)),
                 ..Default::default()
             },
         )
@@ -208,7 +211,8 @@ async fn expired_and_not_yet_valid_credentials_fail() {
         .issue_credential(
             c.sa(EnvironmentKind::Production),
             IssueCredential {
-                not_before: Some(now + Duration::minutes(5)),
+                not_before: Some(now + Duration::hours(1)),
+                expires_at: Some(now + Duration::days(2)),
                 ..Default::default()
             },
         )
@@ -223,11 +227,14 @@ async fn expired_and_not_yet_valid_credentials_fail() {
         reason(&h, future_token).await,
         AuthFailureReason::CredentialNotYetValid
     );
+    // Moving Calling's clock does not make a credential valid.
+    h.clock.advance(Duration::hours(2));
+    assert_rejected(&h, future_token).await;
 
-    h.clock.advance(Duration::minutes(5));
-    assert_eq!(h.whoami(future_token).await.status, StatusCode::OK);
-
-    h.clock.advance(Duration::minutes(5));
+    let wait = (short.credential.expires_at - chrono::Utc::now())
+        .to_std()
+        .unwrap_or_default();
+    tokio::time::sleep(wait + std::time::Duration::from_millis(200)).await;
     assert_rejected(&h, short_token).await;
     assert_eq!(
         reason(&h, short_token).await,
@@ -381,25 +388,30 @@ async fn suspended_tenant_blocks_every_subordinate_credential() {
     }
 }
 
+/// Calling holds no verifier and no pepper: every Calling deployment authenticates through
+/// the one Platform Access, and a revocation there takes effect for all of them at once.
 #[tokio::test]
-async fn verifier_is_bound_to_the_deployment_pepper() {
+async fn every_calling_deployment_shares_the_one_authority() {
     let Some(h) = Harness::new().await else {
         return;
     };
     let c = h.consumer("acme", TenantClassification::External).await;
     let issued = h.issue(c.sa(EnvironmentKind::Production), &[]).await;
-    let other = h.sibling("another-deployment-pepper-99f0c3b8e1d24a6f8c7b5e3d2a1f0e9d");
-    assert_eq!(
-        match other.authenticate(issued.secret.expose_once()).await {
-            Err(AuthenticationError::Rejected { reason, .. }) => reason,
-            other => panic!("{other:?}"),
-        },
-        AuthFailureReason::SecretMismatch
-    );
-    assert_eq!(
-        h.whoami(issued.secret.expose_once()).await.status,
-        StatusCode::OK
-    );
+    let other = h.sibling();
+    let token = issued.secret.expose_once();
+    assert_eq!(other.whoami(token).await.status, StatusCode::OK);
+    assert_eq!(h.whoami(token).await.status, StatusCode::OK);
+    h.platform
+        .revoke_credential(issued.credential.id)
+        .await
+        .unwrap();
+    for deployment in [&h, &other] {
+        assert_rejected(deployment, token).await;
+        assert_eq!(
+            reason(deployment, token).await,
+            AuthFailureReason::CredentialRevoked
+        );
+    }
 }
 
 #[tokio::test]
@@ -437,27 +449,26 @@ async fn health_is_public_and_unauthenticated_routes_do_not_exist() {
     assert_eq!(missing.json["error"]["code"], "NOT_FOUND");
 }
 
-/// §109: failed authentications are throttled per presented credential key id. Above the
-/// threshold of a window further FAILURES of that key id are answered 429 (and one
-/// CREDENTIAL_GUESSING incident is raised), while the correct secret keeps working (no
-/// lock-out). Unknown key ids share one bucket, so guessing ids never grows the table.
+/// §109: failed authentications are throttled per presented credential key id (the
+/// windows are Platform Access's). Above the threshold of a window further FAILURES of that
+/// key id are answered 429 (and Calling raises one CREDENTIAL_GUESSING incident), while the
+/// correct secret keeps working (no lock-out). Unknown key ids share one bucket, so
+/// guessing ids never grows the table. Window reset and pruning are Platform Access's
+/// tests.
 #[tokio::test]
 async fn repeated_failed_authentications_are_throttled_without_locking_out_the_owner() {
     use std::sync::Arc;
-    let Some(db) = common::TestDb::new().await else {
+    let Some(db) = common::TestDb::with_platform_access_env(&[(
+        "PLATFORM_ACCESS_AUTH_FAILURE_THRESHOLD",
+        "3",
+    )])
+    .await
+    else {
         return;
     };
-    let media = Arc::new(common::fake_media::FakeMediaProvider::default());
-    let bus = Arc::new(calling::signaling::InMemorySignalBus::new());
-    let mut runtime = common::test_runtime(Some(media.clone()), bus.clone());
-    runtime.abuse_controls.auth_failure_threshold = 3;
-    let h = Harness::with_runtime(
+    let h = Harness::on(
         Arc::new(db),
-        common::TEST_PEPPER,
         calling::domain::ManualClock::new(common::t0()),
-        media,
-        bus,
-        runtime,
     );
     let c = h.consumer("acme", TenantClassification::External).await;
     let issued = h
@@ -511,9 +522,6 @@ async fn repeated_failed_authentications_are_throttled_without_locking_out_the_o
             &[("reason", "throttled")]
         ) >= 2
     );
-    // The next window starts afresh.
-    h.clock.advance(Duration::seconds(301));
-    assert_rejected(&h, &wrong).await;
 
     // Guessing key ids: every unknown id lands in ONE bucket (bounded table), which is
     // throttled like a known id and raises one platform-wide incident.
@@ -534,22 +542,30 @@ async fn repeated_failed_authentications_are_throttled_without_locking_out_the_o
         };
         assert_eq!(r.status, expected, "{n}: {}", r.text);
     }
+    let pa = h.db.pa();
     assert_eq!(
-        common::scalar_i64(
-            h.conn(),
+        pa.scalar_i64(
             "SELECT count(*) FROM platform_auth_failure_windows WHERE subject_key = 'unknown'"
         )
         .await,
         1
     );
     assert_eq!(
-        common::scalar_i64(
-            h.conn(),
+        pa.scalar_i64(
             "SELECT count(*) FROM platform_auth_failure_windows WHERE subject_key <> 'unknown'"
         )
         .await,
-        2,
+        1,
         "one row per (known key id, window)"
+    );
+    // Calling keeps no failure windows of its own.
+    assert_eq!(
+        common::scalar_i64(
+            h.conn(),
+            "SELECT count(*) FROM platform_auth_failure_windows"
+        )
+        .await,
+        0
     );
     assert_eq!(
         common::scalar_i64(
@@ -560,20 +576,38 @@ async fn repeated_failed_authentications_are_throttled_without_locking_out_the_o
         .await,
         1
     );
-    // Old windows are pruned.
-    let pruned = h
-        .state
-        .authenticator
-        .prune_failure_windows(h.clock.now() + Duration::hours(1))
-        .await
-        .unwrap();
-    assert_eq!(pruned, 3);
+}
+
+/// ADR 0032 §9: without the identity authority nothing is authenticated — Calling answers
+/// the normalized 503, never a cached or local decision.
+#[tokio::test]
+async fn platform_access_unreachable_fails_closed() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.consumer("acme", TenantClassification::External).await;
+    let issued = h.issue(c.sa(EnvironmentKind::Production), &[]).await;
+    let token = issued.secret.expose_once();
+    assert_eq!(h.whoami(token).await.status, StatusCode::OK);
+
+    h.db.pa().stop().await;
+    let refused = h.whoami(token).await;
     assert_eq!(
-        common::scalar_i64(
-            h.conn(),
-            "SELECT count(*) FROM platform_auth_failure_windows"
-        )
-        .await,
-        0
+        refused.status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "{}",
+        refused.text
+    );
+    assert_eq!(refused.json["error"]["code"], "SERVICE_UNAVAILABLE");
+    assert!(!refused.text.contains(token));
+    assert!(matches!(
+        h.authenticate(token).await,
+        Err(AuthenticationError::Unavailable { .. })
+    ));
+    // A wrong secret is refused the same way (no local verifier to fall back on).
+    let wrong = format!("{}0000", &token[..token.len() - 4]);
+    assert_eq!(
+        h.whoami(&wrong).await.status,
+        StatusCode::SERVICE_UNAVAILABLE
     );
 }

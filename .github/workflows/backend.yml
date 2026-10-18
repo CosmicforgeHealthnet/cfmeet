@@ -177,12 +177,13 @@ jobs:
         run: df -h / && (du -sh target 2>/dev/null || true)
 
   docker:
-    name: Docker image (services/meeting-service/ context)
+    name: Docker image (repository-root context)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: docker build
-        run: docker build -t cfmeet-meeting-service:ci .
+        working-directory: .
+        run: docker build -f services/meeting-service/Dockerfile -t cfmeet-meeting-service:ci .
       - name: Disk usage
         if: always()
         run: df -h / && (docker system df || true)

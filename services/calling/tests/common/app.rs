@@ -44,7 +44,6 @@ impl AppWorld {
         runtime.privacy_relay = privacy;
         let h = Harness::with_runtime(
             db,
-            super::TEST_PEPPER,
             calling::domain::ManualClock::new(super::t0()),
             media,
             bus,
@@ -74,6 +73,25 @@ impl AppWorld {
         bridge: Option<std::sync::Arc<dyn calling::telephony::media::PublicMediaGateway>>,
         configure: impl FnOnce(&mut calling::state::CallingRuntime),
     ) -> Option<Self> {
+        Self::with_public_network_in(
+            calling::domain::EnvironmentKind::Production,
+            privacy,
+            telephony,
+            bridge,
+            configure,
+        )
+        .await
+    }
+
+    /// As [`Self::with_public_network_configured`] in an environment of `kind` (only a
+    /// PRODUCTION environment is allowed live telecom).
+    pub async fn with_public_network_in(
+        kind: calling::domain::EnvironmentKind,
+        privacy: std::sync::Arc<dyn calling::privacy_relay::PrivacyRelayAuthority>,
+        telephony: std::sync::Arc<dyn calling::telephony::TelephonyPort>,
+        bridge: Option<std::sync::Arc<dyn calling::telephony::media::PublicMediaGateway>>,
+        configure: impl FnOnce(&mut calling::state::CallingRuntime),
+    ) -> Option<Self> {
         use std::sync::Arc;
         let db = Arc::new(super::TestDb::new().await?);
         let media = Arc::new(FakeMediaProvider::default());
@@ -81,6 +99,7 @@ impl AppWorld {
         let mut runtime = super::test_runtime(Some(media.clone()), bus.clone());
         runtime.privacy_relay = privacy;
         runtime.public_network = calling::calls::app::public::PublicNetwork {
+            synthetic_interconnect: false,
             telephony,
             media: bridge,
             flags: calling::routing::engine::TelecomFlags {
@@ -92,23 +111,23 @@ impl AppWorld {
         configure(&mut runtime);
         let h = Harness::with_runtime(
             db,
-            super::TEST_PEPPER,
             calling::domain::ManualClock::new(chrono::Utc::now()),
             media,
             bus,
             runtime,
         );
-        let w =
-            CallWorld::in_harness(h, "acme", calling::domain::EnvironmentKind::Production).await;
-        w.h.platform
-            .set_live_telecom_allowed(
-                w.consumer
-                    .env(calling::domain::EnvironmentKind::Production)
-                    .id,
-                true,
-            )
-            .await
-            .unwrap();
+        let w = CallWorld::in_harness(h, "acme", kind).await;
+        if kind == calling::domain::EnvironmentKind::Production {
+            w.h.platform
+                .set_live_telecom_allowed(
+                    w.consumer
+                        .env(calling::domain::EnvironmentKind::Production)
+                        .id,
+                    true,
+                )
+                .await
+                .unwrap();
+        }
         Some(Self { w })
     }
 
@@ -161,7 +180,6 @@ impl AppWorld {
         runtime.contact_delegation = contact_delegation;
         let h = Harness::with_service_auth(
             db,
-            super::TEST_PEPPER,
             calling::domain::ManualClock::new(now),
             media,
             bus,
@@ -213,6 +231,7 @@ impl AppWorld {
             service_auth.clone(),
         ));
         runtime.public_network = calling::calls::app::public::PublicNetwork {
+            synthetic_interconnect: false,
             telephony: Arc::new(calling::telephony::HttpTelephony::new(service_auth.clone())),
             media: None,
             flags: calling::routing::engine::TelecomFlags {
@@ -227,7 +246,6 @@ impl AppWorld {
         configure(&mut runtime);
         let h = Harness::with_service_auth(
             db,
-            super::TEST_PEPPER,
             calling::domain::ManualClock::new(now),
             media,
             bus,

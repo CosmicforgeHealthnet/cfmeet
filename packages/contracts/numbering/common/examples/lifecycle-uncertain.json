@@ -1,0 +1,13 @@
+{
+  "numberResourceId": "5f0b2c1e-8d3a-4b6f-9e2d-7a1c3b5d9f01",
+  "fromState": "RELEASING",
+  "toState": "UNKNOWN_PROVIDER_STATE",
+  "revision": 12,
+  "actorKind": "SYSTEM",
+  "reasonCode": "PROVIDER_TIMEOUT",
+  "failureCategory": null,
+  "uncertainOperation": "RELEASE",
+  "evidenceRef": null,
+  "correlationId": "corr_0123456789abcdef0123456789abcdef",
+  "occurredAt": "2031-03-01T11:00:00Z"
+}

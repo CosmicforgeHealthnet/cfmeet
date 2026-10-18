@@ -11,6 +11,7 @@
 //! | `PUBLIC_INBOUND_CALLING_ENABLED` | no | inbound public calls (default `false`) |
 //! | `CALLBACK_RELAY_ENABLED` | no | callback relay legs (default `false`) |
 //! | `ENTERPRISE_SIP_ENABLED` | no | Part F internal enterprise SIP devices: new dialogs, answer / prompt / capture (default `false`) |
+//! | `TELEPHONY_SYNTHETIC_INTERCONNECT_ENABLED` | no | Part IV L: synthetic DCN voice over `SYNTHETIC_TEST` routes (loopback SIP edge, simulated carrier, zero cost); refused outside `local` / `test` (default `false`) |
 //! | `TELEPHONY_WORKER_INTERVAL_MS` | no | command / outbox / reconciliation cadence (default 500) |
 //! | `CF_SERVICE_ID` | no | if set, must be `cfmeet.telephony` |
 //! | `CF_RUNTIME_ENVIRONMENT` | yes | `local`, `test`, `staging` or `production` |
@@ -21,6 +22,7 @@
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | 100–30000 (default 5000) |
 //! | `CALLING_INTERNAL_BASE_URL` | no | Calling's internal API (normalized events, inbound offers) |
 //! | `PRIVACY_RELAY_INTERNAL_BASE_URL` | no | Privacy Relay's internal API (contact resolution, inbound mapping) |
+//! | `NUMBERING_INTERNAL_BASE_URL` | no | Numbering's internal API (DCN inbound resolution, caller-identity grants, voice route readiness); unset: every DCN call fails closed |
 //!
 //! Disabling Telephony or public calling never affects application RTC (Calling serves it
 //! without Telephony). Without `PRIVACY_RELAY_INTERNAL_BASE_URL` every protected
@@ -91,6 +93,9 @@ pub struct TelecomFlags {
     /// Part F: internal enterprise SIP dialogs (never paid, never public). Stops NEW
     /// dialogs and media effects only; hanging up / reconciling always run.
     pub enterprise_sip: FeatureFlag,
+    /// Part IV L: `SYNTHETIC_TEST` routes carry synthetic DCN calls (local / test only).
+    /// Off: every synthetic route is invisible — never offered, never selected.
+    pub synthetic_interconnect: FeatureFlag,
 }
 
 impl TelecomFlags {
@@ -101,7 +106,14 @@ impl TelecomFlags {
             public_inbound: FeatureFlag::new(inbound),
             callback_relay: FeatureFlag::new(callback),
             enterprise_sip: FeatureFlag::new(false),
+            synthetic_interconnect: FeatureFlag::new(false),
         }
+    }
+
+    /// With the synthetic test interconnect switch set.
+    pub fn with_synthetic_interconnect(self, enabled: bool) -> Self {
+        self.synthetic_interconnect.set(enabled);
+        self
     }
 
     /// With the enterprise SIP switch set.
@@ -135,6 +147,7 @@ pub struct TelephonyConfig {
     pub public_inbound_enabled: bool,
     pub callback_relay_enabled: bool,
     pub enterprise_sip_enabled: bool,
+    pub synthetic_interconnect_enabled: bool,
     pub worker_interval: Duration,
     pub json_logs: bool,
 }
@@ -152,6 +165,19 @@ impl TelephonyConfig {
             self.callback_relay_enabled,
         )
         .with_enterprise_sip(self.enterprise_sip_enabled)
+        .with_synthetic_interconnect(self.synthetic_interconnect_enabled)
+    }
+
+    /// The synthetic test interconnect exists for local / test runtimes only: staging and
+    /// production refuse to start with it (never a synthetic route next to real ones).
+    pub fn check_runtime(&self, runtime: RuntimeEnvironment) -> Result<(), ConfigError> {
+        if self.synthetic_interconnect_enabled && !runtime.allows_insecure_transport() {
+            return Err(invalid(
+                "TELEPHONY_SYNTHETIC_INTERCONNECT_ENABLED",
+                format!("the synthetic test interconnect is refused in the {runtime} runtime"),
+            ));
+        }
+        Ok(())
     }
 
     pub fn from_env() -> Result<Self, ConfigError> {
@@ -220,6 +246,7 @@ impl TelephonyConfig {
             public_inbound_enabled: flag(get, "PUBLIC_INBOUND_CALLING_ENABLED")?,
             callback_relay_enabled: flag(get, "CALLBACK_RELAY_ENABLED")?,
             enterprise_sip_enabled: flag(get, "ENTERPRISE_SIP_ENABLED")?,
+            synthetic_interconnect_enabled: flag(get, "TELEPHONY_SYNTHETIC_INTERCONNECT_ENABLED")?,
             worker_interval,
             json_logs,
         })
@@ -301,6 +328,8 @@ pub struct ServiceAuthSettings {
     pub http_timeout: Duration,
     pub calling_base_url: Option<String>,
     pub privacy_relay_base_url: Option<String>,
+    /// Part IV L: Numbering (DCNs). Relay-number and enterprise paths never need it.
+    pub numbering_base_url: Option<String>,
 }
 
 impl ServiceAuthSettings {
@@ -368,6 +397,7 @@ impl ServiceAuthSettings {
             http_timeout,
             calling_base_url: value("CALLING_INTERNAL_BASE_URL"),
             privacy_relay_base_url: value("PRIVACY_RELAY_INTERNAL_BASE_URL"),
+            numbering_base_url: value("NUMBERING_INTERNAL_BASE_URL"),
         })
     }
 
@@ -398,6 +428,11 @@ impl ServiceAuthSettings {
                 .insert(ServiceId::privacy_relay(), url)
                 .map_err(|e| invalid("PRIVACY_RELAY_INTERNAL_BASE_URL", e.to_string()))?;
         }
+        if let Some(url) = &self.numbering_base_url {
+            targets
+                .insert(ServiceId::numbering(), url)
+                .map_err(|e| invalid("NUMBERING_INTERNAL_BASE_URL", e.to_string()))?;
+        }
         let client = Arc::new(
             InternalServiceClient::new(signer.clone(), targets, self.http_timeout)
                 .map_err(|e| invalid("CF_INTERNAL_HTTP_TIMEOUT_MS", e.to_string()))?,
@@ -419,6 +454,31 @@ mod tests {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
         move |k| map.get(k).cloned()
+    }
+
+    #[test]
+    fn the_synthetic_test_interconnect_is_refused_outside_local_and_test() {
+        let base = [("DATABASE_URL", "postgres://u:p@127.0.0.1/db")];
+        let off = TelephonyConfig::from_lookup(&lookup(&base)).unwrap();
+        assert!(!off.synthetic_interconnect_enabled, "off by default");
+        assert!(!off.flags().synthetic_interconnect.enabled());
+        let on = TelephonyConfig::from_lookup(&lookup(&[
+            base[0],
+            ("TELEPHONY_SYNTHETIC_INTERCONNECT_ENABLED", "true"),
+        ]))
+        .unwrap();
+        assert!(on.flags().synthetic_interconnect.enabled());
+        for runtime in [RuntimeEnvironment::Local, RuntimeEnvironment::Test] {
+            assert!(on.check_runtime(runtime).is_ok(), "{runtime}");
+        }
+        for runtime in [RuntimeEnvironment::Staging, RuntimeEnvironment::Production] {
+            let err = on.check_runtime(runtime).unwrap_err().to_string();
+            assert!(
+                err.contains("TELEPHONY_SYNTHETIC_INTERCONNECT_ENABLED"),
+                "{err}"
+            );
+            assert!(off.check_runtime(runtime).is_ok(), "off is always allowed");
+        }
     }
 
     #[test]

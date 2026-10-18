@@ -455,6 +455,58 @@ impl AppCallService {
             return Ok(Dispatched::Refused);
         }
         let mut command = row.payload.clone();
+        // Part IV L: a presented DCN needs Numbering's single-use caller-identity grant for
+        // THIS submission (never a fallback identity: refused = nothing is sent).
+        if let Some(object) = command.as_object_mut() {
+            if let Some(presented) = object.remove("presentedNumberResourceId") {
+                let number_resource_id = presented
+                    .as_str()
+                    .and_then(|s| Uuid::parse_str(s).ok())
+                    .ok_or(CallError::NotFound)?;
+                let command_id = row.payload["commandId"]
+                    .as_str()
+                    .and_then(|s| Uuid::parse_str(s).ok())
+                    .ok_or(CallError::NotFound)?;
+                match self
+                    .dcn_presented_identity(
+                        call,
+                        &correlation,
+                        number_resource_id,
+                        leg_id,
+                        command_id,
+                    )
+                    .await
+                {
+                    Ok(identity) => {
+                        object.insert("presentedIdentity".to_string(), identity);
+                    }
+                    Err(CallError::PublicRouteUnavailable(code)) => {
+                        self.reschedule(row, code).await?;
+                        return Ok(Dispatched::Retry);
+                    }
+                    Err(CallError::PublicRouteDenied(code)) if row.attempts == 0 => {
+                        if self.complete(row, "REFUSED", Some(code), None).await? {
+                            self.leg_never_executed(
+                                call,
+                                leg_id,
+                                row.attempt_id,
+                                active.then_some(FailureCategory::Policy),
+                            )
+                            .await?;
+                        }
+                        tracing::info!(call_id = %call.id, call_leg_id = %leg_id, code, "DCN origination refused before submission");
+                        return Ok(Dispatched::Refused);
+                    }
+                    Err(CallError::PublicRouteDenied(code)) => {
+                        // An earlier submission may have been accepted: Telephony answers
+                        // the resubmission by its idempotency key; never a new identity.
+                        self.reschedule(row, code).await?;
+                        return Ok(Dispatched::Retry);
+                    }
+                    Err(other) => return Err(other),
+                }
+            }
+        }
         command["destination"]["grantId"] = json!(grant.grant_id);
         command["destination"]["grantSecret"] = json!(grant.secret.as_str());
         command["destination"]["grantExpiresAt"] = json!(grant.expires_at);

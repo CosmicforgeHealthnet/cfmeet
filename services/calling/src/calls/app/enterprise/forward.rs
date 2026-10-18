@@ -303,6 +303,7 @@ impl AppCallService {
             relay_session_id: Some(decision.relay_session_id),
             context_id: Some(decision.context_id),
             live_telecom_allowed: live,
+            interconnect: crate::routing::engine::InterconnectClass::Public,
             flags: self.public.flags,
             routes,
             spend_headroom_minor: headroom,
@@ -503,6 +504,8 @@ impl AppCallService {
                 candidate_routes: &candidate_routes,
                 correlation_id: cmd.correlation_id().as_str(),
                 generation: 1,
+                presented_number_resource_id: None,
+                interconnect: crate::routing::engine::InterconnectClass::Public,
             },
             now,
         )

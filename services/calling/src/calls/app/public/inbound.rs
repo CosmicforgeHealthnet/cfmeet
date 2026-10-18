@@ -244,6 +244,7 @@ impl AppCallService {
                 scope.tenant_id(),
                 scope.application_id(),
                 scope.environment_id(),
+                ServiceAccountId::from_uuid(owner.service_account_id),
                 offer.caller_contact_reference,
             )
             .await
@@ -343,6 +344,7 @@ impl AppCallService {
                 s.environment_id,
             )
             .await?,
+            interconnect: crate::routing::engine::InterconnectClass::Public,
             flags: self.public.flags,
             routes: Evidence::Known(Vec::new()),
             spend_headroom_minor: headroom,
@@ -655,6 +657,7 @@ impl AppCallService {
                 scope.tenant_id(),
                 scope.application_id(),
                 scope.environment_id(),
+                ServiceAccountId::from_uuid(owner.service_account_id),
                 offer.caller_contact_reference,
             )
             .await
@@ -665,6 +668,7 @@ impl AppCallService {
                 scope.tenant_id(),
                 scope.application_id(),
                 scope.environment_id(),
+                ServiceAccountId::from_uuid(owner.service_account_id),
                 callee_contact,
             )
             .await
@@ -766,6 +770,7 @@ impl AppCallService {
                 s.environment_id,
             )
             .await?,
+            interconnect: crate::routing::engine::InterconnectClass::Public,
             flags: self.public.flags,
             routes,
             spend_headroom_minor: headroom,
@@ -1032,6 +1037,8 @@ impl AppCallService {
                 candidate_routes: &candidate_routes,
                 correlation_id: correlation.as_str(),
                 generation: 1,
+                presented_number_resource_id: None,
+                interconnect: crate::routing::engine::InterconnectClass::Public,
             },
             now,
         )

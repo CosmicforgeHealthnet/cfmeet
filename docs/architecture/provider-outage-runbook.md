@@ -97,6 +97,30 @@ resolved, and any leg still UNKNOWN after recovery (escalate it to the carrier w
 provider-side reference held in Telephony's restricted provider bindings, never a
 customer number in a ticket).
 
+## 6. Number lifecycle, DCN abuse and cost emergencies (Numbering)
+
+Numbering owns these controls (Part IV P–W, ADR 0043). Every admin call is first-party
+`numbers.admin` with `X-CF-Operator`; every change writes an append-only audit row.
+
+| Situation | Signal | Action |
+|---|---|---|
+| Stop all inbound DCN routing at once | — | `POST /v1/admin/controls/DCN_INBOUND_ROUTING` `{"engaged": true, "reasonCode": "<code>"}`: inbound resolutions answer `ROUTING_DISABLED`; app-to-app calling is unaffected |
+| Stop outbound caller identity / SMS sending from DCNs | SMS pumping, toll fraud, `RISK_RESTRICTION` incidents | `DCN_CALLER_IDENTITY` / `DCN_SMS_SENDER` controls: new grants refused and existing grants stop verifying |
+| Provider cost anomaly | `PROVIDER_COST_SPIKE` incident (hourly provider cost above `NUMBERING_PROVIDER_COST_SPIKE_MINOR`) | the provisioning breaker opens by itself (`PROVIDER_COST_BREAKER_OPEN`); additionally engage `NUMBER_PROVISIONING` while investigating; per-number spend above `NUMBERING_NUMBER_SPEND_THRESHOLD_MINOR` already stops that number's outbound grants (`SPEND_LIMIT_REACHED`) |
+| One abusive number | risk signal or customer report | `POST /v1/admin/number-resources/{id}/suspend` (operator source; only an operator restores it). Suspension is local-first: grants stop before the provider route is disabled |
+| Porting or relay-lease problems | `numbering_port_requests`, `numbering_relay_leases` | `NUMBER_PORTING` / `RELAY_LEASES` controls (relay leases refused → Privacy Relay answers `SERVICE_UNAVAILABLE`, never a local fallback while in `NUMBERING` mode) |
+| Late traffic on a quarantined number | `QUARANTINE_CONFLICT` incident, quarantine `HELD_FOR_REVIEW` | `POST /v1/admin/quarantines/{id}/review` after investigation; a number is never reassignable before its quarantine completes |
+| Lifecycle drift (provider says otherwise) | `PROVIDER_STATE_DRIFT` / `PROVIDER_RELEASED_UNEXPECTEDLY` incidents (`LIFECYCLE_SAFETY` for a suspension / release that cannot proceed safely) | `POST /v1/admin/reconciliation/lifecycle`: drift fails closed (traffic stopped) and is left only with evidence |
+
+Gauges: `numbering_control_engaged{control}`, `numbering_suspensions`,
+`numbering_release_requests`, `numbering_quarantines`, `numbering_port_requests`,
+`numbering_relay_leases`, `numbering_open_incidents` (Numbering metrics listener). An
+UNKNOWN provider release / suspension is reconciled by read-back, never re-sent by hand
+(§3 applies). Disengage controls narrowest first (`{"engaged": false, ...}`) once the
+condition is handled. Backup / restore of the Numbering and SMS Gateway databases uses
+`infra/deployment/backup/backup.sh --service numbering|sms-gateway` and `restore.sh`;
+a restored service resumes queued provider commands and SMS submissions exactly once.
+
 ## References
 
 * ADR 0016 (first interconnect, real-carrier certification pending), ADR 0017 (failover,

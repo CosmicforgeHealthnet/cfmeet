@@ -1,0 +1,19 @@
+# Build-context filter for services/numbering/Dockerfile (context: repository root).
+# Everything is excluded except the directories the image is built from.
+*
+!packages/service-auth
+!packages/object-storage
+!packages/webhooks
+!packages/contracts/numbering
+!services/numbering
+
+# Never send build output, local configuration or key material.
+**/target
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.log
+**/*.rs.bk
+services/numbering/Dockerfile
+services/numbering/Dockerfile.dockerignore

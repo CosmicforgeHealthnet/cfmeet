@@ -1,8 +1,11 @@
 //! Principal tombstone (§80.42): the minimization of a communication principal that must
 //! no longer be identifiable, without breaking any evidence.
 //!
-//! One operator-audited transaction (`PRINCIPAL_TOMBSTONED`, plus a `PRINCIPAL / MINIMIZE`
-//! retention audit row):
+//! The principal itself belongs to Platform Access (ADR 0032): Calling checks its own
+//! retention holds, asks Platform Access to tombstone the principal (named operator,
+//! audited there too), then — in ONE operator-audited Calling transaction
+//! (`PRINCIPAL_TOMBSTONED`, plus a `PRINCIPAL / MINIMIZE` retention audit row) — applies
+//! the tombstoned snapshot to its projection and minimizes its own participations:
 //!
 //! * the principal becomes DEACTIVATED with `tombstoned_at` set (the database then refuses
 //!   any other status, so it can never be reactivated or resolve again);
@@ -31,7 +34,9 @@ use super::{
     DataClass, RetentionAction, RetentionOutcome,
 };
 use crate::platform::{
+    access::IdentityAuthority,
     operator::{self, AuditEntry, AuditTargetKind, OperatorAction, OperatorContext},
+    projection::upsert_principal,
     PlatformError, PlatformResult,
 };
 
@@ -59,93 +64,89 @@ fn stmt(sql: &str, values: Vec<sea_orm::Value>) -> Statement {
 /// Tombstones `principal_id` (see the module documentation).
 pub async fn operator_tombstone(
     db: &DatabaseConnection,
+    authority: &dyn IdentityAuthority,
     op: &OperatorContext,
     principal_id: Uuid,
     now: DateTime<Utc>,
 ) -> PlatformResult<TombstoneView> {
+    let row = db
+        .query_one(stmt(
+            "SELECT tenant_id, application_id, environment_id, kind, tombstoned_at \
+             FROM platform_principals WHERE id = $1",
+            vec![principal_id.into()],
+        ))
+        .await?
+        .ok_or(PlatformError::NotFound("principal"))?;
+    let owner = HoldOwner {
+        tenant_id: row.try_get_by_index(0)?,
+        application_id: row.try_get_by_index(1)?,
+        environment_id: row.try_get_by_index(2)?,
+    };
+    let kind: String = row.try_get_by_index(3)?;
+    let tombstoned_at: Option<DateTime<Utc>> = row.try_get_by_index(4)?;
+    let is_service_account = kind == "SERVICE_ACCOUNT";
+    let audit_entry = move |n: u64, already: bool| {
+        AuditEntry::new(
+            OperatorAction::PrincipalTombstoned,
+            AuditTargetKind::Principal,
+            principal_id,
+        )
+        .scope(
+            Some(owner.tenant_id),
+            Some(owner.application_id),
+            Some(owner.environment_id),
+        )
+        .detail(json!({
+            "kind": kind.clone(),
+            "participationsMinimized": n,
+            "alreadyTombstoned": already,
+        }))
+    };
+    if let Some(at) = tombstoned_at {
+        let view = TombstoneView {
+            principal_id,
+            status: "DEACTIVATED",
+            tombstoned_at: at,
+            participations_minimized: 0,
+            already_tombstoned: true,
+        };
+        let entry = audit_entry(0, true);
+        return operator::audited(db, op, now, move |_| {
+            Box::pin(async move { Ok((view, entry)) })
+        })
+        .await;
+    }
+    if is_service_account {
+        return Err(PlatformError::PolicyViolation(
+            "SERVICE_ACCOUNT principals follow their service account's lifecycle and are not tombstoned"
+                .to_string(),
+        ));
+    }
+    if holds::is_held(db, DataClass::Principal, Some(principal_id), Some(owner)).await? {
+        return Err(PlatformError::InvalidState(
+            "a retention hold covers this principal; release it before tombstoning".to_string(),
+        ));
+    }
+    // The identity authority tombstones the principal (idempotent there).
+    let outcome = authority
+        .tombstone_principal(principal_id, op.operator())
+        .await
+        .map_err(|e| {
+            PlatformError::InvalidState(format!(
+                "platform access could not tombstone the principal: {e}"
+            ))
+        })?;
+    let snapshot = outcome.principal;
+    let at = snapshot.tombstoned_at.unwrap_or(now);
     let actor = op.operator().to_string();
     let view = operator::audited(db, op, now, move |txn| {
         Box::pin(async move {
-            let row = txn
-                .query_one(stmt(
-                    "SELECT tenant_id, application_id, environment_id, kind, tombstoned_at \
-                     FROM platform_principals WHERE id = $1 FOR UPDATE",
-                    vec![principal_id.into()],
-                ))
-                .await?
-                .ok_or(PlatformError::NotFound("principal"))?;
-            let owner = HoldOwner {
-                tenant_id: row.try_get_by_index(0)?,
-                application_id: row.try_get_by_index(1)?,
-                environment_id: row.try_get_by_index(2)?,
-            };
-            let kind: String = row.try_get_by_index(3)?;
-            let tombstoned_at: Option<DateTime<Utc>> = row.try_get_by_index(4)?;
-            let audit_entry = |n: u64, already: bool| {
-                AuditEntry::new(
-                    OperatorAction::PrincipalTombstoned,
-                    AuditTargetKind::Principal,
-                    principal_id,
-                )
-                .scope(
-                    Some(owner.tenant_id),
-                    Some(owner.application_id),
-                    Some(owner.environment_id),
-                )
-                .detail(json!({
-                    "kind": kind,
-                    "participationsMinimized": n,
-                    "alreadyTombstoned": already,
-                }))
-            };
-            if let Some(at) = tombstoned_at {
-                let view = TombstoneView {
-                    principal_id,
-                    status: "DEACTIVATED",
-                    tombstoned_at: at,
-                    participations_minimized: 0,
-                    already_tombstoned: true,
-                };
-                let entry = audit_entry(0, true);
-                return Ok((view, entry));
-            }
-            if kind == "SERVICE_ACCOUNT" {
-                return Err(PlatformError::PolicyViolation(
-                    "SERVICE_ACCOUNT principals follow their service account's lifecycle and are not tombstoned"
-                        .to_string(),
-                ));
-            }
-            if holds::is_held(txn, DataClass::Principal, Some(principal_id), Some(owner)).await? {
-                return Err(PlatformError::InvalidState(
-                    "a retention hold covers this principal; release it before tombstoning".to_string(),
-                ));
-            }
-            // The minimization below is a retention operation: the participant guard
-            // accepts `display_minimized_at` only under the retention flag.
-            txn.execute_unprepared("SET LOCAL calling.retention_worker = 'on'")
-                .await?;
-            let changed = txn
-                .execute(stmt(
-                    "UPDATE platform_principals SET status = 'DEACTIVATED', tombstoned_at = $2, \
-                       external_reference = CASE WHEN kind = 'TELEPHONE_ENDPOINT' THEN id::text \
-                                                 ELSE $3 || id::text END, \
-                       updated_at = GREATEST(updated_at, $2) \
-                     WHERE id = $1 AND tombstoned_at IS NULL",
-                    vec![principal_id.into(), now.into(), TOMBSTONE_PREFIX.into()],
-                ))
-                .await?
-                .rows_affected();
-            if changed != 1 {
-                return Err(PlatformError::NotFound("principal"));
-            }
-            let minimized = txn
-                .execute(stmt(
-                    "UPDATE call_participants SET display_name = NULL, display_minimized_at = $2 \
-                     WHERE principal_id = $1 AND display_minimized_at IS NULL",
-                    vec![principal_id.into(), now.into()],
-                ))
-                .await?
-                .rows_affected();
+            let minimized = upsert_principal(txn, &snapshot, now).await.map_err(|e| {
+                PlatformError::Database {
+                    summary: e.to_string(),
+                    connectivity: false,
+                }
+            })?;
             audit::record(
                 txn,
                 &RetentionAuditEntry {
@@ -163,7 +164,7 @@ pub async fn operator_tombstone(
             let view = TombstoneView {
                 principal_id,
                 status: "DEACTIVATED",
-                tombstoned_at: now,
+                tombstoned_at: at,
                 participations_minimized: minimized,
                 already_tombstoned: false,
             };
@@ -172,18 +173,16 @@ pub async fn operator_tombstone(
         })
     })
     .await?;
-    if !view.already_tombstoned {
-        audit::count(
-            DataClass::Principal,
-            RetentionAction::Minimize,
-            RetentionOutcome::Minimized,
-            1,
-        );
-        tracing::info!(
-            principal_id = %view.principal_id,
-            participations_minimized = view.participations_minimized,
-            "principal tombstoned"
-        );
-    }
+    audit::count(
+        DataClass::Principal,
+        RetentionAction::Minimize,
+        RetentionOutcome::Minimized,
+        1,
+    );
+    tracing::info!(
+        principal_id = %view.principal_id,
+        participations_minimized = view.participations_minimized,
+        "principal tombstoned"
+    );
     Ok(view)
 }

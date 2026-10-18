@@ -1,0 +1,1544 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/platform-access/identity/v1.schema.json",
+  "title": "CF Meet Platform Access identity v1",
+  "description": "The shared identity authority's internal contract (Part IV Workstream B, ADR 0032): Tenant -> Application -> Environment -> Service Account -> API Credential, principals, scopes, credential authentication outcomes, the trusted delegated context, authorization evaluation, the identity change feed consumers project from, and Part III import receipts. Internal service API only (packages/service-auth); no message ever carries a raw credential secret except AuthenticateRequest's presented value, and none carries verifier material.",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/Error"
+    },
+    {
+      "$ref": "#/$defs/AuthenticateRequest"
+    },
+    {
+      "$ref": "#/$defs/AuthenticateResponse"
+    },
+    {
+      "$ref": "#/$defs/TrustedContext"
+    },
+    {
+      "$ref": "#/$defs/CredentialStatusResult"
+    },
+    {
+      "$ref": "#/$defs/EvaluateRequest"
+    },
+    {
+      "$ref": "#/$defs/EvaluateResponse"
+    },
+    {
+      "$ref": "#/$defs/ScopeRegistry"
+    },
+    {
+      "$ref": "#/$defs/ChangesRequest"
+    },
+    {
+      "$ref": "#/$defs/ChangePage"
+    },
+    {
+      "$ref": "#/$defs/ImportReceipt"
+    },
+    {
+      "$ref": "#/$defs/ResolveRequest"
+    },
+    {
+      "$ref": "#/$defs/ResolveResponse"
+    },
+    {
+      "$ref": "#/$defs/TelephoneEndpointRequest"
+    },
+    {
+      "$ref": "#/$defs/PrincipalResult"
+    },
+    {
+      "$ref": "#/$defs/TombstoneRequest"
+    },
+    {
+      "$ref": "#/$defs/TombstoneResult"
+    }
+  ],
+  "$defs": {
+    "Timestamp": {
+      "description": "RFC 3339 UTC timestamp.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "Revision": {
+      "description": "Entity revision: 1 at insert, +1 on every effective update. Consumers apply a snapshot only when its revision is newer than the one they hold.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "Slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,62}$"
+    },
+    "TenantClassification": {
+      "description": "FIRST_PARTY (CosmicForge-operated) or EXTERNAL; decided by Platform Access only, never by a request.",
+      "type": "string",
+      "enum": [
+        "FIRST_PARTY",
+        "EXTERNAL"
+      ]
+    },
+    "TenantStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "SUSPENDED"
+      ]
+    },
+    "ApplicationStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "SUSPENDED"
+      ]
+    },
+    "EnvironmentKind": {
+      "type": "string",
+      "enum": [
+        "SANDBOX",
+        "TEST",
+        "PRODUCTION"
+      ]
+    },
+    "EnvironmentStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "SUSPENDED"
+      ]
+    },
+    "ServiceAccountStatus": {
+      "description": "REVOKED is terminal.",
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "SUSPENDED",
+        "REVOKED"
+      ]
+    },
+    "CredentialStatus": {
+      "description": "REVOKED is terminal.",
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "REVOKED"
+      ]
+    },
+    "PrincipalStatus": {
+      "description": "DEACTIVATED is terminal.",
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "SUSPENDED",
+        "DEACTIVATED"
+      ]
+    },
+    "CredentialEffectiveState": {
+      "description": "Derived from the persisted lifecycle fields at evaluation time. Only ACTIVE and ROTATION_OVERLAP authenticate.",
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "ROTATION_OVERLAP",
+        "NOT_YET_VALID",
+        "EXPIRED",
+        "SUPERSEDED",
+        "REVOKED"
+      ]
+    },
+    "AuthorityMode": {
+      "description": "FULL: every link ACTIVE, the scopes decide. SAFETY_ONLY: the tenant, application or environment is SUSPENDED — the consumer allows only its safety operations (e.g. end a live call).",
+      "type": "string",
+      "enum": [
+        "FULL",
+        "SAFETY_ONLY"
+      ]
+    },
+    "SuspendedLink": {
+      "description": "The suspended link behind a SAFETY_ONLY authority.",
+      "type": "string",
+      "enum": [
+        "TENANT",
+        "APPLICATION",
+        "ENVIRONMENT"
+      ]
+    },
+    "ScopeName": {
+      "description": "A scope registered by Platform Access (GET /internal/v1/scopes), e.g. calls.read, numbers.search, numbers.admin, sms.send.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+      "maxLength": 100
+    },
+    "ScopeTrust": {
+      "description": "STANDARD: grantable to any tenant. FIRST_PARTY_ONLY: FIRST_PARTY tenants only. PRIVILEGED_OPERATOR: an explicit audited operator grant to a FIRST_PARTY application (numbers.admin); never an ordinary grant.",
+      "type": "string",
+      "enum": [
+        "STANDARD",
+        "FIRST_PARTY_ONLY",
+        "PRIVILEGED_OPERATOR"
+      ]
+    },
+    "GrantBasis": {
+      "description": "How an application scope was granted.",
+      "type": "string",
+      "enum": [
+        "STANDARD",
+        "PRIVILEGED_OPERATOR"
+      ]
+    },
+    "AuthFailureReason": {
+      "description": "Why a presented credential does not authenticate. For the consumer's logs and metrics only: every rejection is shown to the customer as the same normalized authentication failure.",
+      "type": "string",
+      "enum": [
+        "malformed_credential",
+        "unknown_credential",
+        "secret_mismatch",
+        "environment_tag_mismatch",
+        "unsupported_verifier",
+        "credential_revoked",
+        "credential_not_yet_valid",
+        "credential_expired",
+        "credential_superseded",
+        "service_account_inactive",
+        "corrupt_authority_chain"
+      ]
+    },
+    "PublicId": {
+      "description": "Non-secret lookup id of a credential (24 lower-case hex).",
+      "type": "string",
+      "pattern": "^[0-9a-f]{24}$"
+    },
+    "TenantSnapshot": {
+      "description": "A tenant (platform customer).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "slug",
+        "displayName",
+        "classification",
+        "status",
+        "billingCurrency",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "slug": {
+          "$ref": "#/$defs/Slug"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "classification": {
+          "$ref": "#/$defs/TenantClassification"
+        },
+        "status": {
+          "$ref": "#/$defs/TenantStatus"
+        },
+        "billingCurrency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "ApplicationSnapshot": {
+      "description": "An application (project) of a tenant.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "tenantId",
+        "slug",
+        "displayName",
+        "status",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "tenantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "slug": {
+          "$ref": "#/$defs/Slug"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "status": {
+          "$ref": "#/$defs/ApplicationStatus"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "EnvironmentSnapshot": {
+      "description": "An application environment. Live telecom effects are possible only in PRODUCTION and only when allowed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "tenantId",
+        "applicationId",
+        "kind",
+        "status",
+        "liveTelecomAllowed",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "tenantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "applicationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "#/$defs/EnvironmentKind"
+        },
+        "status": {
+          "$ref": "#/$defs/EnvironmentStatus"
+        },
+        "liveTelecomAllowed": {
+          "type": "boolean"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "ServiceAccountSnapshot": {
+      "description": "A machine identity of an environment.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "tenantId",
+        "applicationId",
+        "environmentId",
+        "name",
+        "description",
+        "status",
+        "revokedAt",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "tenantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "applicationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "description": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 500
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/ServiceAccountStatus"
+        },
+        "revokedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "CredentialSnapshot": {
+      "description": "An API credential WITHOUT any secret or verifier material (lastFour is for masked display only).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "publicId",
+        "tenantId",
+        "applicationId",
+        "environmentId",
+        "serviceAccountId",
+        "label",
+        "lastFour",
+        "status",
+        "notBefore",
+        "expiresAt",
+        "revokedAt",
+        "rotatedFromCredentialId",
+        "supersededByCredentialId",
+        "supersededAt",
+        "supersessionValidUntil",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "publicId": {
+          "$ref": "#/$defs/PublicId"
+        },
+        "tenantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "applicationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "serviceAccountId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "label": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastFour": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{4}$"
+        },
+        "status": {
+          "$ref": "#/$defs/CredentialStatus"
+        },
+        "notBefore": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "revokedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rotatedFromCredentialId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "supersededByCredentialId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "supersededAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "supersessionValidUntil": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "PrincipalSnapshot": {
+      "description": "A communication principal: an opaque reference only — never a phone number or contact value (TELEPHONE_ENDPOINT principals carry a ContactReference id).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "tenantId",
+        "applicationId",
+        "environmentId",
+        "kind",
+        "externalReference",
+        "linkedServiceAccountId",
+        "status",
+        "tombstonedAt",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "tenantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "applicationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/PrincipalKind"
+        },
+        "externalReference": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "linkedServiceAccountId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/PrincipalStatus"
+        },
+        "tombstonedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "ApplicationScopeSnapshot": {
+      "description": "A scope an application may grant to its credentials.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenantId",
+        "applicationId",
+        "scope",
+        "allowedEnvironmentKinds",
+        "grantBasis",
+        "grantedAt"
+      ],
+      "properties": {
+        "tenantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "applicationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "scope": {
+          "$ref": "#/$defs/ScopeName"
+        },
+        "allowedEnvironmentKinds": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/EnvironmentKind"
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "grantBasis": {
+          "$ref": "#/$defs/GrantBasis"
+        },
+        "grantedAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "CredentialScopeSnapshot": {
+      "description": "A scope granted to a credential.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "credentialId",
+        "tenantId",
+        "applicationId",
+        "scope",
+        "grantedAt"
+      ],
+      "properties": {
+        "credentialId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "tenantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "applicationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "scope": {
+          "$ref": "#/$defs/ScopeName"
+        },
+        "grantedAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "AuthorityChain": {
+      "description": "The trusted authority of an authenticated credential: every link, the effective scopes (sorted) and the authorized-principal restriction. The tenant of a request is ALWAYS taken from here, never from a request.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorityMode",
+        "suspendedLink",
+        "tenant",
+        "application",
+        "environment",
+        "serviceAccount",
+        "credential",
+        "effectiveState",
+        "scopes",
+        "principalRestriction"
+      ],
+      "properties": {
+        "authorityMode": {
+          "$ref": "#/$defs/AuthorityMode"
+        },
+        "suspendedLink": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SuspendedLink"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tenant": {
+          "$ref": "#/$defs/TenantSnapshot"
+        },
+        "application": {
+          "$ref": "#/$defs/ApplicationSnapshot"
+        },
+        "environment": {
+          "$ref": "#/$defs/EnvironmentSnapshot"
+        },
+        "serviceAccount": {
+          "$ref": "#/$defs/ServiceAccountSnapshot"
+        },
+        "credential": {
+          "$ref": "#/$defs/CredentialSnapshot"
+        },
+        "effectiveState": {
+          "$ref": "#/$defs/CredentialEffectiveState"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScopeName"
+          },
+          "uniqueItems": true
+        },
+        "principalRestriction": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "uniqueItems": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Throttle": {
+      "description": "Failed-authentication throttling: the consumer answers 429 with Retry-After instead of 401; thresholdCrossed is true exactly once per window (one deduplicated guessing incident). A correct secret is never throttled.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "retryAfterSeconds",
+        "thresholdCrossed"
+      ],
+      "properties": {
+        "retryAfterSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "thresholdCrossed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "AuthenticateRequest": {
+      "description": "POST /internal/v1/credentials/authenticate (permission platform-credential.authenticate). The presented bearer value; never logged, never stored.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "credential"
+      ],
+      "properties": {
+        "credential": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      }
+    },
+    "AuthenticateResponse": {
+      "description": "Outcome of a credential authentication.",
+      "oneOf": [
+        {
+          "description": "The credential authenticates.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "outcome",
+            "authority"
+          ],
+          "properties": {
+            "outcome": {
+              "const": "AUTHENTICATED"
+            },
+            "authority": {
+              "$ref": "#/$defs/AuthorityChain"
+            }
+          }
+        },
+        {
+          "description": "The credential does not authenticate.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "outcome",
+            "reason"
+          ],
+          "properties": {
+            "outcome": {
+              "const": "REJECTED"
+            },
+            "reason": {
+              "$ref": "#/$defs/AuthFailureReason"
+            },
+            "publicId": {
+              "$ref": "#/$defs/PublicId"
+            },
+            "throttle": {
+              "$ref": "#/$defs/Throttle"
+            }
+          }
+        }
+      ]
+    },
+    "TrustedContext": {
+      "description": "GET /internal/v1/identity/context: the caller's signed delegated scope re-validated against the authority (a forged or stale tenant / application claim is DELEGATED_CONTEXT_INVALID).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorityMode",
+        "suspendedLink",
+        "tenant",
+        "application",
+        "environment",
+        "serviceAccount"
+      ],
+      "properties": {
+        "authorityMode": {
+          "$ref": "#/$defs/AuthorityMode"
+        },
+        "suspendedLink": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SuspendedLink"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tenant": {
+          "$ref": "#/$defs/TenantSnapshot"
+        },
+        "application": {
+          "$ref": "#/$defs/ApplicationSnapshot"
+        },
+        "environment": {
+          "$ref": "#/$defs/EnvironmentSnapshot"
+        },
+        "serviceAccount": {
+          "$ref": "#/$defs/ServiceAccountSnapshot"
+        }
+      }
+    },
+    "CredentialStatusResult": {
+      "description": "GET /internal/v1/credentials/{credentialId}: status, expiry and revocation of a credential of the delegated scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "credential",
+        "effectiveState",
+        "authenticates",
+        "scopes",
+        "principalRestriction"
+      ],
+      "properties": {
+        "credential": {
+          "$ref": "#/$defs/CredentialSnapshot"
+        },
+        "effectiveState": {
+          "$ref": "#/$defs/CredentialEffectiveState"
+        },
+        "authenticates": {
+          "type": "boolean"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScopeName"
+          }
+        },
+        "principalRestriction": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "EvaluateRequest": {
+      "description": "POST /internal/v1/authorization/evaluate: may the credential of the delegated scope perform an operation needing requiredScopes (optionally for principalId), NOW?",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "credentialId",
+        "requiredScopes"
+      ],
+      "properties": {
+        "credentialId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "requiredScopes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "maxItems": 32
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "EvaluateResponse": {
+      "description": "Authorization decision.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed",
+        "missingScopes",
+        "effectiveState"
+      ],
+      "properties": {
+        "allowed": {
+          "type": "boolean"
+        },
+        "reason": {
+          "description": "Absent when allowed.",
+          "type": "string",
+          "enum": [
+            "CREDENTIAL_NOT_AUTHENTICATING",
+            "SCOPE_SUSPENDED",
+            "MISSING_SCOPES",
+            "PRINCIPAL_NOT_AUTHORIZED"
+          ]
+        },
+        "missingScopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "effectiveState": {
+          "$ref": "#/$defs/CredentialEffectiveState"
+        }
+      }
+    },
+    "ScopeDefinition": {
+      "description": "A registered scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "description",
+        "trust"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/ScopeName"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trust": {
+          "$ref": "#/$defs/ScopeTrust"
+        }
+      }
+    },
+    "ScopeRegistry": {
+      "description": "GET /internal/v1/scopes: the server-authoritative scope registry.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scopes"
+      ],
+      "properties": {
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScopeDefinition"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "EntityKind": {
+      "description": "Kind of identity entity a change describes.",
+      "type": "string",
+      "enum": [
+        "TENANT",
+        "APPLICATION",
+        "ENVIRONMENT",
+        "SERVICE_ACCOUNT",
+        "APPLICATION_SCOPE",
+        "CREDENTIAL",
+        "CREDENTIAL_SCOPE",
+        "PRINCIPAL"
+      ]
+    },
+    "ChangeOperation": {
+      "type": "string",
+      "enum": [
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ]
+    },
+    "IdentityChange": {
+      "description": "One committed identity change. Sequences are monotonic in commit order; applying a snapshot is idempotent (revision-guarded). Snapshots never carry verifier material.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "entityKind",
+        "operation",
+        "entityKey",
+        "revision",
+        "occurredAt",
+        "snapshot"
+      ],
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "entityKind": {
+          "$ref": "#/$defs/EntityKind"
+        },
+        "operation": {
+          "$ref": "#/$defs/ChangeOperation"
+        },
+        "entityKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "revision": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Revision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "occurredAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "snapshot": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "entityKind": {
+                "const": "TENANT"
+              }
+            },
+            "required": [
+              "entityKind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "snapshot": {
+                "$ref": "#/$defs/TenantSnapshot"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "entityKind": {
+                "const": "APPLICATION"
+              }
+            },
+            "required": [
+              "entityKind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "snapshot": {
+                "$ref": "#/$defs/ApplicationSnapshot"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "entityKind": {
+                "const": "ENVIRONMENT"
+              }
+            },
+            "required": [
+              "entityKind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "snapshot": {
+                "$ref": "#/$defs/EnvironmentSnapshot"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "entityKind": {
+                "const": "SERVICE_ACCOUNT"
+              }
+            },
+            "required": [
+              "entityKind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "snapshot": {
+                "$ref": "#/$defs/ServiceAccountSnapshot"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "entityKind": {
+                "const": "APPLICATION_SCOPE"
+              }
+            },
+            "required": [
+              "entityKind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "snapshot": {
+                "$ref": "#/$defs/ApplicationScopeSnapshot"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "entityKind": {
+                "const": "CREDENTIAL"
+              }
+            },
+            "required": [
+              "entityKind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "snapshot": {
+                "$ref": "#/$defs/CredentialSnapshot"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "entityKind": {
+                "const": "CREDENTIAL_SCOPE"
+              }
+            },
+            "required": [
+              "entityKind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "snapshot": {
+                "$ref": "#/$defs/CredentialScopeSnapshot"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "entityKind": {
+                "const": "PRINCIPAL"
+              }
+            },
+            "required": [
+              "entityKind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "snapshot": {
+                "$ref": "#/$defs/PrincipalSnapshot"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ChangesRequest": {
+      "description": "POST /internal/v1/identity/changes: the page after the cursor (permission platform-identity.read).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "after": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        }
+      }
+    },
+    "ChangePage": {
+      "description": "A page of the identity change feed. Persist nextAfter only after applying the page.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "changes",
+        "nextAfter",
+        "hasMore"
+      ],
+      "properties": {
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IdentityChange"
+          },
+          "maxItems": 500
+        },
+        "nextAfter": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hasMore": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ImportReceipt": {
+      "description": "GET /internal/v1/identity/imports/{bundleDigest}: Platform Access's receipt of an operator-imported Part III identity bundle (digests and counts only).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sourceService",
+        "bundleDigest",
+        "verifierDigest",
+        "counts",
+        "importedAt"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sourceService": {
+          "type": "string",
+          "pattern": "^cfmeet\\.[a-z][a-z0-9-]*$"
+        },
+        "bundleDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "verifierDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "importedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "alreadyImported": {
+          "type": "boolean"
+        }
+      }
+    },
+    "PrincipalReference": {
+      "description": "A principal reference: either principalId, or kind + externalReference.",
+      "oneOf": [
+        {
+          "description": "By CF Meet principal id.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "principalId"
+          ],
+          "properties": {
+            "principalId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        },
+        {
+          "description": "By consumer-defined opaque reference.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "externalReference"
+          ],
+          "properties": {
+            "kind": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/PrincipalKind"
+            },
+            "externalReference": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        }
+      ]
+    },
+    "ResolveRequest": {
+      "description": "POST /internal/v1/principals/resolve: resolve references inside the delegated scope only.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "references"
+      ],
+      "properties": {
+        "references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrincipalReference"
+          },
+          "minItems": 1,
+          "maxItems": 50
+        }
+      }
+    },
+    "Resolution": {
+      "description": "One resolution, in request order.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome"
+      ],
+      "properties": {
+        "outcome": {
+          "description": "",
+          "type": "string",
+          "enum": [
+            "RESOLVED",
+            "NOT_FOUND",
+            "INACTIVE",
+            "INVALID_REFERENCE"
+          ]
+        },
+        "principal": {
+          "$ref": "#/$defs/PrincipalSnapshot"
+        }
+      }
+    },
+    "ResolveResponse": {
+      "description": "Resolutions in request order.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "results"
+      ],
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Resolution"
+          }
+        }
+      }
+    },
+    "TelephoneEndpointRequest": {
+      "description": "POST /internal/v1/principals/telephone-endpoints: the TELEPHONE_ENDPOINT principal of a protected public party — referenced by its opaque ContactReference, never a number. Idempotent.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contactReference"
+      ],
+      "properties": {
+        "contactReference": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "PrincipalResult": {
+      "description": "A principal.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "principal"
+      ],
+      "properties": {
+        "principal": {
+          "$ref": "#/$defs/PrincipalSnapshot"
+        }
+      }
+    },
+    "TombstoneRequest": {
+      "description": "POST /internal/v1/principals/{principalId}/tombstone: the human operator who decided the tombstone (audited as the actor).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operator"
+      ],
+      "properties": {
+        "operator": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+        }
+      }
+    },
+    "TombstoneResult": {
+      "description": "The tombstoned principal: DEACTIVATED for ever, non-identifying reference.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alreadyTombstoned",
+        "principal"
+      ],
+      "properties": {
+        "alreadyTombstoned": {
+          "type": "boolean"
+        },
+        "principal": {
+          "$ref": "#/$defs/PrincipalSnapshot"
+        }
+      }
+    },
+    "ErrorCode": {
+      "description": "Stable error codes of the Platform Access envelope.",
+      "type": "string",
+      "enum": [
+        "VALIDATION_ERROR",
+        "NOT_FOUND",
+        "METHOD_NOT_ALLOWED",
+        "PAYLOAD_TOO_LARGE",
+        "INTERNAL_AUTHENTICATION_FAILED",
+        "INTERNAL_PERMISSION_DENIED",
+        "DELEGATED_CONTEXT_REQUIRED",
+        "DELEGATED_CONTEXT_INVALID",
+        "OPERATOR_REQUIRED",
+        "CONFLICT",
+        "POLICY_VIOLATION",
+        "INVALID_STATE",
+        "SERVICE_UNAVAILABLE",
+        "INTERNAL_ERROR"
+      ]
+    },
+    "Error": {
+      "description": "The error envelope (never echoes a presented credential, a verifier or row content).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "description": "",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message",
+            "requestId"
+          ],
+          "properties": {
+            "code": {
+              "$ref": "#/$defs/ErrorCode"
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "requestId": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "pattern": "^req_[0-9a-f]{32}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

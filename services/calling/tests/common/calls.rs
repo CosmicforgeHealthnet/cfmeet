@@ -2,6 +2,8 @@
 //! that drive a Call to any canonical state with real (synthetic, provider-independent)
 //! evidence. No RTC, provider or telephony execution exists or is simulated here.
 
+use crate::common::IssuedCredential;
+use crate::common::NewPrincipal;
 use calling::{
     calls::{
         attributes::SafeAttributes,
@@ -16,9 +18,8 @@ use calling::{
     domain::{EnvironmentKind, PrincipalKind, TenantClassification},
     platform::{
         context::PlatformAuthContext,
-        credentials::IssuedCredential,
         limits::LimitValues,
-        principals::{NewPrincipal, PrincipalReference, ResolvedPrincipal},
+        principals::{PrincipalReference, ResolvedPrincipal},
         scopes::names,
     },
 };

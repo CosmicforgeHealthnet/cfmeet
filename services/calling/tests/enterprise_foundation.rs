@@ -538,7 +538,7 @@ async fn cross_tenant_application_and_environment_ids_behave_like_missing_ones()
             .platform
             .register_principal(
                 consumer.env(e.a.w.kind).id,
-                calling::platform::principals::NewPrincipal::External {
+                crate::common::NewPrincipal::External {
                     kind: calling::domain::PrincipalKind::EnterpriseMember,
                     external_reference: "outsider".to_string(),
                 },

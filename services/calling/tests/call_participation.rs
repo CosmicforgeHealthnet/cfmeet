@@ -41,17 +41,17 @@ async fn trusted_principals_become_participants_and_foreign_principals_never_do(
     assert_eq!(recipient.role, ParticipantRole::Recipient);
 
     // Principals of another tenant, another application and another environment.
-    let h2 = Harness::on(w.h.db.clone(), common::TEST_PEPPER, w.h.clock.clone());
+    let h2 = Harness::on(w.h.db.clone(), w.h.clock.clone());
     let other_tenant = CallWorld::in_harness(h2, "other", EnvironmentKind::Production).await;
     let other_app = w.h.application_in(&w.consumer.tenant, "second").await;
     let other_app = CallWorld::for_consumer(
-        Harness::on(w.h.db.clone(), common::TEST_PEPPER, w.h.clock.clone()),
+        Harness::on(w.h.db.clone(), w.h.clock.clone()),
         other_app,
         EnvironmentKind::Production,
     )
     .await;
     let sandbox = CallWorld::for_consumer(
-        Harness::on(w.h.db.clone(), common::TEST_PEPPER, w.h.clock.clone()),
+        Harness::on(w.h.db.clone(), w.h.clock.clone()),
         w.h.application_in(&w.consumer.tenant, "third").await,
         EnvironmentKind::Sandbox,
     )
@@ -380,7 +380,7 @@ async fn sessions_never_cross_calls_or_scopes() {
     ));
     // Another tenant cannot touch it at all.
     let other = CallWorld::in_harness(
-        Harness::on(w.h.db.clone(), common::TEST_PEPPER, w.h.clock.clone()),
+        Harness::on(w.h.db.clone(), w.h.clock.clone()),
         "intruder",
         EnvironmentKind::Production,
     )

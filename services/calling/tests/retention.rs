@@ -18,15 +18,13 @@
 
 mod common;
 
+use common::NewPrincipal;
+
 use std::sync::Arc;
 
 use axum::http::StatusCode;
 use calling::{
-    platform::{
-        operator::OperatorContext,
-        principals::{NewPrincipal, PrincipalReference},
-        PlatformError,
-    },
+    platform::{operator::OperatorContext, principals::PrincipalReference, PlatformError},
     retention::{
         holds::{self, HoldOwner, HoldReason, HoldScope},
         tombstone,
@@ -1058,9 +1056,15 @@ async fn principal_tombstone_keeps_history_and_foreign_keys_and_never_resolves_a
     let before = evidence(&a).await;
     let operator = op();
 
-    let view = tombstone::operator_tombstone(conn(&a), &operator, principal, now(&a))
-        .await
-        .unwrap();
+    let view = tombstone::operator_tombstone(
+        conn(&a),
+        a.h().state.identity.authority().as_ref(),
+        &operator,
+        principal,
+        now(&a),
+    )
+    .await
+    .unwrap();
     assert!(!view.already_tombstoned);
     assert!(view.participations_minimized >= 1);
     assert_eq!(
@@ -1203,9 +1207,15 @@ async fn principal_tombstone_keeps_history_and_foreign_keys_and_never_resolves_a
         Err(PlatformError::PolicyViolation(_))
     ));
     // Idempotent.
-    let again = tombstone::operator_tombstone(conn(&a), &op(), principal, now(&a))
-        .await
-        .unwrap();
+    let again = tombstone::operator_tombstone(
+        conn(&a),
+        a.h().state.identity.authority().as_ref(),
+        &op(),
+        principal,
+        now(&a),
+    )
+    .await
+    .unwrap();
     assert!(again.already_tombstoned);
     assert_eq!(
         count(
@@ -1232,7 +1242,14 @@ async fn principal_tombstone_keeps_history_and_foreign_keys_and_never_resolves_a
     .await
     .unwrap();
     assert!(matches!(
-        tombstone::operator_tombstone(conn(&a), &op(), other, now(&a)).await,
+        tombstone::operator_tombstone(
+            conn(&a),
+            a.h().state.identity.authority().as_ref(),
+            &op(),
+            other,
+            now(&a)
+        )
+        .await,
         Err(PlatformError::InvalidState(_))
     ));
     assert_eq!(

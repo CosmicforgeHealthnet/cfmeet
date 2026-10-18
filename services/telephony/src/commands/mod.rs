@@ -50,11 +50,13 @@ pub(crate) struct CommandRow {
     pub payload: Value,
     pub correlation_id: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// The Numbering CALLER_IDENTITY grant for a DCN origination (scrubbed at transmit).
+    pub dcn_identity_grant: Option<String>,
 }
 
 pub(crate) const COMMAND_COLUMNS: &str = "id, kind, telephony_leg_id, bridge_id, request_digest, \
     status, attempts, max_attempts, transmitted_at, grant_id, grant_secret, grant_expires_at, payload, \
-    correlation_id, created_at";
+    correlation_id, created_at, dcn_identity_grant";
 
 /// Body of TERMINATE / HOLD / RESUME.
 #[derive(Debug, Clone, Deserialize)]
@@ -302,8 +304,8 @@ impl TelephonyService {
                 &txn,
                 "INSERT INTO telephony_commands (id, kind, telephony_leg_id, requester_service, idempotency_key, \
                    request_digest, status, max_attempts, next_attempt_at, grant_id, grant_secret, \
-                   grant_expires_at, payload, request_id, correlation_id, created_at, updated_at) \
-                 VALUES ($1, 'ORIGINATE', $2, $3, $4, $5, 'PENDING', 5, $6, $7, $8, $9, $10, $11, $12, $6, $6)",
+                   grant_expires_at, payload, request_id, correlation_id, created_at, updated_at, dcn_identity_grant) \
+                 VALUES ($1, 'ORIGINATE', $2, $3, $4, $5, 'PENDING', 5, $6, $7, $8, $9, $10, $11, $12, $6, $6, $13)",
                 vec![
                     command.command_id.into(),
                     leg_id.into(),
@@ -317,6 +319,11 @@ impl TelephonyService {
                     payload.into(),
                     requester.request_id.clone().into(),
                     command.correlation_id.clone().into(),
+                    command
+                        .presented_identity
+                        .as_ref()
+                        .map(|p| p.grant.clone())
+                        .into(),
                 ],
             )
             .await

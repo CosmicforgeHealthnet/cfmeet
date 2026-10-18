@@ -1,0 +1,6 @@
+{
+  "outcome": "REJECTED",
+  "reason": "secret_mismatch",
+  "publicId": "0123456789abcdef01234567",
+  "throttle": { "retryAfterSeconds": 120, "thresholdCrossed": true }
+}

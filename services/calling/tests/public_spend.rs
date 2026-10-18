@@ -497,7 +497,7 @@ async fn other_service_account(x: &World, name: &str) -> (Uuid, Uuid) {
         .platform
         .create_service_account(
             env,
-            calling::platform::service_accounts::NewServiceAccount {
+            crate::common::NewServiceAccount {
                 name: name.into(),
                 description: None,
             },
@@ -626,6 +626,7 @@ async fn an_unknown_cost_never_opens_an_unreserved_or_unbounded_paid_leg() {
         capacity_available: Evidence::Known(true),
         estimated_leg_cost_minor: Evidence::Unknown,
         quality_permille: Evidence::Unknown,
+        interconnect_class: Default::default(),
     }]));
     // Room for exactly one allowance today.
     x.set_spend(SpendPolicy {

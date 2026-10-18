@@ -28,7 +28,7 @@
   ],
   "$defs": {
     "OriginateCommand": {
-      "description": "POST /internal/v1/legs/originate. No caller identity (selected server-side), no number, no provider.",
+      "description": "POST /internal/v1/legs/originate. No number, no provider. The caller identity is selected server-side: the session's relay identity, or (Part IV L) a Digital Communications Number presented ONLY under Numbering's single-use CALLER_IDENTITY grant for exactly this origination (operation leg:{callLegId}:{commandId}), which Telephony consumes before transmission and presents only on an interconnect the DCN is bound to.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -242,6 +242,30 @@
             "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
           },
           "description": "Ordered opaque route references from the Routing Engine (Telephony narrows them)."
+        },
+        "presentedIdentity": {
+          "description": "Part IV L: the DCN to present (CF Meet Number Resource id — never the number) and Numbering's bearer grant (stored until transmission only, never logged, excluded from the request digest).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "numberResourceId",
+            "grant"
+          ],
+          "properties": {
+            "numberResourceId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "grant": {
+              "type": "string",
+              "minLength": 20,
+              "maxLength": 4096,
+              "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
+            }
+          }
+        },
+        "interconnectClass": {
+          "$ref": "https://schemas.cfmeet.com/telephony/common/v1.schema.json#/$defs/InterconnectClass",
+          "description": "The interconnect class Calling's route policy selected (default PUBLIC). SYNTHETIC_TEST requires presentedIdentity and uses synthetic test routes only."
         }
       }
     },

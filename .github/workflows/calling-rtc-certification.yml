@@ -75,8 +75,19 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: services/calling -> target
+          workspaces: |
+            services/calling -> target
+            services/platform-access -> target
           key: rtc-certification
+
+      # Calling verifies every customer credential through Platform Access: its tests start
+      # the real server (and migrate its own database) per test database.
+      - name: Build Platform Access
+        working-directory: services/platform-access
+        run: |
+          cargo build --workspace --bins --locked
+          echo "PLATFORM_ACCESS_BIN=$GITHUB_WORKSPACE/services/platform-access/target/debug/platform-access" >> "$GITHUB_ENV"
+          echo "PLATFORM_ACCESS_MIGRATION_BIN=$GITHUB_WORKSPACE/services/platform-access/target/debug/platform-access-migration" >> "$GITHUB_ENV"
 
       - uses: actions/setup-python@v5
         with:

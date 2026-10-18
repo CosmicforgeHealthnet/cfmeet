@@ -40,7 +40,7 @@ fn environment_kind(kind: EnvironmentKind) -> ApplicationEnvironmentKind {
     }
 }
 
-fn principal_kind(kind: PrincipalKind) -> DelegatedPrincipalKind {
+pub(crate) fn principal_kind(kind: PrincipalKind) -> DelegatedPrincipalKind {
     match kind {
         PrincipalKind::NativeCfUser => DelegatedPrincipalKind::NativeCfUser,
         PrincipalKind::ExternalApplicationPrincipal => {

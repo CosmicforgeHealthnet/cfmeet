@@ -299,6 +299,19 @@ class RealRepository(unittest.TestCase):
     def test_guard_sees_the_real_services(self):
         self.assertIn("calling", self.repo.services)
         self.assertIn("meeting-service", self.repo.services)
+        # Part IV services and the operator tooling identity.
+        self.assertTrue({"platform-access", "numbering"} <= set(self.repo.services))
+        self.assertIn("operator-console", self.repo.known_services)
+        access = self.repo.tables["platform-access"]
+        self.assertTrue({"platform_tenants", "platform_applications", "platform_environments",
+                         "platform_service_accounts", "platform_api_credentials",
+                         "platform_principals", "platform_identity_changes",
+                         "platform_access_audit"} <= access, access)
+        numbering = self.repo.tables["numbering"]
+        self.assertTrue({"number_resources", "number_provider_bindings", "number_capabilities",
+                         "number_inventory_snapshots", "number_reservations", "dcn_assignments",
+                         "number_assignment_history", "number_routing_profiles"} <= numbering, numbering)
+        self.assertFalse(numbering & self.repo.tables["calling"])
         self.assertTrue({"privacy-relay", "telephony"} <= self.repo.known_services)
         self.assertTrue({"users", "organizations", "meeting_spaces"} <= self.repo.tables["meeting-service"])
         calling = self.repo.tables["calling"]
@@ -550,10 +563,43 @@ class RealRepository(unittest.TestCase):
             lambda r: write(r, "services/telephony/.env.example", "PRIVACY_RELAY_DATABASE_URL=postgres://relay\n"),
         )
 
-    def test_numbering_service_created_early(self):
+    # Part IV: Platform Access is the only credential authority; Numbering the only
+    # number authority.
+    def test_number_tables_outside_numbering(self):
         self.assertMutationFails(
-            "FUTURE_SERVICE_IMPLEMENTED",
-            lambda r: write(r, "services/numbering/Cargo.toml", '[package]\nname = "numbering"\nversion = "0.1.0"\n'),
+            "NUMBERING_DOMAIN_ELSEWHERE",
+            lambda r: write(r, "services/calling/migration/src/m_numbers.rs", 'const UP: &str = "CREATE TABLE number_resources (id UUID)";\n'),
+        )
+        self.assertMutationFails(
+            "NUMBERING_DOMAIN_ELSEWHERE",
+            lambda r: write(r, "services/privacy-relay/migration/src/m_dcn.rs", 'const UP: &str = "CREATE TABLE dcn_assignments (id UUID)";\n'),
+        )
+
+    # Part IV M: the SMS Gateway is the only SMS transport authority.
+    def test_sms_tables_outside_the_sms_gateway(self):
+        self.assertMutationFails(
+            "SMS_DOMAIN_ELSEWHERE",
+            lambda r: write(r, "services/numbering/migration/src/m_sms.rs", 'const UP: &str = "CREATE TABLE sms_messages (id UUID)";\n'),
+        )
+        self.assertMutationFails(
+            "SMS_DOMAIN_ELSEWHERE",
+            lambda r: write(r, "services/calling/migration/src/m_sms.rs", 'const UP: &str = "CREATE TABLE sms_transports (id UUID)";\n'),
+        )
+
+    def test_credential_verification_outside_platform_access(self):
+        self.assertMutationFails(
+            "IDENTITY_AUTHORITY_ELSEWHERE",
+            lambda r: append(r, "services/calling/src/main.rs", "\nfn local(k: &VerifierKeyring) {}\n"),
+        )
+        self.assertMutationFails(
+            "IDENTITY_AUTHORITY_ELSEWHERE",
+            lambda r: append(r, "services/numbering/src/main.rs", "\nfn local() { let _ = verifier_message; }\n"),
+        )
+
+    def test_calling_reading_the_credential_pepper(self):
+        self.assertMutationFails(
+            "FOREIGN_SECRET_REFERENCE",
+            lambda r: append(r, "services/calling/src/main.rs", '\nconst P: &str = "API_CREDENTIAL_PEPPER_FILE";\n'),
         )
 
     # Part J section 98 / Part K section 109: secret blast radius.

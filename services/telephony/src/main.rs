@@ -62,6 +62,10 @@ async fn main() -> anyhow::Result<()> {
         }
     };
     let runtime_environment = service_auth.signer().runtime_environment();
+    if let Err(err) = config.check_runtime(runtime_environment) {
+        tracing::error!(error = %err, "telephony configuration error");
+        std::process::exit(2);
+    }
     tracing::info!(
         service = %service_auth.signer().issuer(),
         runtime_environment = %runtime_environment,
@@ -120,6 +124,7 @@ async fn main() -> anyhow::Result<()> {
         public_outbound_enabled = flags.public_outbound.enabled(),
         public_inbound_enabled = flags.public_inbound.enabled(),
         callback_relay_enabled = flags.callback_relay.enabled(),
+        synthetic_interconnect_enabled = flags.synthetic_interconnect.enabled(),
         interconnects = providers.ids().count(),
         sip_edge = edge.name(),
         "telephony configuration"
@@ -129,6 +134,11 @@ async fn main() -> anyhow::Result<()> {
         .with_edge(edge.clone())
         .with_privacy_relay(Arc::new(HttpPrivacyRelay::new(service_auth.clone())))
         .with_calling(Arc::new(HttpCalling::new(service_auth.clone())))
+        .with_numbering(if settings.numbering_base_url.is_some() {
+            Arc::new(telephony::ports::HttpNumbering::new(service_auth.clone()))
+        } else {
+            Arc::new(telephony::ports::UnconfiguredNumbering)
+        })
         .with_settings(execution);
     // Edge events (inbound dialogs, call progress, application media joins).
     tokio::spawn(telephony.clone().run_edge_events());

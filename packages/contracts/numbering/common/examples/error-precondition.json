@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "PRECONDITION_FAILED",
+    "message": "A prerequisite of the operation is not met.",
+    "requestId": "req_0123456789abcdef0123456789abcdef",
+    "reason": "RECONCILIATION_REQUIRED"
+  }
+}

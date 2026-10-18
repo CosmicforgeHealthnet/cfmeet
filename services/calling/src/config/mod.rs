@@ -1,21 +1,17 @@
 //! Calling service configuration, read from the environment.
 //!
-//! Secrets (database URL credentials, the credential pepper) are held in redacted
-//! containers. There is no fallback secret in any environment: a missing or weak
-//! `API_CREDENTIAL_PEPPER` stops the service and the admin CLI from starting. Every
-//! secret may be mounted as a file instead (`<NAME>_FILE`, see [`secret`]).
+//! Secrets (database URL credentials, signing keys) are held in redacted containers and
+//! may be mounted as files (`<NAME>_FILE`, see [`secret`]). Calling holds NO credential
+//! verifier material: customer credentials are verified by Platform Access (ADR 0032),
+//! reached through `CF_PLATFORM_ACCESS_BASE_URL` (internal service authentication).
 
 pub mod secret;
 
 use std::{fmt, net::SocketAddr};
 
-use chrono::Duration;
 use secrecy::{ExposeSecret, SecretString};
 
-use crate::platform::{
-    limits::LimitDefaults,
-    verifier::{CredentialPepper, VerifierKeyring},
-};
+use crate::platform::limits::LimitDefaults;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -38,33 +34,14 @@ pub enum LogFormat {
     Json,
 }
 
-/// Credential lifetime / rotation policy applied by issuance and rotation.
-#[derive(Debug, Clone, Copy)]
-pub struct CredentialPolicy {
-    pub default_lifetime: Duration,
-    pub max_lifetime: Duration,
-    pub default_rotation_overlap: Duration,
-    pub max_rotation_overlap: Duration,
-}
-
-impl Default for CredentialPolicy {
-    fn default() -> Self {
-        Self {
-            default_lifetime: Duration::days(365),
-            max_lifetime: Duration::days(730),
-            default_rotation_overlap: Duration::hours(24),
-            max_rotation_overlap: Duration::days(30),
-        }
-    }
-}
-
 pub struct CallingConfig {
     pub database_url: SecretString,
     pub database_max_connections: u32,
     pub bind_address: SocketAddr,
-    pub keyring: VerifierKeyring,
-    pub credential_policy: CredentialPolicy,
     pub limit_defaults: LimitDefaults,
+    /// How often the identity projection reads the Platform Access change feed
+    /// (`CALLING_IDENTITY_SYNC_INTERVAL_MS`, 100–60000, default 1000).
+    pub identity_sync_interval: std::time::Duration,
     pub log_format: LogFormat,
 }
 
@@ -74,8 +51,7 @@ impl fmt::Debug for CallingConfig {
             .field("database_url", &"[REDACTED]")
             .field("database_max_connections", &self.database_max_connections)
             .field("bind_address", &self.bind_address)
-            .field("keyring", &self.keyring)
-            .field("credential_policy", &self.credential_policy)
+            .field("identity_sync_interval", &self.identity_sync_interval)
             .field("limit_defaults", &self.limit_defaults)
             .field("log_format", &self.log_format)
             .finish()
@@ -84,8 +60,31 @@ impl fmt::Debug for CallingConfig {
 
 pub const DEFAULT_BIND_ADDRESS: &str = "127.0.0.1:8090";
 
+/// Prefix of the credential-verifier settings Calling held until Part IV: the whole
+/// family (the pepper, its file and version variants, the previous pepper) moved to
+/// Platform Access with the identity authority (ADR 0032).
+pub const MOVED_TO_PLATFORM_ACCESS_PREFIX: &str = "API_CREDENTIAL_";
+
+/// Refuses to start when any credential-verifier setting is present: a pepper left in
+/// Calling's environment is a verifier secret in the wrong service. The value is never
+/// read or echoed.
+pub fn refuse_moved_settings(names: impl IntoIterator<Item = String>) -> Result<(), ConfigError> {
+    if names
+        .into_iter()
+        .any(|name| name.starts_with(MOVED_TO_PLATFORM_ACCESS_PREFIX))
+    {
+        return Err(ConfigError::invalid(
+            "API_CREDENTIAL_*",
+            "credential verifier settings are owned by Platform Access; remove them from Calling's environment"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
 impl CallingConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
+        refuse_moved_settings(std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()))?;
         Self::from_lookup(|key| std::env::var(key).ok())
     }
 
@@ -110,43 +109,16 @@ impl CallingConfig {
                 )
             })?;
 
-        let keyring = keyring_from(&non_empty)?;
-
-        let defaults = CredentialPolicy::default();
-        let credential_policy = CredentialPolicy {
-            default_lifetime: Duration::days(positive(
+        let identity_sync_interval = std::time::Duration::from_millis(
+            u64::try_from(parse_number(
                 &non_empty,
-                "CREDENTIAL_DEFAULT_LIFETIME_DAYS",
-                defaults.default_lifetime.num_days(),
-            )?),
-            max_lifetime: Duration::days(positive(
-                &non_empty,
-                "CREDENTIAL_MAX_LIFETIME_DAYS",
-                defaults.max_lifetime.num_days(),
-            )?),
-            default_rotation_overlap: Duration::minutes(non_negative(
-                &non_empty,
-                "CREDENTIAL_ROTATION_OVERLAP_MINUTES",
-                defaults.default_rotation_overlap.num_minutes(),
-            )?),
-            max_rotation_overlap: Duration::minutes(non_negative(
-                &non_empty,
-                "CREDENTIAL_MAX_ROTATION_OVERLAP_MINUTES",
-                defaults.max_rotation_overlap.num_minutes(),
-            )?),
-        };
-        if credential_policy.default_lifetime > credential_policy.max_lifetime {
-            return Err(ConfigError::invalid(
-                "CREDENTIAL_DEFAULT_LIFETIME_DAYS",
-                "must not exceed CREDENTIAL_MAX_LIFETIME_DAYS".to_string(),
-            ));
-        }
-        if credential_policy.default_rotation_overlap > credential_policy.max_rotation_overlap {
-            return Err(ConfigError::invalid(
-                "CREDENTIAL_ROTATION_OVERLAP_MINUTES",
-                "must not exceed CREDENTIAL_MAX_ROTATION_OVERLAP_MINUTES".to_string(),
-            ));
-        }
+                "CALLING_IDENTITY_SYNC_INTERVAL_MS",
+                1000,
+                100,
+            )?)
+            .unwrap_or(1000)
+            .min(60_000),
+        );
 
         let platform_defaults = LimitDefaults::default();
         let limit_defaults = LimitDefaults {
@@ -185,9 +157,8 @@ impl CallingConfig {
                 )
             })?,
             bind_address,
-            keyring,
-            credential_policy,
             limit_defaults,
+            identity_sync_interval,
             log_format,
         })
     }
@@ -195,47 +166,6 @@ impl CallingConfig {
     pub fn database_url(&self) -> &str {
         self.database_url.expose_secret()
     }
-}
-
-/// Builds only the verifier keyring (admin CLI and server share this).
-pub fn keyring_from(get: &impl Fn(&str) -> Option<String>) -> Result<VerifierKeyring, ConfigError> {
-    let pepper =
-        secret::required_secret(get, "API_CREDENTIAL_PEPPER", "API_CREDENTIAL_PEPPER_FILE")?;
-    let current = CredentialPepper::parse("API_CREDENTIAL_PEPPER", pepper.expose_secret())?;
-    let current_version = version(get, "API_CREDENTIAL_PEPPER_VERSION")?.unwrap_or(1);
-    let previous = match secret::read_secret(
-        get,
-        "API_CREDENTIAL_PREVIOUS_PEPPER",
-        "API_CREDENTIAL_PREVIOUS_PEPPER_FILE",
-    )? {
-        None => None,
-        Some(raw) => {
-            let pepper =
-                CredentialPepper::parse("API_CREDENTIAL_PREVIOUS_PEPPER", raw.expose_secret())?;
-            let version = version(get, "API_CREDENTIAL_PREVIOUS_PEPPER_VERSION")?.ok_or(
-                ConfigError::Missing {
-                    var: "API_CREDENTIAL_PREVIOUS_PEPPER_VERSION",
-                },
-            )?;
-            Some((version, pepper))
-        }
-    };
-    VerifierKeyring::new(current_version, current, previous)
-}
-
-fn version(
-    get: &impl Fn(&str) -> Option<String>,
-    var: &'static str,
-) -> Result<Option<i32>, ConfigError> {
-    get(var)
-        .map(|v| {
-            v.trim()
-                .parse::<i32>()
-                .ok()
-                .filter(|v| *v > 0)
-                .ok_or_else(|| ConfigError::invalid(var, "must be a positive integer".to_string()))
-        })
-        .transpose()
 }
 
 fn parse_number(
@@ -282,8 +212,6 @@ mod tests {
 
     use super::*;
 
-    const PEPPER: &str = "config-test-pepper-0123456789abcdefghijklmnopqrstuvwxyz";
-
     fn lookup(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
         let map: HashMap<String, String> = pairs
             .iter()
@@ -293,187 +221,57 @@ mod tests {
     }
 
     #[test]
-    fn requires_database_url_and_pepper_without_fallback() {
-        let err =
-            CallingConfig::from_lookup(lookup(&[("API_CREDENTIAL_PEPPER", PEPPER)])).unwrap_err();
+    fn requires_database_url_and_nothing_credential_related() {
+        let err = CallingConfig::from_lookup(lookup(&[])).unwrap_err();
         assert!(matches!(
             err,
             ConfigError::Missing {
                 var: "DATABASE_URL"
             }
         ));
-        let err =
-            CallingConfig::from_lookup(lookup(&[("DATABASE_URL", "postgres://x/y")])).unwrap_err();
-        assert!(matches!(
-            err,
-            ConfigError::Missing {
-                var: "API_CREDENTIAL_PEPPER"
-            }
-        ));
-    }
-
-    /// No fallback pepper exists in any runtime environment (§74.11): a production
-    /// deployment without `API_CREDENTIAL_PEPPER` / `_FILE` refuses to start.
-    #[test]
-    fn production_without_a_pepper_refuses_to_start() {
-        for runtime in ["production", "staging", "local", "test"] {
-            let err = CallingConfig::from_lookup(lookup(&[
-                ("DATABASE_URL", "postgres://x/y"),
-                ("CF_RUNTIME_ENVIRONMENT", runtime),
-            ]))
-            .unwrap_err();
-            assert!(
-                matches!(
-                    err,
-                    ConfigError::Missing {
-                        var: "API_CREDENTIAL_PEPPER"
-                    }
-                ),
-                "{runtime}: {err}"
-            );
-        }
-        // The CLI / server share keyring_from: same refusal.
-        assert!(keyring_from(&lookup(&[("CF_RUNTIME_ENVIRONMENT", "production")])).is_err());
-    }
-
-    #[test]
-    fn the_pepper_can_be_a_secret_file_and_is_never_ambiguous() {
-        use super::secret::tests::TempSecret;
-        let file = TempSecret::new(&format!("{PEPPER}\n"), 0o600);
-        let path = file.path();
-        let cfg = CallingConfig::from_lookup(lookup(&[
-            ("DATABASE_URL", "postgres://x/y"),
-            ("CF_RUNTIME_ENVIRONMENT", "production"),
-            ("API_CREDENTIAL_PEPPER_FILE", path.as_str()),
-        ]))
-        .unwrap();
-        assert_eq!(cfg.keyring.current_version(), 1);
-        // Both forms set: refused (no silent preference).
-        let err = CallingConfig::from_lookup(lookup(&[
-            ("DATABASE_URL", "postgres://x/y"),
-            ("API_CREDENTIAL_PEPPER", PEPPER),
-            ("API_CREDENTIAL_PEPPER_FILE", path.as_str()),
-        ]))
-        .unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid { .. }));
-        // A missing file is an error, never the inline value or a default.
-        let err = CallingConfig::from_lookup(lookup(&[
-            ("DATABASE_URL", "postgres://x/y"),
-            ("API_CREDENTIAL_PEPPER_FILE", "/nonexistent/calling/pepper"),
-        ]))
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            ConfigError::Invalid {
-                var: "API_CREDENTIAL_PEPPER_FILE",
-                ..
-            }
-        ));
-        // A placeholder in a file is as weak as inline.
-        let weak = TempSecret::new("changeme", 0o600);
-        let weak_path = weak.path();
-        assert!(CallingConfig::from_lookup(lookup(&[
-            ("DATABASE_URL", "postgres://x/y"),
-            ("API_CREDENTIAL_PEPPER_FILE", weak_path.as_str()),
-        ]))
-        .is_err());
-        // The previous pepper accepts the file form too.
-        let previous = TempSecret::new(
-            "previous-pepper-zyxwvutsrqponmlkjihgfedcba9876543210",
-            0o600,
+        // No verifier secret is needed (or read) by Calling any more.
+        let cfg =
+            CallingConfig::from_lookup(lookup(&[("DATABASE_URL", "postgres://x/y")])).unwrap();
+        assert_eq!(
+            cfg.identity_sync_interval,
+            std::time::Duration::from_secs(1)
         );
-        let previous_path = previous.path();
-        let cfg = CallingConfig::from_lookup(lookup(&[
-            ("DATABASE_URL", "postgres://x/y"),
-            ("API_CREDENTIAL_PEPPER", PEPPER),
-            ("API_CREDENTIAL_PEPPER_VERSION", "2"),
-            (
-                "API_CREDENTIAL_PREVIOUS_PEPPER_FILE",
-                previous_path.as_str(),
-            ),
-            ("API_CREDENTIAL_PREVIOUS_PEPPER_VERSION", "1"),
-        ]))
-        .unwrap();
-        assert_eq!(cfg.keyring.current_version(), 2);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_world_readable_pepper_file_is_refused_in_production() {
-        use super::secret::tests::TempSecret;
-        let file = TempSecret::new(PEPPER, 0o644);
-        let path = file.path();
-        let err = CallingConfig::from_lookup(lookup(&[
-            ("DATABASE_URL", "postgres://x/y"),
-            ("CF_RUNTIME_ENVIRONMENT", "production"),
-            ("API_CREDENTIAL_PEPPER_FILE", path.as_str()),
-        ]))
-        .unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid { .. }));
-        assert!(!err.to_string().contains(PEPPER));
     }
 
     #[test]
-    fn rejects_placeholder_pepper() {
-        for weak in [
-            "changeme",
-            "secret123",
-            "development-secret",
-            "your-secret-key-change-this-in-production",
+    fn a_leftover_credential_pepper_refuses_to_start() {
+        for var in [
+            "API_CREDENTIAL_PEPPER",
+            "API_CREDENTIAL_PEPPER_FILE",
+            "API_CREDENTIAL_PEPPER_VERSION",
+            "API_CREDENTIAL_PREVIOUS_PEPPER",
+            "API_CREDENTIAL_PREVIOUS_PEPPER_FILE",
         ] {
-            let err = CallingConfig::from_lookup(lookup(&[
-                ("DATABASE_URL", "postgres://x/y"),
-                ("API_CREDENTIAL_PEPPER", weak),
-            ]))
-            .unwrap_err();
-            assert!(matches!(err, ConfigError::Invalid { .. }), "{weak}");
-            assert!(!err.to_string().contains(weak), "error echoes the value");
+            let err =
+                refuse_moved_settings(["DATABASE_URL".to_string(), var.to_string()]).unwrap_err();
+            assert!(matches!(err, ConfigError::Invalid { .. }), "{var}");
         }
+        assert!(refuse_moved_settings(["DATABASE_URL".to_string()]).is_ok());
     }
 
     #[test]
     fn defaults_and_redacted_debug() {
         let cfg = CallingConfig::from_lookup(lookup(&[
             ("DATABASE_URL", "postgres://user:dbpassword@host/db"),
-            ("API_CREDENTIAL_PEPPER", PEPPER),
+            ("CALLING_IDENTITY_SYNC_INTERVAL_MS", "250"),
         ]))
         .unwrap();
         assert_eq!(cfg.bind_address.to_string(), DEFAULT_BIND_ADDRESS);
-        assert_eq!(cfg.keyring.current_version(), 1);
         assert_eq!(cfg.log_format, LogFormat::Pretty);
-        let dbg = format!("{cfg:?}");
-        assert!(!dbg.contains("dbpassword"));
-        assert!(!dbg.contains("config-test-pepper"));
-    }
-
-    #[test]
-    fn previous_pepper_requires_its_version() {
-        let err = CallingConfig::from_lookup(lookup(&[
+        assert_eq!(
+            cfg.identity_sync_interval,
+            std::time::Duration::from_millis(250)
+        );
+        assert!(!format!("{cfg:?}").contains("dbpassword"));
+        assert!(CallingConfig::from_lookup(lookup(&[
             ("DATABASE_URL", "postgres://x/y"),
-            ("API_CREDENTIAL_PEPPER", PEPPER),
-            ("API_CREDENTIAL_PEPPER_VERSION", "2"),
-            (
-                "API_CREDENTIAL_PREVIOUS_PEPPER",
-                "previous-pepper-zyxwvutsrqponmlkjihgfedcba9876543210",
-            ),
+            ("CALLING_IDENTITY_SYNC_INTERVAL_MS", "5"),
         ]))
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            ConfigError::Missing {
-                var: "API_CREDENTIAL_PREVIOUS_PEPPER_VERSION"
-            }
-        ));
-    }
-
-    #[test]
-    fn rejects_inconsistent_credential_policy() {
-        let err = CallingConfig::from_lookup(lookup(&[
-            ("DATABASE_URL", "postgres://x/y"),
-            ("API_CREDENTIAL_PEPPER", PEPPER),
-            ("CREDENTIAL_DEFAULT_LIFETIME_DAYS", "900"),
-        ]))
-        .unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid { .. }));
+        .is_err());
     }
 }

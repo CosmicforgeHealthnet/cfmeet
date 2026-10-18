@@ -1,0 +1,55 @@
+{
+  "data": [
+    {
+      "numberResourceId": "00000001-1c3e-4a5b-8c7d-9e0f1a2b3c4d",
+      "e164": "+15550100003",
+      "countryCode": "US",
+      "region": null,
+      "numberType": "MOBILE",
+      "inventoryClass": "SYNTHETIC",
+      "capabilities": [
+        {
+          "capability": "VOICE_INBOUND",
+          "evidenceStatus": "DECLARED",
+          "synthetic": true,
+          "carrierConfirmed": false
+        },
+        {
+          "capability": "SMS_OUTBOUND",
+          "evidenceStatus": "DECLARED",
+          "synthetic": true,
+          "carrierConfirmed": false
+        }
+      ],
+      "restrictionFlags": [],
+      "kyc": {
+        "status": "REQUIRED_FOR_OWNERSHIP_CLASSES",
+        "ownershipClasses": [
+          "ORGANIZATION",
+          "PERSONAL"
+        ],
+        "numberFlagged": false
+      },
+      "cost": {
+        "monthlyMinor": 0,
+        "setupMinor": null,
+        "currency": "USD",
+        "evidence": "ESTIMATED"
+      },
+      "observation": {
+        "observedAt": "2031-03-01T10:00:30Z",
+        "freshUntil": "2031-03-01T10:15:30Z",
+        "availability": "AVAILABLE",
+        "guaranteed": false
+      }
+    }
+  ],
+  "nextCursor": null,
+  "inventory": {
+    "inventoryClass": "SYNTHETIC",
+    "refresh": "REFRESHED",
+    "refreshedAt": "2031-03-01T10:00:30Z",
+    "guaranteed": false
+  },
+  "notice": "Supports voice and SMS where provisioned; third-party verification compatibility varies by service and number type."
+}

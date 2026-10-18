@@ -1,0 +1,22 @@
+{
+  "ver": 1,
+  "use": "NUMBER_ROUTING_GRANT",
+  "grant_kind": "CALLER_IDENTITY",
+  "iss": "cfmeet.calling",
+  "aud": "cfmeet.telephony",
+  "runtime_environment": "staging",
+  "iat": 1900000000,
+  "nbf": 1900000000,
+  "exp": 1900000060,
+  "jti": "0123456789abcdef0123456789abcdef",
+  "number_resource_id": "5f0b2c1e-8d3a-4b6f-9e2d-7a1c3b5d9f01",
+  "assignment_id": "0d6e2a4c-9b1f-4c3d-8e5a-2f7b9c1d3e5a",
+  "routing_revision": 4,
+  "scope": {
+    "tenant_id": "2b4d6f8a-1c3e-4a5b-8c7d-9e0f1a2b3c4d",
+    "application_id": "3c5e7a9b-2d4f-4b6c-9d8e-0f1a2b3c4d5e",
+    "environment_id": "4d6f8b0c-3e5a-4c7d-8e9f-1a2b3c4d5e6f"
+  },
+  "principal_id": "7e3f9b1d-6c8a-4d0e-9f2a-9b4c6d8e0f2a",
+  "operation_ref": "call-7f3a9c2e1b4d"
+}

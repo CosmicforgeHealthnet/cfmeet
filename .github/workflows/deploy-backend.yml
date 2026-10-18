@@ -1,6 +1,8 @@
 name: Deploy Backend
 
-# Deploy meeting-service to production VPS on push to main.
+# Meeting Service: validate pull requests, then automatically deploy verified main commits.
+# Manual production deployments remain available. No staging target is configured here.
+# Never deploy PR commits or overwrite the live service before smoke checks and rollback setup.
 # Requires GitHub Secrets:
 #   - VPS_HOST: VPS IP or hostname (e.g., 173.249.30.55)
 #   - VPS_USER: SSH user (e.g., root)
@@ -12,6 +14,12 @@ on:
     branches: [main]
     paths:
       - "services/meeting-service/**"
+      - "packages/contracts/**"
+      - ".github/workflows/deploy-backend.yml"
+  pull_request:
+    paths:
+      - "services/meeting-service/**"
+      - "packages/contracts/**"
       - ".github/workflows/deploy-backend.yml"
   workflow_dispatch:
     inputs:
@@ -22,10 +30,9 @@ on:
         type: choice
         options:
           - production
-          - staging
 
 concurrency:
-  group: deploy-backend-${{ github.ref }}
+  group: deploy-backend-production
   cancel-in-progress: false  # Don't cancel in-progress deployments
 
 env:
@@ -80,10 +87,11 @@ jobs:
         run: cargo test --workspace --no-fail-fast
 
   deploy:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     name: Deploy to VPS
     needs: test
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || 'production' }}
+    environment: production
     steps:
       - uses: actions/checkout@v4
 
@@ -100,83 +108,123 @@ jobs:
           echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           echo "message=$(git log -1 --pretty=%B | head -1)" >> $GITHUB_OUTPUT
 
-      - name: Deploy to VPS
+      - name: Deploy verified main commit to VPS (rollback on failure)
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
-          COMMIT_SHA: ${{ steps.commit.outputs.sha_short }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          ssh $VPS_USER@$VPS_HOST << 'DEPLOY_SCRIPT'
-            set -e
+          set -euo pipefail
+          # Shell-quote remote arguments so a deployment path is never interpreted as code.
+          printf -v remote_cmd 'bash -s -- %q %q %q' "$COMMIT_SHA" "$DEPLOY_PATH" "$RUN_ID"
+          # The Contabo Rust release build can exceed 30 minutes; keep SSH alive
+          # through otherwise quiet compile/link phases rather than losing the
+          # session before container switch and smoke certification.
+          ssh -o BatchMode=yes \
+            -o ServerAliveInterval=20 \
+            -o ServerAliveCountMax=90 \
+            -o TCPKeepAlive=yes \
+            "$VPS_USER@$VPS_HOST" "$remote_cmd" <<'DEPLOY_SCRIPT'
+            set -Eeuo pipefail
+            COMMIT="$1"
+            DEPLOY_PATH="$2"
+            RUN_ID="$3"
+            CONTAINER=cfmeet-production-backend
+            PREVIOUS=cfmeet-production-backend-rollback-"$RUN_ID"
+            IMAGE=cfmeet-meeting-service:prod-"$COMMIT"
+            HAD_PREVIOUS=0
+            SWITCH_STARTED=0
 
-            DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
-            COMMIT="${{ steps.commit.outputs.sha_short }}"
-
-            echo "=== Deploying CF Meet Backend (commit: $COMMIT) ==="
-
-            # Navigate to source directory
+            # A queued deployment must never roll back a newer main commit.
             cd "$DEPLOY_PATH/source"
-
-            # Pull latest changes
-            echo "Pulling latest changes..."
             git fetch origin main
-            git reset --hard origin/main
+            test "$(git rev-parse origin/main)" = "$COMMIT" || {
+              echo "Deployment superseded by a newer main commit; refusing stale rollout."
+              exit 1
+            }
+            git reset --hard "$COMMIT"
 
-            # Build new Docker image
-            echo "Building Docker image..."
-            cd services/meeting-service
-            docker build -t cfmeet-meeting-service:prod-$COMMIT -t cfmeet-meeting-service:prod-latest .
+            # Emit output while Rust compiles without logging; many SSH/network
+            # intermediaries drop an otherwise silent connection near 30 minutes.
+            # The heartbeat runs only during this build and is always reaped.
+            ( while sleep 25; do
+                printf '[deploy] Docker build still running at %s\n' "$(date -u +%FT%TZ)"
+              done ) &
+            BUILD_HEARTBEAT_PID=$!
+            BUILD_RESULT=0
+            docker build -f services/meeting-service/Dockerfile \
+              -t "$IMAGE" -t cfmeet-meeting-service:prod-latest . || BUILD_RESULT=$?
+            kill "$BUILD_HEARTBEAT_PID" 2>/dev/null || true
+            wait "$BUILD_HEARTBEAT_PID" 2>/dev/null || true
+            if [ "$BUILD_RESULT" -ne 0 ]; then
+              echo "Docker build failed (exit $BUILD_RESULT); existing production container untouched."
+              exit "$BUILD_RESULT"
+            fi
 
-            # Run migrations
-            echo "Running migrations..."
+            # Migrations are required to be backward-compatible. This step is
+            # intentionally before cutover and is not rolled back automatically.
             docker run --rm \
               --network rtc_backend_cosmicforge-network \
               --env-file "$DEPLOY_PATH/.env" \
-              cfmeet-meeting-service:prod-$COMMIT \
-              ./migration up
+              "$IMAGE" ./migration up
 
-            # Stop old container
-            echo "Stopping old container..."
-            docker rm -f cfmeet-production-backend 2>/dev/null || true
+            rollback() {
+              rc=$?
+              trap - EXIT
+              if [ "$rc" -ne 0 ] && [ "$SWITCH_STARTED" -eq 1 ]; then
+                echo "Deployment failed; restoring prior backend container."
+                docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+                if [ "$HAD_PREVIOUS" -eq 1 ]; then
+                  docker rename "$PREVIOUS" "$CONTAINER" || true
+                  docker start "$CONTAINER" || true
+                  curl -fsS --max-time 5 http://127.0.0.1:18081/health || true
+                fi
+              fi
+              exit "$rc"
+            }
+            trap rollback EXIT
 
-            # Start new container
-            echo "Starting new container..."
+            SWITCH_STARTED=1
+            if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
+              HAD_PREVIOUS=1
+              docker rename "$CONTAINER" "$PREVIOUS"
+              docker stop "$PREVIOUS"
+            fi
+
             docker run -d \
-              --name cfmeet-production-backend \
+              --name "$CONTAINER" \
               --restart unless-stopped \
               --env-file "$DEPLOY_PATH/.env" \
               --network rtc_backend_cosmicforge-network \
               -p 127.0.0.1:18081:8080 \
-              cfmeet-meeting-service:prod-$COMMIT
+              "$IMAGE"
 
-            # Wait for health check
-            echo "Waiting for health check..."
-            sleep 5
-
-            # Verify deployment
-            if docker ps | grep -q cfmeet-production-backend; then
-              echo "=== Deployment successful! ==="
-              docker logs cfmeet-production-backend --tail 10
-            else
-              echo "=== Deployment failed! ==="
-              docker logs cfmeet-production-backend --tail 50
+            # Certify the actual container, not merely a successful docker run.
+            READY=0
+            for attempt in $(seq 1 30); do
+              if curl -fsS --max-time 5 http://127.0.0.1:18081/health >/dev/null \
+                 && curl -fsS --max-time 5 http://127.0.0.1:18081/api-docs/numbering.json >/dev/null \
+                 && curl -fsS --max-time 5 http://127.0.0.1:18081/api-docs/sms-gateway.json >/dev/null \
+                 && curl -fsSL --max-time 5 http://127.0.0.1:18081/swagger-ui/ >/dev/null; then
+                READY=1
+                break
+              fi
+              sleep 2
+            done
+            if [ "$READY" -ne 1 ]; then
+              docker logs "$CONTAINER" --tail 80 || true
+              echo "Health / Swagger smoke check failed."
               exit 1
             fi
 
-            # Cleanup old images (keep last 3)
-            echo "Cleaning up old images..."
-            docker images cfmeet-meeting-service --format "{{.Tag}}" | grep "^prod-" | sort -r | tail -n +4 | xargs -I {} docker rmi cfmeet-meeting-service:{} 2>/dev/null || true
-
-            echo "=== Done ==="
+            SWITCH_STARTED=0
+            trap - EXIT
+            if [ "$HAD_PREVIOUS" -eq 1 ]; then
+              docker rm "$PREVIOUS" || echo "Warning: previous stopped container retained."
+            fi
+            echo "Verified Meeting Service deployment at $COMMIT"
           DEPLOY_SCRIPT
-
-      - name: Verify deployment
-        env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_USER: ${{ secrets.VPS_USER }}
-        run: |
-          ssh $VPS_USER@$VPS_HOST "curl -sf http://localhost:18081/health || exit 1"
-          echo "Health check passed!"
 
       - name: Notify on failure
         if: failure()

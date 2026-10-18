@@ -28,9 +28,10 @@ pub struct Model {
     pub environment_id: Uuid,
     pub service_account_id: Uuid,
     pub label: Option<String>,
-    pub verifier: Verifier,
-    pub verifier_algorithm: String,
-    pub verifier_key_version: i32,
+    /// Present only on Part III rows until the Platform Access hand-off completes.
+    pub verifier: Option<Verifier>,
+    pub verifier_algorithm: Option<String>,
+    pub verifier_key_version: Option<i32>,
     pub last_four: String,
     pub status: CredentialStatus,
     pub not_before: DateTimeUtc,
@@ -40,6 +41,8 @@ pub struct Model {
     pub superseded_by_credential_id: Option<Uuid>,
     pub superseded_at: Option<DateTimeUtc>,
     pub supersession_valid_until: Option<DateTimeUtc>,
+    /// Platform Access revision last applied to this projected row (0 = Part III row).
+    pub pa_revision: i64,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

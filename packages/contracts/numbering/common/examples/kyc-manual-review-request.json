@@ -1,0 +1,12 @@
+{
+  "decision": "REQUEST_EVIDENCE",
+  "reasonCode": "PURPOSE_STATEMENT_NEEDED",
+  "evidenceIds": [
+    "4d6f8a0c-2e4a-4f6b-8d0c-2e4a6f8b0d2e"
+  ],
+  "expectedRevision": 4,
+  "missingRequirements": [
+    "PURPOSE_OF_USE"
+  ],
+  "validForDays": null
+}

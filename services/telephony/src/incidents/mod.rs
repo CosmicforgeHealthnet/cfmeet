@@ -170,6 +170,8 @@ struct IdRow {
 
 /// Dedupe key of the Privacy Relay unavailability incident (one per deployment).
 pub const PRIVACY_RELAY_UNAVAILABLE_KEY: &str = "privacy-relay-unavailable";
+/// Dedupe key of the (single) open Numbering unavailability incident (Part IV L).
+pub const NUMBERING_UNAVAILABLE_KEY: &str = "numbering-unavailable";
 /// Dedupe key of the SIP / media edge health incident.
 pub const SIP_EDGE_HEALTH_KEY: &str = "sip-edge-health";
 
@@ -179,6 +181,8 @@ pub struct DependencyState {
     /// Whether an open Privacy Relay incident may need resolving (starts `true`: another
     /// instance or an earlier run may have opened one).
     privacy_relay_maybe_open: AtomicBool,
+    /// Whether an open Numbering incident may need resolving (Part IV L).
+    numbering_maybe_open: AtomicBool,
     /// The last SIP / media edge health observed (`None`: no edge, or not yet).
     sip_edge_health: Mutex<Option<Health>>,
 }
@@ -187,6 +191,7 @@ impl Default for DependencyState {
     fn default() -> Self {
         Self {
             privacy_relay_maybe_open: AtomicBool::new(true),
+            numbering_maybe_open: AtomicBool::new(true),
             sip_edge_health: Mutex::new(None),
         }
     }
@@ -240,6 +245,41 @@ impl TelephonyService {
             .swap(false, Ordering::SeqCst)
         {
             resolve(&self.db, PRIVACY_RELAY_UNAVAILABLE_KEY, self.now()).await?;
+        }
+        Ok(())
+    }
+
+    /// Numbering could not be reached for a DCN operation (fails closed): ONE
+    /// `NUMBERING_UNAVAILABLE` incident. Relay-number and enterprise calls are unaffected.
+    pub(crate) async fn numbering_unavailable(&self) -> TelephonyResult<()> {
+        crate::metrics::inc(
+            "telephony_dependency_failures_total",
+            &[("dependency", "NUMBERING"), ("operation", "DCN")],
+        );
+        self.dependencies
+            .numbering_maybe_open
+            .store(true, Ordering::SeqCst);
+        raise(
+            &self.db,
+            &Incident::new(
+                "NUMBERING_UNAVAILABLE",
+                Severity::High,
+                NUMBERING_UNAVAILABLE_KEY.to_string(),
+            ),
+            self.now(),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// Numbering answered again: its unavailability incident (if open) resolves.
+    pub(crate) async fn numbering_available(&self) -> TelephonyResult<()> {
+        if self
+            .dependencies
+            .numbering_maybe_open
+            .swap(false, Ordering::SeqCst)
+        {
+            resolve(&self.db, NUMBERING_UNAVAILABLE_KEY, self.now()).await?;
         }
         Ok(())
     }

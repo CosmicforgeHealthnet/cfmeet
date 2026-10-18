@@ -1,0 +1,29 @@
+{
+  "messageId": "0b2c8f5e-7a41-4d3e-9b6c-1f2e3d4c5b6a",
+  "direction": "INBOUND",
+  "status": "RECEIVED",
+  "numberResourceId": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+  "threadId": "6d7e8f90-1a2b-4c3d-9e4f-5a6b7c8d9e0f",
+  "remote": {
+    "masked": "+***0123"
+  },
+  "content": "Is the 3pm slot still free?",
+  "contentPurged": false,
+  "encoding": "GSM7",
+  "segmentCount": 1,
+  "characterCount": 27,
+  "principalId": null,
+  "routing": {
+    "targetKind": "PRINCIPAL",
+    "targetRef": "7e8f9a0b-1c2d-4e3f-8a4b-5c6d7e8f9a0b"
+  },
+  "failureCode": null,
+  "blockedReason": null,
+  "cost": null,
+  "createdAt": "2031-03-01T10:00:00.000Z",
+  "expiresAt": null,
+  "submittedAt": null,
+  "deliveredAt": null,
+  "receivedAt": "2031-03-01T10:00:00.000Z",
+  "failedAt": null
+}

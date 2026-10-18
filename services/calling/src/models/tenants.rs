@@ -12,6 +12,8 @@ pub struct Model {
     pub classification: TenantClassification,
     pub status: TenantStatus,
     pub billing_currency: String,
+    /// Platform Access revision last applied to this projected row (0 = Part III row).
+    pub pa_revision: i64,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

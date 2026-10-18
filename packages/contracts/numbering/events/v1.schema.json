@@ -1,0 +1,2120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/numbering/events/v1.schema.json",
+  "title": "CF Meet Numbering domain events v1",
+  "description": "Durable Numbering events in the platform envelope (cfmeet.platform.event-envelope), written to Numbering's transactional outbox in the same transaction as the state change and published at least once (consumers de-duplicate by event_id), in commit order per aggregate. Payloads carry CF Meet ids and the cfmeet.numbering.common vocabulary only: never a telephone number, provider identifier, provider reference, credential or secret (also refused by a database CHECK). Customer-scoped events carry ownership; platform inventory events do not. causation_id is present only when the cause was itself an event.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ResourceDiscovered"
+    },
+    {
+      "$ref": "#/$defs/ResourceLifecycleChanged"
+    },
+    {
+      "$ref": "#/$defs/ResourceClassified"
+    },
+    {
+      "$ref": "#/$defs/BindingChanged"
+    },
+    {
+      "$ref": "#/$defs/CapabilityChanged"
+    },
+    {
+      "$ref": "#/$defs/CatalogRevised"
+    },
+    {
+      "$ref": "#/$defs/ReservationChanged"
+    },
+    {
+      "$ref": "#/$defs/AssignmentChanged"
+    },
+    {
+      "$ref": "#/$defs/RoutingProfileRevised"
+    },
+    {
+      "$ref": "#/$defs/KycRequirementsPublished"
+    },
+    {
+      "$ref": "#/$defs/KycCaseChanged"
+    },
+    {
+      "$ref": "#/$defs/KycEvidenceReceived"
+    },
+    {
+      "$ref": "#/$defs/EligibilityEvaluated"
+    },
+    {
+      "$ref": "#/$defs/ProviderCommandChanged"
+    },
+    {
+      "$ref": "#/$defs/ProviderEventReceived"
+    },
+    {
+      "$ref": "#/$defs/AcquisitionChanged"
+    },
+    {
+      "$ref": "#/$defs/RouteChanged"
+    },
+    {
+      "$ref": "#/$defs/PoolChanged"
+    },
+    {
+      "$ref": "#/$defs/NumberSuspended"
+    },
+    {
+      "$ref": "#/$defs/NumberRestored"
+    },
+    {
+      "$ref": "#/$defs/ReleaseChanged"
+    },
+    {
+      "$ref": "#/$defs/QuarantineChanged"
+    },
+    {
+      "$ref": "#/$defs/UsageRecorded"
+    },
+    {
+      "$ref": "#/$defs/RiskDecided"
+    },
+    {
+      "$ref": "#/$defs/PortChanged"
+    },
+    {
+      "$ref": "#/$defs/RelayLeaseChanged"
+    }
+  ],
+  "$defs": {
+    "ResourceDiscoveredPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number_resource_id",
+        "country_code",
+        "inventory_source",
+        "number_type",
+        "state",
+        "revision",
+        "actor_kind"
+      ],
+      "properties": {
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResourceId"
+        },
+        "country_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CountryCode"
+        },
+        "inventory_source": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/InventorySource"
+        },
+        "number_type": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberType"
+        },
+        "state": {
+          "const": "DISCOVERED"
+        },
+        "revision": {
+          "const": 1
+        },
+        "actor_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ActorKind"
+        }
+      }
+    },
+    "ResourceDiscovered": {
+      "description": "A Number Resource was created DISCOVERED from its first inventory observation. Platform inventory: no ownership.",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.resource.discovered"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/ResourceDiscoveredPayload"
+            }
+          },
+          "not": {
+            "required": [
+              "ownership"
+            ]
+          }
+        }
+      ]
+    },
+    "ResourceLifecycleChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number_resource_id",
+        "from_state",
+        "to_state",
+        "revision",
+        "reason_code",
+        "actor_kind",
+        "failure_category",
+        "uncertain_operation",
+        "inventory_source"
+      ],
+      "properties": {
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResourceId"
+        },
+        "from_state": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/LifecycleState"
+        },
+        "to_state": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/LifecycleState"
+        },
+        "revision": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Revision"
+        },
+        "reason_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+        },
+        "actor_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ActorKind"
+        },
+        "failure_category": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/FailureCategory"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "uncertain_operation": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/UncertainOperation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inventory_source": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/InventorySource"
+        }
+      }
+    },
+    "ResourceLifecycleChanged": {
+      "description": "A lifecycle transition of a Number Resource (centralized policy).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.resource.lifecycle-changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/ResourceLifecycleChangedPayload"
+            }
+          },
+          "not": {
+            "required": [
+              "ownership"
+            ]
+          }
+        }
+      ]
+    },
+    "ResourceClassifiedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number_resource_id",
+        "number_type",
+        "classification_source",
+        "revision"
+      ],
+      "properties": {
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResourceId"
+        },
+        "number_type": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberType"
+        },
+        "classification_source": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ClassificationSource"
+        },
+        "revision": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Revision"
+        }
+      }
+    },
+    "ResourceClassified": {
+      "description": "An evidence-backed classification was recorded.",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.resource.classified"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/ResourceClassifiedPayload"
+            }
+          },
+          "not": {
+            "required": [
+              "ownership"
+            ]
+          }
+        }
+      ]
+    },
+    "BindingChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number_resource_id",
+        "binding_ref",
+        "change",
+        "capabilities",
+        "binding_revision",
+        "change_reason"
+      ],
+      "properties": {
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResourceId"
+        },
+        "binding_ref": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "change": {
+          "type": "string",
+          "enum": [
+            "ACTIVATED",
+            "ENDED"
+          ]
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Capability"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "binding_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "change_reason": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/BindingChangeReason"
+        }
+      }
+    },
+    "BindingChanged": {
+      "description": "A provider binding was activated or ended. Opaque binding reference only: never the provider id or the provider's reference.",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.binding.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/BindingChangedPayload"
+            }
+          },
+          "not": {
+            "required": [
+              "ownership"
+            ]
+          }
+        }
+      ]
+    },
+    "CapabilityChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number_resource_id",
+        "capability",
+        "status",
+        "previous_status",
+        "source",
+        "change_kind",
+        "capability_revision",
+        "binding_ref",
+        "expires_at",
+        "reason_code",
+        "impacted_assignment_ids"
+      ],
+      "properties": {
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResourceId"
+        },
+        "capability": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Capability"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CapabilityStatus"
+        },
+        "previous_status": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CapabilityStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CapabilitySource"
+        },
+        "change_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CapabilityChangeKind"
+        },
+        "capability_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "binding_ref": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expires_at": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+        },
+        "impacted_assignment_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "CapabilityChanged": {
+      "description": "The current record of a capability changed (append-only history). capability_revision is the resource's new capability revision; consumers reject decisions taken at an older one. impacted_assignment_ids lists open assignments that relied on a now-unusable capability.",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.capability.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/CapabilityChangedPayload"
+            }
+          },
+          "not": {
+            "required": [
+              "ownership"
+            ]
+          }
+        }
+      ]
+    },
+    "CatalogRevisedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "catalog_revision",
+        "entry_kind",
+        "entry_id",
+        "country_code",
+        "inventory_class",
+        "number_type",
+        "change",
+        "reason_code"
+      ],
+      "properties": {
+        "catalog_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "entry_kind": {
+          "type": "string",
+          "enum": [
+            "COUNTRY",
+            "NUMBER_TYPE"
+          ]
+        },
+        "entry_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "country_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CountryCode"
+        },
+        "inventory_class": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/InventoryClass"
+        },
+        "number_type": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "GEOGRAPHIC",
+                "MOBILE",
+                "TOLL_FREE",
+                "NATIONAL"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "change": {
+          "type": "string",
+          "enum": [
+            "PUBLISHED",
+            "WITHDRAWN"
+          ]
+        },
+        "reason_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+        }
+      }
+    },
+    "CatalogRevised": {
+      "description": "A catalog revision was published: a country or number-type entry was published or withdrawn. Platform data: no ownership.",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.catalog.revised"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/CatalogRevisedPayload"
+            }
+          },
+          "not": {
+            "required": [
+              "ownership"
+            ]
+          }
+        }
+      ]
+    },
+    "ReservationChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reservation_id",
+        "number_resource_id",
+        "status",
+        "revision",
+        "expires_at",
+        "provider_release_state",
+        "reason_code"
+      ],
+      "properties": {
+        "reservation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResourceId"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReservationStatus"
+        },
+        "revision": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Revision"
+        },
+        "expires_at": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Timestamp"
+        },
+        "provider_release_state": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReleaseState"
+        },
+        "reason_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+        }
+      }
+    },
+    "ReservationChanged": {
+      "description": "A reservation of a customer scope changed (requested, held, uncertain, expired, cancelled, failed, release confirmed).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.reservation.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/ReservationChangedPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
+        }
+      ]
+    },
+    "AssignmentChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignment_id",
+        "number_resource_id",
+        "event_kind",
+        "from_status",
+        "to_status",
+        "revision",
+        "ownership_class",
+        "owner_kind",
+        "routing_profile_id",
+        "routing_profile_revision",
+        "reason_code"
+      ],
+      "properties": {
+        "assignment_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResourceId"
+        },
+        "event_kind": {
+          "type": "string",
+          "enum": [
+            "CREATED",
+            "STATUS_CHANGED",
+            "ROUTING_CHANGED",
+            "ELIGIBILITY_RECORDED"
+          ]
+        },
+        "from_status": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/AssignmentStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "to_status": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/AssignmentStatus"
+        },
+        "revision": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Revision"
+        },
+        "ownership_class": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/OwnershipClass"
+        },
+        "owner_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/OwnerKind"
+        },
+        "routing_profile_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "routing_profile_revision": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Revision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+        }
+      }
+    },
+    "AssignmentChanged": {
+      "description": "A DCN assignment was created or changed (one event per history row).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.assignment.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/AssignmentChangedPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
+        }
+      ]
+    },
+    "RoutingProfileRevisedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "routing_profile_id",
+        "revision",
+        "voice_target_kind",
+        "sms_target_kind"
+      ],
+      "properties": {
+        "routing_profile_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "revision": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Revision"
+        },
+        "voice_target_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/VoiceTargetKind"
+        },
+        "sms_target_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/SmsTargetKind"
+        }
+      }
+    },
+    "RoutingProfileRevised": {
+      "description": "A routing profile revision was created (revision 1) or superseded by the next one.",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.routing-profile.revised"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/RoutingProfileRevisedPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
+        }
+      ]
+    },
+    "KycRequirementsPublishedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requirement_set_id",
+        "scope_kind",
+        "country_code",
+        "inventory_class",
+        "number_type",
+        "ownership_class",
+        "version",
+        "kyc_mandatory",
+        "reason_code"
+      ],
+      "properties": {
+        "requirement_set_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "scope_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RequirementScope"
+        },
+        "country_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/CountryCode"
+        },
+        "inventory_class": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/InventoryClass"
+        },
+        "number_type": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "GEOGRAPHIC",
+                "MOBILE",
+                "TOLL_FREE",
+                "NATIONAL"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ownership_class": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/OwnershipClass"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kyc_mandatory": {
+          "type": "boolean"
+        },
+        "reason_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+        }
+      }
+    },
+    "KycRequirementsPublished": {
+      "description": "A requirement set version was published (platform policy: no ownership).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.kyc-requirements.published"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/KycRequirementsPublishedPayload"
+            }
+          },
+          "not": {
+            "required": [
+              "ownership"
+            ]
+          }
+        }
+      ]
+    },
+    "KycCaseChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kyc_case_id",
+        "from_status",
+        "to_status",
+        "revision",
+        "decision_kind",
+        "verifier_kind",
+        "reason_code",
+        "expires_at"
+      ],
+      "properties": {
+        "kyc_case_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "from_status": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/KycStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "to_status": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/KycStatus"
+        },
+        "revision": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Revision"
+        },
+        "decision_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/KycDecisionKind"
+        },
+        "verifier_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/VerifierKind"
+        },
+        "reason_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+        },
+        "expires_at": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "KycCaseChanged": {
+      "description": "A KYC case was opened or changed status (one event per immutable decision). Ids, statuses and reason codes only — never evidence or subject data.",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.kyc-case.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/KycCaseChangedPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
+        }
+      ]
+    },
+    "KycEvidenceReceivedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kyc_case_id",
+        "evidence_id",
+        "evidence_kind",
+        "requirement_type"
+      ],
+      "properties": {
+        "kyc_case_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "evidence_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "evidence_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/EvidenceKind"
+        },
+        "requirement_type": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RequirementType"
+        }
+      }
+    },
+    "KycEvidenceReceived": {
+      "description": "Protected evidence was attached to a case (reference only: never content, object key or digest).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.kyc-evidence.received"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/KycEvidenceReceivedPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
+        }
+      ]
+    },
+    "EligibilityEvaluatedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eligibility_decision_id",
+        "outcome",
+        "reason_codes",
+        "kyc_case_id",
+        "valid_until"
+      ],
+      "properties": {
+        "eligibility_decision_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "outcome": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/EligibilityOutcome"
+        },
+        "reason_codes": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/EligibilityReasonCode"
+          }
+        },
+        "kyc_case_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "valid_until": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Timestamp"
+        }
+      }
+    },
+    "EligibilityEvaluated": {
+      "description": "An eligibility decision was recorded (it never reserves or provisions).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.eligibility.evaluated"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/EligibilityEvaluatedPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
+        }
+      ]
+    },
+    "ProviderCommandChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider_command_id",
+        "number_resource_id",
+        "operation",
+        "status",
+        "attempts",
+        "failure_code"
+      ],
+      "properties": {
+        "provider_command_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResourceId"
+        },
+        "operation": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ProviderCommandOperation"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ProviderCommandStatus"
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failure_code": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ProviderCommandChanged": {
+      "description": "A durable provider command was requested or changed status (platform inventory: no ownership; never the provider id or provider reference).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.provider-command.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/ProviderCommandChangedPayload"
+            }
+          },
+          "not": {
+            "required": [
+              "ownership"
+            ]
+          }
+        }
+      ]
+    },
+    "ProviderEventReceivedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider_event_ref",
+        "event_kind",
+        "number_resource_id",
+        "provider_command_id",
+        "disposition"
+      ],
+      "properties": {
+        "provider_event_ref": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "event_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ProviderEventKind"
+        },
+        "number_resource_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResourceId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider_command_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "disposition": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ProviderEventDisposition"
+        }
+      }
+    },
+    "ProviderEventReceived": {
+      "description": "An authenticated provider event was stored (append-only) with its disposition.",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.provider-event.received"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/ProviderEventReceivedPayload"
+            }
+          },
+          "not": {
+            "required": [
+              "ownership"
+            ]
+          }
+        }
+      ]
+    },
+    "AcquisitionChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "acquisition_id",
+        "reservation_id",
+        "number_resource_id",
+        "status",
+        "revision",
+        "requested_capabilities",
+        "failure_code",
+        "reason_code"
+      ],
+      "properties": {
+        "acquisition_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "reservation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResourceId"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/AcquisitionStatus"
+        },
+        "revision": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Revision"
+        },
+        "requested_capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Capability"
+          }
+        },
+        "failure_code": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+        }
+      }
+    },
+    "AcquisitionChanged": {
+      "description": "An acquisition of a customer scope changed (provisioning requested, provisioned, failed, uncertain).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.acquisition.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/AcquisitionChangedPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
+        }
+      ]
+    },
+    "RouteChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number_resource_id",
+        "family",
+        "route_ref",
+        "route_revision",
+        "binding_revision",
+        "status",
+        "reason_code"
+      ],
+      "properties": {
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/NumberResourceId"
+        },
+        "family": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RouteFamily"
+        },
+        "route_ref": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "route_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "binding_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/RouteStatus"
+        },
+        "reason_code": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReasonCode"
+        }
+      }
+    },
+    "RouteChanged": {
+      "description": "A provider route configuration of a number changed (requested, configured, failed, uncertain, superseded) or its consumer acknowledged readiness. route_ref is an opaque CF Meet id (never a provider reference or number).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.route.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/RouteChangedPayload"
+            }
+          },
+          "not": {
+            "required": [
+              "ownership"
+            ]
+          }
+        }
+      ]
+    },
+    "PoolChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pool_id",
+        "change",
+        "assignment_id",
+        "revision",
+        "status"
+      ],
+      "properties": {
+        "pool_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "change": {
+          "type": "string",
+          "enum": [
+            "CREATED",
+            "MEMBER_ADDED",
+            "MEMBER_REMOVED"
+          ]
+        },
+        "assignment_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/Revision"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "ARCHIVED"
+          ]
+        }
+      }
+    },
+    "PoolChanged": {
+      "description": "An organizational pool of a customer scope changed (created, member added / removed; a transfer carries the membership to the successor).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.pool.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/PoolChangedPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
+        }
+      ]
+    },
+    "NumberSuspendedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number_resource_id",
+        "assignment_id",
+        "suspension_id",
+        "source",
+        "reason_code",
+        "provider_state",
+        "status"
+      ],
+      "properties": {
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "assignment_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "suspension_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "source": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/SuspensionSource"
+        },
+        "reason_code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "provider_state": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/SuspensionProviderState"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/SuspensionStatus"
+        }
+      }
+    },
+    "NumberSuspended": {
+      "description": "Workstream P: a number was suspended (grants refused and revoked; ownership retained).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.suspended"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/NumberSuspendedPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
+        }
+      ]
+    },
+    "NumberRestoredPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number_resource_id",
+        "assignment_id",
+        "suspension_id",
+        "source",
+        "reason_code",
+        "provider_state",
+        "status"
+      ],
+      "properties": {
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "assignment_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "suspension_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "source": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/SuspensionSource"
+        },
+        "reason_code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "provider_state": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/SuspensionProviderState"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/SuspensionStatus"
+        }
+      }
+    },
+    "NumberRestored": {
+      "description": "Workstream P: a suspended number is ACTIVE again after every restoration check and the provider's confirmation.",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.restored"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/NumberRestoredPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
+        }
+      ]
+    },
+    "ReleaseChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number_resource_id",
+        "assignment_id",
+        "release_request_id",
+        "policy",
+        "status",
+        "reason_code",
+        "revision"
+      ],
+      "properties": {
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "assignment_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "release_request_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "policy": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReleasePolicy"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/ReleaseStatus"
+        },
+        "reason_code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ReleaseChanged": {
+      "description": "Workstream Q: a release request advanced (requested, routing removed, provider release pending / unknown, quarantined, failed).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.release.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/ReleaseChangedPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
+        }
+      ]
+    },
+    "QuarantineChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number_resource_id",
+        "quarantine_id",
+        "disposition",
+        "status",
+        "policy_ref",
+        "cooldown_days",
+        "quarantine_until",
+        "revision"
+      ],
+      "properties": {
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "quarantine_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "disposition": {
+          "type": "string",
+          "enum": [
+            "POOL_RETURN",
+            "RELINQUISHED"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "HELD_FOR_REVIEW",
+            "COMPLETED"
+          ]
+        },
+        "policy_ref": {
+          "type": "string"
+        },
+        "cooldown_days": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "quarantine_until": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "QuarantineChanged": {
+      "description": "Workstream Q: a quarantine started, was reviewed / held or completed. Platform inventory: no ownership.",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.quarantine.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/QuarantineChangedPayload"
+            }
+          }
+        }
+      ]
+    },
+    "UsageRecordedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "usage_record_id",
+        "number_resource_id",
+        "assignment_id",
+        "usage_kind",
+        "quantity",
+        "unit",
+        "status",
+        "period_start",
+        "period_end"
+      ],
+      "properties": {
+        "usage_record_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "assignment_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "usage_kind": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/UsageKind"
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unit": {
+          "type": "string",
+          "enum": [
+            "MONTH",
+            "EVENT",
+            "SECOND",
+            "SEGMENT"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "PROVISIONAL",
+            "FINAL"
+          ]
+        },
+        "period_start": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "period_end": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "UsageRecorded": {
+      "description": "Workstream S: a usage record (quantities; provider costs stay internal) — the future billing integration's input.",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.usage.recorded"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/UsageRecordedPayload"
+            }
+          }
+        }
+      ]
+    },
+    "RiskDecidedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "risk_decision_id",
+        "decision_kind",
+        "number_resource_id",
+        "outcome",
+        "score",
+        "reasons",
+        "policy_version",
+        "supersedes_id"
+      ],
+      "properties": {
+        "risk_decision_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "decision_kind": {
+          "type": "string"
+        },
+        "number_resource_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "ALLOW",
+            "REVIEW",
+            "DENY",
+            "RESTRICT",
+            "PENDING"
+          ]
+        },
+        "score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          }
+        },
+        "policy_version": {
+          "type": "string"
+        },
+        "supersedes_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RiskDecided": {
+      "description": "Workstream T: an explainable risk decision (allocation refusal, score, appeal).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.risk.decided"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/RiskDecidedPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
+        }
+      ]
+    },
+    "PortChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "port_request_id",
+        "direction",
+        "number_resource_id",
+        "assignment_id",
+        "status",
+        "reason_code",
+        "revision"
+      ],
+      "properties": {
+        "port_request_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "direction": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/PortDirection"
+        },
+        "number_resource_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "assignment_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/numbering/common/v1.schema.json#/$defs/PortStatus"
+        },
+        "reason_code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "PortChanged": {
+      "description": "Workstream U: a port request changed state (never the number).",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.port.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/PortChangedPayload"
+            },
+            "ownership": {
+              "required": [
+                "tenant_id",
+                "application_id",
+                "application_environment_id"
+              ]
+            }
+          },
+          "required": [
+            "ownership"
+          ]
+        }
+      ]
+    },
+    "RelayLeaseChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number_resource_id",
+        "relay_inventory_ref",
+        "lease_id",
+        "generation",
+        "status",
+        "end_reason"
+      ],
+      "properties": {
+        "number_resource_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "relay_inventory_ref": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "lease_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "RELEASED",
+            "EXPIRED",
+            "REVOKED"
+          ]
+        },
+        "end_reason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RelayLeaseChanged": {
+      "description": "Part P: a relay-number lease was granted or ended. Platform inventory: no ownership.",
+      "allOf": [
+        {
+          "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+        },
+        {
+          "properties": {
+            "event_type": {
+              "const": "number.relay-lease.changed"
+            },
+            "schema_version": {
+              "const": 1
+            },
+            "producer_service": {
+              "const": "cfmeet.numbering"
+            },
+            "payload": {
+              "$ref": "#/$defs/RelayLeaseChangedPayload"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

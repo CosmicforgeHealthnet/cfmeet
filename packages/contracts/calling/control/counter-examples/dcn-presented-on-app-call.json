@@ -1,0 +1,9 @@
+{
+  "kind": "VOICE",
+  "initiatorPrincipalId": "11111111-2222-4333-8444-555555555555",
+  "initiatorEndpointId": "a1a1a1a1-b2b2-4c3c-8d4d-e5e5e5e5e5e5",
+  "targetPrincipalIds": [
+    "66666666-7777-4888-9999-aaaaaaaaaaaa"
+  ],
+  "presentedNumberResourceId": "0b2c8f5e-7a41-4d3e-9b6c-1f2e3d4c5b6a"
+}

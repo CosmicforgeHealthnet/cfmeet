@@ -1,0 +1,17 @@
+{
+  "acquisitionId": "6d2e8a0c-5b7f-4c9d-8e1f-8a3b5c7d9e1f",
+  "ownershipClass": "PERSONAL",
+  "routing": {
+    "voice": {
+      "kind": "PRINCIPAL",
+      "ref": "7e3f9b1d-6c8a-4d0e-9f2a-9b4c6d8e0f2a"
+    },
+    "sms": {
+      "kind": "NONE",
+      "ref": null
+    }
+  },
+  "capabilities": [
+    "VOICE_INBOUND"
+  ]
+}

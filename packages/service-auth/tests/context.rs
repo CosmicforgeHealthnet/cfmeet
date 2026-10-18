@@ -91,6 +91,43 @@ fn k_tampering_with_the_context_after_signing_is_rejected() {
     );
 }
 
+/// Replaces every run of 16+ hex digits / dashes (UUIDs, random ids) with `#`, so the
+/// forbidden-word scan below sees field names and values, not chance substrings of random
+/// identifiers (e.g. `e164` inside a UUID).
+fn mask_identifiers(rendered: &str) -> String {
+    let mut out = String::with_capacity(rendered.len());
+    let mut run = String::new();
+    let flush = |run: &mut String, out: &mut String| {
+        if run.len() >= 16 {
+            out.push('#');
+        } else {
+            out.push_str(run);
+        }
+        run.clear();
+    };
+    for c in rendered.chars() {
+        if c.is_ascii_hexdigit() || c == '-' {
+            run.push(c);
+        } else {
+            flush(&mut run, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut run, &mut out);
+    out
+}
+
+#[test]
+fn identifier_masking_keeps_sensitive_text_visible() {
+    let masked = mask_identifiers(
+        r#"{"id":"0b1e164a-7f00-4d5e-9c11-aa22bb33cc44","e164":"+2348031234567"}"#,
+    );
+    assert!(!masked.contains("0b1e164a"));
+    assert!(
+        masked.contains("\"e164\"") && masked.contains("+234"),
+        "{masked}"
+    );
+}
 #[test]
 fn k_context_contains_only_safe_identifiers() {
     let fleet = Fleet::new(RuntimeEnvironment::Staging);
@@ -117,7 +154,7 @@ fn k_context_contains_only_safe_identifiers() {
             "tenant_id"
         ]
     );
-    let rendered = serde_json::to_string(&claims).unwrap().to_lowercase();
+    let rendered = mask_identifiers(&serde_json::to_string(&claims).unwrap().to_lowercase());
     for forbidden in [
         "phone",
         "e164",

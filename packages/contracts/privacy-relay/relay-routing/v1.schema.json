@@ -15,6 +15,12 @@
     },
     {
       "$ref": "#/$defs/InboundCallerResult"
+    },
+    {
+      "$ref": "#/$defs/ProtectDcnCallerRequest"
+    },
+    {
+      "$ref": "#/$defs/DcnCallerResult"
     }
   ],
   "$defs": {
@@ -284,6 +290,60 @@
       "properties": {
         "inboundCaller": {
           "$ref": "#/$defs/InboundCaller"
+        }
+      }
+    },
+    "ProtectDcnCallerRequest": {
+      "description": "Part IV L — Telephony only (protected-contact.protect-inbound), WITHOUT a delegated context: protect the caller of an inbound call to a Digital Communications Number in the scope proven by Numbering's signed INBOUND_VOICE grant (issuer Numbering, audience Calling, verified with Privacy Relay's dedicated routing-grant trust — never its service-auth trust). Telephony asserts no scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numberGrant",
+        "telephoneNumber"
+      ],
+      "properties": {
+        "numberGrant": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 4096,
+          "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
+        },
+        "telephoneNumber": {
+          "description": "The caller's presented number, handed directly to the Contact Vault. Never stored outside the vault, never logged.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        }
+      }
+    },
+    "DcnCallerResult": {
+      "description": "The protected DCN caller: its ContactReference in the grant's scope (201 new, 200 existing).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inboundCaller"
+      ],
+      "properties": {
+        "inboundCaller": {
+          "description": "The protected caller of a DCN call.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "contactReference",
+            "created",
+            "numberResourceId"
+          ],
+          "properties": {
+            "contactReference": {
+              "$ref": "https://schemas.cfmeet.com/privacy-relay/common/v1.schema.json#/$defs/ContactReference"
+            },
+            "created": {
+              "type": "boolean"
+            },
+            "numberResourceId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
         }
       }
     }

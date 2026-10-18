@@ -1,0 +1,13 @@
+{
+  "outcome": "UNAVAILABLE",
+  "family": "SMS",
+  "numberResourceId": null,
+  "assignmentId": null,
+  "scope": null,
+  "ownershipClass": null,
+  "target": null,
+  "routingRevision": null,
+  "grant": null,
+  "reason": "UNKNOWN_NUMBER",
+  "inventoryClass": null
+}

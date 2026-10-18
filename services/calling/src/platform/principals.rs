@@ -15,15 +15,16 @@
 
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
-    EntityTrait, QueryFilter, QueryOrder,
+    ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
 };
 use serde::Serialize;
 use uuid::Uuid;
 
+use std::sync::Arc;
+
 use super::{
-    context::PlatformAuthContext, error::summarize_db_error, PlatformError, PlatformResult,
-    PlatformService,
+    context::PlatformAuthContext, error::summarize_db_error, projection::IdentityProjection,
+    PlatformError, PlatformResult, PlatformService,
 };
 use crate::{
     domain::{
@@ -45,18 +46,6 @@ pub enum PrincipalReference {
         kind: PrincipalKind,
         external_reference: String,
     },
-}
-
-/// Registration request.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NewPrincipal {
-    /// Any category except SERVICE_ACCOUNT, identified by an opaque reference.
-    External {
-        kind: PrincipalKind,
-        external_reference: String,
-    },
-    /// A principal explicitly linked to an authoritative service account.
-    ServiceAccount(ServiceAccountId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -205,116 +194,7 @@ pub fn validate_external_reference(kind: PrincipalKind, value: &str) -> Platform
     }
 }
 
-/// Trusted ownership scope for a registration (from a persisted environment).
-struct OwnerScope {
-    tenant_id: Uuid,
-    application_id: Uuid,
-    environment_id: Uuid,
-}
-
 impl PlatformService {
-    /// Registers (idempotently) a principal in `environment_id`. Returns the principal and
-    /// whether it was newly created.
-    pub async fn register_principal(
-        &self,
-        environment_id: EnvironmentId,
-        new: NewPrincipal,
-    ) -> PlatformResult<(PrincipalView, bool)> {
-        self.register_principal_in(&self.db, environment_id, new)
-            .await
-    }
-
-    pub(crate) async fn register_principal_in<C: ConnectionTrait>(
-        &self,
-        db: &C,
-        environment_id: EnvironmentId,
-        new: NewPrincipal,
-    ) -> PlatformResult<(PrincipalView, bool)> {
-        let environment = self.environment(environment_id).await?;
-        let scope = OwnerScope {
-            tenant_id: environment.tenant_id.as_uuid(),
-            application_id: environment.application_id.as_uuid(),
-            environment_id: environment.id.as_uuid(),
-        };
-        let (kind, reference, linked) = match new {
-            NewPrincipal::External {
-                kind,
-                external_reference,
-            } => (
-                kind,
-                validate_external_reference(kind, &external_reference)?,
-                None,
-            ),
-            NewPrincipal::ServiceAccount(service_account_id) => {
-                let sa = service_accounts::Entity::find_by_id(service_account_id.as_uuid())
-                    .one(db)
-                    .await?
-                    .filter(|sa| {
-                        sa.tenant_id == scope.tenant_id
-                            && sa.application_id == scope.application_id
-                            && sa.environment_id == scope.environment_id
-                    })
-                    .ok_or(PlatformError::NotFound("service account"))?;
-                if sa.status == ServiceAccountStatus::Revoked {
-                    return Err(PlatformError::InvalidState(
-                        "a revoked service account cannot become a principal".to_string(),
-                    ));
-                }
-                (
-                    PrincipalKind::ServiceAccount,
-                    sa.id.to_string(),
-                    Some(sa.id),
-                )
-            }
-        };
-
-        let now = self.clock.now();
-        let inserted = principals::Entity::insert(principals::ActiveModel {
-            id: Set(PrincipalId::generate().as_uuid()),
-            tenant_id: Set(scope.tenant_id),
-            application_id: Set(scope.application_id),
-            environment_id: Set(scope.environment_id),
-            kind: Set(kind),
-            external_reference: Set(reference.clone()),
-            linked_service_account_id: Set(linked),
-            status: Set(PrincipalStatus::Active),
-            created_at: Set(now),
-            updated_at: Set(now),
-        })
-        .on_conflict(
-            sea_orm::sea_query::OnConflict::columns([
-                principals::Column::TenantId,
-                principals::Column::ApplicationId,
-                principals::Column::EnvironmentId,
-                principals::Column::Kind,
-                principals::Column::ExternalReference,
-            ])
-            .do_nothing()
-            .to_owned(),
-        )
-        .exec_without_returning(db)
-        .await?;
-        let model = principals::Entity::find()
-            .filter(principals::Column::TenantId.eq(scope.tenant_id))
-            .filter(principals::Column::ApplicationId.eq(scope.application_id))
-            .filter(principals::Column::EnvironmentId.eq(scope.environment_id))
-            .filter(principals::Column::Kind.eq(kind))
-            .filter(principals::Column::ExternalReference.eq(reference))
-            .one(db)
-            .await?
-            .ok_or(PlatformError::NotFound("principal"))?;
-        let created = inserted > 0;
-        if created {
-            tracing::info!(
-                principal_id = %model.id,
-                environment_id = %model.environment_id,
-                kind = %model.kind,
-                "principal registered"
-            );
-        }
-        Ok((model.into(), created))
-    }
-
     pub async fn principal(&self, id: PrincipalId) -> PlatformResult<PrincipalView> {
         principals::Entity::find_by_id(id.as_uuid())
             .one(&self.db)
@@ -337,105 +217,114 @@ impl PlatformService {
             .map(Into::into)
             .collect())
     }
-
-    pub async fn set_principal_status(
-        &self,
-        id: PrincipalId,
-        status: PrincipalStatus,
-    ) -> PlatformResult<PrincipalView> {
-        self.set_principal_status_in(&self.db, id, status).await
-    }
-
-    pub(crate) async fn set_principal_status_in<C: ConnectionTrait>(
-        &self,
-        db: &C,
-        id: PrincipalId,
-        status: PrincipalStatus,
-    ) -> PlatformResult<PrincipalView> {
-        let model = principals::Entity::find_by_id(id.as_uuid())
-            .one(db)
-            .await?
-            .ok_or(PlatformError::NotFound("principal"))?;
-        if model.status == status {
-            return Ok(model.into());
-        }
-        // A tombstoned principal (Part H §80.42) stays DEACTIVATED for ever (the database
-        // refuses any other status too).
-        let tombstoned = db
-            .query_one(sea_orm::Statement::from_sql_and_values(
-                sea_orm::DbBackend::Postgres,
-                "SELECT 1 FROM platform_principals WHERE id = $1 AND tombstoned_at IS NOT NULL",
-                vec![model.id.into()],
-            ))
-            .await?
-            .is_some();
-        if tombstoned {
-            return Err(PlatformError::InvalidState(
-                "a tombstoned principal cannot change status".to_string(),
-            ));
-        }
-        let mut active: principals::ActiveModel = model.into();
-        active.status = Set(status);
-        active.updated_at = Set(self.clock.now());
-        let model = active.update(db).await?;
-        tracing::info!(principal_id = %model.id, status = %model.status, "principal status changed");
-        Ok(model.into())
-    }
 }
 
 /// Resolves principals strictly inside an authenticated context's ownership scope.
+///
+/// Principals are registered in Platform Access (ADR 0032); Calling resolves them from
+/// its identity projection — the rows its foreign keys reference — and, when a
+/// reference is not projected yet (registered a moment ago), catches the projection up
+/// from the change feed once before answering NOT_FOUND.
 #[derive(Clone)]
 pub struct PrincipalResolver {
     db: DatabaseConnection,
+    projection: Option<Arc<IdentityProjection>>,
 }
 
 impl PrincipalResolver {
+    /// A resolver over the projection only (no catch-up, no registration).
     pub fn new(db: DatabaseConnection) -> Self {
-        Self { db }
+        Self {
+            db,
+            projection: None,
+        }
+    }
+
+    /// A resolver that catches the projection up and registers public parties through
+    /// Platform Access.
+    pub fn with_projection(db: DatabaseConnection, projection: Arc<IdentityProjection>) -> Self {
+        Self {
+            db,
+            projection: Some(projection),
+        }
     }
 
     /// The TELEPHONE_ENDPOINT principal of a protected public party (Part E §45): its
     /// only reference is the opaque ContactReference Privacy Relay issued — never a
-    /// number. Registered on first use in the scope, then resolved like any principal.
+    /// number. Registered on first use in the scope (by Platform Access, in the signed
+    /// delegated scope of `service_account_id`), then resolved like any principal.
     pub async fn ensure_public_party_principal(
         &self,
         tenant_id: TenantId,
         application_id: ApplicationId,
         environment_id: EnvironmentId,
+        service_account_id: ServiceAccountId,
         contact_reference: Uuid,
     ) -> Result<ResolvedPrincipal, PrincipalResolutionError> {
-        use sea_orm::{ConnectionTrait, DbBackend, Statement};
-        let unavailable = |e: sea_orm::DbErr| PrincipalResolutionError::Unavailable {
-            summary: summarize_db_error(&e),
+        let reference = PrincipalReference::External {
+            kind: PrincipalKind::TelephoneEndpoint,
+            external_reference: contact_reference.hyphenated().to_string(),
         };
-        let reference = contact_reference.hyphenated().to_string();
-        self.db
-            .execute(Statement::from_sql_and_values(
-                DbBackend::Postgres,
-                "INSERT INTO platform_principals (id, tenant_id, application_id, environment_id, kind, \
-                   external_reference, status, created_at, updated_at) \
-                 VALUES ($1, $2, $3, $4, 'TELEPHONE_ENDPOINT', $5, 'ACTIVE', now(), now()) \
-                 ON CONFLICT (tenant_id, application_id, environment_id, kind, external_reference) DO NOTHING",
-                vec![
-                    PrincipalId::generate().as_uuid().into(),
-                    tenant_id.as_uuid().into(),
-                    application_id.as_uuid().into(),
+        match self
+            .resolve_local(tenant_id, application_id, environment_id, &reference)
+            .await
+        {
+            Err(PrincipalResolutionError::NotFound) => {}
+            other => return other,
+        }
+        let projection = self
+            .projection
+            .as_ref()
+            .ok_or(PrincipalResolutionError::Unavailable {
+                summary: "platform access is not configured".to_string(),
+            })?;
+        let unavailable = |e: &dyn std::fmt::Display| PrincipalResolutionError::Unavailable {
+            summary: e.to_string(),
+        };
+        let kind: String = self
+            .db
+            .query_one(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DbBackend::Postgres,
+                "SELECT kind FROM platform_environments WHERE id = $1 AND application_id = $2 AND tenant_id = $3",
+                [
                     environment_id.as_uuid().into(),
-                    reference.clone().into(),
+                    application_id.as_uuid().into(),
+                    tenant_id.as_uuid().into(),
                 ],
             ))
             .await
-            .map_err(unavailable)?;
-        self.resolve_in(
-            tenant_id,
-            application_id,
-            environment_id,
-            &PrincipalReference::External {
-                kind: PrincipalKind::TelephoneEndpoint,
-                external_reference: reference,
-            },
-        )
-        .await
+            .map_err(|e| unavailable(&summarize_db_error(&e)))?
+            .ok_or(PrincipalResolutionError::NotFound)?
+            .try_get_by_index(0)
+            .map_err(|e| unavailable(&summarize_db_error(&e)))?;
+        let kind = match kind.as_str() {
+            "PRODUCTION" => cf_service_auth::ApplicationEnvironmentKind::Production,
+            "TEST" => cf_service_auth::ApplicationEnvironmentKind::Test,
+            _ => cf_service_auth::ApplicationEnvironmentKind::Sandbox,
+        };
+        let scope = cf_service_auth::DelegatedPlatformContext::new(
+            tenant_id.as_uuid(),
+            application_id.as_uuid(),
+            environment_id.as_uuid(),
+            kind,
+            service_account_id.as_uuid(),
+        );
+        let snapshot = projection
+            .authority()
+            .ensure_telephone_endpoint(&scope, contact_reference)
+            .await
+            .map_err(|e| match e {
+                super::access::AuthorityError::Refused(code) if code == "INVALID_STATE" => {
+                    PrincipalResolutionError::Inactive
+                }
+                other => unavailable(&other),
+            })?;
+        projection
+            .apply_principal(&snapshot)
+            .await
+            .map_err(|e| unavailable(&e))?;
+        self.resolve_local(tenant_id, application_id, environment_id, &reference)
+            .await
     }
 
     pub async fn resolve(
@@ -454,8 +343,36 @@ impl PrincipalResolver {
 
     /// Resolves inside an ownership scope that was itself established by authentication
     /// (an API credential's context or a verified signaling credential) — never by
-    /// request data.
+    /// request data. A principal not projected yet triggers one projection catch-up.
     pub async fn resolve_in(
+        &self,
+        tenant_id: TenantId,
+        application_id: ApplicationId,
+        environment_id: EnvironmentId,
+        reference: &PrincipalReference,
+    ) -> Result<ResolvedPrincipal, PrincipalResolutionError> {
+        match self
+            .resolve_local(tenant_id, application_id, environment_id, reference)
+            .await
+        {
+            Err(PrincipalResolutionError::NotFound) => {
+                let Some(projection) = &self.projection else {
+                    return Err(PrincipalResolutionError::NotFound);
+                };
+                projection
+                    .catch_up()
+                    .await
+                    .map_err(|e| PrincipalResolutionError::Unavailable {
+                        summary: e.to_string(),
+                    })?;
+                self.resolve_local(tenant_id, application_id, environment_id, reference)
+                    .await
+            }
+            other => other,
+        }
+    }
+
+    async fn resolve_local(
         &self,
         tenant_id: TenantId,
         application_id: ApplicationId,

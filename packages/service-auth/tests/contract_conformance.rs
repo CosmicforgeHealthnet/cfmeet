@@ -327,3 +327,86 @@ fn transport_conventions_and_limits_match_the_contracts() {
         cf_service_auth::claims::TOKEN_TYPE
     );
 }
+
+const GRANT: &str = "numbering/routing-grant/v1.schema.json";
+
+#[test]
+fn number_routing_grants_conform_both_ways() {
+    use cf_service_auth::{
+        number_grant::{
+            GrantScope, GrantTarget, NumberGrantClaims, NumberGrantKind, NumberGrantRequest,
+            NumberGrantSigner, NumberGrantTrust, NUMBER_GRANT_TOKEN_TYPE,
+        },
+        KeyId, ServiceSigningKey, SystemClock,
+    };
+    let v = validator(GRANT);
+    let signer = NumberGrantSigner::new(
+        ServiceId::numbering(),
+        RuntimeEnvironment::Staging,
+        ServiceSigningKey::generate(KeyId::parse("numbering-grant-staging-1").unwrap()),
+        60,
+        std::sync::Arc::new(SystemClock),
+    )
+    .unwrap();
+    let scope = GrantScope {
+        tenant_id: Uuid::new_v4(),
+        application_id: Uuid::new_v4(),
+        environment_id: Uuid::new_v4(),
+    };
+    for kind in NumberGrantKind::ALL {
+        let request = NumberGrantRequest {
+            kind,
+            audience: ServiceId::telephony(),
+            number_resource_id: Uuid::new_v4(),
+            assignment_id: Uuid::new_v4(),
+            routing_revision: 2,
+            scope,
+            principal_id: None,
+            target: (!kind.is_outbound()).then(|| GrantTarget {
+                kind: "ENTERPRISE_QUEUE".into(),
+                target_ref: Uuid::new_v4(),
+            }),
+            operation_ref: kind.is_outbound().then(|| "call-0123456789".to_string()),
+        };
+        let grant = signer.sign(&request).unwrap();
+        let mut parts = grant.expose_for_delivery().split('.');
+        let header = decode_segment(parts.next().unwrap());
+        assert_eq!(header["typ"], NUMBER_GRANT_TOKEN_TYPE);
+        assert_conforms(&v, &decode_segment(parts.next().unwrap()), "grant claims");
+    }
+    // Every contract example is accepted by the Rust types, every counter-example of the
+    // claims / trust bundle refused.
+    for (name, value) in fixtures("numbering/routing-grant", "examples") {
+        if name.starts_with("claims") {
+            NumberGrantClaims::from_json(&value.to_string())
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
+        if name.starts_with("trust-bundle") {
+            NumberGrantTrust::from_json(
+                &value.to_string(),
+                &ServiceId::telephony(),
+                RuntimeEnvironment::Staging,
+            )
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
+    }
+    for (name, value) in fixtures("numbering/routing-grant", "counter-examples") {
+        if name.starts_with("claims-with") {
+            assert!(
+                NumberGrantClaims::from_json(&value.to_string()).is_err(),
+                "{name}"
+            );
+        }
+        if name.starts_with("trust-bundle") {
+            assert!(
+                NumberGrantTrust::from_json(
+                    &value.to_string(),
+                    &ServiceId::telephony(),
+                    RuntimeEnvironment::Staging,
+                )
+                .is_err(),
+                "{name}"
+            );
+        }
+    }
+}

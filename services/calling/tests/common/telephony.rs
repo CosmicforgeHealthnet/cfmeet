@@ -60,6 +60,7 @@ pub fn healthy_routes() -> Evidence<Vec<CandidateRoute>> {
         capacity_available: Evidence::Known(true),
         estimated_leg_cost_minor: Evidence::Known(100),
         quality_permille: Evidence::Unknown,
+        interconnect_class: Default::default(),
     }])
 }
 

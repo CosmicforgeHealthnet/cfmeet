@@ -80,8 +80,8 @@ services:
   # ---------------------------------------------------------------------------
   meeting-service:
     build:
-      context: ./services/meeting-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/meeting-service/Dockerfile
     image: cfmeet-meeting-service:latest
     container_name: cfmeet-api
     restart: unless-stopped

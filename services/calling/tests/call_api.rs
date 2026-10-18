@@ -170,7 +170,7 @@ async fn foreign_calls_are_indistinguishable_from_missing_ones() {
         return;
     };
     let mine = w.create().await.call;
-    let shared = |h: &Harness| Harness::on(h.db.clone(), common::TEST_PEPPER, h.clock.clone());
+    let shared = |h: &Harness| Harness::on(h.db.clone(), h.clock.clone());
     let other_tenant =
         CallWorld::in_harness(shared(&w.h), "beta", EnvironmentKind::Production).await;
     let other_app = CallWorld::for_consumer(
@@ -256,13 +256,13 @@ async fn listings_contain_only_the_callers_calls() {
     for _ in 0..3 {
         mine.insert(w.create().await.call.id.to_string());
     }
-    let shared = Harness::on(w.h.db.clone(), common::TEST_PEPPER, w.h.clock.clone());
+    let shared = Harness::on(w.h.db.clone(), w.h.clock.clone());
     let other = CallWorld::in_harness(shared, "gamma", EnvironmentKind::Production).await;
     for _ in 0..2 {
         other.create().await;
     }
     let sandbox = CallWorld::for_consumer(
-        Harness::on(w.h.db.clone(), common::TEST_PEPPER, w.h.clock.clone()),
+        Harness::on(w.h.db.clone(), w.h.clock.clone()),
         w.h.application_in(&w.consumer.tenant, "sbx-app").await,
         EnvironmentKind::Sandbox,
     )

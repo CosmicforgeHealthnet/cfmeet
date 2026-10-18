@@ -41,6 +41,8 @@ pub struct SweepReport {
     pub relay_cooldowns_completed: usize,
     pub relay_drains_completed: usize,
     pub events_published: usize,
+    /// Numbering leases released after their assignment ended (Part IV Part P).
+    pub numbering_leases_released: usize,
 }
 
 #[derive(Debug, sea_orm::FromQueryResult)]
@@ -256,6 +258,13 @@ impl RelayService {
 
     /// One worker pass: final expiry, then due enforcement retries.
     pub async fn run_sweep(&self) -> RelayResult<SweepReport> {
+        if self.authority_mode == crate::relay_numbers::authority::AuthorityMode::Numbering
+            && !self.numbering_cutover_verified()
+        {
+            if let Err(error) = self.prepare_numbering_cutover().await {
+                tracing::warn!(%error, "relay-number cutover preparation failed; will retry");
+            }
+        }
         Ok(SweepReport {
             contexts_expired: self.expire_contexts(100).await?,
             sessions_expired: self.expire_sessions(100).await?,
@@ -266,6 +275,8 @@ impl RelayService {
             relay_drains_completed: self.complete_relay_drains(100).await?,
             // Durable event publication (never gated by a flag).
             events_published: self.publish_outbox(200).await?,
+            // Lease releases run in every mode (a rollback to LOCAL never strands one).
+            numbering_leases_released: self.release_numbering_leases(200).await?,
         })
     }
 

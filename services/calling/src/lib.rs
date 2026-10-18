@@ -34,6 +34,7 @@ pub mod media;
 pub mod metrics;
 pub mod middleware;
 pub mod models;
+pub mod numbering;
 pub mod platform;
 pub mod privacy_relay;
 pub mod public_docs;

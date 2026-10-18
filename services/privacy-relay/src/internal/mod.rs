@@ -72,6 +72,10 @@ pub fn routes() -> Router<AppState> {
             "/relay-routing/protect-inbound-caller",
             post(protect_inbound_caller),
         )
+        .route(
+            "/relay-routing/protect-dcn-caller",
+            post(protect_dcn_caller),
+        )
         .route("/communication/authorize", post(authorize))
         .route(
             "/contacts/:contact_reference/resolution-grants",
@@ -541,6 +545,78 @@ async fn protect_inbound_caller(
                 "contextId": mapped.context_id,
                 "relaySessionId": mapped.relay_session_id,
                 "allowedTargets": targets,
+            }
+        }),
+        false,
+    ))
+}
+
+/// Telephony only (`protected-contact.protect-inbound`): the caller of a public call to a
+/// DCN. The scope is proven by Numbering's signed INBOUND_VOICE routing grant for the call
+/// (its key from `NUMBER_GRANT_TRUST_BUNDLE_FILE`), never asserted by Telephony; the grant
+/// must be addressed to Calling (the service that will deliver the call). Answers only the
+/// ContactReference. Without grant trust configured: refused (fail closed).
+async fn protect_dcn_caller(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    raw: Result<Json<crate::contact_vault::inbound::ProtectDcnCallerRequest>, JsonRejection>,
+) -> Result<Response, RelayError> {
+    use cf_service_auth::number_grant::NumberGrantKind;
+    let requester = inbound_requester(&caller, InternalPermission::ProtectedContactProtectInbound)?;
+    let request = body(raw)?;
+    let verifier = state.number_grants.as_ref().ok_or(RelayError::Coded(
+        ErrorCode::ServiceUnavailable,
+        "DCN caller protection is not configured.",
+    ))?;
+    let grant = verifier
+        .verify_any_audience(&request.number_grant)
+        .map_err(|failure| {
+            tracing::warn!(failure = failure.as_str(), "DCN routing grant refused");
+            RelayError::Coded(
+                ErrorCode::RelayMappingNotActive,
+                "The routing grant is not valid.",
+            )
+        })?;
+    if grant.kind != NumberGrantKind::InboundVoice
+        || grant.issuer != cf_service_auth::ServiceId::numbering()
+        || grant.audience != cf_service_auth::ServiceId::calling()
+    {
+        return Err(RelayError::Coded(
+            ErrorCode::RelayMappingNotActive,
+            "The routing grant is not valid.",
+        ));
+    }
+    let scope = crate::scope::RelayScope::from_row(
+        grant.scope.tenant_id,
+        grant.scope.application_id,
+        grant.scope.environment_id,
+    );
+    let actor = crate::contact_vault::ContactActor::service(
+        scope,
+        requester.service.clone(),
+        None,
+        requester.request_id.clone(),
+        requester.correlation_id.clone(),
+    );
+    let (created, contact) = state
+        .contacts
+        .protect_dcn_caller(
+            &actor,
+            request.into_presented(),
+            crate::contact_vault::audit::ExecutionRefs::default(),
+        )
+        .await?;
+    Ok(respond(
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        serde_json::json!({
+            "inboundCaller": {
+                "contactReference": contact,
+                "created": created,
+                "numberResourceId": grant.number_resource_id,
             }
         }),
         false,

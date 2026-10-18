@@ -148,6 +148,31 @@ async fn main() -> anyhow::Result<()> {
     } else {
         relay
     };
+    // Part IV Part P: the relay-number authority. NUMBERING without Numbering's address
+    // is a configuration error (it would refuse every assignment).
+    if config.relay_number_authority
+        == privacy_relay::relay_numbers::authority::AuthorityMode::Numbering
+        && settings.numbering_base_url.is_none()
+    {
+        eprintln!(
+            "privacy-relay: RELAY_NUMBER_AUTHORITY=NUMBERING requires NUMBERING_INTERNAL_BASE_URL"
+        );
+        std::process::exit(2);
+    }
+    let number_authority: Option<
+        Arc<dyn privacy_relay::relay_numbers::authority::NumberAuthority>,
+    > = settings.numbering_base_url.as_ref().map(|_| {
+        Arc::new(
+            privacy_relay::relay_numbers::authority::HttpNumberAuthority::new(
+                service_auth.client().clone(),
+            ),
+        ) as Arc<dyn privacy_relay::relay_numbers::authority::NumberAuthority>
+    });
+    let relay = relay.with_number_authority(config.relay_number_authority, number_authority);
+    tracing::info!(
+        relay_number_authority = config.relay_number_authority.as_str(),
+        "relay number authority"
+    );
     tracing::info!(
         relay_number_pool_enabled = config.relay_number_pool_enabled,
         relay_number_cooldown_seconds = config.relay_number_cooldown.as_secs(),
@@ -201,8 +226,9 @@ async fn main() -> anyhow::Result<()> {
             }
         });
     }
-    let state =
-        AppState::new(relay, service_auth).with_contact_vault(contacts, vault_material.delegation);
+    let state = AppState::new(relay, service_auth)
+        .with_contact_vault(contacts, vault_material.delegation)
+        .with_number_grants(vault_material.number_grants);
     let app = routes::app(state, internal::routes());
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "privacy relay service listening");

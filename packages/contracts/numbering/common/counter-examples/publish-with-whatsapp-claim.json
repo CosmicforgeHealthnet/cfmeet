@@ -1,0 +1,18 @@
+{
+  "countryCode": "NG",
+  "inventoryClass": "REAL",
+  "numberType": "MOBILE",
+  "localityClass": "NATIONAL",
+  "supportedCapabilities": [
+    "SMS_OUTBOUND"
+  ],
+  "limitations": {
+    "whatsappAccepted": true
+  },
+  "provenance": {
+    "source": "PROVIDER_DOCUMENTATION",
+    "verificationStatus": "VERIFIED",
+    "evidenceRef": "3d5f7b9c-1e3a-4d5f-8b7c-9e1a3d5f7b9c"
+  },
+  "reasonCode": "LAUNCH_COUNTRY"
+}

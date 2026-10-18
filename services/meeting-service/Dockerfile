@@ -9,10 +9,12 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app/backend
+WORKDIR /app/services/meeting-service
 
-# Copy source code
-COPY . .
+# Build context is the repository root: include only this service and the
+# checked-in platform OpenAPI contracts shown in its Swagger service selector.
+COPY services/meeting-service/ ./
+COPY packages/contracts/ /app/packages/contracts/
 
 # Build for release
 # Build the migration binary from the migration package
@@ -32,8 +34,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy binaries from builder
-COPY --from=builder /app/backend/target/release/migration ./migration
-COPY --from=builder /app/backend/target/release/backend ./server
+COPY --from=builder /app/services/meeting-service/target/release/migration ./migration
+COPY --from=builder /app/services/meeting-service/target/release/backend ./server
 
 # Expose the application port
 EXPOSE 8080

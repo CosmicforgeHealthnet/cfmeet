@@ -1,6 +1,7 @@
 //! Platform credential authentication middleware.
 //!
-//! Accepts only `Authorization: Bearer <credential>`. A request that also carries an
+//! Accepts only `Authorization: Bearer <credential>`, verified by Platform Access (the
+//! shared identity authority, ADR 0032). A request that also carries an
 //! internal service token (`X-CF-Service-Authorization`) is rejected: customer routes
 //! never accept service credentials and the two mechanisms never fall through into each
 //! other. On success a
@@ -124,35 +125,28 @@ pub async fn require_platform_credential(
     {
         Ok(ctx) => ctx,
         Err(AuthenticationError::Rejected { reason, public_id }) => {
-            // §109: a key id above its failed-authentication window is answered 429 (a
-            // correct secret is never refused by it). A window store fault keeps the
-            // normal 401 (authentication itself already failed closed).
-            match state
-                .authenticator
-                .note_failure(reason, public_id.as_deref())
-                .await
-            {
-                Ok(Some(retry_after_secs)) => {
-                    crate::metrics::inc(
-                        "calling_authentication_failures_total",
-                        &[("reason", "throttled")],
-                    );
-                    tracing::warn!(
-                        reason = reason.as_str(),
-                        public_id = public_id.as_deref().unwrap_or(""),
-                        "repeated failed authentication throttled"
-                    );
-                    return CallingError::RateLimited { retry_after_secs }.into_response();
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    tracing::warn!(summary = %summarize_db_error(&err), "failed-authentication window unavailable");
-                }
-            }
             return reject(reason, public_id.as_deref());
         }
+        // §109: a key id above its failed-authentication window is answered 429 (a
+        // correct secret is never refused by it; Platform Access keeps the windows).
+        Err(AuthenticationError::Throttled {
+            reason,
+            public_id,
+            retry_after_secs,
+        }) => {
+            crate::metrics::inc(
+                "calling_authentication_failures_total",
+                &[("reason", "throttled")],
+            );
+            tracing::warn!(
+                reason = reason.as_str(),
+                public_id = public_id.as_deref().unwrap_or(""),
+                "repeated failed authentication throttled"
+            );
+            return CallingError::RateLimited { retry_after_secs }.into_response();
+        }
         Err(AuthenticationError::Unavailable { summary }) => {
-            tracing::error!(%summary, "credential authority unavailable; request refused");
+            tracing::error!(%summary, "credential authority (Platform Access) unavailable; request refused");
             return CallingError::ServiceUnavailable.into_response();
         }
     };
