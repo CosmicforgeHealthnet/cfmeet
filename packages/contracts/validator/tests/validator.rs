@@ -48,6 +48,7 @@ impl Sandbox {
         for service in [
             "calling",
             "meeting-service",
+            "messaging",
             "numbering",
             "platform-access",
             "privacy-relay",
@@ -246,25 +247,38 @@ fn unregistered_duplicate_authority_is_rejected() {
 
 #[test]
 fn contracts_for_unimplemented_services_are_rejected() {
-    // Messaging is a future service (no services/messaging): it cannot own a contract.
+    // `directory` is not a service in this repository (no services/directory): it cannot
+    // own a contract.
     let s = Sandbox::new();
     s.write(
-        "messaging/http/v1.openapi.json",
+        "directory/http/v1.openapi.json",
         &json!({ "openapi": "3.1.0", "info": { "title": "x", "version": "1.0.0" }, "paths": {} }),
     );
     s.edit_manifest(|c| {
         c.push(json!({
-            "id": "cfmeet.messaging.http-api",
+            "id": "cfmeet.directory.http-api",
             "version": "1.0.0",
             "kind": "openapi",
-            "path": "messaging/http/v1.openapi.json",
-            "owner": "messaging",
+            "path": "directory/http/v1.openapi.json",
+            "owner": "directory",
             "visibility": "public",
             "lifecycle": "experimental",
             "authority": "contract-first",
             "description": "fabricated"
         }));
     });
+    assert_rejected(
+        &s.run(),
+        "owner `directory` is not an existing deployable service",
+    );
+}
+
+#[test]
+fn messaging_contracts_require_the_messaging_service() {
+    // The registered Messaging contracts are valid only because services/messaging exists:
+    // without the service directory the same, unmodified contracts are rejected.
+    let s = Sandbox::new();
+    fs::remove_dir_all(s.repo.join("services/messaging")).unwrap();
     assert_rejected(
         &s.run(),
         "owner `messaging` is not an existing deployable service",

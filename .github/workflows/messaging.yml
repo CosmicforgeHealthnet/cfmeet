@@ -27,6 +27,7 @@ on:
       - "packages/service-auth/**"
       - "packages/contracts/**"
       - "infra/deployment/**"
+      - "scripts/messaging/**"
       - ".github/workflows/messaging.yml"
   pull_request:
     paths:
@@ -36,6 +37,7 @@ on:
       - "packages/service-auth/**"
       - "packages/contracts/**"
       - "infra/deployment/**"
+      - "scripts/messaging/**"
       - ".github/workflows/messaging.yml"
   workflow_dispatch:
 
@@ -83,12 +85,19 @@ jobs:
       - name: cargo test (all features)
         run: cargo test --locked --all-features --no-fail-fast
 
+      # Asserted on Cargo's resolved graph (all targets, features per package), not on the
+      # wording of an inverse query. The self-test proves real violations fail and command
+      # failures are never read as "absent".
+      - name: dependency-graph guard self-test (allowed and deliberately prohibited graphs)
+        working-directory: .
+        run: scripts/messaging/test-check-backend-crypto-graph.sh
+
       - name: the public half builds without the client key-generation code
+        working-directory: .
         run: |
           set -euo pipefail
-          out="$(cargo tree --locked -e normal -i openmls_basic_credential 2>&1 || true)"
-          echo "$out" | grep -q "did not match" \
-            || { echo "::error::the default feature set links client key generation"; exit 1; }
+          scripts/messaging/check-backend-crypto-graph.sh expect-absent packages/messaging-crypto
+          scripts/messaging/check-backend-crypto-graph.sh expect-present packages/messaging-crypto --features client
 
       # Compile-only evidence: not linked, not run on a device or in a browser.
       - name: cargo check (Android / iOS / Web, compile-only)
@@ -125,12 +134,13 @@ jobs:
       - name: Architecture tests (no foreign source / tables, public crypto half only, no key / content logging)
         run: cargo test --locked --test architecture
 
-      - name: the backend never links client key generation
+      - name: the backend never links client key generation (every crate, target and feature)
+        working-directory: .
         run: |
           set -euo pipefail
-          out="$(cargo tree --locked -e normal -i openmls_basic_credential 2>&1 || true)"
-          echo "$out" | grep -q "did not match" \
-            || { echo "$out"; echo "::error::services/messaging links the client key-generation half"; exit 1; }
+          scripts/messaging/check-backend-crypto-graph.sh expect-absent services/messaging --workspace
+          scripts/messaging/check-backend-crypto-graph.sh expect-absent services/messaging --workspace --all-features
+          scripts/messaging/check-backend-crypto-graph.sh expect-absent services/messaging --workspace --no-default-features
 
       - name: Repository guards (no other service's source or tables)
         working-directory: .
