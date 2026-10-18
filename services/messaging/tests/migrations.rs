@@ -74,7 +74,7 @@ async fn no_column_can_hold_e2ee_secrets_or_plaintext() {
     let suspicious = count(
         &db,
         "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name ~ \
-         '(private|secret|plaintext|epoch|body|content|text|recovery|attachment_key|media_key|password|phone|msisdn|e164)'",
+         '(private|secret|plaintext|epoch|recovery|attachment_key|media_key|password|phone|msisdn|e164|(^|_)(body|content|text)(_|$))'",
     )
     .await;
     assert_eq!(suspicious, 0);

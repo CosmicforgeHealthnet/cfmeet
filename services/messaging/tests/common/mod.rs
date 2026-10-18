@@ -358,6 +358,10 @@ impl Harness {
     }
 
     pub fn on(db: Arc<TestDb>, configure: impl FnOnce(&mut AppState)) -> Self {
+        let _ = tracing_subscriber::fmt()
+            .with_test_writer()
+            .with_env_filter("messaging=warn")
+            .try_init();
         let clock = ManualClock::new(t0());
         let authority = Arc::new(FakeAuthority::default());
         let principals = Arc::new(FakePrincipals::default());

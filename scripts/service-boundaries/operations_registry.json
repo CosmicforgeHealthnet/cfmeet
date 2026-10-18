@@ -5,6 +5,8 @@
     "usage-finalizer", "artifact-worker", "webhook-delivery-worker"
   ],
   "responsibilities": [
+    {"id": "messaging-conversation-expiry", "owner": "messaging", "source": "src/conversations/service.rs", "entry": "expire_due",
+     "tests": ["tests/conversations.rs::reopening_and_expiry_follow_the_conversations_policy_snapshot"]},
     {"id": "messaging-outbox-publisher", "owner": "messaging", "source": "src/events/outbox.rs", "entry": "publish_due",
      "tests": ["tests/outbox.rs::concurrent_publishers_deliver_each_event_once",
                "tests/outbox.rs::a_crashed_claim_is_reclaimed_after_its_lease_and_failures_dead_letter"]},

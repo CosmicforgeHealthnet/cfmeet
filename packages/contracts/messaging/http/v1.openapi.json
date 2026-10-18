@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging API",
-    "version": "1.0.0",
-    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are refused with CLIENT_TOKENS_NOT_ENABLED). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB."
+    "version": "1.1.0",
+    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are refused with CLIENT_TOKENS_NOT_ENABLED). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB."
   },
   "paths": {
     "/health": {
@@ -457,6 +457,378 @@
           },
           "503": {
             "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/conversations": {
+      "post": {
+        "operationId": "createConversation",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope conversations.create; the acting principal becomes the owner. Context class and security profile are checked against the persisted effective policy: the profile defaults to the context's default (PRIVATE_E2EE where eligible), MANAGED only where the application policy allows it, never a silent fallback (E2EE_NOT_AVAILABLE when encryption cannot be established). DIRECT conversations are deduplicated per principal pair and profile; a live context reference is unique. Idempotency-Key replays the stored response (200).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The Platform Access principal the application backend acts for; honoured only inside the credential's principal restriction and when Platform Access resolves it ACTIVE and messaging-capable in the credential's own environment.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created (201) or an existing / replayed conversation (200).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Conversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/CreateConversationRequest"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listConversations",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Keyset-paginated, newest first (limit 1-100, cursor). With CF-Acting-Principal: that principal's conversations (messages.read); without: the environment's conversations (conversations.manage).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": false,
+            "description": "Optional. With it: the principal's own conversations (scope messages.read; for PATCH: the owner). Without it: the application's administration view (scope conversations.manage).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "lifecycleState",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/LifecycleState"
+            }
+          },
+          {
+            "name": "contextClass",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ContextClass"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ConversationPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversationId}": {
+      "get": {
+        "operationId": "getConversation",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "One conversation of the credential's environment; for a member principal (messages.read) or the administration (conversations.manage). Others: NOT_FOUND.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": false,
+            "description": "Optional. With it: the principal's own conversations (scope messages.read; for PATCH: the owner). Without it: the application's administration view (scope conversations.manage).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Conversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateConversation",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope conversations.manage. Server-authoritative lifecycle transitions (ACTIVE, LOCKED, CLOSED, ARCHIVED, DELETED; EXPIRED by the server only) and expiry, with optimistic concurrency (expectedVersion). Expiry is evaluated first. A security profile change is refused (SECURITY_PROFILE_IMMUTABLE).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": false,
+            "description": "Optional. With it: the principal's own conversations (scope messages.read; for PATCH: the owner). Without it: the application's administration view (scope conversations.manage).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Conversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/UpdateConversationRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/messaging/policy": {
+      "get": {
+        "operationId": "getMessagingPolicy",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope conversations.manage. The environment's overrides, their version and the effective policy.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/PolicyView"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateMessagingPolicy",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope conversations.manage. Replaces the overrides (validated; optimistic concurrency on expectedVersion: POLICY_VERSION_CONFLICT). Audited; existing conversations keep their snapshot.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/PolicyView"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/PolicyUpdateRequest"
+              }
+            }
           }
         }
       }

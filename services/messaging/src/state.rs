@@ -6,7 +6,9 @@ use cf_service_auth::RuntimeEnvironment;
 use sea_orm::DatabaseConnection;
 
 use crate::{
-    config::{service_auth::ServiceAuthRuntime, DeviceSettings, WorkerSettings},
+    config::{
+        service_auth::ServiceAuthRuntime, ConversationSettings, DeviceSettings, WorkerSettings,
+    },
     domain::SharedClock,
     identity::{cache::CachingAuthority, PrincipalDirectory, Unconfigured},
 };
@@ -20,6 +22,7 @@ pub struct AppState {
     pub principals: Arc<dyn PrincipalDirectory>,
     pub service_auth: ServiceAuthRuntime,
     pub devices: DeviceSettings,
+    pub conversations: ConversationSettings,
     pub workers: WorkerSettings,
 }
 
@@ -37,6 +40,7 @@ impl AppState {
             principals: Arc::new(Unconfigured),
             service_auth,
             devices: DeviceSettings::default(),
+            conversations: ConversationSettings::default(),
             workers: WorkerSettings::default(),
         }
     }
@@ -48,6 +52,11 @@ impl AppState {
 
     pub fn with_devices(mut self, devices: DeviceSettings) -> Self {
         self.devices = devices;
+        self
+    }
+
+    pub fn with_conversations(mut self, conversations: ConversationSettings) -> Self {
+        self.conversations = conversations;
         self
     }
 

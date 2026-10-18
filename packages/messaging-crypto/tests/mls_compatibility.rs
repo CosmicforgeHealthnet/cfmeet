@@ -137,3 +137,113 @@ fn device_debug_output_never_contains_key_material() {
     assert!(!text.contains(&public));
     assert!(text.contains("omitted"));
 }
+
+/// Part V D.11 evidence: the client-known AAD is authenticated by MLS end to end, in a
+/// real two-device group bound to a server-assigned 32-byte group id.
+#[test]
+fn mls_authenticates_the_application_message_aad_between_two_devices() {
+    use cf_messaging_crypto::profile::MANDATORY_CIPHERSUITE;
+    use openmls::prelude::{
+        tls_codec::{Deserialize as _, Serialize as _},
+        BasicCredential, CredentialWithKey, GroupId, KeyPackage, MlsGroup, MlsGroupCreateConfig,
+        MlsGroupJoinConfig, MlsMessageBodyIn, MlsMessageIn, ProcessedMessageContent,
+        ProtocolMessage, StagedWelcome,
+    };
+    use openmls_basic_credential::SignatureKeyPair;
+    use openmls_rust_crypto::OpenMlsRustCrypto;
+
+    let party = |device: Uuid| {
+        let provider = OpenMlsRustCrypto::default();
+        let signer = SignatureKeyPair::new(MANDATORY_CIPHERSUITE.signature_algorithm()).unwrap();
+        let credential = CredentialWithKey {
+            credential: BasicCredential::new(binding::device_credential_identity(device)).into(),
+            signature_key: signer.to_public_vec().into(),
+        };
+        (provider, signer, credential)
+    };
+    let (a_provider, a_signer, a_cred) = party(Uuid::new_v4());
+    let (b_provider, b_signer, b_cred) = party(Uuid::new_v4());
+    // Bob publishes a KeyPackage; the server validates it like any other.
+    let bob_kp = KeyPackage::builder()
+        .build(MANDATORY_CIPHERSUITE, &b_provider, &b_signer, b_cred)
+        .unwrap();
+    let encoded = openmls::prelude::MlsMessageOut::from(bob_kp.key_package().clone())
+        .tls_serialize_detached()
+        .unwrap();
+    validate_key_package(&encoded, now(), &LifetimePolicy::default()).unwrap();
+    // Alice creates the group with the conversation's server-assigned group id.
+    let group_id = [0x5au8; 32];
+    let config = MlsGroupCreateConfig::builder()
+        .ciphersuite(MANDATORY_CIPHERSUITE)
+        .use_ratchet_tree_extension(true)
+        .build();
+    let mut alice = MlsGroup::new_with_group_id(
+        &a_provider,
+        &a_signer,
+        &config,
+        GroupId::from_slice(&group_id),
+        a_cred,
+    )
+    .unwrap();
+    let (_commit, welcome, _) = alice
+        .add_members(&a_provider, &a_signer, &[bob_kp.key_package().clone()])
+        .unwrap();
+    alice.merge_pending_commit(&a_provider).unwrap();
+    let welcome_bytes = welcome.tls_serialize_detached().unwrap();
+    let MlsMessageBodyIn::Welcome(welcome) = MlsMessageIn::tls_deserialize_exact(&welcome_bytes)
+        .unwrap()
+        .extract()
+    else {
+        panic!("not a welcome")
+    };
+    let mut bob =
+        StagedWelcome::new_from_welcome(&b_provider, &MlsGroupJoinConfig::default(), welcome, None)
+            .unwrap()
+            .into_group(&b_provider)
+            .unwrap();
+    assert_eq!(bob.group_id().as_slice(), group_id);
+
+    let conversation = Uuid::new_v4();
+    let client_message = Uuid::new_v4();
+    let sender_device = Uuid::new_v4();
+    let aad = binding::application_message_aad(conversation, client_message, sender_device);
+    let send = |alice: &mut MlsGroup, text: &[u8]| -> Vec<u8> {
+        alice.set_aad(aad.clone());
+        alice
+            .create_message(&a_provider, &a_signer, text)
+            .unwrap()
+            .tls_serialize_detached()
+            .unwrap()
+    };
+    let receive = |bob: &mut MlsGroup, bytes: &[u8]| {
+        let message = MlsMessageIn::tls_deserialize_exact(bytes).map_err(|_| ())?;
+        let protocol: ProtocolMessage = message.try_into_protocol_message().map_err(|_| ())?;
+        bob.process_message(&b_provider, protocol).map_err(|_| ())
+    };
+    let genuine = send(&mut alice, b"hello bob");
+    // The plaintext never appears in what the server relays.
+    assert!(!genuine.windows(9).any(|w| w == b"hello bob"));
+    let processed = receive(&mut bob, &genuine).unwrap();
+    assert_eq!(processed.aad(), aad.as_slice());
+    assert_eq!(
+        binding::parse_application_message_aad(processed.aad()),
+        Some((conversation, client_message, sender_device))
+    );
+    let ProcessedMessageContent::ApplicationMessage(app) = processed.into_content() else {
+        panic!("not an application message")
+    };
+    assert_eq!(app.into_bytes(), b"hello bob");
+    // A server (or anyone) rewriting the AAD — e.g. re-attributing the message to another
+    // conversation — is detected by the recipient.
+    let next = send(&mut alice, b"second");
+    let at = next
+        .windows(aad.len())
+        .position(|w| w == aad.as_slice())
+        .expect("the AAD travels in the clear (authenticated, not encrypted)");
+    let mut forged = next.clone();
+    forged[at + aad.len() - 1] ^= 0x01;
+    assert!(
+        receive(&mut bob, &forged).is_err(),
+        "a rewritten AAD was accepted"
+    );
+}

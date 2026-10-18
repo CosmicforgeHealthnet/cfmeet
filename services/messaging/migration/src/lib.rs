@@ -11,6 +11,7 @@
 pub use sea_orm_migration::prelude::*;
 
 mod m20261101_000001_messaging_foundation;
+mod m20261102_000002_conversations;
 
 /// Name of the table recording which Messaging migrations have been applied.
 pub const MIGRATION_TABLE: &str = "messaging_seaql_migrations";
@@ -20,7 +21,10 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(m20261101_000001_messaging_foundation::Migration)]
+        vec![
+            Box::new(m20261101_000001_messaging_foundation::Migration),
+            Box::new(m20261102_000002_conversations::Migration),
+        ]
     }
 
     fn migration_table_name() -> DynIden {

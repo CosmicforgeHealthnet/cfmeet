@@ -16,6 +16,8 @@
 //! | `MESSAGING_DIRECTORY_LOOKUPS_PER_MINUTE` | no | device-directory / proof lookups per credential per minute (1–100000, default 600) |
 //! | `MESSAGING_AUTH_CACHE_TTL_SECONDS` | no | positive authentication cache for READ routes (0–60, default 10; 0 disables). Mutations always re-authenticate |
 //! | `MESSAGING_IDENTITY_FEED_INTERVAL_MS` | no | Platform Access change-feed poll (250–60000, default 2000); any change flushes the cache, a failed poll disables it |
+//! | `MESSAGING_CONVERSATIONS_PER_MINUTE` | no | conversation creations per acting principal per minute (1–100000, default 120) |
+//! | `MESSAGING_EXPIRY_INTERVAL_MS` | no | conversation expiry worker interval (250–600000, default 5000) |
 //! | `MESSAGING_WORKER_INTERVAL_MS` / `MESSAGING_WORKER_LEASE_SECONDS` / `MESSAGING_OUTBOX_MAX_ATTEMPTS` | no | outbox publisher (defaults 1000 / 60 / 12) |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
@@ -104,6 +106,22 @@ impl Default for AuthCacheSettings {
     }
 }
 
+/// Conversation-domain limits and workers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConversationSettings {
+    pub creations_per_minute: i64,
+    pub expiry_interval: Duration,
+}
+
+impl Default for ConversationSettings {
+    fn default() -> Self {
+        Self {
+            creations_per_minute: 120,
+            expiry_interval: Duration::from_millis(5_000),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorkerSettings {
     pub interval: Duration,
@@ -128,6 +146,7 @@ pub struct MessagingConfig {
     pub metrics_address: Option<SocketAddr>,
     pub devices: DeviceSettings,
     pub auth_cache: AuthCacheSettings,
+    pub conversations: ConversationSettings,
     pub workers: WorkerSettings,
     pub log_format: LogFormat,
 }
@@ -271,6 +290,22 @@ impl MessagingConfig {
                 60_000,
             )? as u64),
         };
+        let conversations = ConversationSettings {
+            creations_per_minute: bounded(
+                &get,
+                "MESSAGING_CONVERSATIONS_PER_MINUTE",
+                120,
+                1,
+                100_000,
+            )?,
+            expiry_interval: Duration::from_millis(bounded(
+                &get,
+                "MESSAGING_EXPIRY_INTERVAL_MS",
+                5_000,
+                250,
+                600_000,
+            )? as u64),
+        };
         let workers = WorkerSettings {
             interval: Duration::from_millis(bounded(
                 &get,
@@ -311,6 +346,7 @@ impl MessagingConfig {
             metrics_address,
             devices,
             auth_cache,
+            conversations,
             workers,
             log_format,
         })

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/messaging/common/v1.schema.json",
   "title": "CF Meet Messaging common v1",
-  "description": "Messaging vocabulary and messages (Part V Workstreams C–D): error envelope, security profiles, protocol / cipher suite, devices and their PUBLIC MLS material, registration challenges, KeyPackage publication, the key-transparency tree head and proofs. Never a private key, group secret, ciphertext or plaintext content.",
+  "description": "Messaging vocabulary and messages (Part V Workstreams C–D): error envelope, security profiles, protocol / cipher suite, devices and their PUBLIC MLS material, registration challenges, KeyPackage publication, the key-transparency tree head and proofs, conversations, context classes, lifecycle, policies. Never a private key, group secret, ciphertext or plaintext content.",
   "oneOf": [
     {
       "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Error"
@@ -39,6 +39,33 @@
     },
     {
       "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Readiness"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ContextRef"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/CreateConversationRequest"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Conversation"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ConversationPage"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/UpdateConversationRequest"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ApplicationPolicy"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/PolicyUpdateRequest"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/EffectivePolicy"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/PolicyView"
     }
   ],
   "$defs": {
@@ -667,6 +694,565 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "ContextClass": {
+      "type": "string",
+      "enum": [
+        "DIRECT",
+        "GROUP",
+        "MEETING",
+        "TRANSACTION",
+        "CONSULTATION",
+        "SUPPORT",
+        "ENTERPRISE",
+        "DEVELOPER_DEFINED"
+      ],
+      "description": "Generic context classes; a product's order, trip, consultation or case is only an opaque ContextRef."
+    },
+    "LifecycleState": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "LOCKED",
+        "CLOSED",
+        "ARCHIVED",
+        "EXPIRED",
+        "DELETED"
+      ]
+    },
+    "ContextRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "reference"
+      ],
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,62}$"
+        },
+        "reference": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:/-]{1,256}$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        }
+      },
+      "description": "An opaque reference in the application's own namespace. Never authority, never a membership grant."
+    },
+    "CreateConversationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contextClass"
+      ],
+      "properties": {
+        "contextClass": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ContextClass"
+        },
+        "securityProfile": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/SecurityProfile"
+        },
+        "counterpartPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "context": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ContextRef"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expectedPolicyVersion": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "description": "A tenant / application / environment is never part of a request: it comes from the authenticated credential."
+    },
+    "Conversation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conversationId",
+        "contextClass",
+        "context",
+        "securityProfile",
+        "encryption",
+        "lifecycleState",
+        "lifecycleReason",
+        "policy",
+        "version",
+        "createdByPrincipalId",
+        "ownerPrincipalId",
+        "members",
+        "createdAt",
+        "updatedAt",
+        "stateChangedAt",
+        "expiresAt"
+      ],
+      "properties": {
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "contextClass": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ContextClass"
+        },
+        "context": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ContextRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "securityProfile": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/SecurityProfile"
+        },
+        "encryption": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol",
+            "ciphersuite",
+            "mlsGroupId",
+            "securityPolicyVersion",
+            "serverCanReadContent"
+          ],
+          "properties": {
+            "protocol": {
+              "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Protocol"
+            },
+            "ciphersuite": {
+              "oneOf": [
+                {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Ciphersuite"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "mlsGroupId": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{43}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "securityPolicyVersion": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "serverCanReadContent": {
+              "type": "boolean"
+            }
+          }
+        },
+        "lifecycleState": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/LifecycleState"
+        },
+        "lifecycleReason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "snapshotId",
+            "digest",
+            "applicationPolicyVersion"
+          ],
+          "properties": {
+            "snapshotId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "applicationPolicyVersion": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "createdByPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "ownerPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "members": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "principalId",
+              "role"
+            ],
+            "properties": {
+              "principalId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "OWNER",
+                  "MEMBER"
+                ]
+              }
+            }
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "stateChangedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "The canonical Conversation aggregate. PRIVATE_E2EE: MLS 1.0 with the server-assigned 32-byte MLS group id; serverCanReadContent is false. MANAGED: no MLS binding; serverCanReadContent is true.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "securityProfile": {
+                "const": "PRIVATE_E2EE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "encryption": {
+                "properties": {
+                  "protocol": {
+                    "const": "MLS_1_0"
+                  },
+                  "serverCanReadContent": {
+                    "const": false
+                  },
+                  "mlsGroupId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "encryption": {
+                "properties": {
+                  "protocol": {
+                    "const": "CFMEET_MANAGED_V1"
+                  },
+                  "serverCanReadContent": {
+                    "const": true
+                  },
+                  "mlsGroupId": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ConversationPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conversations",
+        "nextCursor"
+      ],
+      "properties": {
+        "conversations": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Conversation"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "UpdateConversationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "lifecycleState": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "LOCKED",
+            "CLOSED",
+            "ARCHIVED",
+            "DELETED"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "Optimistic concurrency on the aggregate version. EXPIRED is set by the server only. A security profile can never be changed (SECURITY_PROFILE_IMMUTABLE)."
+    },
+    "ApplicationPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contexts": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ContextClass"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "allowedProfiles": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/SecurityProfile"
+                }
+              },
+              "defaultProfile": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/SecurityProfile"
+              },
+              "maxMembers": {
+                "type": "integer",
+                "minimum": 2,
+                "maximum": 100000
+              },
+              "maxLifetimeSeconds": {
+                "type": "integer",
+                "minimum": 60,
+                "maximum": 315360000
+              },
+              "reopenAllowed": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "sendingEnabled": {
+          "type": "boolean"
+        }
+      },
+      "description": "An application environment's overrides of the platform defaults. MANAGED is available for a context only when listed here."
+    },
+    "PolicyUpdateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "policy"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "policy": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ApplicationPolicy"
+        }
+      }
+    },
+    "EffectivePolicy": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "platformPolicyVersion",
+        "applicationPolicyVersion",
+        "contexts",
+        "sendingEnabled"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "platformPolicyVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "applicationPolicyVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "contexts": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ContextClass"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "enabled",
+              "allowedProfiles",
+              "defaultProfile",
+              "maxMembers",
+              "maxLifetimeSeconds",
+              "reopenAllowed",
+              "legalHoldEligible",
+              "smsBridgeEligible"
+            ],
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "allowedProfiles": {
+                "type": "array",
+                "items": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/SecurityProfile"
+                }
+              },
+              "defaultProfile": {
+                "oneOf": [
+                  {
+                    "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/SecurityProfile"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "maxMembers": {
+                "oneOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "maxLifetimeSeconds": {
+                "oneOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reopenAllowed": {
+                "type": "boolean"
+              },
+              "legalHoldEligible": {
+                "type": "boolean"
+              },
+              "smsBridgeEligible": {
+                "const": false
+              }
+            }
+          },
+          "minProperties": 8
+        },
+        "sendingEnabled": {
+          "type": "boolean"
+        }
+      },
+      "description": "Platform defaults merged with the application's overrides (deterministic; stored as an immutable content-addressed snapshot)."
+    },
+    "PolicyView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "policy",
+        "effective",
+        "digest",
+        "platformPolicyVersion"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "policy": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ApplicationPolicy"
+        },
+        "effective": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/EffectivePolicy"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "platformPolicyVersion": {
+          "type": "integer",
+          "minimum": 1
         }
       }
     }

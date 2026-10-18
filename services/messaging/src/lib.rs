@@ -5,6 +5,8 @@
 //!   Platform Access inside the credential's own environment.
 //! * [`devices`]: Messaging devices and their PUBLIC MLS material (registration with
 //!   proof of possession, KeyPackages, revocation, directory).
+//! * [`conversations`]: the Conversation aggregate — context classes, persisted security
+//!   profiles, policy snapshots, lifecycle, sequencing foundation.
 //! * [`transparency`]: the append-only RFC 9162 key-transparency log (unwitnessed).
 //! * [`domain`]: security profiles and the encrypted / managed content boundary.
 //! * [`events`]: transactional outbox.
@@ -15,6 +17,7 @@
 
 pub mod audit;
 pub mod config;
+pub mod conversations;
 pub mod db;
 pub mod devices;
 pub mod domain;

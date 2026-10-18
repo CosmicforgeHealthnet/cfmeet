@@ -3,10 +3,12 @@
 The Unified Messaging backend foundation (Part V Workstreams C–D,
 [ADR 0045](../../docs/decisions/0045-messaging-domain-and-cryptographic-core.md),
 [0046](../../docs/decisions/0046-platform-access-messaging-scopes-and-device-authority.md),
-[0047](../../docs/decisions/0047-messaging-service-devices-and-key-transparency.md)).
+[0047](../../docs/decisions/0047-messaging-service-devices-and-key-transparency.md),
+[0048](../../docs/decisions/0048-conversation-aggregate-security-profiles-and-ordering.md)).
 An independent service (`cfmeet.messaging`, port 8097) with its own PostgreSQL database.
 
-It owns: Messaging devices and their **public** MLS material (device signature keys,
+It owns: conversations (eight generic context classes, persisted PRIVATE_E2EE / MANAGED
+profiles, lifecycle, policy snapshots, the message-sequence allocator), Messaging devices and their **public** MLS material (device signature keys,
 published KeyPackages), the append-only key-transparency log, idempotency records, its
 audit and its transactional outbox. It never holds a private key, group / epoch secret or
 plaintext E2EE content — MLS runs on client devices (`packages/messaging-crypto`).
@@ -28,6 +30,10 @@ credential's own environment. Client tokens are refused (`CLIENT_TOKENS_NOT_ENAB
 | `POST /v1/messaging/devices/{deviceId}/revoke` | `messages.send` |
 | `GET /v1/messaging/principals/{principalId}/devices` | `messages.read` |
 | `GET /v1/messaging/key-transparency/proofs` | `messages.read` |
+| `POST /v1/conversations` (`Idempotency-Key`) | `conversations.create` |
+| `GET /v1/conversations`, `GET /v1/conversations/{id}` | `messages.read` (own, with acting principal) or `conversations.manage` (environment) |
+| `PATCH /v1/conversations/{id}` | `conversations.manage` (owner when a principal acts) |
+| `GET` / `PUT /v1/messaging/policy` | `conversations.manage` |
 
 `/internal/v1/**` is service-authenticated and exposes no operation yet.
 
@@ -50,7 +56,7 @@ Platform Access's trust bundle must grant `cfmeet.messaging`
 TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres make messaging-test
 ```
 
-Suites: `foundation`, `startup` (the real binary), `migrations`, `outbox`, `devices`
+Suites: `conversations`, `foundation`, `startup` (the real binary), `migrations`, `outbox`, `devices`
 (real OpenMLS client devices), `transparency` (proofs verified with the RFC 9162
 algorithms), `architecture`, and `platform_access_e2e` (the real Platform Access process).
 

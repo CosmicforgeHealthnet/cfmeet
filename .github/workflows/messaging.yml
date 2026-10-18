@@ -182,6 +182,8 @@ jobs:
         run: cargo test --locked --test foundation --test startup --test migrations --test outbox
       - name: Devices and key directory (C) — proof of possession, KeyPackages, revocation, transparency
         run: cargo test --locked --test devices --test transparency
+      - name: Conversation domain (D) — profiles, policy, lifecycle, concurrency, isolation, idempotency, sequencing
+        run: cargo test --locked --test conversations
       - name: cargo test (whole workspace, incl. the Platform Access certification)
         env:
           PLATFORM_ACCESS_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access

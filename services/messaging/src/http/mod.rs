@@ -2,7 +2,7 @@
 //!
 //! * `GET /health` — liveness only; `GET /ready` — database reachable and every
 //!   migration applied (503 otherwise), plus non-secret operational facts.
-//! * `/v1/messaging/**` — the customer API: Platform Access authentication, scopes, a
+//! * `/v1/messaging/**` and `/v1/conversations/**` — the customer API: Platform Access authentication, scopes, a
 //!   verified acting principal ([`middleware`]).
 //! * `/internal/v1/**` — service-authenticated; no internal operation exists yet, so
 //!   every request is authenticated by construction (unknown paths included) and 404s.
@@ -39,7 +39,7 @@ pub const MAX_BODY_BYTES: usize = 512 * 1024;
 
 /// Customer routes nested under `/v1/messaging`.
 pub fn customer_routes() -> Router<AppState> {
-    devices::routes()
+    devices::routes().merge(crate::conversations::http::policy_routes())
 }
 
 pub fn app(state: AppState) -> Router {
@@ -55,6 +55,12 @@ pub fn app(state: AppState) -> Router {
         .nest(
             "/v1/messaging",
             customer_routes()
+                .fallback(not_found)
+                .method_not_allowed_fallback(method_not_allowed),
+        )
+        .nest(
+            "/v1/conversations",
+            crate::conversations::http::conversation_routes()
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )

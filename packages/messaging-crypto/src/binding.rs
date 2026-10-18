@@ -11,7 +11,12 @@
 //!   KeyPackage proves possession of the device signature key AND freshness (the
 //!   single-use server challenge) without any custom signature construction.
 //!
-//! Both are ASCII, versioned and parsed strictly (lower-case hyphenated UUIDs, 64
+//! * **Application-message AAD** — the MLS `authenticated_data` of every application
+//!   message: `cfmeet-messaging-aad:v1:<conversation id>:<client message id>:<sender
+//!   device id>`. Only client-known values: the server's canonical sequence / message id
+//!   are bound separately by the server's acceptance record (services/messaging).
+//!
+//! All are ASCII, versioned and parsed strictly (lower-case hyphenated UUIDs, 64
 //! lower-case hex nonce characters).
 
 use uuid::Uuid;
@@ -60,6 +65,35 @@ pub fn parse_registration_binding(binding: &[u8]) -> Option<(Uuid, [u8; NONCE_LE
     Some((id, nonce))
 }
 
+const AAD_PREFIX: &str = "cfmeet-messaging-aad:v1:";
+
+/// The MLS authenticated data of an application message.
+pub fn application_message_aad(
+    conversation_id: Uuid,
+    client_message_id: Uuid,
+    sender_device_id: Uuid,
+) -> Vec<u8> {
+    format!(
+        "{AAD_PREFIX}{}:{}:{}",
+        conversation_id.hyphenated(),
+        client_message_id.hyphenated(),
+        sender_device_id.hyphenated()
+    )
+    .into_bytes()
+}
+
+/// `(conversation, client message, sender device)` of a canonical AAD.
+pub fn parse_application_message_aad(aad: &[u8]) -> Option<(Uuid, Uuid, Uuid)> {
+    let text = std::str::from_utf8(aad).ok()?;
+    let mut parts = text.strip_prefix(AAD_PREFIX)?.split(':');
+    let ids = (
+        canonical_uuid(parts.next()?)?,
+        canonical_uuid(parts.next()?)?,
+        canonical_uuid(parts.next()?)?,
+    );
+    parts.next().is_none().then_some(ids)
+}
+
 fn canonical_uuid(text: &str) -> Option<Uuid> {
     let id = Uuid::parse_str(text).ok()?;
     (id.hyphenated().to_string() == text).then_some(id)
@@ -88,6 +122,26 @@ mod tests {
         ] {
             assert_eq!(parse_device_credential_identity(&bad), None);
         }
+    }
+
+    #[test]
+    fn application_aad_round_trips_and_is_strict() {
+        let (c, m, d) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let aad = application_message_aad(c, m, d);
+        assert_eq!(parse_application_message_aad(&aad), Some((c, m, d)));
+        let text = String::from_utf8(aad).unwrap();
+        assert_eq!(
+            parse_application_message_aad(format!("{text}:extra").as_bytes()),
+            None
+        );
+        assert_eq!(
+            parse_application_message_aad(text.to_uppercase().as_bytes()),
+            None
+        );
+        assert_ne!(
+            application_message_aad(c, m, d),
+            application_message_aad(m, c, d)
+        );
     }
 
     #[test]

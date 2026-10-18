@@ -103,7 +103,12 @@ async fn main() -> anyhow::Result<()> {
             service_auth.client(),
         )))
         .with_devices(config.devices)
+        .with_conversations(config.conversations)
         .with_workers(config.workers);
+    tokio::spawn(messaging::conversations::service::run_expiry(
+        state.clone(),
+        config.conversations.expiry_interval,
+    ));
     // No event consumer exists yet (realtime gateway / webhooks are later workstreams):
     // the outbox publisher is not started and events stay PENDING (readiness, metrics).
     tracing::info!(
