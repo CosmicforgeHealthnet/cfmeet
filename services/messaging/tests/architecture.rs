@@ -189,7 +189,11 @@ fn managed_content_never_enters_e2ee_paths() {
         if MANAGED_MODULES.contains(&file.as_str()) {
             continue;
         }
-        for term in ["ManagedContent", "MessagePayload::Managed", "Payload::Managed"] {
+        for term in [
+            "ManagedContent",
+            "MessagePayload::Managed",
+            "Payload::Managed",
+        ] {
             assert!(
                 !code.contains(term),
                 "{file}: `{term}` — managed (server-readable) content in a non-managed module"
@@ -237,8 +241,18 @@ fn no_provider_identifiers_in_the_public_contracts() {
     walk(&root, &mut files);
     assert!(files.len() >= 3, "the Messaging contracts are present");
     let forbidden = [
-        "provider", "carrier", "twilio", "vonage", "plivo", "sinch", "messagebird",
-        "sendbird", "firebase", "livekit", "telnyx", "bandwidth",
+        "provider",
+        "carrier",
+        "twilio",
+        "vonage",
+        "plivo",
+        "sinch",
+        "messagebird",
+        "sendbird",
+        "firebase",
+        "livekit",
+        "telnyx",
+        "bandwidth",
     ];
     let mut names = Vec::new();
     for f in &files {
@@ -255,7 +269,10 @@ fn no_provider_identifiers_in_the_public_contracts() {
             names.push(k);
         }
     }
-    assert!(names.iter().any(|n| n == "securityProfile"), "walked real schemas");
+    assert!(
+        names.iter().any(|n| n == "securityProfile"),
+        "walked real schemas"
+    );
 }
 
 #[test]

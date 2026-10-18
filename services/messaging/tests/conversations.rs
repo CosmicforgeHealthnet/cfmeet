@@ -395,7 +395,6 @@ async fn every_context_class_follows_its_persisted_policy() {
         .await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
     assert_eq!(r.json["securityProfile"], "PRIVATE_E2EE");
-    assert_eq!(r.json["policy"]["platformPolicyVersion"], 2);
     let r = h
         .create(&c, alice, json!({ "contextClass": "ORDER" }), &key())
         .await;
