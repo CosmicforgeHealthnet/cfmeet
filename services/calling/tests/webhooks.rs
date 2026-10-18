@@ -926,7 +926,18 @@ async fn privacy_relay_events_are_normalized_before_delivery() {
     );
     assert_eq!(body["type"], "relay.revoked");
     assert_eq!(body["data"]["resource"], "SESSION");
-    let text = String::from_utf8_lossy(&seen[0].body);
+    // Random identifiers (webhook id, context / session ids) can contain "234"; drop them so
+    // the check only sees the remaining payload (a leaked number fragment still fails it).
+    let mut text = String::from_utf8_lossy(&seen[0].body).into_owned();
+    for id in [
+        &body["id"],
+        &body["data"]["contextId"],
+        &body["data"]["sessionId"],
+    ] {
+        if let Some(id) = id.as_str() {
+            text = text.replace(id, "");
+        }
+    }
     assert!(
         !text.contains("234") && !text.contains("PN123") && !text.contains("relay_number"),
         "{text}"
