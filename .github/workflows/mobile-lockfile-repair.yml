@@ -8,6 +8,7 @@ on:
     branches: [staging]
     paths:
       - ".github/workflows/mobile-lockfile-repair.yml"
+      - "apps/mobile/package.json"
 
 permissions:
   contents: write
