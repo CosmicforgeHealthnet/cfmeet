@@ -86,3 +86,40 @@ each have zero commits not reachable from `staging` (6e4b70b), no open pull requ
 attempted and **refused by the session's Git proxy (HTTP 403)**; they still exist.
 No branch is protected and no ruleset exists. `deploy-backend.yml` deploys only on a push
 to `main` (or a manual dispatch); a push to `staging` deploys nothing.
+
+### GitHub Actions on the final implementation commit `b8f3f40`
+
+`b8f3f40` adds one more fix: Calling's `repeated_loop_blocks_are_one_incident` failed at
+random on `91658c0` ([run 39116719995](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39116719995))
+because a random destination UUID contained "650", the substring the test uses to detect a
+leaked extension number. The check now removes the incident's own ids first. Pre-existing,
+unrelated to Part V; a real leak still fails it.
+
+All 16 workflows pass on `b8f3f40`:
+Messaging ([39118281447](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281447): crypto core, service lint and graph guard, PostgreSQL tests with real Platform Access incl. the §10 certification, build / migration smoke / isolation, **Docker image**),
+Contracts and service auth ([39118281479](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281479)),
+Service boundaries ([39118281337](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281337)),
+Dependency and image security ([39118281424](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281424)),
+Platform Access ([39118281491](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281491)),
+Calling ([39118281381](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281381)),
+Calling RTC certification ([39118281362](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281362)),
+Enterprise calling certification ([39118281341](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281341)),
+Communications end-to-end journeys ([39118281368](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281368)),
+Numbering ([39118281347](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281347)),
+SMS Gateway ([39118281392](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281392)),
+Privacy Relay ([39118281363](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281363)),
+Telephony ([39118281340](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281340)),
+Telephony SIP certification ([39118281483](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281483)),
+Compose config ([39118281376](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281376)),
+Deploy Backend ([39118281403](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281403): pre-deploy tests pass, "Deploy to VPS" **skipped** — nothing deployed).
+
+The Docker-image blocker of the first session is resolved by CI (the local build was only
+rate-limited). Known, not fixed here: Calling's `a_stuck_queue_entry_is_an_incident_and_drains_later`
+reads the process-global `calling_enterprise_queue_depth` gauge and can fail when run in
+parallel on a small machine (2 of 3 local runs; green in every CI run).
+
+### PR 9 status
+
+Open, not merged. Merge gates not met: the Version 2.0 specification review (document
+unavailable) and an approving review (none; the only GitHub identity available to the
+implementation session is the PR author). The feature branch is retained.
