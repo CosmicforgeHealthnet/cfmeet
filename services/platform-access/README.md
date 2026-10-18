@@ -10,9 +10,11 @@ It owns, in its own PostgreSQL database:
   `cfmk_<sbx|test|live>_<24 hex>_<64 hex>`, HMAC-SHA-256 verifiers under the pepper (the
   Part III construction, unchanged; the raw secret is returned once and never stored);
 * the **scope registry** — Calling scopes, `numbers.search | read | manage | assign |
-  kyc.read | kyc.manage | portability`, `sms.send | read` (STANDARD) and
-  `numbers.admin` (PRIVILEGED_OPERATOR: an explicit audited operator grant to a
-  FIRST_PARTY application only) — with optional per-environment-kind restriction;
+  kyc.read | kyc.manage | portability`, `sms.send | read`, the Part V Messaging scopes `messages.send | read`,
+  `conversations.create | manage`, `attachments.write | read`, `moderation.manage`,
+  `messaging.export` (STANDARD) and `numbers.admin` / `messaging.admin`
+  (PRIVILEGED_OPERATOR: an explicit audited operator grant to a FIRST_PARTY application
+  only) — with optional per-environment-kind restriction;
 * **principals** (opaque references only) and their tombstones;
 * the **failed-authentication throttle**, the commit-ordered **identity change feed**
   consumers project from, Part III **import receipts** and an append-only **operator
@@ -24,14 +26,14 @@ It exposes no customer API. Consumers call the service-authenticated `/internal/
 
 | Route | Permission | Consumer |
 |---|---|---|
-| `POST /internal/v1/credentials/authenticate` | `platform-credential.authenticate` | Calling, Numbering |
+| `POST /internal/v1/credentials/authenticate` | `platform-credential.authenticate` | Calling, Numbering, SMS Gateway, Messaging |
 | `GET /internal/v1/credentials/{id}` (delegated) | `platform-identity.read` | Calling, Numbering |
 | `POST /internal/v1/authorization/evaluate` (delegated) | `platform-identity.read` | Calling, Numbering |
 | `GET /internal/v1/identity/context` (delegated) | `platform-identity.read` | Calling, Numbering |
-| `POST /internal/v1/identity/changes` | `platform-identity.read` | Calling (projection) |
+| `POST /internal/v1/identity/changes` | `platform-identity.read` | Calling (projection), Messaging (cache invalidation) |
 | `GET /internal/v1/identity/imports/{digest}` | `platform-identity.read` | Calling (hand-off) |
 | `GET /internal/v1/scopes` | `platform-identity.read` | any consumer |
-| `POST /internal/v1/principals/resolve` (delegated) | `platform-principal.resolve` | Calling, Numbering |
+| `POST /internal/v1/principals/resolve` (delegated) | `platform-principal.resolve` | Calling, Numbering, SMS Gateway, Messaging |
 | `POST /internal/v1/principals/telephone-endpoints` (delegated) | `platform-principal.register` | Calling |
 | `POST /internal/v1/principals/{id}/tombstone` | `platform-principal.register` | Calling |
 | `/internal/v1/admin/**` (+ `X-CF-Operator`) | `platform-identity.administer` | operator console |
@@ -84,6 +86,6 @@ Suites: `authentication` (Part III continuity, every rejection reason, rotation,
 expiry, revocation, safety-only authority, throttling, pepper rotation),
 `credential_storage`, `scopes` (registry, first-party / external, privileged grants,
 environment-kind restriction), `isolation` (cross-tenant / application / environment,
-forged delegated context, internal authorization), `change_feed`, `handoff`
+forged delegated context, internal authorization), `messaging_scopes` (Part V B), `change_feed`, `handoff`
 (Part III import), `admin_cli`, `migrations`, `contracts` (OpenAPI = routes, responses
 conform). Calling's suite runs against this service's real binaries.

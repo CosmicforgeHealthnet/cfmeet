@@ -398,7 +398,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::PlatformCredentialAuthenticate,
         name: "platform-credential.authenticate",
         receiver: services::PLATFORM_ACCESS,
-        grantable_to: &[services::CALLING, services::NUMBERING, services::SMS_GATEWAY],
+        grantable_to: &[services::CALLING, services::NUMBERING, services::SMS_GATEWAY, services::MESSAGING],
         sensitive: false,
         description: "Verify a presented customer API credential; returns the trusted authority chain and effective scopes (never verifier material)",
     },
@@ -406,7 +406,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::PlatformPrincipalResolve,
         name: "platform-principal.resolve",
         receiver: services::PLATFORM_ACCESS,
-        grantable_to: &[services::CALLING, services::NUMBERING, services::SMS_GATEWAY],
+        grantable_to: &[services::CALLING, services::NUMBERING, services::SMS_GATEWAY, services::MESSAGING],
         sensitive: false,
         description: "Resolve communication principals inside the signed delegated scope",
     },
@@ -422,7 +422,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::PlatformIdentityRead,
         name: "platform-identity.read",
         receiver: services::PLATFORM_ACCESS,
-        grantable_to: &[services::CALLING, services::NUMBERING],
+        grantable_to: &[services::CALLING, services::NUMBERING, services::MESSAGING],
         sensitive: false,
         description: "Read the identity change feed, trusted tenant / application / environment context, effective scopes, credential status and import receipts (no verifier material)",
     },
@@ -837,7 +837,14 @@ mod tests {
     }
 
     /// Every permission Messaging may ever be granted (registry order).
-    const MESSAGING_GRANTS: &[&str] = &[];
+    /// Part V B: credential verification, principal resolution in the signed delegated
+    /// scope, and identity reads (change feed for bounded authorization caching). Never
+    /// principal registration or identity administration.
+    const MESSAGING_GRANTS: &[&str] = &[
+        "platform-credential.authenticate",
+        "platform-principal.resolve",
+        "platform-identity.read",
+    ];
 
     #[test]
     fn wildcard_like_values_are_detected() {
