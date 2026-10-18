@@ -193,7 +193,7 @@ pub async fn load_by_client_id<C: ConnectionTrait>(
     .await?)
 }
 
-async fn hidden_for<C: ConnectionTrait>(
+pub(crate) async fn hidden_for<C: ConnectionTrait>(
     db: &C,
     principal: Uuid,
     ids: &[Uuid],

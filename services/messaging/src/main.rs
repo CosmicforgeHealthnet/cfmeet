@@ -233,6 +233,10 @@ async fn main() -> anyhow::Result<()> {
         state.clone(),
         config.workers.interval,
     ));
+    tokio::spawn(messaging::compliance::run(
+        state.clone(),
+        std::time::Duration::from_secs(60),
+    ));
     tokio::spawn(messaging::attachments::lifecycle::run(
         state.clone(),
         std::time::Duration::from_secs(30),

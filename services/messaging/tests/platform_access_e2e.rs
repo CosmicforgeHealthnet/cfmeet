@@ -7,8 +7,9 @@
 //! line, unless `MESSAGING_E2E_REQUIRED=1` (CI), where it fails instead. `pg_dump` /
 //! `pg_restore` / `psql` are required for the recovery step under the same rule.
 //!
-//! This is a foundation certification, NOT an E2EE chat certification: encrypted send /
-//! decrypt / reconnect is certified after Workstream I.
+//! This is a foundation certification, NOT an E2EE chat certification. Step 9b adds the
+//! Part E realtime handshake on the real binary (client token, single-use ticket,
+//! WebSocket, membership-authorized subscription).
 
 mod common;
 
@@ -238,6 +239,13 @@ async fn setup(admin: &str) -> Option<World> {
     )
     .unwrap();
     // A SEPARATE Ed25519 key signs key-transparency tree heads (Part V G.5 / §142).
+    // Messaging Client Access Token signing key (Part E realtime; a Messaging-only secret).
+    let ct_key = ServiceSigningKey::generate(KeyId::parse("messaging-ct-1").unwrap());
+    std::fs::write(
+        dir.join("messaging-ct.pem"),
+        ct_key.to_pkcs8_pem().as_bytes(),
+    )
+    .unwrap();
     let kt_key = ServiceSigningKey::generate(KeyId::parse("messaging-kt-1").unwrap());
     let kt_pem = kt_key.to_pkcs8_pem();
     std::fs::write(dir.join("messaging-kt.pem"), kt_pem.as_bytes()).unwrap();
@@ -321,6 +329,10 @@ async fn setup(admin: &str) -> Option<World> {
         (
             "MESSAGING_KT_SIGNING_KEY_FILE".into(),
             dir.join("messaging-kt.pem").display().to_string(),
+        ),
+        (
+            "MESSAGING_CLIENT_TOKEN_SIGNING_KEY_FILE".into(),
+            dir.join("messaging-ct.pem").display().to_string(),
         ),
     ];
     Some(World {
@@ -598,6 +610,54 @@ async fn a_to_d_foundation_certification_across_real_services() {
         .0,
         404
     );
+    // 9b. Part E on the REAL binary: a short-lived client token for Alice's ACTIVE device,
+    // a single-use ticket (device-direct), a WebSocket authenticated by it, and a
+    // subscription authorized by current membership. The ticket cannot be reused.
+    let (s, ct) = m
+        .call(
+            M::POST,
+            &token,
+            Some(alice),
+            "/v1/messaging/client-tokens",
+            Some(json!({ "deviceId": alice_device.device_id() })),
+            None,
+        )
+        .await;
+    assert_eq!(s, 201, "{ct}");
+    let tk = world
+        .http
+        .post(format!("{url}/v1/realtime/tickets"))
+        .header(
+            "authorization",
+            format!("CF-Client-Token {}", ct["token"].as_str().unwrap()),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(tk.status().as_u16(), 201);
+    let tk: Value = tk.json().await.unwrap();
+    let ticket = tk["ticket"].as_str().unwrap().to_string();
+    let addr: std::net::SocketAddr = url.trim_start_matches("http://").parse().unwrap();
+    let mut ws = common::realtime::open_ws(addr, &ticket, None)
+        .await
+        .expect("authenticated WebSocket");
+    let sub = ws.subscribe(&conv, None).await;
+    assert_eq!(sub["type"], "subscribed", "{sub}");
+    assert_eq!(
+        common::realtime::open_ws(addr, &ticket, None).await.err(),
+        Some(401),
+        "single-use ticket"
+    );
+    // The API credential itself is never accepted by the device-direct ticket route.
+    let r = world
+        .http
+        .post(format!("{url}/v1/realtime/tickets"))
+        .header("authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 401);
+    drop(ws);
     // 10. Unauthorized scopes cannot administer; new scopes were never granted implicitly.
     let (reader, _) = world.credential(sa_a, &["messages.read"]).await;
     let (s, body) = m

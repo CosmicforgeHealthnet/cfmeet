@@ -859,6 +859,10 @@
         "expectedPolicyVersion": {
           "type": "integer",
           "minimum": 0
+        },
+        "managedDisclosureAcknowledged": {
+          "type": "boolean",
+          "description": "Regulated contexts: creating a MANAGED conversation requires acknowledging that the server can read its content (refused otherwise with MANAGED_DISCLOSURE_REQUIRED)."
         }
       },
       "description": "A tenant / application / environment is never part of a request: it comes from the authenticated credential."
@@ -3611,6 +3615,1001 @@
       },
       "required": [
         "holds"
+      ]
+    },
+    "SearchResults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Message"
+          }
+        },
+        "searchedProfile": {
+          "const": "MANAGED"
+        },
+        "nextBeforeSequence": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "localSearchOnlyConversations": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "results",
+        "searchedProfile"
+      ],
+      "description": "Server search covers MANAGED conversations only; PRIVATE_E2EE conversations are searched on devices (LOCAL_SEARCH_ONLY)."
+    },
+    "ReportRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "enum": [
+            "SPAM",
+            "HARASSMENT",
+            "HATE",
+            "VIOLENCE",
+            "SEXUAL_CONTENT",
+            "CHILD_SAFETY",
+            "SELF_HARM",
+            "ILLEGAL_CONTENT",
+            "IMPERSONATION",
+            "OTHER"
+          ]
+        },
+        "messageIds": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "reportedPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "disclosure": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "messageId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 4000
+              }
+            },
+            "required": [
+              "messageId",
+              "text"
+            ]
+          },
+          "description": "PRIVATE_E2EE only and optional: what the reporter's own device decrypted, disclosed voluntarily (sealed at rest; presented as unverifiable)."
+        }
+      },
+      "required": [
+        "category"
+      ]
+    },
+    "ReportReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reportId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "const": "OPEN"
+        },
+        "category": {
+          "enum": [
+            "SPAM",
+            "HARASSMENT",
+            "HATE",
+            "VIOLENCE",
+            "SEXUAL_CONTENT",
+            "CHILD_SAFETY",
+            "SELF_HARM",
+            "ILLEGAL_CONTENT",
+            "IMPERSONATION",
+            "OTHER"
+          ]
+        },
+        "evidenceKind": {
+          "enum": [
+            "NONE",
+            "MANAGED_REFERENCE",
+            "REPORTER_DISCLOSURE"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "reportId",
+        "status",
+        "category",
+        "evidenceKind",
+        "createdAt"
+      ],
+      "description": "What the reporter learns: that the report was received. The reported principal is never told who reported."
+    },
+    "ReportSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reportId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "securityProfile": {
+          "enum": [
+            "PRIVATE_E2EE",
+            "MANAGED"
+          ]
+        },
+        "reporterPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "reportedPrincipalId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "messageIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "category": {
+          "enum": [
+            "SPAM",
+            "HARASSMENT",
+            "HATE",
+            "VIOLENCE",
+            "SEXUAL_CONTENT",
+            "CHILD_SAFETY",
+            "SELF_HARM",
+            "ILLEGAL_CONTENT",
+            "IMPERSONATION",
+            "OTHER"
+          ]
+        },
+        "evidenceKind": {
+          "enum": [
+            "NONE",
+            "MANAGED_REFERENCE",
+            "REPORTER_DISCLOSURE"
+          ]
+        },
+        "status": {
+          "enum": [
+            "OPEN",
+            "ACTIONED",
+            "DISMISSED"
+          ]
+        },
+        "resolution": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolvedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "reportId",
+        "conversationId",
+        "securityProfile",
+        "reporterPrincipalId",
+        "reportedPrincipalId",
+        "messageIds",
+        "category",
+        "evidenceKind",
+        "status",
+        "resolution",
+        "resolvedAt",
+        "createdAt"
+      ]
+    },
+    "ReportList": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reports": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ReportSummary"
+          }
+        }
+      },
+      "required": [
+        "reports"
+      ]
+    },
+    "ReportDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reportId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "securityProfile": {
+          "enum": [
+            "PRIVATE_E2EE",
+            "MANAGED"
+          ]
+        },
+        "reporterPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "reportedPrincipalId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "messageIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "category": {
+          "enum": [
+            "SPAM",
+            "HARASSMENT",
+            "HATE",
+            "VIOLENCE",
+            "SEXUAL_CONTENT",
+            "CHILD_SAFETY",
+            "SELF_HARM",
+            "ILLEGAL_CONTENT",
+            "IMPERSONATION",
+            "OTHER"
+          ]
+        },
+        "evidenceKind": {
+          "enum": [
+            "NONE",
+            "MANAGED_REFERENCE",
+            "REPORTER_DISCLOSURE"
+          ]
+        },
+        "status": {
+          "enum": [
+            "OPEN",
+            "ACTIONED",
+            "DISMISSED"
+          ]
+        },
+        "resolution": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolvedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "note": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "messageId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "sequence": {
+                "type": "integer"
+              },
+              "senderPrincipalId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "senderDeviceId": {
+                "oneOf": [
+                  {
+                    "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "lifecycle": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "e2ee": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "ciphertextSha256": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "acceptanceDigest": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "reporterDisclosure": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "verification": {
+                    "enum": [
+                      "REPORTER_ATTESTED_UNVERIFIABLE",
+                      "NO_PLAINTEXT_AVAILABLE"
+                    ]
+                  }
+                },
+                "required": [
+                  "ciphertextSha256",
+                  "acceptanceDigest",
+                  "reporterDisclosure",
+                  "verification"
+                ]
+              },
+              "managed": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "text": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "visibility": {
+                    "enum": [
+                      "POLICY_ALLOWS_MODERATOR_ACCESS",
+                      "POLICY_WITHHOLDS_CONTENT"
+                    ]
+                  }
+                },
+                "required": [
+                  "text",
+                  "visibility"
+                ]
+              }
+            },
+            "required": [
+              "messageId",
+              "sequence",
+              "senderPrincipalId",
+              "lifecycle",
+              "createdAt"
+            ]
+          }
+        },
+        "decryptionCapability": {
+          "const": "NONE"
+        }
+      },
+      "required": [
+        "reportId",
+        "conversationId",
+        "securityProfile",
+        "reporterPrincipalId",
+        "reportedPrincipalId",
+        "messageIds",
+        "category",
+        "evidenceKind",
+        "status",
+        "resolution",
+        "resolvedAt",
+        "createdAt",
+        "note",
+        "messages",
+        "decryptionCapability"
+      ],
+      "description": "A report with its evidence (moderation.manage; audited as REPORT_VIEWED)."
+    },
+    "ModerationActionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "REMOVE_MESSAGE",
+            "MUTE_MEMBER",
+            "UNMUTE_MEMBER",
+            "REMOVE_MEMBER",
+            "RESTRICT_PRINCIPAL",
+            "LIFT_RESTRICTION",
+            "DISMISS_REPORT"
+          ]
+        },
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "messageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "reportId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        },
+        "durationSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 2592000
+        }
+      },
+      "required": [
+        "kind",
+        "reason"
+      ]
+    },
+    "ModerationAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "actionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "enum": [
+            "REMOVE_MESSAGE",
+            "MUTE_MEMBER",
+            "UNMUTE_MEMBER",
+            "REMOVE_MEMBER",
+            "RESTRICT_PRINCIPAL",
+            "LIFT_RESTRICTION",
+            "DISMISS_REPORT"
+          ]
+        },
+        "conversationId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "messageId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "principalId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reportId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        },
+        "effectiveUntil": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "actionId",
+        "kind",
+        "conversationId",
+        "messageId",
+        "principalId",
+        "reportId",
+        "reason",
+        "effectiveUntil",
+        "createdAt"
+      ],
+      "description": "Append-only; audited. No action reads PRIVATE_E2EE content."
+    },
+    "ModerationActionList": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ModerationAction"
+          }
+        }
+      },
+      "required": [
+        "actions"
+      ]
+    },
+    "ExportRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      },
+      "required": [
+        "conversationId"
+      ]
+    },
+    "Export": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "exportId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "format": {
+          "const": "CFMEET_MESSAGING_MANAGED_EXPORT_V1"
+        },
+        "status": {
+          "enum": [
+            "PENDING",
+            "READY",
+            "FAILED",
+            "EXPIRED"
+          ]
+        },
+        "size": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sha256": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "messageCount": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "failure": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "exportId",
+        "conversationId",
+        "format",
+        "status",
+        "size",
+        "sha256",
+        "messageCount",
+        "failure",
+        "createdAt",
+        "completedAt",
+        "expiresAt"
+      ],
+      "description": "A MANAGED-only export (PRIVATE_E2EE: E2EE_EXPORT_NOT_AVAILABLE)."
+    },
+    "ExportDownloadGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "exportId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "method": {
+          "const": "GET"
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "size": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sha256": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "exportId",
+        "method",
+        "url",
+        "expiresAt",
+        "size",
+        "sha256"
+      ]
+    },
+    "DeletionRequestBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "PRINCIPAL_ERASURE",
+            "CONVERSATION_PURGE"
+          ]
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      },
+      "required": [
+        "kind"
+      ]
+    },
+    "DeletionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requestId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "enum": [
+            "PRINCIPAL_ERASURE",
+            "CONVERSATION_PURGE"
+          ]
+        },
+        "principalId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "conversationId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "PENDING",
+            "COMPLETED",
+            "PARTIALLY_HELD"
+          ]
+        },
+        "messagesPurged": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attachmentsDeleted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "heldItems": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "handshakeRecordsRetained": {
+          "const": true
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "requestId",
+        "kind",
+        "principalId",
+        "conversationId",
+        "status",
+        "messagesPurged",
+        "attachmentsDeleted",
+        "heldItems",
+        "handshakeRecordsRetained",
+        "createdAt",
+        "completedAt"
+      ],
+      "description": "Legal holds win: held items are preserved and counted (PARTIALLY_HELD)."
+    },
+    "AuditEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "auditId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "credentialId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principalId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        },
+        "targetKind": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        },
+        "targetId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "correlationId": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "auditId",
+        "occurredAt",
+        "credentialId",
+        "principalId",
+        "action",
+        "targetKind",
+        "targetId",
+        "correlationId",
+        "detail"
+      ]
+    },
+    "AuditPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/AuditEntry"
+          }
+        },
+        "nextBefore": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "entries",
+        "nextBefore"
       ]
     }
   }

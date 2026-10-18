@@ -24,8 +24,8 @@ which this repository cannot supply.
 | AD-04 | Post-quantum | Do not combine experimental PQ mechanisms with MLS 1.0 in v2. Provide protocol agility and a future hybrid MLS profile once an appropriate standard / audited library is available. | Classical suite only; no PQ claim. `libcrux-kem 0.0.9` is in the lockfile but in no build graph (CI-proven, scoped RustSec ignore). Protocol agility: protocol id, suite and binding formats are versioned. | PENDING owner approval |
 | AD-05 | Key transparency | Implement draft-aligned append-only key transparency with client proofs / monitoring; require external witness / auditor or equivalent anti-equivocation control before strong production claims. | RFC 9162 Merkle log, inclusion / consistency proofs, Ed25519-signed tree heads (dedicated server key), reported `UNWITNESSED`. Not aligned to a pinned KEYTRANS draft yet; no witness / auditor. | PENDING owner approval; witness open |
 | AD-06 | Web threat model | Web E2EE is supported but cannot protect against a malicious server that ships hostile JavaScript to the client. High-assurance claims require signed / reproducible native / desktop clients or stronger code-delivery controls. | `web` feature compile-checked for wasm32 only; no Web client exists in this repository. | PENDING owner approval |
-| AD-07 | History on new device | New devices receive future messages only by default; historical plaintext requires encrypted backup or authenticated device-to-device transfer. | Not implemented (no message store yet; later workstreams). Nothing grants history server-side. | PENDING owner approval |
-| AD-08 | E2EE attachments | Client encrypts before upload; server stores ciphertext and cannot truthfully perform plaintext malware scanning. | Not implemented (Workstreams K / L). | PENDING owner approval |
+| AD-07 | History on new device | New devices receive future messages only by default; historical plaintext requires encrypted backup or authenticated device-to-device transfer. | Message store exists (opaque MLS ciphertext); a new device joins through a Welcome and can decrypt only from its join epoch; members' history windows bound replay. No backup / device-to-device transfer implemented. Nothing grants history server-side. | PENDING owner approval |
+| AD-08 | E2EE attachments | Client encrypts before upload; server stores ciphertext and cannot truthfully perform plaintext malware scanning. | Implemented candidate (Part F, ADR 0050): `cf_messaging_crypto::attachment` (XChaCha20-Poly1305 STREAM, per-file key carried only in the MLS-protected descriptor); the server stores ciphertext only (CHECK: no name, no metadata, `application/octet-stream`), never sends it to a scanner and reports `NOT_APPLICABLE_ENCRYPTED`. | PENDING owner approval |
 | AD-09 | SMS | SMS is never E2EE. E2EE → SMS requires explicit per-message / channel downgrade and distinct transport copy. | No SMS path exists; `smsBridgeEligible` is always `false` in every policy snapshot. | PENDING owner approval |
 | AD-10 | Production claim | Independent cryptographic / security assessment is mandatory before marketing / declaring E2EE production parity with leading secure messengers. | No parity claim; no assessment performed. | PENDING (external assessment not started) |
 
@@ -89,13 +89,45 @@ Every change to an entry is a new version, never an in-place reinterpretation.
 5. Moving between profiles requires a new successor conversation with disclosure (later
    workstream). SMS is never E2EE (AD-09) and no SMS path exists.
 
-## 5. Capability matrix (what exists in A–D)
+## 5. Capability matrix (A–G)
 
 | Capability | PRIVATE_E2EE | MANAGED |
 |---|---|---|
-| Conversation create / read / lifecycle | Yes | Yes (only where application policy enables it) |
-| Message storage | Not yet (Workstream F); bodies will be ciphertext only | Not yet (Workstream F; envelope encryption, Appendix J) |
-| Server search / moderation of content | Never | Not yet |
-| Legal hold eligibility flag | `false` | `true` where allowed (no hold implementation yet) |
-| SMS Bridge | Never | Not yet (`smsBridgeEligible` always `false`) |
+| Conversation create / read / lifecycle | Yes | Yes (only where application policy enables it; regulated contexts require `managedDisclosureAcknowledged`) |
+| Message storage | Opaque MLS ciphertext + acceptance digest (Delivery Service checks public framing only) | Text sealed under the managed key ring (XChaCha20-Poly1305) + full-text index |
+| Realtime delivery (Part E) | Ciphertext from committed state; ephemeral typing / presence | Same |
+| Attachments (Part F) | Client-encrypted; never scanned, never claimed scanned | Content-type checks + fail-closed self-hosted ClamAV |
+| Server search | Never (`LOCAL_SEARCH_ONLY`; device-local index) | Membership-aware PostgreSQL full text |
+| Reports / moderation | Metadata + reporter's voluntary, unverifiable disclosure; tombstone / mute / remove / restrict without reading content | Message references; moderators see text only where policy allows |
+| Exports | Never (`E2EE_EXPORT_NOT_AVAILABLE`) | MANAGED-only, policy-gated, audited |
+| Retention / purge / legal hold | Yes — holds preserve ciphertext only, never create a decryption capability | Yes |
+| SMS Bridge | Never | Not implemented (`smsBridgeEligible` always `false`) |
 | Device keys | Public material only; private keys device-side | n/a |
+
+## 6. Parts E–G security audit (§96)
+
+Each item is enforced in code and covered by a test; "structural" means a database
+constraint or trigger enforces it independently of application code.
+
+| Restriction (§48) | Enforcement | Evidence |
+|---|---|---|
+| No plaintext substitute for E2EE | PRIVATE_E2EE rows can hold no sealed text / index (CHECK); MLS framing inspected, plaintext refused | `tests/messaging.rs` |
+| No E2EE private keys / backdoor on the server | Only public MLS material stored; no decrypt path exists; holds / exports / moderation report `decryptionCapability: NONE` | architecture tests, `tests/compliance.rs` |
+| LiveKit not a messaging store; Redis not the durable store | No LiveKit dependency; broker carries pointers; outbox in PostgreSQL is the replay log | `tests/realtime.rs::committed_messages_survive_a_broker_outage` |
+| WebSocket delivery is not proof of commit | Delivery only after commit from the outbox | `tests/realtime.rs` |
+| Typing never persisted; presence privacy | Ephemeral store with TTL; HIDDEN = OFFLINE | `tests/realtime.rs` |
+| No server scanning of E2EE plaintext / no false scan claim | Scanner never invoked for E2EE; CHECK forces `NOT_APPLICABLE_ENCRYPTED` (structural) | `tests/attachments.rs` |
+| No E2EE search terms to the server | Refused before any processing; queries never logged | `tests/compliance.rs` |
+| No globally accessible attachment URLs | Private bucket, per-object signed reads ≤ grant TTL, re-authorized each time | `tests/attachments.rs::real_object_storage_end_to_end` |
+| Removed members get no fresh grants | Membership checked per grant / proxied read | `tests/attachments.rs` |
+| Legal holds respected by purge | Every purge / object deletion checks holds; held → preserved | `tests/attachments.rs`, `tests/compliance.rs` |
+| No plaintext export of E2EE | `E2EE_EXPORT_NOT_AVAILABLE`, audited | `tests/compliance.rs` |
+| No disabled security gates | CI gates extended (attachments, compliance, MinIO, ClamAV), none removed | `.github/workflows/messaging.yml` |
+| No WhatsApp / Signal equivalence claim | None made; AD-10 assessment not started | this document |
+
+Residual risks (open): AD-01…AD-10 pending; no independent cryptographic assessment;
+key-transparency log UNWITNESSED; Web clients cannot be protected from a malicious
+server (AD-06); a grant issued before a revocation remains usable for its TTL (stated
+in the response, default 60 s); MANAGED content is readable by the operator by design;
+reporter disclosures are unverifiable; ClamAV coverage depends on the deployment's
+signature databases; no APNs / FCM adapters; no media processing (durations unverified).

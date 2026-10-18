@@ -136,12 +136,8 @@ pub async fn validate(state: &AppState, session: &SessionRow) -> std::result::Re
         .await
         .map_err(|_| Invalid::Unavailable)?
         .ok_or(Invalid::SessionRevoked)?;
-    if current.status != "ACTIVE" {
-        return Err(Invalid::SessionRevoked);
-    }
-    if current.expires_at <= state.now() {
-        return Err(Invalid::Expired);
-    }
+    // The device first: a device revocation also revokes its sessions, and the reason a
+    // client sees must not depend on which signal reached this gateway first.
     let device_active = db::scalar_i64(
         &state.db,
         "SELECT count(*) FROM messaging_devices WHERE id = $1 AND principal_id = $2 AND environment_id = $3 AND status = 'ACTIVE'",
@@ -151,6 +147,12 @@ pub async fn validate(state: &AppState, session: &SessionRow) -> std::result::Re
     .map_err(|_| Invalid::Unavailable)?;
     if device_active != 1 {
         return Err(Invalid::DeviceRevoked);
+    }
+    if current.status != "ACTIVE" {
+        return Err(Invalid::SessionRevoked);
+    }
+    if current.expires_at <= state.now() {
+        return Err(Invalid::Expired);
     }
     let scope = current.owner_scope().ok_or(Invalid::SessionRevoked)?;
     match state.principals.resolve(&scope, current.principal_id).await {

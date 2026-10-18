@@ -4,9 +4,12 @@
 //! | Route | Scope |
 //! |---|---|
 //! | `GET` / `POST /legal-holds`, `GET /legal-holds/{holdId}`, `POST /legal-holds/{holdId}/release` | `conversations.manage` |
+//! | `POST /exports`, `GET /exports/{exportId}`, `POST /exports/{exportId}/download-grants` (MANAGED only) | `messaging.export` |
+//! | `POST /deletion-requests`, `GET /deletion-requests/{requestId}` | `conversations.manage` |
+//! | `GET /audit` | `conversations.manage` |
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
@@ -14,7 +17,10 @@ use axum::{
 };
 use uuid::Uuid;
 
-use super::holds::{self, CreateHold, ReleaseHold};
+use super::{
+    audit_log, deletion, exports,
+    holds::{self, CreateHold, ReleaseHold},
+};
 use crate::{
     conversations::http::CONVERSATIONS_MANAGE,
     error::{Error, ErrorCode},
@@ -30,6 +36,80 @@ pub fn routes() -> Router<AppState> {
         .route("/legal-holds", get(list).post(create))
         .route("/legal-holds/:hold_id", get(one))
         .route("/legal-holds/:hold_id/release", post(release))
+        .route("/exports", post(export))
+        .route("/exports/:export_id", get(export_status))
+        .route("/exports/:export_id/download-grants", post(export_grant))
+        .route("/deletion-requests", post(deletion_request))
+        .route("/deletion-requests/:request_id", get(deletion_status))
+        .route("/audit", get(audit))
+}
+
+pub const MESSAGING_EXPORT: &str = "messaging.export";
+
+async fn export(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Json(body): Json<exports::ExportRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let ctx = administration(&caller, &headers, MESSAGING_EXPORT)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(exports::request(&state, ctx, body).await?),
+    ))
+}
+
+async fn export_status(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    let ctx = administration(&caller, &headers, MESSAGING_EXPORT)?;
+    Ok(Json(exports::get(&state, ctx, id).await?))
+}
+
+async fn export_grant(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    let ctx = administration(&caller, &headers, MESSAGING_EXPORT)?;
+    Ok(Json(exports::grant(&state, ctx, id).await?))
+}
+
+async fn deletion_request(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Json(body): Json<deletion::DeletionRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let ctx = administration(&caller, &headers, CONVERSATIONS_MANAGE)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(deletion::create(&state, ctx, body).await?),
+    ))
+}
+
+async fn deletion_status(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    let ctx = administration(&caller, &headers, CONVERSATIONS_MANAGE)?;
+    Ok(Json(deletion::get(&state, ctx, id).await?))
+}
+
+async fn audit(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Query(q): Query<audit_log::AuditQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let ctx = administration(&caller, &headers, CONVERSATIONS_MANAGE)?;
+    Ok(Json(audit_log::list(&state, ctx, q).await?))
 }
 
 /// Compliance administration is an application-level authority, never a principal's.

@@ -166,6 +166,36 @@ impl ManagedKeyring {
         })
     }
 
+    /// Seals a server-held record other than message text (e.g. evidence a reporter
+    /// voluntarily disclosed) under the active key, bound to `aad`.
+    /// Returns `(sealed, nonce, key id)`.
+    pub fn seal_record(&self, aad: &[u8], data: &[u8]) -> Result<(Vec<u8>, Vec<u8>, String)> {
+        let key = self
+            .keys
+            .get(&self.active)
+            .ok_or(Error::code(ErrorCode::InternalError))?;
+        let cipher = XChaCha20Poly1305::new(key.as_slice().into());
+        let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+        let sealed = cipher
+            .encrypt(&nonce, Payload { msg: data, aad })
+            .map_err(|_| Error::code(ErrorCode::InternalError))?;
+        Ok((sealed, nonce.to_vec(), self.active.clone()))
+    }
+
+    pub fn open_record(
+        &self,
+        aad: &[u8],
+        sealed: &[u8],
+        nonce: &[u8],
+        key_id: &str,
+    ) -> Option<Vec<u8>> {
+        let key = self.keys.get(key_id)?;
+        let nonce: [u8; 24] = nonce.try_into().ok()?;
+        XChaCha20Poly1305::new(key.as_slice().into())
+            .decrypt(&XNonce::from(nonce), Payload { msg: sealed, aad })
+            .ok()
+    }
+
     fn open(&self, scope: &SealScope, sealed: &[u8], nonce: &[u8], key_id: &str) -> Option<String> {
         let key = self.keys.get(key_id)?;
         let nonce: [u8; 24] = nonce.try_into().ok()?;
@@ -215,6 +245,20 @@ pub fn text_of(state: &AppState, row: &MessageRow) -> Option<String> {
     }
     let ring = state.managed_keys.as_ref()?;
     ring.open(
+        &scope_of_row(row),
+        row.managed_sealed.as_deref()?,
+        row.managed_seal_nonce.as_deref()?,
+        row.managed_seal_key_id.as_deref()?,
+    )
+}
+
+/// The stored text of a MANAGED message whatever its lifecycle (moderation review of
+/// reported content; `None` once purged). Never used for member-facing reads.
+pub fn stored_text_of(state: &AppState, row: &MessageRow) -> Option<String> {
+    if row.profile() != SecurityProfile::Managed {
+        return None;
+    }
+    state.managed_keys.as_ref()?.open(
         &scope_of_row(row),
         row.managed_sealed.as_deref()?,
         row.managed_seal_nonce.as_deref()?,

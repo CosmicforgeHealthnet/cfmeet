@@ -189,6 +189,10 @@ pub struct CreateRequest {
     /// Optional optimistic guard: the application policy version the caller decided on.
     #[serde(default)]
     pub expected_policy_version: Option<i64>,
+    /// Regulated contexts (§92): creating a MANAGED conversation requires the caller to
+    /// acknowledge that the server can read its content (it is not end-to-end encrypted).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub managed_disclosure_acknowledged: bool,
 }
 
 /// `(HTTP status, body)` of a creation, as stored for idempotent replays.
@@ -433,6 +437,16 @@ async fn create_in(
                 SecurityProfile::Managed => "MANAGED_NOT_ALLOWED",
                 SecurityProfile::PrivateE2ee => "PRIVATE_E2EE_NOT_ALLOWED",
             },
+        ));
+    }
+    if profile == SecurityProfile::Managed
+        && context_policy.regulated
+        && !request.managed_disclosure_acknowledged
+    {
+        // Never a silent server-readable conversation in a regulated context.
+        return Err(Error::reason(
+            ErrorCode::SecurityProfileNotAllowed,
+            "MANAGED_DISCLOSURE_REQUIRED",
         ));
     }
     if profile == SecurityProfile::PrivateE2ee {
