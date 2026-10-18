@@ -1,0 +1,59 @@
+name: Mobile lockfile repair (one-time staging remediation)
+
+# One-time, staging-only maintenance: regenerate the lockfile on a trusted
+# GitHub runner with registry access; commit only after a real npm ci succeeds.
+# This does not run a production build or deploy anything.
+on:
+  push:
+    branches: [staging]
+    paths:
+      - ".github/workflows/mobile-lockfile-repair.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mobile-lockfile-repair-staging
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: github.repository == 'CosmicforgeHealthnet/cfmeet' && github.ref == 'refs/heads/staging'
+    name: Regenerate and verify mobile package-lock
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: staging
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify clean checkout
+        run: |
+          git status --short
+          test -z "$(git status --porcelain)"
+      - name: Update lockfile against npm registry
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Verify reproducible clean install
+        run: npm ci --no-audit --no-fund
+      - name: Ensure manifest unchanged
+        run: |
+          git diff --exit-code -- apps/mobile/package.json
+      - name: Commit lockfile-only fix to staging
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- apps/mobile/package-lock.json; then
+            echo "Lockfile already synchronized"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- apps/mobile/package-lock.json
+          test "$(git diff --cached --name-only)" = "apps/mobile/package-lock.json"
+          git commit -m "fix(mobile): synchronize Expo package-lock for deterministic staging npm ci"
+          git push origin HEAD:staging
