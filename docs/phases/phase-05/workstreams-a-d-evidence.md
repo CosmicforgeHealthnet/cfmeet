@@ -24,3 +24,65 @@ is treated as not yet approved.
 
 Not certified here: end-to-end encrypted send / decrypt / reconnect (after Workstream I),
 independently witnessed key transparency, mobile / Web clients, external security review.
+
+## Remediation round — 18 October 2026
+
+### CI failures on `bfc0bd5` and their fixes (commit `2f98f55`)
+
+| Workflow (run on `bfc0bd5`) | Root cause | Fix | Regression coverage |
+|---|---|---|---|
+| Contracts and service auth ([run 39110802279](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39110802279)) — `an_unmodified_copy_is_valid` | The validator test sandbox listed the deployable services that existed before Part V and omitted `services/messaging`, so the registered `cfmeet.messaging.*` 1.1.0 contracts were rejected. The validator was right; the fixture was stale. | `packages/contracts/validator/tests/validator.rs`: the sandbox includes `messaging`. Ownership rules unchanged. | `contracts_for_unimplemented_services_are_rejected` now uses a service that does not exist (`directory`); new `messaging_contracts_require_the_messaging_service` removes `services/messaging` and asserts the real contracts are rejected. 18/18 validator tests; 52 contracts OK. |
+| Messaging ([run 39110802342](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39110802342)) — "the backend never links client key generation" | The step grepped an inverse `cargo tree -i openmls_basic_credential` for `did not match`; current Cargo prints `warning: nothing to print` when the crate is absent, so a correct graph failed. A command failure would also have been indistinguishable from "absent". | `scripts/messaging/check-backend-crypto-graph.sh` reads the full resolved graph (`-e normal --target all`, per-package features). Violation = `openmls_basic_credential` or the `client` / `web` feature on `cf-messaging-crypto`. Exit 2 when cargo fails or the graph has no `openmls`. The backend is checked with default, `--all-features` and `--no-default-features`; the crypto core with default (absent) and `--features client` (present). | `scripts/messaging/test-check-backend-crypto-graph.sh` (runs in CI): allowed graphs pass; `client` / `web` features and a deliberately prohibited backend crate (crypto core with `client` as a normal dependency) fail; a missing directory, an unknown feature and a graph without OpenMLS exit 2. 10/10 locally. |
+
+The guard was not disabled, made informational or relaxed.
+
+### Specification compliance — NOT PERFORMED
+
+The 60-page Part V Version 2.0 document was **not available** in the remediation session
+either (no file attached, none in the repository). The requirement-by-requirement audit
+against Workstreams A–D, Appendices G, H, L and N, and the exact wording of AD-01…AD-10,
+has therefore **not** been carried out. Nothing in this register claims compliance with
+that document. The implementation remains checked only against the directive that
+restates it (table above, ADR 0045–0048).
+
+### Approval register (all PENDING owner decision)
+
+| Decision | Implementation candidate | Known limitation | Status |
+|---|---|---|---|
+| MLS / OpenMLS adoption | MLS 1.0 (RFC 9420) via OpenMLS `=0.9.1`, `openmls_rust_crypto =0.6.0` | Pre-1.0 library; every bump is a reviewed change | PENDING |
+| Cipher suite | `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` only; others rejected at KeyPackage validation | Classical only | PENDING |
+| Signal / libsignal exclusion | Not used; no Signal-protocol or interoperability claim | — | PENDING |
+| Post-quantum policy | None implemented; no post-quantum claim | `libcrux-kem 0.0.9` is in the lockfile but in no build graph (RUSTSEC-2026-0330/0331, scoped ignore, CI-proven) | PENDING |
+| Key transparency and witnesses | RFC 9162 Merkle log, inclusion / consistency proofs, reported `UNWITNESSED` | No signed tree heads by an independent witness; equivocation is not detectable by clients yet | PENDING |
+| Web security limitations | `web` feature compile-checked for wasm32 | Not run in a browser; no Web key-storage design certified | PENDING |
+| History on new devices | Not implemented (Workstream E+) | — | PENDING |
+| Encrypted attachments | Not implemented | — | PENDING |
+| SMS downgrade rules | No downgrade path exists; PRIVATE_E2EE cannot become MANAGED (API, CHECK, trigger) | Rules for later fallbacks undefined | PENDING |
+| Independent cryptographic assessment | Not performed | Registration proof-of-possession composition is unreviewed | PENDING (external) |
+| `hpke-rs` MPL-2.0 | Transitive via `openmls_rust_crypto`, unmodified | File-level copyleft obligations need legal confirmation | PENDING (legal) |
+| Mobile / browser runtime certification | Android / iOS / wasm compile-only | Not run on devices | PENDING |
+
+E2EE device operations stay disabled by default outside local / test
+(`MESSAGING_E2EE_DEVICES_ENABLED`). Nothing here enables production E2EE.
+
+### Status classification
+
+| Classification | A–D |
+|---|---|
+| SOFTWARE COMPLETE | Yes, against the directive and ADR 0045–0048 (not against the unseen specification) |
+| INTEGRATION READY | Staging only, once PR 9 is merged; the service is not deployed anywhere |
+| EXTERNAL SECURITY CERTIFICATION PENDING | Yes — no independent assessment |
+| PRODUCTION APPROVAL PENDING | Yes — every decision above |
+
+### Branch administration
+
+Verified on 18 October 2026: the eight historical branches
+(`backup/pre-platform-layout` 300383b, `ccr-3ee568f2-bpv1kl` 380e693,
+`ccr-c5e05129-xhhmmk` b10d112, `chore/auto-deploy-meeting-service-main` e2ad624,
+`chore/platform-monorepo-layout` e8ee532, `chore/rename-meeting-service` 727febd,
+`claude/peaceful-curie-7yqa4g` 04ab2eb, `fix/meeting-deploy-ssh-build-keepalive` 2281aeb)
+each have zero commits not reachable from `staging` (6e4b70b), no open pull request
+(PRs 1, 2, 6, 7, 8 are closed) and no reference in any workflow or script. Deletion was
+attempted and **refused by the session's Git proxy (HTTP 403)**; they still exist.
+No branch is protected and no ruleset exists. `deploy-backend.yml` deploys only on a push
+to `main` (or a manual dispatch); a push to `staging` deploys nothing.
