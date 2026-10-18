@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/messaging/events/v1.schema.json",
+  "title": "CF Meet Messaging events v1",
+  "description": "Messaging domain events in the platform envelope (transactional outbox committed with the state change, at least once, per-aggregate order): messaging.device.registered, messaging.device.key-packages-published, messaging.device.revoked. Ids, states and versions only — never key material, ciphertext, content or a credential.",
+  "$ref": "#/$defs/MessagingEvent",
+  "$defs": {
+    "DeviceRegistered": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_id",
+        "principal_id",
+        "key_fingerprint",
+        "transparency_leaf_index"
+      ],
+      "properties": {
+        "device_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "key_fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "transparency_leaf_index": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "KeyPackagesPublished": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_id",
+        "count",
+        "available"
+      ],
+      "properties": {
+        "device_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "available": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "DeviceRevoked": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_id",
+        "principal_id",
+        "reason",
+        "transparency_leaf_index"
+      ],
+      "properties": {
+        "device_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "reason": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/RevocationReason"
+        },
+        "transparency_leaf_index": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "MessagingEvent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.device.registered"
+            },
+            "payload": {
+              "$ref": "#/$defs/DeviceRegistered"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.device.key-packages-published"
+            },
+            "payload": {
+              "$ref": "#/$defs/KeyPackagesPublished"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.device.revoked"
+            },
+            "payload": {
+              "$ref": "#/$defs/DeviceRevoked"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -5,6 +5,11 @@
     "usage-finalizer", "artifact-worker", "webhook-delivery-worker"
   ],
   "responsibilities": [
+    {"id": "messaging-outbox-publisher", "owner": "messaging", "source": "src/events/outbox.rs", "entry": "publish_due",
+     "tests": ["tests/outbox.rs::concurrent_publishers_deliver_each_event_once",
+               "tests/outbox.rs::a_crashed_claim_is_reclaimed_after_its_lease_and_failures_dead_letter"]},
+    {"id": "messaging-key-package-claims", "owner": "messaging", "source": "src/devices/mod.rs", "entry": "claim_key_packages",
+     "tests": ["tests/devices.rs::key_package_claims_are_single_use_under_concurrency"]},
     {"id": "call-timeout", "owner": "calling", "source": "src/calls/app/workers.rs", "entry": "expire_stalled_setups",
      "tests": ["tests/durable_workers.rs::a_call_stuck_before_connect_times_out_once_and_its_paid_leg_is_released",
                "tests/durable_workers.rs::the_setup_deadline_cancels_outstanding_ring_offers_of_a_stuck_application_call",

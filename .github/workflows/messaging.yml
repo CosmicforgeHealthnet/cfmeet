@@ -1,7 +1,12 @@
 name: Messaging
 
-# Part V Unified Messaging (ADR 0045): the shared cryptographic core
+# Part V Unified Messaging (ADR 0045-0048): services/messaging — the Messaging backend
+# foundation (conversations, devices and their PUBLIC MLS material, key-transparency log,
+# outbox; its own PostgreSQL database) — and the shared cryptographic core
 # packages/messaging-crypto (MLS 1.0 / OpenMLS, RFC 9162 transparency proofs).
+# Messaging depends only on packages/service-auth, packages/messaging-crypto and its
+# contracts; at runtime on Platform Access (the test job runs the REAL Platform Access
+# binaries for the cross-service certification).
 # Independent of every other service: this workflow never builds, starts or deploys the
 # Meeting Service, Calling, Numbering, the SMS Gateway or any other service, and nothing
 # here deploys anything.
@@ -16,11 +21,21 @@ on:
   push:
     branches: [main, staging]
     paths:
+      - "services/messaging/**"
+      - "services/platform-access/**"
       - "packages/messaging-crypto/**"
+      - "packages/service-auth/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
       - ".github/workflows/messaging.yml"
   pull_request:
     paths:
+      - "services/messaging/**"
+      - "services/platform-access/**"
       - "packages/messaging-crypto/**"
+      - "packages/service-auth/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
       - ".github/workflows/messaging.yml"
   workflow_dispatch:
 
@@ -82,3 +97,167 @@ jobs:
           cargo check --locked --features client --target aarch64-linux-android
           cargo check --locked --features client --target aarch64-apple-ios
           cargo check --locked --features web --target wasm32-unknown-unknown
+
+  lint:
+    name: service fmt / check / clippy / boundaries
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/messaging
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/messaging -> target
+          key: lint
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Architecture tests (no foreign source / tables, public crypto half only, no key / content logging)
+        run: cargo test --locked --test architecture
+
+      - name: the backend never links client key generation
+        run: |
+          set -euo pipefail
+          out="$(cargo tree --locked -e normal -i openmls_basic_credential 2>&1 || true)"
+          echo "$out" | grep -q "did not match" \
+            || { echo "$out"; echo "::error::services/messaging links the client key-generation half"; exit 1; }
+
+      - name: Repository guards (no other service's source or tables)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if grep -n -E 'services/(calling|platform-access|numbering|privacy-relay|telephony|meeting-service|sms-gateway)|\.\./(calling|platform-access|numbering|privacy-relay|telephony|meeting-service|sms-gateway)' \
+               services/messaging/Cargo.toml services/messaging/migration/Cargo.toml; then
+            echo "::error::services/messaging depends on another service"; exit 1
+          fi
+          if grep -rn -i -P 'CREATE TABLE (?!messaging_)' services/messaging/migration/src; then
+            echo "::error::services/messaging creates a table outside its domain"; exit 1
+          fi
+
+  test:
+    name: service test (PostgreSQL, real Platform Access)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    defaults:
+      run:
+        working-directory: services/messaging
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            services/messaging -> target
+            services/platform-access -> target
+          key: test
+
+      - name: Build Platform Access
+        working-directory: services/platform-access
+        run: cargo build --workspace --bins --locked
+
+      # Named gates first (a failure names the gate), then the whole workspace.
+      - name: Foundation (C) — probes, authentication boundaries, served contract, caching, startup, migrations
+        run: cargo test --locked --test foundation --test startup --test migrations --test outbox
+      - name: Devices and key directory (C) — proof of possession, KeyPackages, revocation, transparency
+        run: cargo test --locked --test devices --test transparency
+      - name: cargo test (whole workspace, incl. the Platform Access certification)
+        env:
+          PLATFORM_ACCESS_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access
+          PLATFORM_ACCESS_MIGRATION_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access-migration
+          MESSAGING_E2E_REQUIRED: "1"
+        run: cargo test --workspace --no-fail-fast --locked
+
+  build:
+    name: service build / migration smoke / isolation
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        working-directory: services/messaging
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/messaging -> target
+          key: build
+
+      - name: cargo build
+        run: cargo build --workspace --locked
+
+      - name: Migration smoke (up / reset / up)
+        env:
+          PGPASSWORD: postgres
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/messaging_migration_smoke
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE messaging_migration_smoke"
+          ./target/debug/messaging-migration up
+          ./target/debug/messaging-migration status
+          ./target/debug/messaging-migration reset
+          ./target/debug/messaging-migration up
+          q() { psql -h 127.0.0.1 -U postgres -d messaging_migration_smoke -tAc "$1"; }
+          test "$(q "SELECT count(*) FROM messaging_seaql_migrations")" = "$(grep -c 'Box::new(m20' migration/src/lib.rs)"
+          # Only messaging_ tables, and no column that could hold an E2EE secret or plaintext.
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename !~ '^messaging_'")" = "0"
+          test "$(q "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name ~ '(private|secret|plaintext|epoch|body|content|recovery|attachment_key)'")" = "0"
+
+      - name: Per-service database roles with the real migrations
+        env:
+          MESSAGING_MIGRATION_BIN: ${{ github.workspace }}/services/messaging/target/debug/messaging-migration
+        run: |
+          set -euo pipefail
+          test -x "$MESSAGING_MIGRATION_BIN"
+          "$GITHUB_WORKSPACE/infra/deployment/postgres/verify-service-isolation.sh" \
+            --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres
+
+  docker:
+    name: Docker image (repository-root context; never pushed or deployed)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker build
+        run: docker build -f services/messaging/Dockerfile -t cfmeet-messaging:ci .
+      - name: image contains only the Messaging binaries and no key material
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint /bin/ls cfmeet-messaging:ci /app | tr '\n' ' ')" = "messaging messaging-migration "
+          if docker run --rm --entrypoint /bin/sh cfmeet-messaging:ci -c 'grep -rlI --exclude-dir=proc --exclude-dir=sys -- "PRIVATE KEY-----" / 2>/dev/null'; then
+            echo "::error::private key material in the image"; exit 1
+          fi
+      - name: the container starts and refuses to run without its configuration
+        run: |
+          set -euo pipefail
+          if docker run --rm cfmeet-messaging:ci; then echo "::error::started without configuration"; exit 1; fi

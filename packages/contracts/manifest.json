@@ -541,6 +541,39 @@
       "lifecycle": "beta",
       "authority": "contract-first",
       "description": "SMS Gateway message events in the platform envelope (transactional outbox, at least once): received (N); requested, submitted, delivered, failed, unknown, blocked (O). Published to the platform customer webhook delivery as sms.*. Never content, a number or a provider identifier."
+    },
+    {
+      "id": "cfmeet.messaging.common",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "messaging/common/v1.schema.json",
+      "owner": "messaging",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Messaging vocabulary and messages (Part V C): error envelope, security profiles, protocol and the single accepted MLS cipher suite, devices and their PUBLIC MLS material, registration challenges, KeyPackage publication, revocation, the key-transparency tree head and RFC 9162 proofs (UNWITNESSED). Never a private key, group secret, ciphertext or plaintext."
+    },
+    {
+      "id": "cfmeet.messaging.http-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "messaging/http/v1.openapi.json",
+      "owner": "messaging",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "HTTP surface of services/messaging, served at /openapi.json: health, readiness and the device / key-directory API under /v1/messaging (Platform Access credential, scopes messages.send / messages.read, verified acting principal)."
+    },
+    {
+      "id": "cfmeet.messaging.event",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "messaging/events/v1.schema.json",
+      "owner": "messaging",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Messaging domain events in the platform envelope (transactional outbox, at least once): messaging.device.registered, messaging.device.key-packages-published, messaging.device.revoked. No key material, ciphertext or content."
     }
   ]
 }

@@ -1,0 +1,674 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/messaging/common/v1.schema.json",
+  "title": "CF Meet Messaging common v1",
+  "description": "Messaging vocabulary and messages (Part V Workstreams C–D): error envelope, security profiles, protocol / cipher suite, devices and their PUBLIC MLS material, registration challenges, KeyPackage publication, the key-transparency tree head and proofs. Never a private key, group secret, ciphertext or plaintext content.",
+  "oneOf": [
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Error"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/RegistrationChallenge"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/RegisterDeviceRequest"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Device"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/TreeHead"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/DeviceDirectory"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/PublishKeyPackagesRequest"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/PublishKeyPackagesResponse"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/RevokeDeviceRequest"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/TransparencyProof"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Health"
+    },
+    {
+      "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Readiness"
+    }
+  ],
+  "$defs": {
+    "ErrorCode": {
+      "type": "string",
+      "enum": [
+        "VALIDATION_ERROR",
+        "AUTHENTICATION_FAILED",
+        "CLIENT_TOKENS_NOT_ENABLED",
+        "AUTHORITY_SUSPENDED",
+        "INSUFFICIENT_SCOPE",
+        "ACTING_PRINCIPAL_REQUIRED",
+        "PRINCIPAL_NOT_AUTHORIZED",
+        "NOT_FOUND",
+        "METHOD_NOT_ALLOWED",
+        "PAYLOAD_TOO_LARGE",
+        "RATE_LIMITED",
+        "INTERNAL_AUTHENTICATION_FAILED",
+        "INTERNAL_PERMISSION_DENIED",
+        "FEATURE_DISABLED",
+        "CHALLENGE_INVALID",
+        "KEY_PACKAGE_REJECTED",
+        "DEVICE_REVOKED",
+        "DEVICE_LIMIT_REACHED",
+        "KEY_PACKAGE_LIMIT_REACHED",
+        "IDEMPOTENCY_KEY_REQUIRED",
+        "IDEMPOTENCY_KEY_REUSED",
+        "CONTEXT_NOT_ALLOWED",
+        "SECURITY_PROFILE_NOT_ALLOWED",
+        "SECURITY_PROFILE_IMMUTABLE",
+        "E2EE_NOT_AVAILABLE",
+        "VERSION_CONFLICT",
+        "INVALID_TRANSITION",
+        "CONVERSATION_NOT_ACTIVE",
+        "POLICY_VERSION_CONFLICT",
+        "CONFLICT",
+        "SERVICE_UNAVAILABLE",
+        "INTERNAL_ERROR"
+      ]
+    },
+    "Error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message",
+            "requestId"
+          ],
+          "properties": {
+            "code": {
+              "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ErrorCode"
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "requestId": {
+              "oneOf": [
+                {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RequestId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            }
+          }
+        }
+      },
+      "description": "Error envelope. Messages never contain key material, ciphertext, content, a credential or database text."
+    },
+    "SecurityProfile": {
+      "type": "string",
+      "enum": [
+        "PRIVATE_E2EE",
+        "MANAGED"
+      ],
+      "description": "PRIVATE_E2EE: client-side MLS 1.0 encryption, the server holds no decryption key. MANAGED: server-processable, never presented as E2EE."
+    },
+    "Protocol": {
+      "type": "string",
+      "enum": [
+        "MLS_1_0",
+        "CFMEET_MANAGED_V1"
+      ]
+    },
+    "Ciphersuite": {
+      "type": "string",
+      "enum": [
+        "MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519"
+      ]
+    },
+    "DeviceStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "REVOKED"
+      ]
+    },
+    "RevocationReason": {
+      "type": "string",
+      "enum": [
+        "USER_REQUESTED",
+        "LOST_OR_STOLEN",
+        "COMPROMISED",
+        "REPLACED",
+        "ADMINISTRATIVE"
+      ]
+    },
+    "RegistrationChallenge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "challengeId",
+        "deviceId",
+        "principalId",
+        "nonce",
+        "registrationBinding",
+        "credentialIdentity",
+        "protocol",
+        "ciphersuite",
+        "expiresAt"
+      ],
+      "properties": {
+        "challengeId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "deviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "registrationBinding": {
+          "type": "string",
+          "pattern": "^cfmeet-messaging-registration:v1:[0-9a-f-]{36}:[0-9a-f]{64}$",
+          "description": "The exact RFC 9420 application_id leaf extension the registration KeyPackage must carry."
+        },
+        "credentialIdentity": {
+          "type": "string",
+          "pattern": "^cfmeet-messaging-device:v1:[0-9a-f-]{36}$",
+          "description": "The exact BasicCredential identity of every KeyPackage of the device."
+        },
+        "protocol": {
+          "const": "MLS_1_0"
+        },
+        "ciphersuite": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Ciphersuite"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "A single-use registration challenge with a server-assigned device id."
+    },
+    "RegisterDeviceRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "challengeId",
+        "keyPackage"
+      ],
+      "properties": {
+        "challengeId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "keyPackage": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "base64url of the registration KeyPackage (RFC 9420 MLSMessage, wire format mls_key_package).",
+          "maxLength": 24576
+        },
+        "displayLabel": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deviceId",
+        "principalId",
+        "status",
+        "protocol",
+        "ciphersuite",
+        "signaturePublicKey",
+        "credentialIdentity",
+        "keyFingerprint",
+        "displayLabel",
+        "registeredAt",
+        "revokedAt",
+        "revocationReason",
+        "transparency",
+        "version"
+      ],
+      "properties": {
+        "deviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/DeviceStatus"
+        },
+        "protocol": {
+          "const": "MLS_1_0"
+        },
+        "ciphersuite": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Ciphersuite"
+        },
+        "signaturePublicKey": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "base64url Ed25519 MLS signature PUBLIC key (32 bytes)."
+        },
+        "credentialIdentity": {
+          "type": "string",
+          "pattern": "^cfmeet-messaging-device:v1:[0-9a-f-]{36}$"
+        },
+        "keyFingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "displayLabel": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "registeredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "revokedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revocationReason": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/RevocationReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "transparency": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "registrationLeafIndex",
+            "revocationLeafIndex"
+          ],
+          "properties": {
+            "registrationLeafIndex": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "revocationLeafIndex": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "A Messaging device: PUBLIC key material only (never a private key)."
+    },
+    "TreeHead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "treeSize",
+        "rootHash",
+        "hashAlgorithm",
+        "witnessStatus"
+      ],
+      "properties": {
+        "treeSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rootHash": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "description": "base64url SHA-256 (32 bytes)"
+        },
+        "hashAlgorithm": {
+          "const": "RFC9162_SHA256"
+        },
+        "witnessStatus": {
+          "const": "UNWITNESSED",
+          "description": "The log is verifiable but not independently witnessed: not anti-equivocation, not production-certified key transparency."
+        }
+      }
+    },
+    "DeviceDirectory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "principalId",
+        "devices",
+        "treeHead"
+      ],
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "devices": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Device"
+          }
+        },
+        "treeHead": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/TreeHead"
+        }
+      }
+    },
+    "PublishKeyPackagesRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "keyPackages"
+      ],
+      "properties": {
+        "keyPackages": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "description": "base64url without padding",
+            "maxLength": 24576
+          }
+        }
+      }
+    },
+    "PublishKeyPackagesResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deviceId",
+        "keyPackages"
+      ],
+      "properties": {
+        "deviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "keyPackages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "keyPackageRef",
+              "notAfter",
+              "outcome"
+            ],
+            "properties": {
+              "keyPackageRef": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{43}$",
+                "description": "base64url SHA-256 (32 bytes)"
+              },
+              "notAfter": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "PUBLISHED",
+                  "ALREADY_PUBLISHED"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "RevokeDeviceRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason"
+      ],
+      "properties": {
+        "reason": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/RevocationReason"
+        }
+      }
+    },
+    "TransparencyProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deviceId",
+        "treeHead",
+        "entries",
+        "consistency"
+      ],
+      "properties": {
+        "deviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "treeHead": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/TreeHead"
+        },
+        "entries": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "leafIndex",
+              "kind",
+              "leafData",
+              "inclusionProof"
+            ],
+            "properties": {
+              "leafIndex": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "DEVICE_REGISTERED",
+                  "DEVICE_REVOKED"
+                ]
+              },
+              "leafData": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]+$",
+                "description": "base64url of the exact leaf bytes the log hashed (canonical JSON)."
+              },
+              "inclusionProof": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{43}$",
+                  "description": "base64url SHA-256 (32 bytes)"
+                }
+              }
+            }
+          }
+        },
+        "consistency": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "fromTreeSize",
+                "fromRootHash",
+                "proof"
+              ],
+              "properties": {
+                "fromTreeSize": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "fromRootHash": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{43}$",
+                  "description": "base64url SHA-256 (32 bytes)"
+                },
+                "proof": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$",
+                    "description": "base64url SHA-256 (32 bytes)"
+                  }
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "service"
+      ],
+      "properties": {
+        "status": {
+          "const": "ok"
+        },
+        "service": {
+          "const": "messaging"
+        }
+      }
+    },
+    "Readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "service",
+        "database",
+        "migrations",
+        "e2eeDevices",
+        "authorizationCache",
+        "outboxPending",
+        "outboxDeadLetter"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "not_ready"
+          ]
+        },
+        "service": {
+          "const": "messaging"
+        },
+        "database": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "unavailable"
+          ]
+        },
+        "migrations": {
+          "type": "string",
+          "enum": [
+            "current",
+            "pending",
+            "unknown"
+          ]
+        },
+        "e2eeDevices": {
+          "type": "string",
+          "enum": [
+            "enabled",
+            "disabled"
+          ]
+        },
+        "authorizationCache": {
+          "type": "string",
+          "enum": [
+            "active",
+            "inactive"
+          ]
+        },
+        "outboxPending": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outboxDeadLetter": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

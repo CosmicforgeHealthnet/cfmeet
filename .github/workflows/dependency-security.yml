@@ -20,6 +20,7 @@ on:
       - "services/calling/**"
       - "services/privacy-relay/**"
       - "services/telephony/**"
+      - "services/messaging/**"
       - "packages/**"
       - "scripts/secret-scan/**"
       - ".github/workflows/dependency-security.yml"
@@ -28,6 +29,7 @@ on:
       - "services/calling/**"
       - "services/privacy-relay/**"
       - "services/telephony/**"
+      - "services/messaging/**"
       - "packages/**"
       - "scripts/secret-scan/**"
       - ".github/workflows/dependency-security.yml"
@@ -56,6 +58,7 @@ jobs:
           - packages/object-storage
           - packages/contracts/validator
           - packages/messaging-crypto
+          - services/messaging
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -73,7 +76,7 @@ jobs:
       # libcrux-kem is in no build graph (any target, all features); the ignore is lifted
       # when hpke-rs releases a fixed pin (ADR 0045).
       - name: libcrux-kem is never compiled into the Messaging crypto core
-        if: matrix.lockfile == 'packages/messaging-crypto'
+        if: matrix.lockfile == 'packages/messaging-crypto' || matrix.lockfile == 'services/messaging'
         working-directory: ${{ matrix.lockfile }}
         run: |
           set -euo pipefail
@@ -84,7 +87,7 @@ jobs:
         working-directory: ${{ matrix.lockfile }}
         run: >-
           cargo audit --ignore RUSTSEC-2023-0071
-          ${{ matrix.lockfile == 'packages/messaging-crypto' && '--ignore RUSTSEC-2026-0330 --ignore RUSTSEC-2026-0331' || '' }}
+          ${{ (matrix.lockfile == 'packages/messaging-crypto' || matrix.lockfile == 'services/messaging') && '--ignore RUSTSEC-2026-0330 --ignore RUSTSEC-2026-0331' || '' }}
 
   image:
     name: image security (${{ matrix.service }})
