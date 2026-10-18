@@ -475,7 +475,9 @@ async fn repeated_failed_authentications_are_throttled_without_locking_out_the_o
         .issue(c.sa(EnvironmentKind::Production), &[names::PRINCIPALS_READ])
         .await;
     let token = issued.secret.expose_once().to_string();
-    let wrong = format!("{}0000", &token[..token.len() - 4]);
+    // A DIFFERENT last secret digit (a fixed "0000" tail equals the token 1 in 65536 times).
+    let last = if token.ends_with('0') { '1' } else { '0' };
+    let wrong = format!("{}{last}", &token[..token.len() - 1]);
     assert_ne!(wrong, token);
     let mismatches_before = calling::metrics::counter(
         "calling_authentication_failures_total",
@@ -605,7 +607,10 @@ async fn platform_access_unreachable_fails_closed() {
         Err(AuthenticationError::Unavailable { .. })
     ));
     // A wrong secret is refused the same way (no local verifier to fall back on).
-    let wrong = format!("{}0000", &token[..token.len() - 4]);
+    // A DIFFERENT last secret digit (a fixed "0000" tail equals the token 1 in 65536 times).
+    let last = if token.ends_with('0') { '1' } else { '0' };
+    let wrong = format!("{}{last}", &token[..token.len() - 1]);
+    assert_ne!(wrong, token);
     assert_eq!(
         h.whoami(&wrong).await.status,
         StatusCode::SERVICE_UNAVAILABLE

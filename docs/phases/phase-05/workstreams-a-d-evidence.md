@@ -1,10 +1,15 @@
 # Part V Workstreams A–D — implementation evidence register
 
-Branch `feature/part-v-a-d-secure-messaging-foundation`, based on `staging` after its
-reconciliation with `main` (689728c). Decisions: ADR 0045–0048. The Part V specification
-document itself was not available in the implementation session; requirements were taken
-from the implementation directive that restates it, and every AD-01…AD-10 owner decision
-is treated as not yet approved.
+Branch `feature/part-v-a-d-secure-messaging-foundation` (PR 9, target `staging`), based on
+`staging` after its reconciliation with `main` (689728c, merge 6e4b70b). Decisions:
+ADR 0045–0048; security architecture, AD register and threat model:
+`docs/architecture/messaging-security-architecture.md`. The implementation was reviewed
+against the Part V Version 2.0 specification (60 pages, 18 October 2026) in the
+remediation round below; the requirement matrix and its seven corrections are recorded
+there. Every AD-01…AD-10 owner decision and the independent cryptographic assessment
+remain **pending** (none has been approved); production E2EE is not enabled.
+
+#### Initial implementation round (head `bfc0bd5`, before the remediation)
 
 | Gate | Command (local, PostgreSQL 16, no Docker) | Result |
 |---|---|---|
@@ -20,10 +25,12 @@ is treated as not yet approved.
 | DB isolation | `MESSAGING_MIGRATION_BIN=… infra/deployment/postgres/verify-service-isolation.sh` | OK (runtime role has no DDL; no cross-service connection) |
 | RustSec | `cargo audit` (crypto core, service) | clean except RUSTSEC-2026-0330/0331 on `libcrux-kem 0.0.9`, present in the lockfile but in no build graph (CI-proven; ADR 0045) |
 | Regression | SMS Gateway full suite; Numbering lib / service / contracts / routing grants; Calling lib / http_contract / architecture / authentication / scopes | pass |
-| Docker image | `docker build -f services/messaging/Dockerfile .` | **BLOCKED locally** (Docker Hub 429 rate limit pulling base images); verified by the `messaging.yml` docker job in CI |
+| Docker image | `docker build -f services/messaging/Dockerfile .` | BLOCKED locally (Docker Hub 429 rate limit pulling base images); the `messaging.yml` Docker job passes in CI (below) |
 
-Not certified here: end-to-end encrypted send / decrypt / reconnect (after Workstream I),
-independently witnessed key transparency, mobile / Web clients, external security review.
+Counts above are those of the initial round; the remediation round adds tests (below).
+Not certified anywhere in A–D: end-to-end encrypted send / decrypt / reconnect (after
+Workstream I), independently witnessed key transparency, mobile / Web clients, external
+security review.
 
 ## Remediation round — 18 October 2026
 
@@ -131,7 +138,7 @@ G's "immutable when the first protected application message is committed".
 | Cipher suite | `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` only; others rejected at KeyPackage validation | Classical only | PENDING |
 | Signal / libsignal exclusion | Not used; no Signal-protocol or interoperability claim | — | PENDING |
 | Post-quantum policy | None implemented; no post-quantum claim | `libcrux-kem 0.0.9` is in the lockfile but in no build graph (RUSTSEC-2026-0330/0331, scoped ignore, CI-proven) | PENDING |
-| Key transparency and witnesses | RFC 9162 Merkle log, inclusion / consistency proofs, reported `UNWITNESSED` | No signed tree heads by an independent witness; equivocation is not detectable by clients yet | PENDING |
+| Key transparency and witnesses | RFC 9162 Merkle log, inclusion / consistency proofs, Ed25519-signed tree heads (operator key), reported `UNWITNESSED` | No independent witness / auditor co-signs heads, so split-view equivocation is not yet detectable; not aligned to a pinned KEYTRANS draft | PENDING |
 | Web security limitations | `web` feature compile-checked for wasm32 | Not run in a browser; no Web key-storage design certified | PENDING |
 | History on new devices | Not implemented (Workstream E+) | — | PENDING |
 | Encrypted attachments | Not implemented | — | PENDING |
@@ -165,39 +172,38 @@ attempted and **refused by the session's Git proxy (HTTP 403)**; they still exis
 No branch is protected and no ruleset exists. `deploy-backend.yml` deploys only on a push
 to `main` (or a manual dispatch); a push to `staging` deploys nothing.
 
-### GitHub Actions on the final implementation commit `b8f3f40`
+### GitHub Actions — remediation rounds
 
-`b8f3f40` adds one more fix: Calling's `repeated_loop_blocks_are_one_incident` failed at
-random on `91658c0` ([run 39116719995](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39116719995))
-because a random destination UUID contained "650", the substring the test uses to detect a
-leaked extension number. The check now removes the incident's own ids first. Pre-existing,
-unrelated to Part V; a real leak still fails it.
+Every round ran all 16 PR workflows on the PR head.
 
-All 16 workflows pass on `b8f3f40`:
-Messaging ([39118281447](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281447): crypto core, service lint and graph guard, PostgreSQL tests with real Platform Access incl. the §10 certification, build / migration smoke / isolation, **Docker image**),
-Contracts and service auth ([39118281479](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281479)),
-Service boundaries ([39118281337](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281337)),
-Dependency and image security ([39118281424](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281424)),
-Platform Access ([39118281491](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281491)),
-Calling ([39118281381](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281381)),
-Calling RTC certification ([39118281362](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281362)),
-Enterprise calling certification ([39118281341](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281341)),
-Communications end-to-end journeys ([39118281368](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281368)),
-Numbering ([39118281347](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281347)),
-SMS Gateway ([39118281392](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281392)),
-Privacy Relay ([39118281363](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281363)),
-Telephony ([39118281340](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281340)),
-Telephony SIP certification ([39118281483](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281483)),
-Compose config ([39118281376](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281376)),
-Deploy Backend ([39118281403](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281403): pre-deploy tests pass, "Deploy to VPS" **skipped** — nothing deployed).
+| Head | Result | Cause of any failure | Fix |
+|---|---|---|---|
+| `bfc0bd5` | 2 failed | validator fixture; fragile graph guard (table above) | `2f98f55` |
+| `91658c0` | 15 / 16 | Calling `repeated_loop_blocks_are_one_incident`: a random UUID contained "650", the substring that detects a leaked extension number ([run 39116719995](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39116719995)) | `b8f3f40`: the incident's own ids are removed before the check |
+| `b8f3f40` | **16 / 16** (e.g. Messaging [39118281447](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281447), Docker image job included; Deploy Backend [39118281403](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39118281403): "Deploy to VPS" skipped) | — | — |
+| `0b1c608` (specification corrections) | 3 jobs failed | rustfmt of two new architecture guards; a wrong assertion in a new test; clippy `manual_is_multiple_of` in the vector test | `7d9d49c`, `1c450a7` |
+| `1c450a7` | 15 / 16 (Messaging [39123308296](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39123308296), Contracts [39123308232](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39123308232), Service boundaries [39123308245](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39123308245), Dependency security [39123308353](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39123308353) …) | Calling `debug_output_of_secret_bearing_types_is_redacted` ([run 39123308255](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39123308255)): the test built its "wrong" credential by replacing the last four secret characters with `0000`, which IS the real credential whenever the random secret already ends in `0000` (1 in 65 536); Platform Access verified it correctly. Pre-existing, unrelated to Part V | The commit containing this paragraph: every wrong-credential construction in Calling's tests (`secret_leakage.rs`, `authentication.rs`, three `0000` / one `ffff` sites) now changes the last digit to a different one and asserts `wrong != token` |
 
-The Docker-image blocker of the first session is resolved by CI (the local build was only
-rate-limited). Known, not fixed here: Calling's `a_stuck_queue_entry_is_an_incident_and_drains_later`
-reads the process-global `calling_enterprise_queue_depth` gauge and can fail when run in
-parallel on a small machine (2 of 3 local runs; green in every CI run).
+The final head is the commit that adds this table; its CI results (all workflows) are
+recorded on PR 9 (closing comment), since a document cannot record the CI of the commit
+that contains it.
+
+Local validation of the final code (PostgreSQL 16, no Docker): crypto core 12 unit + 6
+OpenMLS + 2 RFC 9420 vector tests (fmt / clippy clean for default, `client` and all
+features); Messaging fmt / clippy clean, 26 unit, architecture 6, conversations 15,
+devices 11, foundation 7, transparency 4, startup 3, outbox 3, migrations 3 and the
+real-process Platform Access certification 1; Calling `secret_leakage` 4 and
+`authentication` 11; contracts 52 OK; validator 18; service boundaries OK; secret scan
+clean; licence check 156 / 379 packages.
+
+Known, not fixed here (pre-existing, outside Part V): Calling's
+`a_stuck_queue_entry_is_an_incident_and_drains_later` reads the process-global
+`calling_enterprise_queue_depth` gauge and can fail when run in parallel on a small
+machine (2 of 3 local runs; green in every CI run).
 
 ### PR 9 status
 
-Open, not merged. Merge gates not met: the Version 2.0 specification review (document
-unavailable) and an approving review (none; the only GitHub identity available to the
-implementation session is the PR author). The feature branch is retained.
+Open, not merged. Software gates: met once CI on the final head is green. The Version 2.0
+specification review is complete (above). Remaining gate: an independent review. The only
+GitHub identity available to the implementation session is the PR author, which cannot
+approve its own PR; no approval is invented. `main` is unchanged and nothing is deployed.
