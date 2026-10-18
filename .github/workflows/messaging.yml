@@ -214,6 +214,8 @@ jobs:
         run: cargo test --locked --test devices --test transparency
       - name: Conversation domain (D) — profiles, policy, lifecycle, concurrency, isolation, idempotency, sequencing
         run: cargo test --locked --test conversations
+      - name: Membership, messages and MLS Delivery Service (Parts E-G prerequisites) — real OpenMLS devices, profile isolation, blocks
+        run: cargo test --locked --test messaging
       - name: cargo test (whole workspace, incl. the Platform Access certification)
         env:
           PLATFORM_ACCESS_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access
@@ -264,7 +266,9 @@ jobs:
           test "$(q "SELECT count(*) FROM messaging_seaql_migrations")" = "$(grep -c 'Box::new(m20' migration/src/lib.rs)"
           # Only messaging_ tables, and no column that could hold an E2EE secret or plaintext.
           test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename !~ '^messaging_'")" = "0"
-          test "$(q "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name ~ '(private|secret|plaintext|epoch|body|content|recovery|attachment_key)'")" = "0"
+          # `mls_epoch` (the PUBLIC epoch number of RFC 9420 framing) is the one exact
+          # exception; epoch secrets and every other match stay refused.
+          test "$(q "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND column_name ~ '(private|secret|plaintext|epoch|body|content|recovery|attachment_key)' AND column_name <> 'mls_epoch'")" = "0"
 
       - name: Per-service database roles with the real migrations
         env:

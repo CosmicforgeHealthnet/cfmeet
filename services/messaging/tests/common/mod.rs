@@ -10,6 +10,8 @@
 //! (`cf-messaging-crypto` with its `client` feature — test code only).
 #![allow(dead_code)]
 
+pub mod flows;
+
 use std::{
     collections::{BTreeSet, HashMap},
     sync::{Arc, Mutex as StdMutex},
@@ -375,7 +377,10 @@ impl Harness {
             .with_devices(DeviceSettings::default())
             .with_tree_head_signer(Arc::new(messaging::transparency::TreeHeadSigner::generate(
                 "cfmeet-messaging:test",
-            )));
+            )))
+            .with_managed_keys(Arc::new(
+                messaging::messages::managed::ManagedKeyring::generate("test-1"),
+            ));
         configure(&mut state);
         Self {
             db,

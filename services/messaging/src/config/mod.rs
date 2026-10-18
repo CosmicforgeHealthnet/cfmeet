@@ -21,6 +21,10 @@
 //! | `MESSAGING_WORKER_INTERVAL_MS` / `MESSAGING_WORKER_LEASE_SECONDS` / `MESSAGING_OUTBOX_MAX_ATTEMPTS` | no | outbox publisher (defaults 1000 / 60 / 12) |
 //! | `MESSAGING_KT_LOG_ID` | yes | identifier of this deployment's key-transparency log, signed into every tree head (`[a-z0-9][a-z0-9.:-]{2,63}`, stable across key rotation) |
 //! | `MESSAGING_KT_SIGNING_KEY_FILE` | yes | PKCS#8 PEM Ed25519 private key FILE that signs tree heads (Part V G.5 / §142). A server secret distinct from the service-authentication key; inline `MESSAGING_KT_SIGNING_KEY` is refused |
+//! | `MESSAGING_MAX_MEMBERS` | no | ACTIVE members per conversation (2–100000, default 10000; policy may lower it) |
+//! | `MESSAGING_ENVIRONMENT_MESSAGES_PER_MINUTE` | no | tenant-fairness bound per application environment (default 60000) |
+//! | `MESSAGING_ABUSE_SIGNAL_THRESHOLD` / `MESSAGING_ABUSE_RESTRICTION_SECONDS` | no | automatic temporary sending restriction (defaults 10 per hour / 900 s) |
+//! | `MESSAGING_MANAGED_KEYRING_FILE` | no | key-ring FILE sealing MANAGED message text at rest (`<id> <base64url 32-byte key>` per line, first = active). Without it MANAGED sending fails closed |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
 //! Service authentication (`CF_*`) is read by [`service_auth`].
@@ -113,6 +117,13 @@ impl Default for AuthCacheSettings {
 pub struct ConversationSettings {
     pub creations_per_minute: i64,
     pub expiry_interval: Duration,
+    /// Platform bound of ACTIVE members per conversation (policy may lower it).
+    pub max_members: i64,
+    /// Messages per environment per minute (tenant fairness on shared capacity).
+    pub environment_messages_per_minute: i64,
+    /// Abuse signals per principal per hour that trigger an automatic restriction.
+    pub abuse_signal_threshold: i64,
+    pub abuse_restriction_seconds: i64,
 }
 
 impl Default for ConversationSettings {
@@ -120,6 +131,10 @@ impl Default for ConversationSettings {
         Self {
             creations_per_minute: 120,
             expiry_interval: Duration::from_millis(5_000),
+            max_members: 10_000,
+            environment_messages_per_minute: 60_000,
+            abuse_signal_threshold: 10,
+            abuse_restriction_seconds: 900,
         }
     }
 }
@@ -175,6 +190,7 @@ pub struct MessagingConfig {
     pub conversations: ConversationSettings,
     pub workers: WorkerSettings,
     pub transparency: TransparencySettings,
+    pub managed_keyring_file: Option<std::path::PathBuf>,
     pub log_format: LogFormat,
 }
 
@@ -333,6 +349,28 @@ impl MessagingConfig {
                 250,
                 600_000,
             )? as u64),
+            max_members: bounded(&get, "MESSAGING_MAX_MEMBERS", 10_000, 2, 100_000)?,
+            environment_messages_per_minute: bounded(
+                &get,
+                "MESSAGING_ENVIRONMENT_MESSAGES_PER_MINUTE",
+                60_000,
+                1,
+                10_000_000,
+            )?,
+            abuse_signal_threshold: bounded(
+                &get,
+                "MESSAGING_ABUSE_SIGNAL_THRESHOLD",
+                10,
+                1,
+                100_000,
+            )?,
+            abuse_restriction_seconds: bounded(
+                &get,
+                "MESSAGING_ABUSE_RESTRICTION_SECONDS",
+                900,
+                60,
+                7 * 86_400,
+            )?,
         };
         let workers = WorkerSettings {
             interval: Duration::from_millis(bounded(
@@ -400,6 +438,8 @@ impl MessagingConfig {
             conversations,
             workers,
             transparency,
+            managed_keyring_file: get("MESSAGING_MANAGED_KEYRING_FILE")
+                .map(std::path::PathBuf::from),
             log_format,
         })
     }

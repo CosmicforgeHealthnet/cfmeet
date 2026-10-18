@@ -873,6 +873,10 @@ pub async fn revoke(
                     now,
                 )
                 .await?;
+                // The revoked device must leave every E2EE group of its principal: those
+                // groups accept only a removal commit until one is accepted.
+                crate::mls::device_revoked(txn, ctx.scope.environment_id, acting.principal_id, device.id, now)
+                    .await?;
                 crate::metrics::inc("messaging_devices_revoked_total", &[]);
                 load_device(txn, &ctx, device.id, false)
                     .await?

@@ -84,6 +84,52 @@ pub async fn enqueue<C: ConnectionTrait>(
     Ok(id)
 }
 
+/// Records `event` as the next durable event of `conversation_id` (its replay cursor),
+/// in the caller's transaction. The per-conversation event sequence is allocated from
+/// the conversation's counter row, so it is gap-free per committed transaction and
+/// totally ordered within the conversation. Returns `(event id, event sequence)`.
+pub async fn enqueue_conversation<C: ConnectionTrait>(
+    db: &C,
+    conversation_id: Uuid,
+    event: NewEvent,
+    ctx: &RequestContext,
+    now: DateTime<Utc>,
+) -> Result<(Uuid, i64), DbErr> {
+    let row = db
+        .query_one(stmt(
+            "UPDATE messaging_conversation_sequences SET next_event_sequence = next_event_sequence + 1 \
+             WHERE conversation_id = $1 RETURNING next_event_sequence - 1",
+            vec![conversation_id.into()],
+        ))
+        .await?
+        .ok_or_else(|| DbErr::RecordNotFound("conversation sequence".into()))?;
+    let cursor: i64 = row.try_get_by_index(0)?;
+    let id = Uuid::new_v4();
+    db.execute(stmt(
+        "INSERT INTO messaging_outbox_events (id, event_type, aggregate_type, aggregate_id, tenant_id, \
+           application_id, environment_id, correlation_id, causation_id, payload, occurred_at, next_attempt_at, \
+           conversation_id, conversation_event_sequence) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12, $13)",
+        vec![
+            id.into(),
+            event.event_type.into(),
+            event.aggregate_type.into(),
+            event.aggregate_id.into(),
+            event.scope.tenant_id.into(),
+            event.scope.application_id.into(),
+            event.scope.environment_id.into(),
+            ctx.correlation_id.as_str().into(),
+            ctx.cause().as_str().into(),
+            event.payload.into(),
+            now.into(),
+            conversation_id.into(),
+            cursor.into(),
+        ],
+    ))
+    .await?;
+    Ok((id, cursor))
+}
+
 /// A claimed, committed event.
 #[derive(Debug, Clone, FromQueryResult)]
 pub struct OutboxEvent {
@@ -101,6 +147,8 @@ pub struct OutboxEvent {
     pub payload: Value,
     pub occurred_at: DateTime<Utc>,
     pub attempts: i32,
+    pub conversation_id: Option<Uuid>,
+    pub conversation_event_sequence: Option<i64>,
 }
 
 impl OutboxEvent {
@@ -152,6 +200,12 @@ pub enum Delivery {
 #[async_trait::async_trait]
 pub trait EventTransport: Send + Sync {
     async fn deliver(&self, envelope: &Value) -> Delivery;
+
+    /// Delivers one claimed event. Transports that route by conversation cursor (the
+    /// realtime fanout) read it from `event`; the platform envelope is unchanged.
+    async fn deliver_event(&self, _event: &OutboxEvent, envelope: &Value) -> Delivery {
+        self.deliver(envelope).await
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -212,7 +266,7 @@ impl OutboxPublisher {
                 ORDER BY e.sequence LIMIT $4 FOR UPDATE SKIP LOCKED) \
              RETURNING o.id, o.sequence, o.event_type, o.schema_version, o.aggregate_type, o.aggregate_id, \
                        o.tenant_id, o.application_id, o.environment_id, o.correlation_id, o.causation_id, \
-                       o.payload, o.occurred_at, o.attempts",
+                       o.payload, o.occurred_at, o.attempts, o.conversation_id, o.conversation_event_sequence",
             vec![
                 token.into(),
                 (now + self.settings.lease).into(),
@@ -235,7 +289,7 @@ impl OutboxPublisher {
     ) -> Result<(), DbErr> {
         let outcome = self
             .transport
-            .deliver(&event.envelope(&self.runtime_environment))
+            .deliver_event(event, &event.envelope(&self.runtime_environment))
             .await;
         let now = self.clock.now();
         let attempts = event.attempts + 1;

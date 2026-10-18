@@ -11,6 +11,7 @@ use crate::{
     },
     domain::SharedClock,
     identity::{cache::CachingAuthority, PrincipalDirectory, Unconfigured},
+    messages::managed::ManagedKeyring,
     transparency::TreeHeadSigner,
 };
 
@@ -28,6 +29,8 @@ pub struct AppState {
     /// Signs every served key-transparency tree head. `None` (not configured): the
     /// directory / proof endpoints fail closed instead of serving an unsigned head.
     pub tree_heads: Option<Arc<TreeHeadSigner>>,
+    /// Seals MANAGED message text at rest. `None`: MANAGED sending fails closed.
+    pub managed_keys: Option<Arc<ManagedKeyring>>,
 }
 
 impl AppState {
@@ -47,6 +50,7 @@ impl AppState {
             conversations: ConversationSettings::default(),
             workers: WorkerSettings::default(),
             tree_heads: None,
+            managed_keys: None,
         }
     }
 
@@ -72,6 +76,11 @@ impl AppState {
 
     pub fn with_tree_head_signer(mut self, signer: Arc<TreeHeadSigner>) -> Self {
         self.tree_heads = Some(signer);
+        self
+    }
+
+    pub fn with_managed_keys(mut self, keys: Arc<ManagedKeyring>) -> Self {
+        self.managed_keys = Some(keys);
         self
     }
 

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/messaging/events/v1.schema.json",
   "title": "CF Meet Messaging events v1",
-  "description": "Messaging domain events in the platform envelope (transactional outbox committed with the state change, at least once, per-aggregate order): messaging.device.registered, messaging.device.key-packages-published, messaging.device.revoked, messaging.conversation.created, messaging.conversation.lifecycle-changed, messaging.conversation.updated, messaging.policy.updated. Ids, states and versions only — never key material, ciphertext, content or a credential.",
+  "description": "Messaging domain events in the platform envelope (transactional outbox committed with the state change, at least once, per-aggregate order): messaging.device.registered, messaging.device.key-packages-published, messaging.device.revoked, messaging.conversation.created, messaging.conversation.lifecycle-changed, messaging.conversation.updated, messaging.policy.updated. 1.2.0 (Parts E-G): messaging.message.created / edited / deleted / moderated / expired, messaging.member.added / removed / updated, messaging.read-cursor.updated, messaging.mls.welcome-available; conversation-scoped events also carry a per-conversation event cursor in the outbox (the replay log). Ids, states and versions only — never key material, ciphertext, content or a credential.",
   "$ref": "#/$defs/MessagingEvent",
   "$defs": {
     "DeviceRegistered": {
@@ -321,7 +321,465 @@
               "$ref": "#/$defs/PolicyUpdated"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.message.created"
+            },
+            "payload": {
+              "$ref": "#/$defs/MessageCreated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.message.edited"
+            },
+            "payload": {
+              "$ref": "#/$defs/MessageEdited"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.message.deleted"
+            },
+            "payload": {
+              "$ref": "#/$defs/MessageDeleted"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.message.moderated"
+            },
+            "payload": {
+              "$ref": "#/$defs/MessageModerated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.message.expired"
+            },
+            "payload": {
+              "$ref": "#/$defs/MessageExpired"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.member.added"
+            },
+            "payload": {
+              "$ref": "#/$defs/MemberAdded"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.member.removed"
+            },
+            "payload": {
+              "$ref": "#/$defs/MemberRemoved"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.member.updated"
+            },
+            "payload": {
+              "$ref": "#/$defs/MemberUpdated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.read-cursor.updated"
+            },
+            "payload": {
+              "$ref": "#/$defs/ReadCursorUpdated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.mls.welcome-available"
+            },
+            "payload": {
+              "$ref": "#/$defs/WelcomeAvailable"
+            }
+          }
         }
+      ]
+    },
+    "MessageCreated": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "message_kind": {
+          "enum": [
+            "APPLICATION",
+            "MLS_COMMIT"
+          ]
+        },
+        "sender_principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sender_device_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "message_id",
+        "sequence",
+        "message_kind",
+        "sender_principal_id",
+        "sender_device_id"
+      ]
+    },
+    "MessageEdited": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "target_message_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sender_principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      },
+      "required": [
+        "message_id",
+        "target_message_id",
+        "sequence",
+        "sender_principal_id"
+      ]
+    },
+    "MessageDeleted": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "lifecycle": {
+          "enum": [
+            "DELETED",
+            "MODERATED",
+            "EXPIRED"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        }
+      },
+      "required": [
+        "message_id",
+        "sequence",
+        "lifecycle",
+        "reason"
+      ]
+    },
+    "MessageModerated": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "lifecycle": {
+          "enum": [
+            "DELETED",
+            "MODERATED",
+            "EXPIRED"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        }
+      },
+      "required": [
+        "message_id",
+        "sequence",
+        "lifecycle",
+        "reason"
+      ]
+    },
+    "MessageExpired": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "lifecycle": {
+          "enum": [
+            "DELETED",
+            "MODERATED",
+            "EXPIRED"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        }
+      },
+      "required": [
+        "message_id",
+        "sequence",
+        "lifecycle",
+        "reason"
+      ]
+    },
+    "MemberAdded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "role": {
+          "enum": [
+            "MEMBER",
+            "ADMIN"
+          ]
+        },
+        "added_by_principal_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "conversation_id",
+        "principal_id",
+        "role",
+        "added_by_principal_id"
+      ]
+    },
+    "MemberRemoved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        },
+        "left": {
+          "type": "boolean"
+        },
+        "removed_by_principal_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mls_rekey_required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "principal_id",
+        "reason",
+        "left",
+        "removed_by_principal_id",
+        "mls_rekey_required"
+      ]
+    },
+    "MemberUpdated": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "send_restricted_until": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "principal_id",
+        "send_restricted_until",
+        "reason"
+      ]
+    },
+    "ReadCursorUpdated": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "read_sequence": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "principal_id",
+        "read_sequence"
+      ]
+    },
+    "WelcomeAvailable": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "welcome_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "device_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      },
+      "required": [
+        "welcome_id",
+        "device_id",
+        "conversation_id"
       ]
     }
   }

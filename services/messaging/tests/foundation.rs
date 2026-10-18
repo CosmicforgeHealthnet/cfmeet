@@ -255,10 +255,10 @@ async fn the_served_contract_lists_exactly_the_implemented_routes() {
     for (path, item) in api["paths"].as_object().unwrap() {
         for method in item.as_object().unwrap().keys() {
             documented += 1;
-            let concrete = path
-                .replace("{deviceId}", &Uuid::new_v4().to_string())
-                .replace("{principalId}", &Uuid::new_v4().to_string())
-                .replace("{conversationId}", &Uuid::new_v4().to_string());
+            let mut concrete = path.clone();
+            while let (Some(a), Some(b)) = (concrete.find('{'), concrete.find('}')) {
+                concrete.replace_range(a..=b, &Uuid::new_v4().to_string());
+            }
             let m = Method::from_bytes(method.to_uppercase().as_bytes()).unwrap();
             let r = h
                 .send(
@@ -280,6 +280,57 @@ async fn the_served_contract_lists_exactly_the_implemented_routes() {
         }
     }
     assert!(documented >= 9);
+    // And every route the sources register is documented (`:param` ~ `{param}`).
+    let normalized: Vec<String> = api["paths"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|p| {
+            p.split('/')
+                .map(|s| if s.starts_with('{') { "*" } else { s })
+                .collect::<Vec<_>>()
+                .join("/")
+        })
+        .collect();
+    fn walk(dir: &std::path::Path, out: &mut Vec<String>) {
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(std::fs::read_to_string(p).unwrap());
+            }
+        }
+    }
+    let mut sources = Vec::new();
+    walk(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut sources,
+    );
+    let mut routes = 0;
+    for code in sources {
+        for (i, _) in code.match_indices(".route(\"") {
+            let rest = &code[i + 8..];
+            let route = &rest[..rest.find('"').unwrap()];
+            let route = route
+                .split('/')
+                .map(|s| if s.starts_with(':') { "*" } else { s })
+                .collect::<Vec<_>>()
+                .join("/");
+            let route = route.trim_end_matches('/').to_string();
+            routes += 1;
+            // The nest prefix itself (`/v1/conversations`) and the separate operations
+            // listener (`/metrics`, never on the API port) are not API routes.
+            if route.is_empty() || route == "/metrics" {
+                continue;
+            }
+            assert!(
+                normalized.iter().any(|d| d.ends_with(&route)),
+                "registered route {route} is not in the served contract"
+            );
+        }
+    }
+    assert!(routes >= 20, "walked the real route table ({routes})");
     // And an undocumented path is not routed.
     let r = h.get(&c, None, "/v1/messaging/admin").await;
     assert_eq!(

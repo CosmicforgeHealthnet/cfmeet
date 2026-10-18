@@ -403,12 +403,15 @@ dependencies = [
 name = "cf-messaging-crypto"
 version = "0.1.0"
 dependencies = [
+ "aead",
+ "chacha20poly1305",
  "openmls",
  "openmls_basic_credential",
  "openmls_rust_crypto",
  "sha2 0.10.9",
  "thiserror",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -2277,6 +2280,7 @@ dependencies = [
  "base64 0.22.1",
  "cf-messaging-crypto",
  "cf-service-auth",
+ "chacha20poly1305",
  "chrono",
  "dotenvy",
  "ed25519-dalek",

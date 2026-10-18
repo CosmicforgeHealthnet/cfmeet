@@ -155,7 +155,9 @@ fn the_backend_links_only_the_public_half_of_the_crypto_core() {
 #[test]
 fn e2ee_content_is_opaque_to_the_backend() {
     for (file, code) in sources() {
-        if file == "src/domain/profile.rs" {
+        // The MANAGED store seals / opens MANAGED text with the deployment's managed key
+        // ring; it is unreachable from E2EE paths (managed_content_never_enters_e2ee_paths).
+        if file == "src/domain/profile.rs" || file == "src/messages/managed.rs" {
             continue;
         }
         // Ciphertext is never turned into text, and no message-body parser exists.
@@ -179,12 +181,16 @@ fn e2ee_content_is_opaque_to_the_backend() {
 /// Part V §145: managed-content code is never reachable from E2EE storage / delivery
 /// paths. Server-readable content ([`ManagedContent`], `MessagePayload::Managed`) may be
 /// named only by the profile module that separates the two payload kinds; the device,
-/// key-transparency, sequencing and conversation modules (the E2EE paths that exist
-/// today) never name it. The managed message store of Workstream F must be its own
-/// module listed here, never one of the E2EE paths.
+/// key-transparency, sequencing, conversation, E2EE message, MLS and realtime modules
+/// never name it. The managed message store is its own module
+/// (`src/messages/managed.rs`), never one of the E2EE paths.
 #[test]
 fn managed_content_never_enters_e2ee_paths() {
-    const MANAGED_MODULES: &[&str] = &["src/domain/profile.rs", "src/domain/mod.rs"];
+    const MANAGED_MODULES: &[&str] = &[
+        "src/domain/profile.rs",
+        "src/domain/mod.rs",
+        "src/messages/managed.rs",
+    ];
     for (file, code) in sources() {
         if MANAGED_MODULES.contains(&file.as_str()) {
             continue;

@@ -14,6 +14,7 @@
 //! * [`sequence`] — the canonical message-sequence allocator and the server acceptance
 //!   record that binds a server sequence / id to a client-encrypted MLS message.
 
+pub mod access;
 pub mod http;
 pub mod policy;
 pub mod sequence;

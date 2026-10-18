@@ -819,11 +819,13 @@ async fn no_private_key_or_secret_material_reaches_the_database() {
     for term in ["private", "secret", "-----begin"] {
         assert!(!dump.contains(term), "{term} in the database");
     }
-    // No column in the schema could hold one.
+    // No column in the schema could hold one (`mls_epoch`, the PUBLIC epoch number of
+    // RFC 9420 framing, is the one exact exception; see tests/migrations.rs).
     let suspicious = h
         .scalar(
             "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' \
-             AND column_name ~ '(private|secret|plaintext|epoch|body|content|recovery|attachment_key)'",
+             AND column_name ~ '(private|secret|plaintext|epoch|body|content|recovery|attachment_key)' \
+             AND column_name <> 'mls_epoch'",
         )
         .await;
     assert_eq!(suspicious, 0);

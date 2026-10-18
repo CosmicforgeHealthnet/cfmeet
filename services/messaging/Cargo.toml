@@ -49,6 +49,9 @@ rand = "0.8"
 base64 = "0.22"
 async-trait = "0.1"
 zeroize = "1.8"
+# Seals MANAGED message text at rest (XChaCha20-Poly1305; RustCrypto, already in the
+# OpenMLS provider graph). Never used for PRIVATE_E2EE content.
+chacha20poly1305 = "0.10"
 
 [dev-dependencies]
 # Tests act as client devices: they generate real MLS KeyPackages (never the server).

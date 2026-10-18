@@ -59,6 +59,19 @@ error_codes! {
     ConversationNotActive = "CONVERSATION_NOT_ACTIVE" => CONFLICT, "The conversation does not accept this operation in its lifecycle state.";
     PolicyVersionConflict = "POLICY_VERSION_CONFLICT" => CONFLICT, "The messaging policy changed; reload it and retry with its current version.";
     Conflict = "CONFLICT" => CONFLICT, "The operation conflicts with existing state.";
+    EpochMismatch = "EPOCH_MISMATCH" => CONFLICT, "The MLS message was not created in the group's current epoch; process the pending commits and retry.";
+    MlsRekeyRequired = "MLS_REKEY_REQUIRED" => CONFLICT, "Removed or revoked devices must first be removed from the MLS group by a commit.";
+    SendRestricted = "SEND_RESTRICTED" => FORBIDDEN, "The principal may not send in this conversation at this time.";
+    DeliveryRefused = "DELIVERY_REFUSED" => FORBIDDEN, "The message cannot be delivered to this conversation.";
+    ContentRejected = "CONTENT_REJECTED" => UNPROCESSABLE_ENTITY, "The content does not match the conversation's security profile or its bounds.";
+    MessageNotModifiable = "MESSAGE_NOT_MODIFIABLE" => CONFLICT, "The message can no longer be changed.";
+    QuotaExceeded = "QUOTA_EXCEEDED" => FORBIDDEN, "A storage or upload quota would be exceeded.";
+    AttachmentNotReady = "ATTACHMENT_NOT_READY" => CONFLICT, "The attachment is not available in its current state.";
+    IntegrityCheckFailed = "INTEGRITY_CHECK_FAILED" => UNPROCESSABLE_ENTITY, "The uploaded object does not match its declared size or digest.";
+    LocalSearchOnly = "LOCAL_SEARCH_ONLY" => CONFLICT, "End-to-end encrypted conversations are searched only on the user's devices.";
+    E2eeExportNotAvailable = "E2EE_EXPORT_NOT_AVAILABLE" => CONFLICT, "The server cannot export end-to-end encrypted content; export it from an authorized device.";
+    LegalHoldActive = "LEGAL_HOLD_ACTIVE" => CONFLICT, "The data is protected by an active legal hold.";
+    StorageUnavailable = "STORAGE_UNAVAILABLE" => SERVICE_UNAVAILABLE, "Object storage is temporarily unavailable.";
     ServiceUnavailable = "SERVICE_UNAVAILABLE" => SERVICE_UNAVAILABLE, "The service is temporarily unavailable.";
     InternalError = "INTERNAL_ERROR" => INTERNAL_SERVER_ERROR, "An internal error occurred.";
 }

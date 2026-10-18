@@ -18,6 +18,14 @@
 //! Platform policy version 2 (Part V specification review): SUPPORT defaults to
 //! PRIVATE_E2EE like every other context (version 1 left it without a default) and the
 //! snapshot names the message features of §28 (`messages`).
+//!
+//! Platform policy version 3 (Parts E–G): the features now implemented carry explicit,
+//! overridable values — attachments (OFF by default), editing windows, privacy of
+//! presence / typing / read receipts (on for co-members, no last-seen), retention (kept
+//! until deleted; immediate purge after deletion), moderation and reporting, abuse limits
+//! — and contexts gain regulated controls (§92): `regulated`, `centralArchiveRequired`
+//! (MANAGED only), `attachmentsEnabled`, `reportingEnabled`, `exportsEnabled` (MANAGED
+//! only) and `retentionDays`.
 
 use std::collections::BTreeMap;
 
@@ -36,7 +44,7 @@ use crate::{
 };
 
 /// Version of the platform defaults below.
-pub const PLATFORM_POLICY_VERSION: i32 = 2;
+pub const PLATFORM_POLICY_VERSION: i32 = 3;
 /// Version of the policy document schema.
 pub const POLICY_SCHEMA_VERSION: i32 = 1;
 /// Version of the security policy persisted with every conversation (profile rules).
@@ -50,13 +58,92 @@ pub struct ContextPolicy {
     pub allowed_profiles: Vec<SecurityProfile>,
     /// `None`: the creator must name a profile (and it must be allowed).
     pub default_profile: Option<SecurityProfile>,
-    /// `None`: unset (the membership workstream's platform bound applies).
+    /// `None`: unset (the platform bound applies).
     pub max_members: Option<i64>,
     /// `None`: no context expiry.
     pub max_lifetime_seconds: Option<i64>,
     pub reopen_allowed: bool,
     pub legal_hold_eligible: bool,
     pub sms_bridge_eligible: bool,
+    /// Regulated context (§92): MANAGED conversations need an explicit disclosure
+    /// acknowledgement at creation; exports / reporting follow the flags below.
+    pub regulated: bool,
+    /// Centralized server-side archival is required: only MANAGED is allowed (never an
+    /// E2EE conversation whose content the server cannot keep).
+    pub central_archive_required: bool,
+    /// `None`: the environment's attachment setting applies.
+    pub attachments_enabled: Option<bool>,
+    pub reporting_enabled: bool,
+    /// Server-side exports (MANAGED only, never E2EE plaintext).
+    pub exports_enabled: bool,
+    /// `None`: the environment's retention applies.
+    pub retention_days: Option<i64>,
+}
+
+/// Attachment policy of an environment (§69–§80). Sizes in bytes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentPolicy {
+    pub enabled: bool,
+    pub max_bytes: i64,
+    pub max_per_message: i64,
+    pub allowed_kinds: Vec<String>,
+    /// MANAGED attachments must pass the self-hosted scanner before they are usable.
+    pub managed_scan_required: bool,
+    pub max_voice_note_seconds: i64,
+    pub max_video_seconds: i64,
+    /// `None`: only the deployment's limit applies.
+    pub storage_budget_bytes: Option<i64>,
+    pub daily_upload_bytes: Option<i64>,
+    pub max_concurrent_uploads: i64,
+}
+
+/// Privacy of ephemeral signals (§62–§63).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivacyPolicy {
+    pub presence: bool,
+    pub typing_indicators: bool,
+    pub read_receipts: bool,
+    pub last_seen: bool,
+}
+
+/// Retention (§89–§90). `None` days: kept until deleted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetentionPolicy {
+    pub message_days: Option<i64>,
+    /// Delay between a user-visible deletion and the irreversible purge.
+    pub deleted_purge_grace_seconds: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModerationPolicy {
+    pub enabled: bool,
+    pub reports_enabled: bool,
+    /// MANAGED only: a report may reference server-visible content (never E2EE).
+    pub managed_evidence_allowed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditingPolicy {
+    /// `None`: no window.
+    pub edit_window_seconds: Option<i64>,
+    pub delete_window_seconds: Option<i64>,
+}
+
+/// Abuse limits (§88), per acting principal unless stated.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AbusePolicy {
+    pub messages_per_minute: i64,
+    pub new_direct_contacts_per_hour: i64,
+    pub reports_per_hour: i64,
+    pub uploads_per_hour: i64,
+    /// MANAGED only: links per principal per hour (content is visible by design).
+    pub managed_links_per_hour: i64,
 }
 
 /// The effective policy of an application environment.
@@ -68,30 +155,30 @@ pub struct EffectivePolicy {
     pub application_policy_version: i64,
     pub contexts: BTreeMap<ContextClass, ContextPolicy>,
     pub sending_enabled: bool,
-    /// Features of later workstreams: present, explicit, and off / unset.
+    /// Message features not implemented yet: present, explicit, and unset.
     pub messages: Value,
-    pub attachments: Value,
-    pub editing: Value,
-    pub privacy: Value,
-    pub retention: Value,
-    pub moderation: Value,
+    pub attachments: AttachmentPolicy,
+    pub editing: EditingPolicy,
+    pub privacy: PrivacyPolicy,
+    pub retention: RetentionPolicy,
+    pub moderation: ModerationPolicy,
+    pub abuse: AbusePolicy,
 }
+
+/// Attachment kinds (generic; no product vocabulary).
+pub const ATTACHMENT_KINDS: &[&str] = &["IMAGE", "DOCUMENT", "FILE", "VOICE_NOTE", "VIDEO"];
 
 /// The platform defaults (explicit; see the module documentation).
 pub fn platform_defaults() -> EffectivePolicy {
     let contexts = ContextClass::ALL
         .iter()
         .map(|c| {
-            let (allowed, default) = (
-                vec![SecurityProfile::PrivateE2ee],
-                Some(SecurityProfile::PrivateE2ee),
-            );
             (
                 *c,
                 ContextPolicy {
                     enabled: true,
-                    allowed_profiles: allowed,
-                    default_profile: default,
+                    allowed_profiles: vec![SecurityProfile::PrivateE2ee],
+                    default_profile: Some(SecurityProfile::PrivateE2ee),
                     max_members: if *c == ContextClass::Direct {
                         Some(2)
                     } else {
@@ -101,6 +188,12 @@ pub fn platform_defaults() -> EffectivePolicy {
                     reopen_allowed: true,
                     legal_hold_eligible: false,
                     sms_bridge_eligible: false,
+                    regulated: false,
+                    central_archive_required: false,
+                    attachments_enabled: None,
+                    reporting_enabled: true,
+                    exports_enabled: false,
+                    retention_days: None,
                 },
             )
         })
@@ -112,11 +205,47 @@ pub fn platform_defaults() -> EffectivePolicy {
         contexts,
         sending_enabled: true,
         messages: json!({ "replies": null, "threads": null, "reactions": null, "pins": null }),
-        attachments: json!({ "enabled": false, "maxBytes": null, "allowedMediaTypes": [] }),
-        editing: json!({ "editWindowSeconds": null, "deleteWindowSeconds": null }),
-        privacy: json!({ "presence": null, "readReceipts": null }),
-        retention: json!({ "days": null }),
-        moderation: json!({ "enabled": false }),
+        // Attachments exist but are OFF until an application enables them; no commercial
+        // storage budget is invented here (deployment limits apply).
+        attachments: AttachmentPolicy {
+            enabled: false,
+            max_bytes: 25 * 1024 * 1024,
+            max_per_message: 10,
+            allowed_kinds: ATTACHMENT_KINDS.iter().map(|k| k.to_string()).collect(),
+            managed_scan_required: true,
+            max_voice_note_seconds: 900,
+            max_video_seconds: 600,
+            storage_budget_bytes: None,
+            daily_upload_bytes: None,
+            max_concurrent_uploads: 10,
+        },
+        editing: EditingPolicy {
+            edit_window_seconds: None,
+            delete_window_seconds: None,
+        },
+        // Privacy-respecting defaults: presence only to co-members, no last-seen.
+        privacy: PrivacyPolicy {
+            presence: true,
+            typing_indicators: true,
+            read_receipts: true,
+            last_seen: false,
+        },
+        retention: RetentionPolicy {
+            message_days: None,
+            deleted_purge_grace_seconds: 0,
+        },
+        moderation: ModerationPolicy {
+            enabled: true,
+            reports_enabled: true,
+            managed_evidence_allowed: false,
+        },
+        abuse: AbusePolicy {
+            messages_per_minute: 120,
+            new_direct_contacts_per_hour: 30,
+            reports_per_hour: 20,
+            uploads_per_hour: 120,
+            managed_links_per_hour: 60,
+        },
     }
 }
 
@@ -136,7 +265,69 @@ pub struct ContextOverride {
     pub max_lifetime_seconds: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reopen_allowed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regulated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub central_archive_required: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reporting_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exports_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retention_days: Option<i64>,
 }
+
+macro_rules! overrides {
+    ($(#[$m:meta])* $name:ident { $($field:ident : $ty:ty),+ $(,)? }) => {
+        $(#[$m])*
+        #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        pub struct $name {
+            $(#[serde(default, skip_serializing_if = "Option::is_none")] pub $field: Option<$ty>,)+
+        }
+    };
+}
+
+overrides!(AttachmentOverride {
+    enabled: bool,
+    max_bytes: i64,
+    max_per_message: i64,
+    allowed_kinds: Vec<String>,
+    managed_scan_required: bool,
+    max_voice_note_seconds: i64,
+    max_video_seconds: i64,
+    storage_budget_bytes: i64,
+    daily_upload_bytes: i64,
+    max_concurrent_uploads: i64,
+});
+overrides!(PrivacyOverride {
+    presence: bool,
+    typing_indicators: bool,
+    read_receipts: bool,
+    last_seen: bool,
+});
+overrides!(RetentionOverride {
+    message_days: i64,
+    deleted_purge_grace_seconds: i64,
+});
+overrides!(ModerationOverride {
+    enabled: bool,
+    reports_enabled: bool,
+    managed_evidence_allowed: bool,
+});
+overrides!(EditingOverride {
+    edit_window_seconds: i64,
+    delete_window_seconds: i64,
+});
+overrides!(AbuseOverride {
+    messages_per_minute: i64,
+    new_direct_contacts_per_hour: i64,
+    reports_per_hour: i64,
+    uploads_per_hour: i64,
+    managed_links_per_hour: i64,
+});
 
 /// An application environment's policy overrides (what `PUT /v1/messaging/policy` sets).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -146,9 +337,31 @@ pub struct ApplicationPolicy {
     pub contexts: BTreeMap<ContextClass, ContextOverride>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sending_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<AttachmentOverride>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub privacy: Option<PrivacyOverride>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retention: Option<RetentionOverride>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moderation: Option<ModerationOverride>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editing: Option<EditingOverride>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abuse: Option<AbuseOverride>,
 }
 
 const MAX_LIFETIME: i64 = 10 * 365 * 86_400;
+const MAX_RETENTION_DAYS: i64 = 36_500;
+
+fn within(v: Option<i64>, min: i64, max: i64, what: &str) -> std::result::Result<(), String> {
+    match v {
+        Some(n) if !(min..=max).contains(&n) => {
+            Err(format!("{what} must be between {min} and {max}"))
+        }
+        _ => Ok(()),
+    }
+}
 
 impl ApplicationPolicy {
     /// Validation independent of the defaults (bounds, consistency).
@@ -184,6 +397,106 @@ impl ApplicationPolicy {
                     ));
                 }
             }
+            within(
+                o.retention_days,
+                1,
+                MAX_RETENTION_DAYS,
+                &format!("{}: retentionDays", class.as_str()),
+            )?;
+        }
+        if let Some(a) = &self.attachments {
+            within(
+                a.max_bytes,
+                1,
+                4 * 1024 * 1024 * 1024,
+                "attachments.maxBytes",
+            )?;
+            within(a.max_per_message, 1, 100, "attachments.maxPerMessage")?;
+            within(
+                a.max_voice_note_seconds,
+                1,
+                86_400,
+                "attachments.maxVoiceNoteSeconds",
+            )?;
+            within(
+                a.max_video_seconds,
+                1,
+                86_400,
+                "attachments.maxVideoSeconds",
+            )?;
+            within(
+                a.storage_budget_bytes,
+                0,
+                i64::MAX,
+                "attachments.storageBudgetBytes",
+            )?;
+            within(
+                a.daily_upload_bytes,
+                0,
+                i64::MAX,
+                "attachments.dailyUploadBytes",
+            )?;
+            within(
+                a.max_concurrent_uploads,
+                1,
+                1_000,
+                "attachments.maxConcurrentUploads",
+            )?;
+            if let Some(kinds) = &a.allowed_kinds {
+                if kinds
+                    .iter()
+                    .any(|k| !ATTACHMENT_KINDS.contains(&k.as_str()))
+                {
+                    return Err(format!(
+                        "attachments.allowedKinds must be among {ATTACHMENT_KINDS:?}"
+                    ));
+                }
+            }
+        }
+        if let Some(r) = &self.retention {
+            within(
+                r.message_days,
+                1,
+                MAX_RETENTION_DAYS,
+                "retention.messageDays",
+            )?;
+            within(
+                r.deleted_purge_grace_seconds,
+                0,
+                365 * 86_400,
+                "retention.deletedPurgeGraceSeconds",
+            )?;
+        }
+        if let Some(e) = &self.editing {
+            within(
+                e.edit_window_seconds,
+                1,
+                MAX_LIFETIME,
+                "editing.editWindowSeconds",
+            )?;
+            within(
+                e.delete_window_seconds,
+                1,
+                MAX_LIFETIME,
+                "editing.deleteWindowSeconds",
+            )?;
+        }
+        if let Some(a) = &self.abuse {
+            within(a.messages_per_minute, 1, 100_000, "abuse.messagesPerMinute")?;
+            within(
+                a.new_direct_contacts_per_hour,
+                1,
+                100_000,
+                "abuse.newDirectContactsPerHour",
+            )?;
+            within(a.reports_per_hour, 1, 10_000, "abuse.reportsPerHour")?;
+            within(a.uploads_per_hour, 1, 100_000, "abuse.uploadsPerHour")?;
+            within(
+                a.managed_links_per_hour,
+                1,
+                100_000,
+                "abuse.managedLinksPerHour",
+            )?;
         }
         Ok(())
     }
@@ -234,10 +547,146 @@ pub fn resolve(
         if let Some(r) = o.reopen_allowed {
             c.reopen_allowed = r;
         }
+        if let Some(r) = o.regulated {
+            c.regulated = r;
+        }
+        if let Some(r) = o.central_archive_required {
+            c.central_archive_required = r;
+        }
+        if c.central_archive_required && c.allowed_profiles != vec![SecurityProfile::Managed] {
+            return Err(format!(
+                "{}: centralArchiveRequired allows MANAGED only (allowedProfiles must be [MANAGED]); \
+                 an E2EE conversation cannot be archived by the server",
+                class.as_str()
+            ));
+        }
+        if o.attachments_enabled.is_some() {
+            c.attachments_enabled = o.attachments_enabled;
+        }
+        if let Some(r) = o.reporting_enabled {
+            c.reporting_enabled = r;
+        }
+        if let Some(e) = o.exports_enabled {
+            if e && !c.allowed_profiles.contains(&SecurityProfile::Managed) {
+                return Err(format!(
+                    "{}: exportsEnabled requires MANAGED (the server cannot export E2EE plaintext)",
+                    class.as_str()
+                ));
+            }
+            c.exports_enabled = e;
+        }
+        if o.retention_days.is_some() {
+            c.retention_days = o.retention_days;
+        }
         c.legal_hold_eligible = c.allowed_profiles.contains(&SecurityProfile::Managed);
         c.sms_bridge_eligible = false;
     }
+    if let Some(a) = &overrides.attachments {
+        let t = &mut p.attachments;
+        if let Some(v) = a.enabled {
+            t.enabled = v;
+        }
+        if let Some(v) = a.max_bytes {
+            t.max_bytes = v;
+        }
+        if let Some(v) = a.max_per_message {
+            t.max_per_message = v;
+        }
+        if let Some(v) = &a.allowed_kinds {
+            let mut v = v.clone();
+            v.sort();
+            v.dedup();
+            t.allowed_kinds = v;
+        }
+        if let Some(v) = a.managed_scan_required {
+            t.managed_scan_required = v;
+        }
+        if let Some(v) = a.max_voice_note_seconds {
+            t.max_voice_note_seconds = v;
+        }
+        if let Some(v) = a.max_video_seconds {
+            t.max_video_seconds = v;
+        }
+        if a.storage_budget_bytes.is_some() {
+            t.storage_budget_bytes = a.storage_budget_bytes;
+        }
+        if a.daily_upload_bytes.is_some() {
+            t.daily_upload_bytes = a.daily_upload_bytes;
+        }
+        if let Some(v) = a.max_concurrent_uploads {
+            t.max_concurrent_uploads = v;
+        }
+    }
+    if let Some(o) = &overrides.privacy {
+        let t = &mut p.privacy;
+        if let Some(v) = o.presence {
+            t.presence = v;
+        }
+        if let Some(v) = o.typing_indicators {
+            t.typing_indicators = v;
+        }
+        if let Some(v) = o.read_receipts {
+            t.read_receipts = v;
+        }
+        if let Some(v) = o.last_seen {
+            t.last_seen = v;
+        }
+    }
+    if let Some(o) = &overrides.retention {
+        if o.message_days.is_some() {
+            p.retention.message_days = o.message_days;
+        }
+        if let Some(v) = o.deleted_purge_grace_seconds {
+            p.retention.deleted_purge_grace_seconds = v;
+        }
+    }
+    if let Some(o) = &overrides.moderation {
+        let t = &mut p.moderation;
+        if let Some(v) = o.enabled {
+            t.enabled = v;
+        }
+        if let Some(v) = o.reports_enabled {
+            t.reports_enabled = v;
+        }
+        if let Some(v) = o.managed_evidence_allowed {
+            t.managed_evidence_allowed = v;
+        }
+    }
+    if let Some(o) = &overrides.editing {
+        if o.edit_window_seconds.is_some() {
+            p.editing.edit_window_seconds = o.edit_window_seconds;
+        }
+        if o.delete_window_seconds.is_some() {
+            p.editing.delete_window_seconds = o.delete_window_seconds;
+        }
+    }
+    if let Some(o) = &overrides.abuse {
+        let t = &mut p.abuse;
+        if let Some(v) = o.messages_per_minute {
+            t.messages_per_minute = v;
+        }
+        if let Some(v) = o.new_direct_contacts_per_hour {
+            t.new_direct_contacts_per_hour = v;
+        }
+        if let Some(v) = o.reports_per_hour {
+            t.reports_per_hour = v;
+        }
+        if let Some(v) = o.uploads_per_hour {
+            t.uploads_per_hour = v;
+        }
+        if let Some(v) = o.managed_links_per_hour {
+            t.managed_links_per_hour = v;
+        }
+    }
     Ok(p)
+}
+
+/// The CURRENT effective policy of an environment (operational features — attachments,
+/// privacy, retention, moderation, abuse — follow the current policy; a conversation's
+/// snapshot fixes its security profile and creation rules).
+pub async fn current<C: ConnectionTrait>(db: &C, environment_id: Uuid) -> Result<EffectivePolicy> {
+    let (overrides, version) = load_application_policy(db, environment_id, false).await?;
+    resolve(&overrides, version).map_err(|_| Error::code(ErrorCode::InternalError))
 }
 
 /// JSON with recursively sorted object keys (independent of serde_json feature flags).
@@ -475,6 +924,75 @@ mod tests {
             },
         );
         assert!(resolve(&direct, 1).is_err());
+    }
+
+    #[test]
+    fn version_3_feature_policies_are_explicit_and_regulated_contexts_never_hold_e2ee_archives() {
+        let p = platform_defaults();
+        assert_eq!(p.platform_policy_version, 3);
+        assert!(!p.attachments.enabled, "attachments are off until enabled");
+        assert!(
+            p.attachments.storage_budget_bytes.is_none(),
+            "no invented commercial budget"
+        );
+        assert!(p.privacy.presence && !p.privacy.last_seen);
+        assert!(p.retention.message_days.is_none());
+        // centralArchiveRequired allows MANAGED only.
+        let mut o = ApplicationPolicy::default();
+        o.contexts.insert(
+            ContextClass::Consultation,
+            ContextOverride {
+                central_archive_required: Some(true),
+                ..Default::default()
+            },
+        );
+        assert!(
+            resolve(&o, 1).is_err(),
+            "an E2EE context cannot require server archival"
+        );
+        o.contexts
+            .get_mut(&ContextClass::Consultation)
+            .unwrap()
+            .allowed_profiles = Some(vec![SecurityProfile::Managed]);
+        o.contexts
+            .get_mut(&ContextClass::Consultation)
+            .unwrap()
+            .regulated = Some(true);
+        let r = resolve(&o, 1).unwrap();
+        let c = r.context(ContextClass::Consultation);
+        assert!(c.central_archive_required && c.regulated && c.legal_hold_eligible);
+        assert_eq!(
+            c.default_profile, None,
+            "MANAGED is never a default by itself"
+        );
+        // Exports need MANAGED.
+        let mut e = ApplicationPolicy::default();
+        e.contexts.insert(
+            ContextClass::Group,
+            ContextOverride {
+                exports_enabled: Some(true),
+                ..Default::default()
+            },
+        );
+        assert!(resolve(&e, 1).is_err());
+        // Bounds of the feature overrides.
+        let bad: ApplicationPolicy =
+            serde_json::from_value(json!({ "attachments": { "allowedKinds": ["EXECUTABLE"] } }))
+                .unwrap();
+        assert!(resolve(&bad, 1).is_err());
+        let bad: ApplicationPolicy =
+            serde_json::from_value(json!({ "retention": { "messageDays": 0 } })).unwrap();
+        assert!(resolve(&bad, 1).is_err());
+        assert!(
+            serde_json::from_value::<ApplicationPolicy>(json!({ "privacy": { "spy": true } }))
+                .is_err()
+        );
+        let ok: ApplicationPolicy = serde_json::from_value(
+            json!({ "privacy": { "presence": false }, "attachments": { "enabled": true } }),
+        )
+        .unwrap();
+        let r = resolve(&ok, 2).unwrap();
+        assert!(!r.privacy.presence && r.attachments.enabled);
     }
 
     #[test]

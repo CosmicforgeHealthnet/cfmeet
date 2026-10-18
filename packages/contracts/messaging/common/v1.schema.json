@@ -103,7 +103,20 @@
         "POLICY_VERSION_CONFLICT",
         "CONFLICT",
         "SERVICE_UNAVAILABLE",
-        "INTERNAL_ERROR"
+        "INTERNAL_ERROR",
+        "EPOCH_MISMATCH",
+        "MLS_REKEY_REQUIRED",
+        "SEND_RESTRICTED",
+        "DELIVERY_REFUSED",
+        "CONTENT_REJECTED",
+        "MESSAGE_NOT_MODIFIABLE",
+        "QUOTA_EXCEEDED",
+        "ATTACHMENT_NOT_READY",
+        "INTEGRITY_CHECK_FAILED",
+        "LOCAL_SEARCH_ONLY",
+        "E2EE_EXPORT_NOT_AVAILABLE",
+        "LEGAL_HOLD_ACTIVE",
+        "STORAGE_UNAVAILABLE"
       ]
     },
     "Error": {
@@ -1136,12 +1149,175 @@
               },
               "reopenAllowed": {
                 "type": "boolean"
+              },
+              "regulated": {
+                "type": "boolean"
+              },
+              "centralArchiveRequired": {
+                "type": "boolean",
+                "description": "Only MANAGED is allowed (allowedProfiles must be [MANAGED]); an E2EE conversation can never be archived by the server."
+              },
+              "attachmentsEnabled": {
+                "type": "boolean"
+              },
+              "reportingEnabled": {
+                "type": "boolean"
+              },
+              "exportsEnabled": {
+                "type": "boolean",
+                "description": "Requires MANAGED; the server never exports E2EE plaintext."
+              },
+              "retentionDays": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 36500
               }
             }
           }
         },
         "sendingEnabled": {
           "type": "boolean"
+        },
+        "attachments": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxBytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967296
+            },
+            "maxPerMessage": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "allowedKinds": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/AttachmentKind"
+              }
+            },
+            "managedScanRequired": {
+              "type": "boolean"
+            },
+            "maxVoiceNoteSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400
+            },
+            "maxVideoSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400
+            },
+            "storageBudgetBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "dailyUploadBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxConcurrentUploads": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            }
+          }
+        },
+        "privacy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "presence": {
+              "type": "boolean"
+            },
+            "typingIndicators": {
+              "type": "boolean"
+            },
+            "readReceipts": {
+              "type": "boolean"
+            },
+            "lastSeen": {
+              "type": "boolean"
+            }
+          }
+        },
+        "retention": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "messageDays": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 36500
+            },
+            "deletedPurgeGraceSeconds": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 31536000
+            }
+          }
+        },
+        "moderation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "reportsEnabled": {
+              "type": "boolean"
+            },
+            "managedEvidenceAllowed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "editing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "editWindowSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "deleteWindowSeconds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "abuse": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "messagesPerMinute": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "newDirectContactsPerHour": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "reportsPerHour": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "uploadsPerHour": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "managedLinksPerHour": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
         }
       },
       "description": "An application environment's overrides of the platform defaults. MANAGED is available for a context only when listed here."
@@ -1200,7 +1376,13 @@
               "maxLifetimeSeconds",
               "reopenAllowed",
               "legalHoldEligible",
-              "smsBridgeEligible"
+              "smsBridgeEligible",
+              "regulated",
+              "centralArchiveRequired",
+              "reportingEnabled",
+              "exportsEnabled",
+              "attachmentsEnabled",
+              "retentionDays"
             ],
             "properties": {
               "enabled": {
@@ -1250,6 +1432,38 @@
               },
               "smsBridgeEligible": {
                 "const": false
+              },
+              "regulated": {
+                "type": "boolean"
+              },
+              "centralArchiveRequired": {
+                "type": "boolean"
+              },
+              "reportingEnabled": {
+                "type": "boolean"
+              },
+              "exportsEnabled": {
+                "type": "boolean"
+              },
+              "attachmentsEnabled": {
+                "oneOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "retentionDays": {
+                "oneOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             }
           },
@@ -1267,9 +1481,223 @@
               "null"
             ]
           }
+        },
+        "attachments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "maxBytes",
+            "maxPerMessage",
+            "allowedKinds",
+            "managedScanRequired",
+            "maxVoiceNoteSeconds",
+            "maxVideoSeconds",
+            "storageBudgetBytes",
+            "dailyUploadBytes",
+            "maxConcurrentUploads"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxBytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967296
+            },
+            "maxPerMessage": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "allowedKinds": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/AttachmentKind"
+              }
+            },
+            "managedScanRequired": {
+              "type": "boolean"
+            },
+            "maxVoiceNoteSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400
+            },
+            "maxVideoSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400
+            },
+            "storageBudgetBytes": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "dailyUploadBytes": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxConcurrentUploads": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            }
+          }
+        },
+        "privacy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "presence",
+            "typingIndicators",
+            "readReceipts",
+            "lastSeen"
+          ],
+          "properties": {
+            "presence": {
+              "type": "boolean"
+            },
+            "typingIndicators": {
+              "type": "boolean"
+            },
+            "readReceipts": {
+              "type": "boolean"
+            },
+            "lastSeen": {
+              "type": "boolean"
+            }
+          }
+        },
+        "retention": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "messageDays",
+            "deletedPurgeGraceSeconds"
+          ],
+          "properties": {
+            "messageDays": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 36500
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "deletedPurgeGraceSeconds": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 31536000
+            }
+          }
+        },
+        "moderation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "reportsEnabled",
+            "managedEvidenceAllowed"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "reportsEnabled": {
+              "type": "boolean"
+            },
+            "managedEvidenceAllowed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "editing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "editWindowSeconds",
+            "deleteWindowSeconds"
+          ],
+          "properties": {
+            "editWindowSeconds": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "deleteWindowSeconds": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "abuse": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "messagesPerMinute",
+            "newDirectContactsPerHour",
+            "reportsPerHour",
+            "uploadsPerHour",
+            "managedLinksPerHour"
+          ],
+          "properties": {
+            "messagesPerMinute": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "newDirectContactsPerHour": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "reportsPerHour": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "uploadsPerHour": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "managedLinksPerHour": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
         }
       },
-      "description": "Platform defaults merged with the application's overrides (deterministic; stored as an immutable content-addressed snapshot)."
+      "description": "Platform defaults merged with the application's overrides (deterministic; stored as an immutable content-addressed snapshot). Platform policy version 3 (Parts E-G): attachments (off by default), editing windows, privacy of presence / typing / read receipts, retention, moderation, abuse limits; regulated context controls."
     },
     "PolicyView": {
       "type": "object",
@@ -1301,6 +1729,841 @@
           "minimum": 1
         }
       }
+    },
+    "AttachmentKind": {
+      "type": "string",
+      "enum": [
+        "IMAGE",
+        "DOCUMENT",
+        "FILE",
+        "VOICE_NOTE",
+        "VIDEO"
+      ]
+    },
+    "MemberRole": {
+      "type": "string",
+      "enum": [
+        "OWNER",
+        "ADMIN",
+        "MEMBER"
+      ]
+    },
+    "MessageLifecycle": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "DELETED",
+        "MODERATED",
+        "EXPIRED",
+        "PURGED",
+        "HIDDEN_FOR_YOU"
+      ],
+      "description": "ACTIVE carries content; every other state is a tombstone without content. HIDDEN_FOR_YOU: deleted on the reader's own devices only."
+    },
+    "MessageKind": {
+      "type": "string",
+      "enum": [
+        "APPLICATION",
+        "MLS_COMMIT",
+        "EDIT"
+      ]
+    },
+    "Member": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "role": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/MemberRole"
+        },
+        "state": {
+          "const": "ACTIVE"
+        },
+        "joinedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sendRestrictedUntil": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "principalId",
+        "role",
+        "state",
+        "joinedAt",
+        "sendRestrictedUntil",
+        "version"
+      ]
+    },
+    "MemberPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Member"
+          }
+        }
+      },
+      "required": [
+        "members"
+      ]
+    },
+    "AddMemberRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "role": {
+          "enum": [
+            "MEMBER",
+            "ADMIN"
+          ]
+        }
+      },
+      "required": [
+        "principalId"
+      ]
+    },
+    "MemberRemoval": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "state": {
+          "enum": [
+            "REMOVED",
+            "LEFT"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        },
+        "mlsRekeyRequired": {
+          "type": "boolean"
+        },
+        "cryptographicRemoval": {
+          "enum": [
+            "PENDING_MEMBER_COMMIT",
+            "NOT_APPLICABLE"
+          ],
+          "description": "PRIVATE_E2EE: the server-side removal is authorization only; a member's MLS commit removing the devices completes the cryptographic exclusion."
+        }
+      },
+      "required": [
+        "principalId",
+        "state",
+        "reason",
+        "mlsRekeyRequired",
+        "cryptographicRemoval"
+      ]
+    },
+    "SendMessageRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "clientMessageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "deviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740992
+        },
+        "ciphertext": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]*$",
+          "description": "PRIVATE_E2EE: the MLS PrivateMessage (MLSMessage bytes, base64url). Never plaintext."
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384,
+          "description": "MANAGED only."
+        },
+        "kind": {
+          "enum": [
+            "APPLICATION",
+            "EDIT"
+          ]
+        },
+        "targetMessageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "attachmentIds": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        }
+      },
+      "required": [
+        "clientMessageId"
+      ],
+      "description": "Which fields apply is decided by the conversation's PERSISTED security profile: PRIVATE_E2EE needs deviceId, epoch and ciphertext and refuses text (CONTENT_REJECTED / PLAINTEXT_IN_E2EE); MANAGED needs text and refuses ciphertext."
+    },
+    "Message": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "messageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/MessageKind"
+        },
+        "securityProfile": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/SecurityProfile"
+        },
+        "senderPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "senderDeviceId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "clientMessageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "targetMessageId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lifecycle": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/MessageLifecycle"
+        },
+        "lifecycleReason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "editCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "editedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "attachmentIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "e2ee": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "epoch": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "ciphertext": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "ciphertextSha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "acceptanceDigest": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "epoch",
+            "ciphertext",
+            "ciphertextSha256",
+            "acceptanceDigest"
+          ]
+        },
+        "managed": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "text"
+          ]
+        },
+        "mlsEpoch": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "messageId",
+        "conversationId",
+        "sequence",
+        "kind",
+        "securityProfile",
+        "senderPrincipalId",
+        "clientMessageId",
+        "lifecycle",
+        "createdAt",
+        "attachmentIds"
+      ],
+      "description": "A message. Content (ciphertext or MANAGED text) only while ACTIVE. e2ee for PRIVATE_E2EE rows, managed for MANAGED rows; the acceptance digest binds the server sequence and id to the ciphertext (cfmeet-messaging-acceptance:v2)."
+    },
+    "MessagePage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Message"
+          }
+        },
+        "nextAfterSequence": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "messages",
+        "nextAfterSequence"
+      ]
+    },
+    "PermalinkResolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resolution": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/MessageLifecycle"
+        },
+        "message": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Message"
+        }
+      },
+      "required": [
+        "resolution",
+        "message"
+      ],
+      "description": "A permalink is never authority: resolution checks current membership; a non-member and an unknown id are the same NOT_FOUND."
+    },
+    "EditMessageRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        }
+      },
+      "required": [
+        "text"
+      ]
+    },
+    "MessageDeletion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "messageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "deletion": {
+          "enum": [
+            "DELETED",
+            "HIDDEN_FOR_YOU",
+            "MODERATED",
+            "EXPIRED",
+            "PURGED"
+          ]
+        },
+        "purgeAfter": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "messageId",
+        "deletion"
+      ]
+    },
+    "ReadCursorRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "sequence"
+      ]
+    },
+    "ReadCursor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "readSequence": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "conversationId",
+        "readSequence"
+      ]
+    },
+    "ConversationEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "pattern": "^evt_[0-9a-f]{32}$"
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9.-]{2,79}$"
+        },
+        "schemaVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "eventSequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "data": {
+          "type": "object",
+          "description": "camelCase payload; message events carry the message's CURRENT representation (a deleted message replays as a tombstone)."
+        }
+      },
+      "required": [
+        "eventId",
+        "type",
+        "schemaVersion",
+        "conversationId",
+        "eventSequence",
+        "occurredAt",
+        "data"
+      ],
+      "description": "A durable conversation event (derived from committed state, replayable by its per-conversation eventSequence)."
+    },
+    "EventPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ConversationEvent"
+          }
+        },
+        "nextAfter": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hasMore": {
+          "type": "boolean"
+        },
+        "syncRequired": {
+          "type": "boolean",
+          "description": "The requested position is older than the retained event window: resynchronize messages by sequence."
+        }
+      },
+      "required": [
+        "events",
+        "nextAfter",
+        "hasMore",
+        "syncRequired"
+      ]
+    },
+    "CommitRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "clientMessageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "deviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]*$"
+        },
+        "welcome": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]*$"
+        },
+        "welcomeDeviceIds": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "removedDeviceIds": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        }
+      },
+      "required": [
+        "clientMessageId",
+        "deviceId",
+        "epoch",
+        "commit"
+      ],
+      "description": "An MLS Commit created in the group's current epoch. removedDeviceIds is the committer's attestation of the leaves it removes; while removals are pending it must cover them all."
+    },
+    "MlsGroupState": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "mlsEpoch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rekeyRequired": {
+          "type": "boolean"
+        },
+        "rekeyReason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "commitsAccepted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pendingRemovals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "deviceId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "principalId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "reason": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+              }
+            },
+            "required": [
+              "deviceId",
+              "principalId",
+              "reason"
+            ]
+          }
+        }
+      },
+      "required": [
+        "conversationId",
+        "mlsEpoch",
+        "rekeyRequired",
+        "rekeyReason",
+        "commitsAccepted",
+        "pendingRemovals"
+      ]
+    },
+    "KeyPackageClaimRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "principalIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        }
+      },
+      "required": [
+        "principalIds"
+      ]
+    },
+    "KeyPackageClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reservationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "keyPackages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "principalId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "deviceId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "keyPackage": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]*$"
+              }
+            },
+            "required": [
+              "principalId",
+              "deviceId",
+              "keyPackage"
+            ]
+          }
+        }
+      },
+      "required": [
+        "reservationId",
+        "keyPackages"
+      ]
+    },
+    "WelcomePage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "welcomes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "welcomeId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "conversationId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "mlsEpoch": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "welcome": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]*$"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "welcomeId",
+              "conversationId",
+              "mlsEpoch",
+              "welcome",
+              "createdAt"
+            ]
+          }
+        }
+      },
+      "required": [
+        "welcomes"
+      ]
+    },
+    "WelcomeConsumed": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "welcomeId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "consumed": {
+          "const": true
+        }
+      },
+      "required": [
+        "welcomeId",
+        "consumed"
+      ]
+    },
+    "BlockRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      },
+      "required": [
+        "principalId"
+      ]
+    },
+    "Block": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "blockedPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "blockedPrincipalId",
+        "createdAt"
+      ]
+    },
+    "BlockPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Block"
+          }
+        }
+      },
+      "required": [
+        "blocks"
+      ]
+    },
+    "BlockRemoved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "blockedPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "removed": {
+          "const": true
+        }
+      },
+      "required": [
+        "blockedPrincipalId",
+        "removed"
+      ]
     }
   }
 }

@@ -104,7 +104,19 @@ async fn main() -> anyhow::Result<()> {
             config.auth_cache.feed_interval,
         ));
     }
-    let state = AppState::new(db.clone(), clock, authority, service_auth.clone())
+    let managed_keys = match &config.managed_keyring_file {
+        Some(path) => Some(Arc::new(
+            messaging::messages::managed::ManagedKeyring::load(path)
+                .unwrap_or_else(|e| fatal("MESSAGING_MANAGED_KEYRING_FILE", e)),
+        )),
+        None => {
+            tracing::warn!(
+                "no managed key ring is configured: MANAGED message sending is disabled"
+            );
+            None
+        }
+    };
+    let mut state = AppState::new(db.clone(), clock, authority, service_auth.clone())
         .with_principals(Arc::new(PlatformAccessPrincipals::new(
             service_auth.client(),
         )))
@@ -112,6 +124,7 @@ async fn main() -> anyhow::Result<()> {
         .with_conversations(config.conversations)
         .with_workers(config.workers)
         .with_tree_head_signer(tree_heads);
+    state.managed_keys = managed_keys;
     tokio::spawn(messaging::conversations::service::run_expiry(
         state.clone(),
         config.conversations.expiry_interval,

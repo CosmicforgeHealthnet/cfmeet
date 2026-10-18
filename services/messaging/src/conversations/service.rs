@@ -30,15 +30,15 @@ use crate::{
     state::AppState,
 };
 
-fn request_context() -> RequestContext {
+pub fn request_context() -> RequestContext {
     current_context().unwrap_or_else(RequestContext::generate)
 }
 
-fn rfc3339(t: DateTime<Utc>) -> String {
+pub fn rfc3339(t: DateTime<Utc>) -> String {
     t.to_rfc3339_opts(SecondsFormat::Micros, true)
 }
 
-fn scope_of(ctx: &TrustedContext) -> EventScope {
+pub fn scope_of(ctx: &TrustedContext) -> EventScope {
     EventScope {
         tenant_id: ctx.scope.tenant_id,
         application_id: ctx.scope.application_id,
@@ -132,7 +132,7 @@ fn view(c: &ConversationRow, members: &[MemberRow]) -> Value {
     })
 }
 
-async fn load<C: ConnectionTrait>(
+pub async fn load<C: ConnectionTrait>(
     db: &C,
     ctx: &TrustedContext,
     id: Uuid,
@@ -158,13 +158,14 @@ async fn load<C: ConnectionTrait>(
 async fn members<C: ConnectionTrait>(db: &C, id: Uuid) -> Result<Vec<MemberRow>> {
     Ok(db::all(
         db,
-        "SELECT principal_id, role FROM messaging_conversation_members WHERE conversation_id = $1 ORDER BY role DESC, principal_id",
+        "SELECT principal_id, role FROM messaging_conversation_members WHERE conversation_id = $1 AND state = 'ACTIVE' \
+         ORDER BY CASE role WHEN 'OWNER' THEN 0 WHEN 'ADMIN' THEN 1 ELSE 2 END, principal_id",
         vec![id.into()],
     )
     .await?)
 }
 
-async fn full_view<C: ConnectionTrait>(db: &C, row: &ConversationRow) -> Result<Value> {
+pub async fn full_view<C: ConnectionTrait>(db: &C, row: &ConversationRow) -> Result<Value> {
     Ok(view(row, &members(db, row.id).await?))
 }
 
@@ -273,6 +274,44 @@ pub async fn create(
             retry_after_seconds: retry,
         });
     }
+    if let Some(p) = counterpart {
+        // Repeated unsolicited direct contacts (§88): only a NEW pair counts.
+        let existing = db::scalar_i64(
+            &state.db,
+            "SELECT count(*) FROM messaging_conversations WHERE environment_id = $1 AND context_class = 'DIRECT' \
+               AND direct_pair_key = $2 AND lifecycle_state IN ('ACTIVE', 'LOCKED', 'CLOSED', 'ARCHIVED')",
+            vec![ctx.scope.environment_id.into(), direct_pair(acting.principal_id, p).into()],
+        )
+        .await?;
+        if existing == 0 {
+            let effective = policy::current(&state.db, ctx.scope.environment_id).await?;
+            let key = format!(
+                "direct-contact:{}:{}",
+                ctx.scope.environment_id.simple(),
+                acting.principal_id.simple()
+            );
+            if let Some(retry) = limits::hit(
+                &state.db,
+                &key,
+                Window::Hour,
+                effective.abuse.new_direct_contacts_per_hour,
+                now,
+            )
+            .await?
+            {
+                crate::safety::abuse::signal(
+                    state,
+                    ctx,
+                    acting.principal_id,
+                    "DIRECT_CONTACT_VELOCITY",
+                )
+                .await;
+                return Err(Error::RateLimited {
+                    retry_after_seconds: retry,
+                });
+            }
+        }
+    }
     let digest = hex::encode(Sha256::digest(
         canonical_json(&json!({
             "request": serde_json::to_value(&request).expect("serializes"),
@@ -355,6 +394,17 @@ async fn create_in(
         };
     }
 
+    if let Some(p) = counterpart {
+        // A block (either direction) forbids a DIRECT conversation; the pair lock makes a
+        // concurrent block and creation serialize. Same refusal as an unknown principal.
+        crate::safety::blocks::lock_pair(txn, acting.principal_id, p).await?;
+        if crate::safety::blocks::blocked_between(txn, env, acting.principal_id, p).await? {
+            return Err(Error::reason(
+                ErrorCode::PrincipalNotAuthorized,
+                "COUNTERPART_NOT_AVAILABLE",
+            ));
+        }
+    }
     let snapshot = policy::current_snapshot(txn, env, now).await?;
     if request
         .expected_policy_version
@@ -464,16 +514,16 @@ async fn create_in(
     let (row, status) = if inserted == 1 {
         db::exec(
             txn,
-            "INSERT INTO messaging_conversation_members (conversation_id, principal_id, environment_id, role, joined_at) \
-             VALUES ($1, $2, $3, 'OWNER', $4)",
+            "INSERT INTO messaging_conversation_members (conversation_id, principal_id, environment_id, role, joined_at, updated_at) \
+             VALUES ($1, $2, $3, 'OWNER', $4, $4)",
             vec![id.into(), acting.principal_id.into(), env.into(), now.into()],
         )
         .await?;
         if let Some(p) = counterpart {
             db::exec(
                 txn,
-                "INSERT INTO messaging_conversation_members (conversation_id, principal_id, environment_id, role, joined_at) \
-                 VALUES ($1, $2, $3, 'MEMBER', $4)",
+                "INSERT INTO messaging_conversation_members (conversation_id, principal_id, environment_id, role, joined_at, updated_at) \
+                 VALUES ($1, $2, $3, 'MEMBER', $4, $4)",
                 vec![id.into(), p.into(), env.into(), now.into()],
             )
             .await?;
@@ -484,8 +534,19 @@ async fn create_in(
             vec![id.into()],
         )
         .await?;
-        outbox::enqueue(
+        if profile == SecurityProfile::PrivateE2ee {
+            // The Delivery Service's view of the group: epoch 0 until the creator's first
+            // commit (adding the other devices) is accepted.
+            db::exec(
+                txn,
+                "INSERT INTO messaging_mls_groups (conversation_id, updated_at) VALUES ($1, $2)",
+                vec![id.into(), now.into()],
+            )
+            .await?;
+        }
+        outbox::enqueue_conversation(
             txn,
+            id,
             NewEvent {
                 event_type: "messaging.conversation.created",
                 aggregate_type: "CONVERSATION",
@@ -583,7 +644,7 @@ async fn is_member<C: ConnectionTrait>(
 ) -> Result<bool> {
     Ok(db::scalar_i64(
         db,
-        "SELECT count(*) FROM messaging_conversation_members WHERE conversation_id = $1 AND principal_id = $2",
+        "SELECT count(*) FROM messaging_conversation_members WHERE conversation_id = $1 AND principal_id = $2 AND state = 'ACTIVE'",
         vec![conversation.into(), principal.into()],
     )
     .await?
@@ -674,7 +735,7 @@ pub async fn list(
             "SELECT {COLUMNS} FROM {FROM} \
              WHERE c.tenant_id = $1 AND c.application_id = $2 AND c.environment_id = $3 \
                AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM messaging_conversation_members m \
-                    WHERE m.conversation_id = c.id AND m.principal_id = $4)) \
+                    WHERE m.conversation_id = c.id AND m.principal_id = $4 AND m.state = 'ACTIVE')) \
                AND ($5::text IS NULL OR c.lifecycle_state = $5) \
                AND ($6::text IS NULL OR c.context_class = $6) \
                AND ($7::timestamptz IS NULL OR (c.created_at, c.id) < ($7, $8)) \
@@ -917,8 +978,9 @@ async fn transition<C: ConnectionTrait>(
     if updated != 1 {
         return Err(Error::code(ErrorCode::VersionConflict));
     }
-    outbox::enqueue(
+    outbox::enqueue_conversation(
         db,
+        row.id,
         NewEvent {
             event_type: if state_changed {
                 "messaging.conversation.lifecycle-changed"
@@ -989,8 +1051,9 @@ pub async fn expire_due(state: &AppState, batch: i64) -> Result<usize> {
                         vec![d.id.into(), now.into()],
                     )
                     .await?;
-                    outbox::enqueue(
+                    outbox::enqueue_conversation(
                         txn,
+                        d.id,
                         NewEvent {
                             event_type: "messaging.conversation.lifecycle-changed",
                             aggregate_type: "CONVERSATION",

@@ -39,7 +39,10 @@ pub const MAX_BODY_BYTES: usize = 512 * 1024;
 
 /// Customer routes nested under `/v1/messaging`.
 pub fn customer_routes() -> Router<AppState> {
-    devices::routes().merge(crate::conversations::http::policy_routes())
+    devices::routes()
+        .merge(crate::conversations::http::policy_routes())
+        .merge(crate::mls::http::device_routes())
+        .merge(crate::safety::http::routes())
 }
 
 pub fn app(state: AppState) -> Router {
@@ -61,6 +64,9 @@ pub fn app(state: AppState) -> Router {
         .nest(
             "/v1/conversations",
             crate::conversations::http::conversation_routes()
+                .merge(crate::membership::http::routes())
+                .merge(crate::messages::http::routes())
+                .merge(crate::mls::http::conversation_routes())
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )
