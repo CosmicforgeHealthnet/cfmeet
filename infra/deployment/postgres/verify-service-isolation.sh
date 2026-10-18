@@ -11,7 +11,7 @@
 #     and so on);
 #   * when <SERVICE>_MIGRATION_BIN is set (CALLING_MIGRATION_BIN,
 #     PLATFORM_ACCESS_MIGRATION_BIN, NUMBERING_MIGRATION_BIN, PRIVACY_RELAY_MIGRATION_BIN,
-#     TELEPHONY_MIGRATION_BIN, SMS_GATEWAY_MIGRATION_BIN), the service's REAL migrations apply as its migrator role
+#     TELEPHONY_MIGRATION_BIN, SMS_GATEWAY_MIGRATION_BIN, MESSAGING_MIGRATION_BIN), the service's REAL migrations apply as its migrator role
 #     and the runtime role can read every table they create.
 #
 #   verify-service-isolation.sh --admin-url <superuser url>
@@ -28,7 +28,7 @@ done
 here="$(cd "$(dirname "$0")" && pwd)"
 work="$(mktemp -d)"
 tag="iso$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')_"
-services=(calling platform-access numbering privacy-relay telephony sms-gateway)
+services=(calling platform-access numbering privacy-relay telephony sms-gateway messaging)
 failures=0
 
 url_for() { # url_for <role> <password> <database>

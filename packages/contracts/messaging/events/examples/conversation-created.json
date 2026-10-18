@@ -1,0 +1,12 @@
+{
+  "event_type": "messaging.conversation.created",
+  "payload": {
+    "conversation_id": "2b3c4d5e-6f70-4182-9a3b-4c5d6e7f8091",
+    "conversation_kind": "DIRECT",
+    "security_profile": "PRIVATE_E2EE",
+    "lifecycle_state": "ACTIVE",
+    "version": 1,
+    "policy_digest": "abababababababababababababababababababababababababababababababab",
+    "created_by_principal_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+  }
+}

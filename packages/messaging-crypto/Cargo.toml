@@ -1,0 +1,42 @@
+[package]
+name = "cf-messaging-crypto"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.91"
+publish = false
+description = "CF Meet Messaging cryptographic core: MLS 1.0 (RFC 9420) KeyPackage validation and device-binding formats, RFC 9162 Merkle key-transparency proofs, and (feature `client`) device key generation for client SDKs"
+
+# Stand-alone workspace: built by its own CI and consumed as a path dependency. It never
+# depends on a deployable service (scripts/service-boundaries enforces it).
+[workspace]
+
+[lib]
+name = "cf_messaging_crypto"
+path = "src/lib.rs"
+
+[features]
+default = []
+# Client-side device cryptography: generates and holds MLS signature / HPKE PRIVATE keys.
+# The Messaging backend must never enable it (services/messaging architecture test).
+client = ["dep:openmls_basic_credential"]
+# Browser (wasm32-unknown-unknown) builds of the client core: OpenMLS `js` (Web Crypto
+# randomness and time) and the same for the getrandom 0.2 used by the RustCrypto stack.
+web = ["client", "openmls/js", "dep:getrandom02"]
+
+[dependencies]
+# MLS 1.0 (RFC 9420). Pinned exactly: every bump is a reviewed decision (ADR 0045).
+openmls = { version = "=0.9.1", default-features = false }
+# RustCrypto-backed provider (ed25519-dalek, x25519-dalek, aes-gcm, hpke-rs). Used here
+# for its OpenMlsCrypto implementation (signature verification, hashing) and, in the
+# `client` feature, for key generation.
+openmls_rust_crypto = "=0.6.0"
+openmls_basic_credential = { version = "=0.6.0", optional = true }
+sha2 = "0.10"
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"], optional = true }
+thiserror = "2"
+uuid = "1"
+
+[dev-dependencies]
+# Reads the RFC 9420 published test vectors (tests/rfc9420_vectors.rs).
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }

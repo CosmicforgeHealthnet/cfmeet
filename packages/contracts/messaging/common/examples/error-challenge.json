@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "CHALLENGE_INVALID",
+    "message": "The registration challenge is unknown, expired, consumed or bound to another request.",
+    "requestId": "req_00000000000000000000000000000000",
+    "reason": "EXPIRED"
+  }
+}

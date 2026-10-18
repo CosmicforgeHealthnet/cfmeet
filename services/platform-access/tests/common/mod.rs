@@ -229,6 +229,9 @@ pub struct Peers {
     pub clock: cf_service_auth::ManualClock,
     pub calling: Arc<ServiceTokenSigner>,
     pub numbering: Arc<ServiceTokenSigner>,
+    pub messaging: Arc<ServiceTokenSigner>,
+    /// Trusted Messaging identity name, signing with a key the bundle does not list.
+    pub rogue_messaging: Arc<ServiceTokenSigner>,
     pub operator: Arc<ServiceTokenSigner>,
     /// Correctly signing, but not in Platform Access's trust bundle.
     pub untrusted: Arc<ServiceTokenSigner>,
@@ -261,6 +264,12 @@ pub const CALLING_PERMISSIONS: &[&str] = &[
     "platform-principal.register",
     "platform-identity.read",
 ];
+/// Part V B: what Messaging's grant in Platform Access's trust bundle holds.
+pub const MESSAGING_PERMISSIONS: &[&str] = &[
+    "platform-credential.authenticate",
+    "platform-principal.resolve",
+    "platform-identity.read",
+];
 pub const NUMBERING_PERMISSIONS: &[&str] = &[
     "platform-credential.authenticate",
     "platform-principal.resolve",
@@ -274,6 +283,7 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
     let me = key("platform-access-test-1");
     let calling = key("calling-test-1");
     let numbering = key("numbering-test-1");
+    let messaging = key("messaging-test-1");
     let operator = key("operator-test-1");
     let policy = TrustPolicy::from_json(
         &trust_bundle(
@@ -288,6 +298,11 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
                     cf_service_auth::services::NUMBERING,
                     vec![numbering.public_jwk()],
                     NUMBERING_PERMISSIONS,
+                ),
+                (
+                    cf_service_auth::services::MESSAGING,
+                    vec![messaging.public_jwk()],
+                    MESSAGING_PERMISSIONS,
                 ),
                 (
                     cf_service_auth::services::OPERATOR_CONSOLE,
@@ -317,6 +332,8 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
     let peers = Peers {
         calling: signer(ServiceId::calling(), calling),
         numbering: signer(ServiceId::numbering(), numbering),
+        messaging: signer(ServiceId::messaging(), messaging),
+        rogue_messaging: signer(ServiceId::messaging(), key("messaging-rogue-1")),
         operator: signer(ServiceId::operator_console(), operator),
         untrusted: signer(ServiceId::telephony(), key("telephony-test-1")),
         rogue_calling: signer(ServiceId::calling(), key("calling-rogue-1")),

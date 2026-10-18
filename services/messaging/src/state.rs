@@ -1,0 +1,85 @@
+//! Shared application state (cheap to clone).
+
+use std::sync::Arc;
+
+use cf_service_auth::RuntimeEnvironment;
+use sea_orm::DatabaseConnection;
+
+use crate::{
+    config::{
+        service_auth::ServiceAuthRuntime, ConversationSettings, DeviceSettings, WorkerSettings,
+    },
+    domain::SharedClock,
+    identity::{cache::CachingAuthority, PrincipalDirectory, Unconfigured},
+    transparency::TreeHeadSigner,
+};
+
+#[derive(Clone)]
+pub struct AppState {
+    pub db: DatabaseConnection,
+    pub clock: SharedClock,
+    /// Platform Access credential verification behind the bounded cache.
+    pub authority: Arc<CachingAuthority>,
+    pub principals: Arc<dyn PrincipalDirectory>,
+    pub service_auth: ServiceAuthRuntime,
+    pub devices: DeviceSettings,
+    pub conversations: ConversationSettings,
+    pub workers: WorkerSettings,
+    /// Signs every served key-transparency tree head. `None` (not configured): the
+    /// directory / proof endpoints fail closed instead of serving an unsigned head.
+    pub tree_heads: Option<Arc<TreeHeadSigner>>,
+}
+
+impl AppState {
+    pub fn new(
+        db: DatabaseConnection,
+        clock: SharedClock,
+        authority: Arc<CachingAuthority>,
+        service_auth: ServiceAuthRuntime,
+    ) -> Self {
+        Self {
+            db,
+            clock,
+            authority,
+            principals: Arc::new(Unconfigured),
+            service_auth,
+            devices: DeviceSettings::default(),
+            conversations: ConversationSettings::default(),
+            workers: WorkerSettings::default(),
+            tree_heads: None,
+        }
+    }
+
+    pub fn with_principals(mut self, principals: Arc<dyn PrincipalDirectory>) -> Self {
+        self.principals = principals;
+        self
+    }
+
+    pub fn with_devices(mut self, devices: DeviceSettings) -> Self {
+        self.devices = devices;
+        self
+    }
+
+    pub fn with_conversations(mut self, conversations: ConversationSettings) -> Self {
+        self.conversations = conversations;
+        self
+    }
+
+    pub fn with_workers(mut self, workers: WorkerSettings) -> Self {
+        self.workers = workers;
+        self
+    }
+
+    pub fn with_tree_head_signer(mut self, signer: Arc<TreeHeadSigner>) -> Self {
+        self.tree_heads = Some(signer);
+        self
+    }
+
+    pub fn now(&self) -> chrono::DateTime<chrono::Utc> {
+        self.clock.now()
+    }
+
+    pub fn runtime_environment(&self) -> RuntimeEnvironment {
+        self.service_auth.signer().runtime_environment()
+    }
+}

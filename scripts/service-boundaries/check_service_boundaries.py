@@ -34,6 +34,22 @@ crosses another service's boundary:
   SMS_DOMAIN_ELSEWHERE            another service's migrations create an SMS transport
                                   table (`sms_*`): the SMS Gateway (Part IV M) is the only
                                   SMS transport authority
+  MESSAGING_DOMAIN_ELSEWHERE      another service's migrations create a Messaging table
+                                  (`messaging_*`): Messaging (Part V) is the only
+                                  conversation / device-key authority
+  MESSAGING_CRYPTO_ELSEWHERE      another service's migrations create MLS / Messaging
+                                  device-key storage (`key_package`, `mls_`,
+                                  `messaging_device`): Platform Access owns principal
+                                  authority, Messaging owns device public keys
+  E2EE_SECRET_IN_SCHEMA           migrations of Messaging or Platform Access name a
+                                  column / table for E2EE private material (private
+                                  keys, epoch / exporter / init secrets, attachment or
+                                  recovery keys, plaintext bodies): the backend never
+                                  stores what would let it decrypt PRIVATE_E2EE content
+  PRODUCT_DOMAIN_IN_MESSAGING     Messaging creates a product-specific business table
+                                  (orders, trips, patients, ...) or names a CosmicForge
+                                  product in production code: conversation contexts are
+                                  generic and product references opaque
   IDENTITY_AUTHORITY_ELSEWHERE    credential verifier machinery (keyring, pepper, verifier
                                   message) in production code outside Platform Access: it
                                   is the only credential authority (Part IV Workstream B)
@@ -214,7 +230,7 @@ CONTACT_VAULT_CRATES = {"aes-gcm", "phonenumber"}
 CONTACT_VAULT_MARKER_RE = re.compile(
     r"\b(?:aes_gcm|phonenumber|expose_e164|ContactKeyProvider|FileKeyring|VaultKeys|contact_vault)\b"
 )
-PLAINTEXT_FIELD_SERVICES = {"calling"}
+PLAINTEXT_FIELD_SERVICES = {"calling", "messaging"}
 PLAINTEXT_FIELD_RE = re.compile(
     r"\b(phone_number|telephone_number|msisdn|e164|destination_number|caller_number|private_number|raw_number)\s*:",
     re.I,
@@ -234,6 +250,23 @@ NUMBERING_OWNER = "numbering"
 NUMBERING_TABLE_PREFIXES = ("number_", "dcn_")
 SMS_OWNER = "sms-gateway"
 SMS_TABLE_PREFIXES = ("sms_",)
+# Part V: Messaging owns conversations and Messaging device public keys; nothing it
+# persists may let the backend decrypt PRIVATE_E2EE content.
+MESSAGING_OWNER = "messaging"
+MESSAGING_TABLE_PREFIXES = ("messaging_",)
+MESSAGING_CRYPTO_RE = re.compile(r"\b[a-z_]*(?:key_package|mls_|messaging_device)[a-z0-9_]*\b")
+E2EE_SECRET_SERVICES = {"messaging", "platform-access"}
+E2EE_SECRET_RE = re.compile(
+    r"\b[a-z_]*(?:private_key|secret_key|signing_key_private|epoch_secret|exporter_secret|init_secret|"
+    r"encryption_secret|leaf_secret|joiner_secret|welcome_secret|psk_secret|hpke_private|init_private|"
+    r"signature_private|attachment_key|media_key|recovery_key|backup_key|decryption_key|plaintext|"
+    r"message_body|body_text)[a-z0-9_]*\b"
+)
+PRODUCT_NAME_RE = re.compile(r"\b[a-z0-9_]*(?:karryam|healthnet|cosmicforge)[a-z0-9_]*\b", re.I)
+PRODUCT_TABLE_RE = re.compile(
+    r"(?:^|_)(?:orders?|trips?|rides?|deliver(?:y|ies)|patients?|prescriptions?|invoices?|payments?|"
+    r"shipments?|bookings?|carts?|riders?|drivers?|doctors?|clinics?)(?:_|$)"
+)
 # Secret material each service alone may read (environment variable names, `_FILE`
 # variants included). Shared service-auth signing keys are per-service values of the same
 # variable and are not listed. Test code may start another service's binary with that
@@ -501,9 +534,46 @@ def check_rust(repo: Repository, path: Path, out: list[Violation]):
     if name == CONTACT_VAULT_OWNER:
         for m in NUMBERING_RE.finditer(identifiers_only):
             out.append(Violation("NUMBERING_IN_PRIVACY_RELAY", rel, line_of(identifiers_only, m.start()), f"`{m.group(0)}`: permanent public-number lifecycle belongs to the Numbering service"))
+    if name == MESSAGING_OWNER:
+        for m in PRODUCT_NAME_RE.finditer(remove_cfg_test_items(strip_rust(source, keep_strings=True))):
+            out.append(Violation("PRODUCT_DOMAIN_IN_MESSAGING", rel, line_of(with_strings, m.start()), f"`{m.group(0)}`: Messaging never hard-codes a product; context references are opaque"))
     if name != IDENTITY_AUTHORITY_OWNER:
         for m in IDENTITY_AUTHORITY_MARKER_RE.finditer(identifiers_only):
             out.append(Violation("IDENTITY_AUTHORITY_ELSEWHERE", rel, line_of(identifiers_only, m.start()), f"`{m.group(0)}`: credential verification exists only in services/{IDENTITY_AUTHORITY_OWNER}; consume its authenticated contract"))
+
+
+def migration_sources(repo: Repository, service: str):
+    """(path, lower-case code with strings, comments removed) of a service's migrations."""
+    for path in repo.files(repo.root / "services" / service):
+        if path.suffix == ".rs" and "migration" in path.relative_to(repo.root).parts:
+            code = strip_rust(path.read_text(encoding="utf-8", errors="replace"), keep_strings=True)
+            # SQL comments (`-- ...`) inside migration strings may discuss forbidden data.
+            code = "\n".join(line.split("--", 1)[0] for line in code.splitlines())
+            # SQL string literals (CHECK vocabularies, guards that FORBID a key) are data,
+            # not schema identifiers.
+            code = re.sub(r"'[^'\n]*'", "''", code)
+            yield path, code.lower()
+
+
+def check_messaging_schemas(repo: Repository, out: list[Violation]):
+    for service in repo.services:
+        for path, code in migration_sources(repo, service):
+            rel = repo.rel(path)
+            if service != MESSAGING_OWNER:
+                for m in MESSAGING_CRYPTO_RE.finditer(code):
+                    out.append(Violation("MESSAGING_CRYPTO_ELSEWHERE", rel, line_of(code, m.start()), f"`{m.group(0)}`: Messaging device keys and MLS objects are stored only by services/{MESSAGING_OWNER}"))
+            if service in E2EE_SECRET_SERVICES:
+                for m in E2EE_SECRET_RE.finditer(code):
+                    out.append(Violation("E2EE_SECRET_IN_SCHEMA", rel, line_of(code, m.start()), f"`{m.group(0)}`: {service} never persists E2EE private keys, group secrets or plaintext content"))
+            if service == MESSAGING_OWNER:
+                for m in RAW_CREATE_RE.finditer(code):
+                    table = m.group(1).lower()
+                    if PRODUCT_TABLE_RE.search(table) or PRODUCT_NAME_RE.search(table):
+                        out.append(Violation("PRODUCT_DOMAIN_IN_MESSAGING", rel, line_of(code, m.start()), f"table `{table}` models a product's business domain; Messaging stores generic contexts with opaque references"))
+                for m in PLAINTEXT_FIELD_RE.finditer(code):
+                    out.append(Violation("PLAINTEXT_CONTACT_FIELD", rel, line_of(code, m.start()), f"`{m.group(1)}`: Messaging stores principal ids, never telephone numbers"))
+                for m in re.finditer(r"\b(phone_number|telephone_number|msisdn|e164)\b", code):
+                    out.append(Violation("PLAINTEXT_CONTACT_FIELD", rel, line_of(code, m.start()), f"`{m.group(1)}`: Messaging stores principal ids, never telephone numbers"))
 
 
 def is_config(path: Path) -> bool:
@@ -542,6 +612,12 @@ def check(root: Path) -> list[Violation]:
             continue
         for table in sorted(t for t in tables if t.startswith(SMS_TABLE_PREFIXES)):
             out.append(Violation("SMS_DOMAIN_ELSEWHERE", f"services/{service}", 1, f"table `{table}` belongs to services/{SMS_OWNER} (SMS transports); no other service stores it"))
+    for service, tables in sorted(repo.tables.items()):
+        if service == MESSAGING_OWNER:
+            continue
+        for table in sorted(t for t in tables if t.startswith(MESSAGING_TABLE_PREFIXES)):
+            out.append(Violation("MESSAGING_DOMAIN_ELSEWHERE", f"services/{service}", 1, f"table `{table}` belongs to services/{MESSAGING_OWNER} (conversations, Messaging devices); no other service stores it"))
+    check_messaging_schemas(repo, out)
     for top in ("services", "packages"):
         for path in repo.files(repo.root / top):
             if path.name == "Cargo.toml":

@@ -1,0 +1,19 @@
+# Build-context filter for services/messaging/Dockerfile (context: repository root).
+# Everything is excluded except the directories the image is built from.
+*
+!packages/service-auth
+!packages/messaging-crypto
+!packages/contracts/messaging
+!services/messaging
+
+# Never send build output, local configuration or key material.
+**/target
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.secret
+**/*.log
+**/*.rs.bk
+services/messaging/Dockerfile
+services/messaging/Dockerfile.dockerignore

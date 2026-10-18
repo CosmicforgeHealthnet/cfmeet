@@ -172,7 +172,13 @@ async fn repeated_loop_blocks_are_one_incident() {
     assert_eq!(incident["evidence"]["reason"], "LOOP_BLOCKED");
     // The first observation keeps its Call; repeats count.
     assert_eq!(incident["callId"], first.to_string());
-    let text = incident.to_string();
+    // Random identifiers (hyphenated or simple, e.g. inside `key`) can contain "650"; drop
+    // the incident's own ids so the check only sees the remaining evidence.
+    let mut text = incident.to_string();
+    for field in ["callId", "resourceId"] {
+        let id = incident[field].as_str().unwrap().to_owned();
+        text = text.replace(&id, "").replace(&id.replace('-', ""), "");
+    }
     assert!(
         !text.contains("650"),
         "no extension number in evidence: {text}"

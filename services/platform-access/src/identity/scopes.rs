@@ -105,7 +105,38 @@ pub mod names {
     pub const SMS_SEND: &str = "sms.send";
     /// SMS: read messages and delivery state of the application.
     pub const SMS_READ: &str = "sms.read";
+    /// Messaging (Part V): submit messages for authorized conversations.
+    pub const MESSAGES_SEND: &str = "messages.send";
+    /// Messaging: read messages / history and Messaging device directories.
+    pub const MESSAGES_READ: &str = "messages.read";
+    /// Messaging: create eligible conversations.
+    pub const CONVERSATIONS_CREATE: &str = "conversations.create";
+    /// Messaging: administer conversations (lifecycle) and the application's policy.
+    pub const CONVERSATIONS_MANAGE: &str = "conversations.manage";
+    /// Messaging: upload attachments (reserved for the attachment workstream).
+    pub const ATTACHMENTS_WRITE: &str = "attachments.write";
+    /// Messaging: retrieve attachments (reserved for the attachment workstream).
+    pub const ATTACHMENTS_READ: &str = "attachments.read";
+    /// Messaging: authorized moderation (reserved for the moderation workstream).
+    pub const MODERATION_MANAGE: &str = "moderation.manage";
+    /// Messaging: approved exports (reserved for the export workstream).
+    pub const MESSAGING_EXPORT: &str = "messaging.export";
+    /// Messaging: privileged internal operator authority. Never an ordinary grant.
+    pub const MESSAGING_ADMIN: &str = "messaging.admin";
 }
+
+/// The Part V Messaging scopes (least privilege: none implies another).
+pub const MESSAGING_SCOPES: &[&str] = &[
+    names::MESSAGES_SEND,
+    names::MESSAGES_READ,
+    names::CONVERSATIONS_CREATE,
+    names::CONVERSATIONS_MANAGE,
+    names::ATTACHMENTS_WRITE,
+    names::ATTACHMENTS_READ,
+    names::MODERATION_MANAGE,
+    names::MESSAGING_EXPORT,
+    names::MESSAGING_ADMIN,
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -286,6 +317,51 @@ const STANDARD_SCOPES: &[ScopeDefinition] = &[
         name: names::SMS_READ,
         description: "Read the application's SMS messages and delivery state",
         trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::MESSAGES_SEND,
+        description: "Submit messages to conversations the acting principal is authorized for; register and use the principal's Messaging devices",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::MESSAGES_READ,
+        description: "Read messages, history and conversations the acting principal is authorized for, and the Messaging device directory of principals in the same application environment",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::CONVERSATIONS_CREATE,
+        description: "Create conversations of an eligible context class and security profile within the credential's application environment",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::CONVERSATIONS_MANAGE,
+        description: "Administer conversations (lifecycle) and the application's messaging policy within the credential's application environment (never implies reading message content)",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::ATTACHMENTS_WRITE,
+        description: "Upload message attachments (reserved for the Messaging attachment API)",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::ATTACHMENTS_READ,
+        description: "Retrieve message attachments the acting principal is authorized for (reserved for the Messaging attachment API)",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::MODERATION_MANAGE,
+        description: "Authorized moderation of MANAGED conversations (reserved for the Messaging moderation API)",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::MESSAGING_EXPORT,
+        description: "Approved exports of MANAGED messaging data (reserved for the Messaging export API; never PRIVATE_E2EE plaintext)",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::MESSAGING_ADMIN,
+        description: "Privileged internal operator authority over Messaging (platform operations); never an ordinary customer grant",
+        trust: ScopeTrust::PrivilegedOperator,
     },
     ScopeDefinition {
         name: names::EVENTS_PRIVATE_DELIVERY,
@@ -836,6 +912,46 @@ mod tests {
             }
         }
         assert!(registry.definition(names::NUMBERS_ADMIN).is_some());
+    }
+
+    #[test]
+    fn messaging_scopes_are_registered_with_least_privilege_trust() {
+        let registry = ScopeRegistry::standard();
+        assert_eq!(MESSAGING_SCOPES.len(), 9);
+        for scope in MESSAGING_SCOPES {
+            let def = registry.definition(scope).expect("registered");
+            if *scope == names::MESSAGING_ADMIN {
+                assert_eq!(def.trust, ScopeTrust::PrivilegedOperator);
+                for classification in TenantClassification::ALL {
+                    assert!(registry.grantable(scope, *classification).is_err());
+                }
+                assert!(registry
+                    .grantable_privileged(scope, TenantClassification::FirstParty)
+                    .is_ok());
+                assert!(registry
+                    .grantable_privileged(scope, TenantClassification::External)
+                    .is_err());
+            } else {
+                assert_eq!(def.trust, ScopeTrust::Standard, "{scope}");
+                for classification in TenantClassification::ALL {
+                    assert!(
+                        registry.grantable(scope, *classification).is_ok(),
+                        "{scope}"
+                    );
+                }
+            }
+        }
+        // messaging.admin is honoured only with its privileged basis.
+        assert!(!registry.honours(
+            &grant(names::MESSAGING_ADMIN, GrantBasis::Standard, true),
+            TenantClassification::FirstParty
+        ));
+        // No scope implies another: the effective set is exactly what was granted.
+        let set = registry.effective(
+            vec![grant(names::MESSAGES_SEND, GrantBasis::Standard, true)],
+            TenantClassification::External,
+        );
+        assert_eq!(set.names(), vec![names::MESSAGES_SEND.to_string()]);
     }
 
     #[test]
