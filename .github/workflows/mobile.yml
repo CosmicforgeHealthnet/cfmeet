@@ -7,7 +7,7 @@ name: Mobile
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
     paths:
       - "apps/mobile/**"
       - ".github/workflows/mobile.yml"
@@ -103,7 +103,7 @@ jobs:
     name: EAS Build (Production)
     needs: lint
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.profile == 'production'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.profile == 'production' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
 
@@ -136,7 +136,7 @@ jobs:
     name: Submit to App Stores
     needs: build-production
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.profile == 'production'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.profile == 'production' && github.ref == 'refs/heads/main'
     environment: production
     steps:
       - uses: actions/checkout@v4
