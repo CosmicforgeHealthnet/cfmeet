@@ -65,7 +65,15 @@ impl Device {
         self.signer.to_public_vec()
     }
 
-    fn credential(&self) -> CredentialWithKey {
+    pub(crate) fn provider(&self) -> &OpenMlsRustCrypto {
+        &self.provider
+    }
+
+    pub(crate) fn signer(&self) -> &SignatureKeyPair {
+        &self.signer
+    }
+
+    pub(crate) fn credential(&self) -> CredentialWithKey {
         CredentialWithKey {
             credential: BasicCredential::new(binding::device_credential_identity(self.device_id))
                 .into(),

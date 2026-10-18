@@ -274,3 +274,81 @@ fn mls_authenticates_the_application_message_aad_between_two_devices() {
         a.replace("PRIVATE_E2EE", "MANAGED_E2EE")
     });
 }
+
+/// Part V E/F evidence: the client group wrapper and the PUBLIC framing inspector the
+/// Delivery Service uses. A removed device cannot read anything sent after the removal
+/// commit, and the server-side inspector sees only group id, epoch and content type.
+#[test]
+fn group_lifecycle_with_removal_and_public_framing() {
+    use cf_messaging_crypto::{
+        framing::{inspect, is_welcome, FramedContent, FramedWireFormat},
+        group::Processed,
+    };
+    let (a, b, c) = (
+        Device::generate(Uuid::new_v4()).unwrap(),
+        Device::generate(Uuid::new_v4()).unwrap(),
+        Device::generate(Uuid::new_v4()).unwrap(),
+    );
+    let gid = [0x42u8; 32];
+    let mut ga = a.create_group(&gid).unwrap();
+    assert_eq!(ga.epoch(), 0);
+    let add = a
+        .add_devices(
+            &mut ga,
+            &[b.key_package().unwrap(), c.key_package().unwrap()],
+        )
+        .unwrap();
+    assert_eq!(add.epoch, 0);
+    assert_eq!(ga.epoch(), 1);
+    let welcome = add.welcome.unwrap();
+    assert!(is_welcome(&welcome));
+    let f = inspect(&add.commit).unwrap();
+    assert_eq!(
+        (f.group_id.as_slice(), f.epoch, f.content),
+        (&gid[..], 0, FramedContent::Commit)
+    );
+    let mut gb = b.join(&welcome).unwrap();
+    let mut gc = c.join(&welcome).unwrap();
+    assert_eq!(gb.epoch(), 1);
+    let mut expected = vec![a.device_id(), b.device_id(), c.device_id()];
+    expected.sort();
+    assert_eq!(gb.member_devices(), expected);
+
+    let m1 = a.encrypt(&mut ga, b"aad-1", b"hello all").unwrap();
+    let f = inspect(&m1).unwrap();
+    assert_eq!(f.content, FramedContent::Application);
+    assert_eq!(f.wire_format, FramedWireFormat::Private);
+    assert_eq!(f.epoch, 1);
+    assert!(!m1.windows(9).any(|w| w == b"hello all"));
+    for (dev, g) in [(&b, &mut gb), (&c, &mut gc)] {
+        assert_eq!(
+            dev.process(g, &m1).unwrap(),
+            Processed::Application {
+                aad: b"aad-1".to_vec(),
+                plaintext: b"hello all".to_vec()
+            }
+        );
+    }
+    // Remove C.
+    let rm = a.remove_devices(&mut ga, &[c.device_id()]).unwrap();
+    assert_eq!(rm.epoch, 1);
+    assert_eq!(inspect(&rm.commit).unwrap().content, FramedContent::Commit);
+    assert_eq!(
+        b.process(&mut gb, &rm.commit).unwrap(),
+        Processed::CommitMerged { epoch: 2 }
+    );
+    // C processes its own removal and can decrypt nothing afterwards.
+    let _ = c.process(&mut gc, &rm.commit);
+    let m2 = a.encrypt(&mut ga, b"aad-2", b"after removal").unwrap();
+    assert_eq!(inspect(&m2).unwrap().epoch, 2);
+    assert!(matches!(
+        b.process(&mut gb, &m2).unwrap(),
+        Processed::Application { .. }
+    ));
+    assert!(
+        c.process(&mut gc, &m2).is_err(),
+        "a removed device decrypted a later message"
+    );
+    assert!(!gb.member_devices().contains(&c.device_id()));
+    assert!(a.remove_devices(&mut ga, &[Uuid::new_v4()]).is_err());
+}

@@ -21,9 +21,16 @@
 //! Protocol interoperability claim.
 
 pub mod binding;
+pub mod framing;
 pub mod key_package;
 pub mod profile;
 pub mod transparency;
 
 #[cfg(feature = "client")]
+pub mod attachment;
+#[cfg(feature = "client")]
 pub mod device;
+#[cfg(feature = "client")]
+pub mod group;
+#[cfg(feature = "client")]
+pub mod local_search;
