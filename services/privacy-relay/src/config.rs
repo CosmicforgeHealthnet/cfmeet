@@ -25,6 +25,7 @@
 //! | `NUMBER_GRANT_TRUST_BUNDLE_FILE` | no | Numbering's routing grant key (DCN inbound caller protection); unset: refused |
 //! | `RELAY_NUMBER_AUTHORITY` | no | `LOCAL` (default, the rollback position) or `NUMBERING`: relay numbers are leased from Numbering (Part IV Part P) |
 //! | `NUMBERING_INTERNAL_BASE_URL` | with `NUMBERING` | Numbering's internal API (relay inventory import, leases, resolution) |
+//! | `MESSAGING_INTERNAL_BASE_URL` | no | Messaging's internal API (communication-context authority for conversations, Part V H §103); unset: authority jobs stay PENDING |
 //!
 //! Without `CALLING_INTERNAL_BASE_URL` enforcement jobs and outbox events stay durably
 //! PENDING (authority is still revoked locally; nothing is falsely reported as applied or
@@ -305,6 +306,8 @@ pub struct ServiceAuthSettings {
     pub calling_base_url: Option<String>,
     /// `NUMBERING_INTERNAL_BASE_URL`: relay-number leases (Part IV Part P).
     pub numbering_base_url: Option<String>,
+    /// Part V H: Messaging's internal API (context authority pushes).
+    pub messaging_base_url: Option<String>,
 }
 
 impl ServiceAuthSettings {
@@ -372,6 +375,7 @@ impl ServiceAuthSettings {
             http_timeout,
             calling_base_url: value("CALLING_INTERNAL_BASE_URL"),
             numbering_base_url: value("NUMBERING_INTERNAL_BASE_URL"),
+            messaging_base_url: value("MESSAGING_INTERNAL_BASE_URL"),
         })
     }
 
@@ -401,6 +405,11 @@ impl ServiceAuthSettings {
             targets
                 .insert(ServiceId::numbering(), url)
                 .map_err(|e| invalid("NUMBERING_INTERNAL_BASE_URL", e.to_string()))?;
+        }
+        if let Some(url) = &self.messaging_base_url {
+            targets
+                .insert(ServiceId::messaging(), url)
+                .map_err(|e| invalid("MESSAGING_INTERNAL_BASE_URL", e.to_string()))?;
         }
         let client = Arc::new(
             InternalServiceClient::new(signer.clone(), targets, self.http_timeout)

@@ -166,14 +166,18 @@ async fn upgrade_from_the_previous_head_keeps_data_adds_objects_and_reverts_clea
         .is_empty());
     assert_eq!(digest(&db.conn, &shape).await, before, "data intact");
     let after_tables = tables(&db.conn).await;
-    // The newest migration (Part IV Part P): the Numbering lease ledger.
-    let new = "relay_number_leases".to_string();
+    // The newest migration (Part V H §103): durable context-authority jobs to Messaging.
+    let new = "privacy_relay_messaging_authority_jobs".to_string();
     assert!(!before_tables.contains(&new));
     assert!(after_tables.contains(&new), "{new}");
     assert_eq!(
-        scalar(&db.conn, "SELECT count(*) FROM relay_number_leases").await,
+        scalar(
+            &db.conn,
+            "SELECT count(*) FROM privacy_relay_messaging_authority_jobs"
+        )
+        .await,
         0,
-        "a Part III assignment carries no lease until it is adopted"
+        "existing voice-only contexts never concern Messaging"
     );
 
     // The service keeps working on the upgraded data: authority as before, the pending
@@ -233,7 +237,7 @@ async fn upgrade_from_the_previous_head_keeps_data_adds_objects_and_reverts_clea
     assert_eq!(
         scalar(
             &db.conn,
-            "SELECT count(*) FROM pg_proc WHERE proname = 'privacy_relay_guard_lease'"
+            "SELECT count(*) FROM pg_proc WHERE proname IN ('privacy_relay_guard_messaging_authority_job', 'privacy_relay_enqueue_messaging_authority')"
         )
         .await,
         0

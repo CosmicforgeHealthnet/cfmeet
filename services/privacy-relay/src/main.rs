@@ -141,6 +141,16 @@ async fn main() -> anyhow::Result<()> {
     );
     // Committed domain events are published to Calling's platform-event ingress (Part G
     // §67) when Calling is configured; otherwise they stay PENDING in the outbox.
+    // Part V H §103: context authority reaches Messaging when it is configured.
+    let relay = if settings.messaging_base_url.is_some() {
+        relay.with_messaging_authority(Arc::new(
+            privacy_relay::messaging_authority::HttpMessagingAuthority::new(
+                service_auth.client().clone(),
+            ),
+        ))
+    } else {
+        relay
+    };
     let relay = if settings.calling_base_url.is_some() {
         relay.with_event_publisher(Arc::new(privacy_relay::events::HttpEventPublisher::new(
             service_auth.client().clone(),

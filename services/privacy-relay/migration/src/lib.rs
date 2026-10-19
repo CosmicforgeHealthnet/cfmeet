@@ -23,6 +23,7 @@ mod m20261010_000012_relay_outbox_publication;
 mod m20261010_000013_retention_and_contact_erasure;
 mod m20261015_000014_incidents_and_enforcement_dead_letter;
 mod m20261024_000015_numbering_relay_leases;
+mod m20261026_000016_messaging_authority_jobs;
 
 /// Name of the table recording which Privacy Relay migrations have been applied.
 pub const MIGRATION_TABLE: &str = "privacy_relay_seaql_migrations";
@@ -48,6 +49,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261010_000013_retention_and_contact_erasure::Migration),
             Box::new(m20261015_000014_incidents_and_enforcement_dead_letter::Migration),
             Box::new(m20261024_000015_numbering_relay_leases::Migration),
+            Box::new(m20261026_000016_messaging_authority_jobs::Migration),
         ]
     }
 

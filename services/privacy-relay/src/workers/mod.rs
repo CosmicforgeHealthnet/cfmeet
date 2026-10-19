@@ -43,6 +43,8 @@ pub struct SweepReport {
     pub events_published: usize,
     /// Numbering leases released after their assignment ended (Part IV Part P).
     pub numbering_leases_released: usize,
+    /// Part V H: context authority applied by Messaging.
+    pub messaging_authority_applied: usize,
 }
 
 #[derive(Debug, sea_orm::FromQueryResult)]
@@ -277,6 +279,8 @@ impl RelayService {
             events_published: self.publish_outbox(200).await?,
             // Lease releases run in every mode (a rollback to LOCAL never strands one).
             numbering_leases_released: self.release_numbering_leases(200).await?,
+            // Restrictive authority reaches Messaging (never gated by a flag).
+            messaging_authority_applied: self.run_messaging_authority_sweep(100).await?,
         })
     }
 
