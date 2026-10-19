@@ -418,7 +418,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         receiver: services::CALLING,
         grantable_to: &[services::PRIVACY_RELAY, services::SMS_GATEWAY, services::MESSAGING],
         sensitive: false,
-        description: "Publish a committed Privacy Relay or SMS Gateway domain event (platform envelope, the publisher's own events only) for normalized customer webhooks",
+        description: "Publish a committed Privacy Relay, SMS Gateway or Messaging domain event (platform envelope, the publisher's own events only) for normalized customer webhooks",
     },
     PermissionDefinition {
         permission: InternalPermission::PlatformCredentialAuthenticate,

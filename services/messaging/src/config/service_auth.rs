@@ -11,6 +11,7 @@
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | outbound timeout (100–30000, default 5000) |
 //! | `CF_PLATFORM_ACCESS_BASE_URL` | yes (server) | Platform Access, the identity authority |
 //! | `CF_SMS_GATEWAY_BASE_URL` | no | SMS Gateway (SMS Bridge transport); unset: bridges are refused |
+//! | `CF_CALLING_BASE_URL` | no | Calling's platform-event ingress (customer webhooks); unset: relayed events wait PENDING |
 //!
 //! Inbound, every `/internal/v1` route requires a service token whose issuer Messaging's
 //! own trust bundle grants the route's permission. The internal operations (Part V H) are
@@ -106,6 +107,9 @@ const TARGETS: &[(&str, &str)] = &[
     ("CF_PLATFORM_ACCESS_BASE_URL", services::PLATFORM_ACCESS),
     // Part V H SMS Bridge: carrier transport (sms-bridge.submit).
     ("CF_SMS_GATEWAY_BASE_URL", services::SMS_GATEWAY),
+    // Part V I: customer webhooks through Calling's platform-event ingress
+    // (platform-event.publish).
+    ("CF_CALLING_BASE_URL", services::CALLING),
 ];
 
 #[derive(Debug, Clone)]

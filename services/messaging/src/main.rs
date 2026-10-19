@@ -215,6 +215,24 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("CF_SMS_GATEWAY_BASE_URL is not set: SMS bridges are refused (in-app messaging unaffected)");
         state
     };
+    // Part V I: customer webhooks through the existing platform webhook system (Calling).
+    let calling_configured = settings
+        .targets
+        .iter()
+        .any(|(s, _)| s.as_str() == cf_service_auth::services::CALLING);
+    let webhook_sink: Arc<dyn messaging::webhook_relay::PlatformEventSink> = if calling_configured {
+        Arc::new(messaging::webhook_relay::CallingPlatformEvents::new(
+            state.service_auth.client(),
+        ))
+    } else {
+        tracing::warn!("CF_CALLING_BASE_URL is not set: webhook-relayed events wait PENDING");
+        Arc::new(messaging::webhook_relay::UnconfiguredSink)
+    };
+    tokio::spawn(messaging::webhook_relay::run(
+        state.clone(),
+        webhook_sink,
+        config.workers.interval,
+    ));
     tokio::spawn(messaging::conversations::service::run_expiry(
         state.clone(),
         config.conversations.expiry_interval,

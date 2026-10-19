@@ -5,6 +5,9 @@
     "usage-finalizer", "artifact-worker", "webhook-delivery-worker"
   ],
   "responsibilities": [
+    {"id": "messaging-webhook-relay", "owner": "messaging", "source": "src/webhook_relay.rs", "entry": "relay_due",
+     "tests": ["tests/webhook_relay.rs::public_events_are_relayed_as_platform_envelopes_without_content",
+               "tests/webhook_relay.rs::relay_failures_retry_dead_letter_and_wait_for_configuration"]},
     {"id": "messaging-sms-bridge-transport", "owner": "messaging", "source": "src/sms_bridge/mod.rs", "entry": "run_due",
      "tests": ["tests/sms_bridge.rs::a_managed_conversation_bridges_to_sms_with_explicit_disclosure_and_separate_transport_state"]},
     {"id": "sms-bridge-inbound-delivery", "owner": "sms-gateway", "source": "src/sms/bridge.rs", "entry": "deliver_due",

@@ -1,5 +1,6 @@
 //! Internal platform-event ingress (`/internal/v1/platform/events`, Part G §67): committed
-//! Privacy Relay and SMS Gateway (Part IV N / O) domain events, service-authenticated
+//! Privacy Relay, SMS Gateway (Part IV N / O) and Messaging (Part V I) domain events,
+//! service-authenticated
 //! (`platform-event.publish`, grantable only to those producers), projected into the
 //! public catalog for customer webhooks.
 
@@ -11,7 +12,8 @@ use cf_service_auth::InternalPermission;
 use serde_json::{json, Value};
 
 use super::worker::{
-    EventTransport, LocalWebhookTransport, PRODUCER_PRIVACY_RELAY, PRODUCER_SMS_GATEWAY,
+    EventTransport, LocalWebhookTransport, PRODUCER_MESSAGING, PRODUCER_PRIVACY_RELAY,
+    PRODUCER_SMS_GATEWAY,
 };
 use crate::{error::CallingError, internal_auth::middleware::InternalCaller, state::AppState};
 
@@ -20,8 +22,8 @@ pub fn internal_routes() -> Router<AppState> {
     Router::new().route("/platform/events", post(ingest))
 }
 
-/// A committed producer event (platform envelope). Only Privacy Relay and the SMS Gateway
-/// may publish, each only its OWN events (the envelope's producer is the authenticated
+/// A committed producer event (platform envelope). Only Privacy Relay, the SMS Gateway and
+/// Messaging may publish, each only its OWN events (the envelope's producer is the authenticated
 /// caller); the envelope is projected (never stored verbatim).
 async fn ingest(
     State(state): State<AppState>,
@@ -35,9 +37,13 @@ async fn ingest(
         .authenticated_service()
         .as_str()
         .to_string();
-    let producer = [PRODUCER_PRIVACY_RELAY, PRODUCER_SMS_GATEWAY]
-        .into_iter()
-        .find(|p| *p == caller_service);
+    let producer = [
+        PRODUCER_PRIVACY_RELAY,
+        PRODUCER_SMS_GATEWAY,
+        PRODUCER_MESSAGING,
+    ]
+    .into_iter()
+    .find(|p| *p == caller_service);
     let valid = producer.is_some()
         && envelope.get("producer_service").and_then(Value::as_str) == producer
         && envelope

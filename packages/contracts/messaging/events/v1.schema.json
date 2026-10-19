@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/messaging/events/v1.schema.json",
   "title": "CF Meet Messaging events v1",
-  "description": "Messaging domain events in the platform envelope (transactional outbox committed with the state change, at least once, per-aggregate order): messaging.device.registered, messaging.device.key-packages-published, messaging.device.revoked, messaging.conversation.created, messaging.conversation.lifecycle-changed, messaging.conversation.updated, messaging.policy.updated. 1.2.0 (Parts E-G): messaging.message.created / edited / deleted / moderated / expired, messaging.member.added / removed / updated, messaging.read-cursor.updated, messaging.mls.welcome-available; conversation-scoped events also carry a per-conversation event cursor in the outbox (the replay log). Ids, states and versions only — never key material, ciphertext, content or a credential. 1.5.0 (Part V I): messaging.reaction.added / removed, messaging.pin.added / removed (ids and the reaction only).",
+  "description": "Messaging domain events in the platform envelope (transactional outbox committed with the state change, at least once, per-aggregate order): messaging.device.registered, messaging.device.key-packages-published, messaging.device.revoked, messaging.conversation.created, messaging.conversation.lifecycle-changed, messaging.conversation.updated, messaging.policy.updated. 1.2.0 (Parts E-G): messaging.message.created / edited / deleted / moderated / expired, messaging.member.added / removed / updated, messaging.read-cursor.updated, messaging.mls.welcome-available; conversation-scoped events also carry a per-conversation event cursor in the outbox (the replay log). Ids, states and versions only — never key material, ciphertext, content or a credential. 1.5.0 (Part V I): messaging.reaction.added / removed, messaging.pin.added / removed (ids and the reaction only). 1.6.0: message events may carry conversation_id (the webhook relay to the platform webhook system).",
   "$ref": "#/$defs/MessagingEvent",
   "$defs": {
     "DeviceRegistered": {
@@ -602,6 +602,10 @@
         },
         "notify": {
           "type": "boolean"
+        },
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "The conversation (added by the webhook relay; the outbox row carries it as its conversation cursor)."
         }
       },
       "required": [
@@ -628,6 +632,10 @@
         },
         "sender_principal_id": {
           "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "The conversation (added by the webhook relay; the outbox row carries it as its conversation cursor)."
         }
       },
       "required": [
@@ -658,6 +666,10 @@
         "reason": {
           "type": "string",
           "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        },
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "The conversation (added by the webhook relay; the outbox row carries it as its conversation cursor)."
         }
       },
       "required": [
@@ -688,6 +700,10 @@
         "reason": {
           "type": "string",
           "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        },
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "The conversation (added by the webhook relay; the outbox row carries it as its conversation cursor)."
         }
       },
       "required": [
@@ -718,6 +734,10 @@
         "reason": {
           "type": "string",
           "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        },
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "The conversation (added by the webhook relay; the outbox row carries it as its conversation cursor)."
         }
       },
       "required": [
@@ -850,6 +870,10 @@
         "read_sequence": {
           "type": "integer",
           "minimum": 0
+        },
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "The conversation (added by the webhook relay; the outbox row carries it as its conversation cursor)."
         }
       },
       "required": [

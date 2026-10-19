@@ -277,6 +277,10 @@ jobs:
         run: cargo test --locked --test sms_bridge
       - name: Engagement and usage (Part V I §113 / §129) — roles, bans, replies / threads, reactions, pins, unread, usage facts without prices
         run: cargo test --locked --test engagement
+      - name: Webhook relay (Part V I §§116–118) — public events to the existing platform webhook system, never content
+        run: cargo test --locked --test webhook_relay
+      - name: Query plans (Part V I §§119–122) — every hot query of the new APIs and workers is index-served
+        run: cargo test --locked --test query_plans -- --nocapture
       - name: cargo test (whole workspace, incl. the Platform Access certification)
         env:
           PLATFORM_ACCESS_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access

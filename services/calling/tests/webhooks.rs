@@ -1076,6 +1076,170 @@ async fn sms_gateway_events_become_sms_webhooks_with_safe_data_only() {
     assert!(seen[0].headers.contains_key("cf-webhook-signature"));
 }
 
+/// Part V I §§116–118: Messaging's committed events reach customers through the SAME
+/// webhook system (subscription, platform signature, retries, replay): only from
+/// Messaging itself, projected to `conversation.*` / `message.*` with ids, sequences and
+/// codes only — never message text, ciphertext or key material, whatever the profile —
+/// and only for subscribers holding `messages.read`.
+#[tokio::test]
+async fn messaging_events_become_webhooks_without_content() {
+    let Some(w) = World::new(dev_settings()).await else {
+        return;
+    };
+    w.e.h()
+        .platform
+        .grant_application_scope(w.e.a.w.consumer.application.id, names::MESSAGES_READ)
+        .await
+        .unwrap();
+    let r = w
+        .send(
+            Method::POST,
+            "/v1/webhooks",
+            Some(json!({ "url": "https://example.com/hook", "eventTypes": ["message.created"] })),
+        )
+        .await;
+    assert_eq!(
+        r.status,
+        StatusCode::FORBIDDEN,
+        "messages.read is required: {}",
+        r.text
+    );
+    let reader = credential(
+        w.e.h(),
+        &w.e.a.w.consumer,
+        w.e.a.w.kind,
+        &[names::WEBHOOKS_MANAGE, names::MESSAGES_READ],
+    )
+    .await;
+    let rx = Receiver::start().await;
+    let r =
+        w.e.send(
+            reader.secret.expose_once(),
+            Method::POST,
+            "/v1/webhooks",
+            Some(json!({ "url": rx.url, "eventTypes": ["message.created", "conversation.member_removed"] })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let s = w.e.a.w.scope();
+    let (conversation, message) = (Uuid::new_v4(), Uuid::new_v4());
+    let envelope = |event_type: &str, payload: Value| {
+        json!({
+            "event_id": format!("evt_{}", Uuid::new_v4().simple()),
+            "event_type": event_type,
+            "schema_version": 1,
+            "occurred_at": "2031-03-01T10:00:00.000000Z",
+            "producer_service": "cfmeet.messaging",
+            "runtime_environment": "test",
+            "correlation_id": "corr_msg_1",
+            "ownership": {
+                "tenant_id": s.tenant_id().as_uuid(),
+                "application_id": s.application_id().as_uuid(),
+                "application_environment_id": s.environment_id().as_uuid(),
+            },
+            "payload": payload,
+        })
+    };
+    let created = envelope(
+        "messaging.message.created",
+        json!({ "conversation_id": conversation, "message_id": message, "sequence": 3,
+                "message_kind": "APPLICATION", "sender_principal_id": Uuid::new_v4(),
+                "sender_device_id": Uuid::new_v4(), "security_provenance": "NATIVE", "notify": true,
+                "text": "meet at the north gate", "ciphertext": "c2VjcmV0", "epoch_secret": "a2V5" }),
+    );
+    let commit = envelope(
+        "messaging.message.created",
+        json!({ "conversation_id": conversation, "message_id": Uuid::new_v4(), "sequence": 4,
+                "message_kind": "COMMIT", "sender_principal_id": Uuid::new_v4() }),
+    );
+    let removed = envelope(
+        "messaging.member.removed",
+        json!({ "conversation_id": conversation, "principal_id": Uuid::new_v4(), "reason": "BANNED",
+                "left": false, "mls_rekey_required": true }),
+    );
+    let world = &w;
+    let send = |signer: Arc<cf_service_auth::ServiceTokenSigner>, body: Value| async move {
+        let signed = signer
+            .sign(&OutboundServiceRequest::new_operation(ServiceId::calling()))
+            .unwrap();
+        let headers: Vec<(String, String)> = signed
+            .headers()
+            .iter()
+            .map(|(n, v)| (n.as_str().to_string(), v.to_str().unwrap().to_string()))
+            .collect();
+        let refs: Vec<(&str, &str)> = headers
+            .iter()
+            .map(|(n, v)| (n.as_str(), v.as_str()))
+            .collect();
+        world
+            .e
+            .h()
+            .request_with(
+                Method::POST,
+                "/internal/v1/platform/events",
+                None,
+                Some(body),
+                &refs,
+            )
+            .await
+    };
+    let peers = w.e.h().peers.clone();
+    // Only Messaging publishes Messaging's events; Messaging cannot publish another's.
+    let r = send(peers.sms_gateway.clone(), created.clone()).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
+    let mut forged = created.clone();
+    forged["producer_service"] = json!("cfmeet.sms-gateway");
+    let r = send(peers.messaging.clone(), forged).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
+    let r = send(peers.untrusted.clone(), created.clone()).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{}", r.text);
+    // At least once: replays store once.
+    for e in [&created, &created, &commit, &removed] {
+        let r = send(peers.messaging.clone(), e.clone()).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    }
+    assert_eq!(
+        w.one("SELECT count(*)::text FROM webhook_events WHERE producer = 'cfmeet.messaging'")
+            .await,
+        "2",
+        "the MLS commit is never a public event"
+    );
+    w.deliver().await;
+    let seen = rx.seen();
+    assert_eq!(seen.len(), 2);
+    let mut types = Vec::new();
+    for d in &seen {
+        let body: Value = serde_json::from_slice(&d.body).unwrap();
+        common::contracts::check(
+            "platform/webhooks/v1.schema.json#/$defs/WebhookEvent",
+            &body,
+        );
+        assert!(d.headers.contains_key("cf-webhook-signature"));
+        assert_eq!(body["data"]["conversationId"], json!(conversation));
+        let text = String::from_utf8_lossy(&d.body);
+        for leak in [
+            "north gate",
+            "c2VjcmV0",
+            "a2V5",
+            "ciphertext",
+            "text",
+            "epoch",
+            "device",
+        ] {
+            assert!(!text.contains(leak), "{leak} in {text}");
+        }
+        types.push(body["type"].as_str().unwrap().to_string());
+        if body["type"] == "message.created" {
+            assert_eq!(body["data"]["messageId"], json!(message));
+            assert_eq!(body["data"]["sequence"], 3);
+        } else {
+            assert_eq!(body["data"]["reason"], "BANNED");
+        }
+    }
+    types.sort();
+    assert_eq!(types, ["conversation.member_removed", "message.created"]);
+}
+
 /// §68 DNS rebinding at delivery: a subscription whose (accepted) host name resolves to
 /// a prohibited address when the delivery connects is never reached — FAILED
 /// ENDPOINT_BLOCKED, nothing received.
