@@ -1999,3 +1999,576 @@ async fn scenario_9_messaging_events_reach_customer_webhooks_through_real_callin
     tokio::time::sleep(Duration::from_millis(1500)).await;
     assert!(other_receiver.seen.lock().unwrap().is_empty());
 }
+
+// =====================================================================================
+// Failure injection — PostgreSQL loss during active messaging (real Messaging process)
+// =====================================================================================
+
+/// A TCP gate between Messaging and PostgreSQL: `cut()` drops every live connection and
+/// refuses new ones until `restore()` (no other test's database is affected).
+#[derive(Clone)]
+struct TcpGate {
+    open: Arc<std::sync::atomic::AtomicBool>,
+    epoch: Arc<std::sync::atomic::AtomicU64>,
+    port: u16,
+}
+
+impl TcpGate {
+    async fn start(target: std::net::SocketAddr) -> TcpGate {
+        use std::sync::atomic::Ordering;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let gate = TcpGate {
+            open: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            port: listener.local_addr().unwrap().port(),
+        };
+        let g = gate.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut inbound, _)) = listener.accept().await else {
+                    continue;
+                };
+                if !g.open.load(Ordering::SeqCst) {
+                    drop(inbound);
+                    continue;
+                }
+                let g2 = g.clone();
+                let epoch = g.epoch.load(Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let Ok(mut outbound) = tokio::net::TcpStream::connect(target).await else {
+                        return;
+                    };
+                    let watch = async {
+                        loop {
+                            if g2.epoch.load(Ordering::SeqCst) != epoch {
+                                return;
+                            }
+                            tokio::time::sleep(Duration::from_millis(20)).await;
+                        }
+                    };
+                    tokio::select! {
+                        _ = tokio::io::copy_bidirectional(&mut inbound, &mut outbound) => {}
+                        _ = watch => {}
+                    }
+                });
+            }
+        });
+        gate
+    }
+
+    fn cut(&self) {
+        use std::sync::atomic::Ordering;
+        self.open.store(false, Ordering::SeqCst);
+        self.epoch.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn restore(&self) {
+        self.open.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[tokio::test]
+async fn postgresql_loss_during_active_messaging_loses_nothing_acknowledged_and_duplicates_nothing()
+{
+    let Some(mut st) = Stack::new(&[]).await else {
+        return;
+    };
+    use reqwest::Method as M;
+    st.messaging_trust(&[]);
+    // Messaging's OWN database, reached through the gate.
+    let db = TestDb::empty().await.unwrap();
+    messaging_migration::Migrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    // postgres://user:pass@host:port/name — reroute host:port through the gate.
+    let (head, rest) = db.url.split_once('@').unwrap();
+    let (hostport, tail) = rest.split_once('/').unwrap();
+    let hostport = hostport.replace("localhost", "127.0.0.1");
+    let hostport = if hostport.contains(':') {
+        hostport
+    } else {
+        format!("{hostport}:5432")
+    };
+    let target: std::net::SocketAddr = hostport.parse().unwrap();
+    let gate = TcpGate::start(target).await;
+    let gated_url = format!("{head}@127.0.0.1:{}/{tail}", gate.port);
+    let direct = db.conn.clone();
+    st.messaging_db = Some(db);
+    st.start_messaging(&[
+        ("DATABASE_URL", gated_url),
+        ("MESSAGING_DATABASE_MAX_CONNECTIONS", "8".to_string()),
+    ])
+    .await;
+
+    let t = st.tenant("EXTERNAL", &MESSAGING_SCOPES).await;
+    let token = st.credential(&t, &MESSAGING_SCOPES).await;
+    let alice = st.principal(&t, "EXTERNAL_APPLICATION_PRINCIPAL").await;
+    let bob = st.principal(&t, "EXTERNAL_APPLICATION_PRINCIPAL").await;
+    st.allow_managed(&token, "GROUP").await;
+    let conv = st
+        .customer(
+            &token,
+            Some(alice),
+            M::POST,
+            "/v1/conversations",
+            Some(json!({ "contextClass": "GROUP", "securityProfile": "MANAGED" })),
+        )
+        .await;
+    assert_eq!(conv.status, 201, "{}", conv.text);
+    let cid = conv.json["conversationId"].as_str().unwrap().to_string();
+    st.add_member(&token, alice, &cid, bob).await;
+
+    // 120 messages from 2 concurrent senders; the database is cut after ~40 of them.
+    const N: usize = 120;
+    let ids: Vec<(Uuid, Uuid)> = (0..N)
+        .map(|i| (Uuid::new_v4(), if i % 2 == 0 { alice } else { bob }))
+        .collect();
+    let send = |client_id: Uuid, from: Uuid| {
+        let http = st.http.clone();
+        let url = format!("{}/v1/conversations/{cid}/messages", st.m_url());
+        let token = token.clone();
+        async move {
+            let r = http
+                .post(url)
+                .bearer_auth(token)
+                .header("cf-acting-principal", from.to_string())
+                .header("idempotency-key", Uuid::new_v4().to_string())
+                .timeout(Duration::from_secs(10))
+                .json(&json!({ "clientMessageId": client_id, "text": format!("m-{client_id}") }))
+                .send()
+                .await;
+            match r {
+                Ok(r) => r.status().as_u16(),
+                Err(_) => 0, // indeterminate (timeout / connection error)
+            }
+        }
+    };
+    let mut outcomes = vec![0u16; N];
+    let started = std::time::Instant::now();
+    let mut downtime = None;
+    for chunk in (0..N).collect::<Vec<_>>().chunks(10) {
+        if chunk[0] == 40 {
+            // Cut while this batch is in flight (some transactions are mid-commit).
+            let g = gate.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(15)).await;
+                g.cut();
+            });
+            downtime = Some(std::time::Instant::now());
+        }
+        if chunk[0] == 80 {
+            gate.restore();
+        }
+        let futs: Vec<_> = chunk.iter().map(|&i| send(ids[i].0, ids[i].1)).collect();
+        for (i, s) in chunk.iter().zip(futures_util::future::join_all(futs).await) {
+            outcomes[*i] = s;
+        }
+        if chunk[0] == 40 {
+            // Readiness reports the database outage instead of lying.
+            let r = st
+                .http
+                .get(format!("{}/ready", st.m_url()))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(r.status().as_u16(), 503, "ready while the database is cut");
+        }
+    }
+    let down_ms = downtime.map(|d| d.elapsed().as_millis()).unwrap_or(0);
+    let acknowledged: Vec<usize> = (0..N).filter(|&i| outcomes[i] == 201).collect();
+    let refused: Vec<usize> = (0..N).filter(|&i| outcomes[i] >= 500).collect();
+    let indeterminate: Vec<usize> = (0..N).filter(|&i| outcomes[i] == 0).collect();
+    let other: Vec<(usize, u16)> = (0..N)
+        .filter(|&i| ![0, 201].contains(&outcomes[i]) && outcomes[i] < 500)
+        .map(|i| (i, outcomes[i]))
+        .collect();
+    assert!(
+        other.is_empty(),
+        "unexpected outcomes during the outage: {other:?}"
+    );
+    assert!(
+        !refused.is_empty() || !indeterminate.is_empty(),
+        "the outage was observed"
+    );
+    // Readiness recovers.
+    eventually(30, "ready after restore", || async {
+        let r = st
+            .http
+            .get(format!("{}/ready", st.m_url()))
+            .send()
+            .await
+            .ok()?;
+        (r.status().as_u16() == 200).then_some(())
+    })
+    .await;
+    // Every acknowledged message is durable; nothing un-acknowledged pretended success.
+    let stored = |cm: Uuid| {
+        let db = direct.clone();
+        let cid = cid.clone();
+        async move {
+            scalar(&db, &format!(
+                "SELECT count(*) FROM messaging_messages WHERE conversation_id = '{cid}' AND client_message_id = '{cm}'"
+            ))
+            .await
+        }
+    };
+    for &i in &acknowledged {
+        assert_eq!(
+            stored(ids[i].0).await,
+            1,
+            "acknowledged message {i} is durable"
+        );
+    }
+    // The client retries everything it was not sure about with the SAME client id.
+    let mut retried_existing = 0;
+    for i in refused.iter().chain(&indeterminate) {
+        let before = stored(ids[*i].0).await;
+        let s = send(ids[*i].0, ids[*i].1).await;
+        assert!(s == 201 || s == 200, "retry of {i}: {s}");
+        if before == 1 {
+            retried_existing += 1;
+        }
+    }
+    // Exactly once each, in one gap-free canonical order, nothing downgraded.
+    assert_eq!(
+        scalar(&direct, &format!("SELECT count(*) FROM messaging_messages WHERE conversation_id = '{cid}' AND message_kind = 'APPLICATION'")).await,
+        N as i64
+    );
+    assert_eq!(
+        scalar(&direct, &format!("SELECT count(DISTINCT client_message_id) FROM messaging_messages WHERE conversation_id = '{cid}' AND message_kind = 'APPLICATION'")).await,
+        N as i64,
+        "no duplicate logical message"
+    );
+    assert_eq!(
+        scalar(&direct, &format!("SELECT count(*) FROM (SELECT sequence, lag(sequence) OVER (ORDER BY sequence) AS prev FROM messaging_messages WHERE conversation_id = '{cid}') s WHERE prev IS NOT NULL AND sequence <> prev + 1")).await,
+        0,
+        "gap-free sequence"
+    );
+    assert_eq!(
+        scalar(&direct, &format!("SELECT count(*) FROM messaging_conversations WHERE id = '{cid}' AND security_profile = 'MANAGED'")).await,
+        1,
+        "no security-profile change"
+    );
+    // The receiver's view after reconnecting: all N, in order.
+    let mut seen = Vec::new();
+    let mut after = 0i64;
+    loop {
+        let r = st
+            .customer(
+                &token,
+                Some(bob),
+                M::GET,
+                &format!("/v1/conversations/{cid}/messages?afterSequence={after}&limit=100"),
+                None,
+            )
+            .await;
+        assert_eq!(r.status, 200, "{}", r.text);
+        let page = r.json["messages"].as_array().cloned().unwrap_or_default();
+        for m in &page {
+            if m["kind"] == "APPLICATION" {
+                seen.push(m["sequence"].as_i64().unwrap());
+            }
+        }
+        match r.json["nextAfterSequence"].as_i64() {
+            Some(n) if n > after && !page.is_empty() => after = n,
+            _ => break,
+        }
+    }
+    assert_eq!(seen.len(), N, "receiver sees every message once");
+    assert!(seen.windows(2).all(|w| w[0] < w[1]), "in canonical order");
+    println!(
+        "EVIDENCE postgres_loss messages={N} acknowledged_during_run={} refused={} indeterminate={} \
+         retries_that_found_a_committed_message={retried_existing} outage_ms={down_ms} total_ms={}",
+        acknowledged.len(),
+        refused.len(),
+        indeterminate.len(),
+        started.elapsed().as_millis()
+    );
+}
+
+// =====================================================================================
+// Failure injection — SMS Gateway process death mid-send (real Messaging + Gateway)
+// =====================================================================================
+
+#[tokio::test]
+async fn sms_gateway_death_mid_send_recovers_without_duplicate_submission() {
+    let Some(b) = bins(&["SMS_GATEWAY_BIN", "SMS_GATEWAY_MIGRATION_BIN"]) else {
+        return;
+    };
+    let Some(mut st) = Stack::new(&[]).await else {
+        return;
+    };
+    use cf_service_auth::services as s;
+    use reqwest::Method as M;
+    let b64 =
+        |bytes: &[u8]| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
+    let gw_key = key(&st.dir, "gw-key.pem", "sms-gateway-xs-1");
+    let callback_secret: [u8; 32] = rand::random();
+    std::fs::write(st.dir.join("gw-callback.secret"), b64(&callback_secret)).unwrap();
+    std::fs::write(
+        st.dir.join("gw-content.key"),
+        b64(&rand::random::<[u8; 32]>()),
+    )
+    .unwrap();
+    std::fs::write(
+        st.dir.join("gw-fingerprint.key"),
+        b64(&rand::random::<[u8; 32]>()),
+    )
+    .unwrap();
+    let gjwk = gw_key.public_jwk();
+    let mjwk = st.messaging_key.public_jwk();
+    st.messaging_trust(&[(s::SMS_GATEWAY, &gjwk, &["messaging-sms-bridge.deliver"])]);
+    std::fs::write(
+        st.dir.join("gw-trust.json"),
+        trust_bundle(
+            s::SMS_GATEWAY,
+            &[(s::MESSAGING, &mjwk, &["sms-bridge.submit"])],
+        ),
+    )
+    .unwrap();
+    let t = st.tenant("EXTERNAL", &MESSAGING_SCOPES).await;
+    let token = st.credential(&t, &MESSAGING_SCOPES).await;
+    let owner = st.principal(&t, "EXTERNAL_APPLICATION_PRINCIPAL").await;
+    let party = {
+        let p = st
+            .created(
+                &format!("/internal/v1/admin/environments/{}/principals", t.env),
+                json!({ "kind": "TELEPHONE_ENDPOINT", "externalReference": Uuid::new_v4().to_string() }),
+            )
+            .await;
+        Uuid::parse_str(p["principal"]["id"].as_str().unwrap()).unwrap()
+    };
+    let number = Uuid::new_v4();
+    let numbering = numbering_stub(NumberingStub {
+        number,
+        assignment: Uuid::new_v4(),
+        scope: json!({ "tenantId": t.tenant, "applicationId": t.app, "environmentId": t.env }),
+        app: t.app,
+    })
+    .await;
+    let gw_port = free_port();
+    let gw_url = format!("http://127.0.0.1:{gw_port}");
+    st.start_messaging(&[("CF_SMS_GATEWAY_BASE_URL", gw_url.clone())])
+        .await;
+    let gw_db_url = create_db(&st.admin, "xs_sms").await;
+    migrate(&b[1], &gw_db_url);
+    let gw_db = Database::connect(&gw_db_url).await.unwrap();
+    let gw_env = |dispatch_ms: &str| -> Vec<(String, String)> {
+        [
+            ("DATABASE_URL", gw_db_url.clone()),
+            ("SMS_GATEWAY_DATABASE_MAX_CONNECTIONS", "5".into()),
+            (
+                "SMS_GATEWAY_METRICS_ADDRESS",
+                format!("127.0.0.1:{}", free_port()),
+            ),
+            ("CF_RUNTIME_ENVIRONMENT", env_name()),
+            ("CF_SERVICE_AUTH_KEY_ID", "sms-gateway-xs-1".into()),
+            ("CF_SERVICE_AUTH_PRIVATE_KEY_FILE", st.path("gw-key.pem")),
+            ("CF_SERVICE_TRUST_BUNDLE_FILE", st.path("gw-trust.json")),
+            ("CF_PLATFORM_ACCESS_BASE_URL", st.pa.url.clone()),
+            ("CF_NUMBERING_BASE_URL", numbering.clone()),
+            ("CF_MESSAGING_BASE_URL", st.m_url()),
+            ("SMS_GATEWAY_CONTENT_KEY_ID", "xs-content-1".into()),
+            ("SMS_GATEWAY_CONTENT_KEY_FILE", st.path("gw-content.key")),
+            (
+                "SMS_GATEWAY_FINGERPRINT_KEY_FILE",
+                st.path("gw-fingerprint.key"),
+            ),
+            ("SMS_GATEWAY_PROVIDER", "deterministic".into()),
+            (
+                "SMS_GATEWAY_PROVIDER_CALLBACK_SECRET_FILE",
+                st.path("gw-callback.secret"),
+            ),
+            ("SMS_GATEWAY_ALLOWED_DESTINATION_PREFIXES", "+1".into()),
+            ("SMS_GATEWAY_WORKER_INTERVAL_MS", dispatch_ms.into()),
+            ("SMS_GATEWAY_RETRY_BASE_MS", "100".into()),
+            ("SMS_GATEWAY_SUBMIT_TIMEOUT_MS", "300".into()),
+            ("RUST_LOG", "sms_gateway=warn".into()),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect()
+    };
+    // A slow dispatch loop: submissions are accepted (durable) but not yet sent.
+    let mut gw = spawn(
+        &st.http,
+        &b[0],
+        "/ready",
+        "SMS_GATEWAY_BIND_ADDRESS",
+        &gw_env("60000"),
+        Some(gw_port),
+    )
+    .await;
+    st.allow_managed(&token, "GROUP").await;
+    let conv = st
+        .customer(
+            &token,
+            Some(owner),
+            M::POST,
+            "/v1/conversations",
+            Some(json!({ "contextClass": "GROUP", "securityProfile": "MANAGED" })),
+        )
+        .await;
+    let cid = conv.json["conversationId"].as_str().unwrap().to_string();
+    let r = st
+        .customer(&token, Some(owner), M::POST, &format!("/v1/conversations/{cid}/sms-bridges"),
+            Some(json!({ "numberResourceId": number, "to": PARTY, "externalPrincipalId": party,
+                "disclosureVersion": messaging::sms_bridge::DISCLOSURE_VERSION, "smsDisclosureAcknowledged": true })))
+        .await;
+    assert_eq!(r.status, 201, "{}", r.text);
+
+    // (1) The gateway accepts the submission, then dies before dispatching it.
+    let m1 = st.send_text(&token, owner, &cid, "before the crash").await;
+    assert_eq!(m1.status, 201, "{}", m1.text);
+    let mid1 = m1.json["messageId"].as_str().unwrap().to_string();
+    let sms1 = eventually(30, "submission accepted by the gateway", || async {
+        text(st.mdb(), &format!("SELECT sms_message_id::text FROM messaging_sms_transports WHERE message_id = '{mid1}' AND direction = 'OUTBOUND'")).await
+    })
+    .await;
+    assert_eq!(
+        text(
+            &gw_db,
+            &format!("SELECT status FROM sms_transports WHERE id = '{sms1}'")
+        )
+        .await
+        .as_deref(),
+        Some("AUTHORIZED")
+    );
+    gw.stop().await;
+    // (2) Another message while the gateway is down: Messaging keeps it QUEUED (never
+    // "failed" or "delivered"); the in-app message is unaffected.
+    let m2 = st
+        .send_text(&token, owner, &cid, "while the gateway is down")
+        .await;
+    assert_eq!(
+        m2.status, 201,
+        "in-app delivery is independent of SMS: {}",
+        m2.text
+    );
+    let mid2 = m2.json["messageId"].as_str().unwrap().to_string();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    for mid in [&mid1, &mid2] {
+        let r = st
+            .customer(
+                &token,
+                Some(owner),
+                M::GET,
+                &format!("/v1/conversations/{cid}/messages/{mid}/sms-transport"),
+                None,
+            )
+            .await;
+        let state = r.json["transportStatus"].as_str().unwrap_or("").to_string();
+        assert!(
+            !["DELIVERED", "FAILED", "BLOCKED"].contains(&state.as_str()),
+            "a dead gateway never yields a final state: {}",
+            r.text
+        );
+    }
+    // Restart (fast dispatch): both messages are sent exactly once.
+    let _gw = spawn(
+        &st.http,
+        &b[0],
+        "/ready",
+        "SMS_GATEWAY_BIND_ADDRESS",
+        &gw_env("100"),
+        Some(gw_port),
+    )
+    .await;
+    let sms2 = eventually(60, "the queued message reaches the restarted gateway", || async {
+        text(st.mdb(), &format!("SELECT sms_message_id::text FROM messaging_sms_transports WHERE message_id = '{mid2}' AND direction = 'OUTBOUND' AND sms_message_id IS NOT NULL")).await
+    })
+    .await;
+    for sms in [&sms1, &sms2] {
+        eventually(60, "dispatched after restart", || async {
+            (text(
+                &gw_db,
+                &format!("SELECT status FROM sms_transports WHERE id = '{sms}'"),
+            )
+            .await
+            .as_deref()
+                == Some("SUBMITTED"))
+            .then_some(())
+        })
+        .await;
+        assert_eq!(
+            scalar(
+                &gw_db,
+                &format!("SELECT count(*) FROM sms_provider_bindings WHERE transport_id = '{sms}'")
+            )
+            .await,
+            1,
+            "one provider submission"
+        );
+    }
+    // Messaging's retries while the gateway was down did not create a second transport.
+    assert_eq!(
+        scalar(
+            &gw_db,
+            "SELECT count(*) FROM sms_transports WHERE direction = 'OUTBOUND'"
+        )
+        .await,
+        2
+    );
+    assert_eq!(
+        scalar(
+            st.mdb(),
+            "SELECT count(*) FROM messaging_sms_transports WHERE direction = 'OUTBOUND'"
+        )
+        .await,
+        2
+    );
+    // Receipts after the restart; a duplicate receipt changes nothing.
+    for sms in [&sms1, &sms2] {
+        let provider_ref = text(&gw_db, &format!("SELECT provider_message_ref FROM sms_provider_bindings WHERE transport_id = '{sms}'")).await.unwrap();
+        let id = format!("rc-{}", Uuid::new_v4().simple());
+        let body = json!({ "kind": "RECEIPT", "eventId": id, "messageRef": provider_ref, "status": "DELIVERED",
+            "errorCode": null, "costMinor": null, "occurredAt": now_plus(0) });
+        let raw = serde_json::to_vec(&body).unwrap();
+        for expected in ["ACCEPTED", "DUPLICATE"] {
+            let ts = chrono::Utc::now().timestamp().to_string();
+            let mut msg = format!("v1:{ts}:{id}:").into_bytes();
+            msg.extend_from_slice(&raw);
+            let r = send(
+                st.http
+                    .post(format!(
+                        "{gw_url}/provider-callbacks/v1/sms/deterministic/delivery-receipts"
+                    ))
+                    .header("content-type", "application/json")
+                    .header("x-provider-event-id", &id)
+                    .header("x-provider-timestamp", ts)
+                    .header(
+                        "x-provider-signature",
+                        format!("v1={}", hex::encode(hmac_sha256(&callback_secret, &msg))),
+                    )
+                    .body(raw.clone()),
+            )
+            .await;
+            assert_eq!(r.json["status"], expected, "{}", r.text);
+        }
+    }
+    for mid in [&mid1, &mid2] {
+        eventually(
+            90,
+            "DELIVERED reaches Messaging after the restart",
+            || async {
+                let r = st
+                    .customer(
+                        &token,
+                        Some(owner),
+                        M::GET,
+                        &format!("/v1/conversations/{cid}/messages/{mid}/sms-transport"),
+                        None,
+                    )
+                    .await;
+                (r.json["transportStatus"] == "DELIVERED").then_some(())
+            },
+        )
+        .await;
+    }
+    assert_eq!(
+        scalar(st.mdb(), &format!("SELECT count(*) FROM messaging_messages WHERE conversation_id = '{cid}' AND message_kind = 'APPLICATION' AND lifecycle = 'ACTIVE'")).await,
+        2,
+        "the in-app messages stayed consistent"
+    );
+    println!("EVIDENCE sms_gateway_death submissions=2 provider_submissions_each=1 duplicate_receipts_rejected=2");
+}
