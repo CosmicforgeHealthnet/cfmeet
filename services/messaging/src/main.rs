@@ -201,6 +201,20 @@ async fn main() -> anyhow::Result<()> {
         rt
     };
     let state = state.with_realtime(realtime.clone());
+    // Part V H SMS Bridge: the SMS Gateway is the only SMS transport authority.
+    let sms_configured = settings
+        .targets
+        .iter()
+        .any(|(s, _)| s.as_str() == cf_service_auth::services::SMS_GATEWAY);
+    let state = if sms_configured {
+        let client = state.service_auth.client();
+        state.with_sms_transport(Arc::new(messaging::sms_bridge::HttpSmsTransport::new(
+            client,
+        )))
+    } else {
+        tracing::warn!("CF_SMS_GATEWAY_BASE_URL is not set: SMS bridges are refused (in-app messaging unaffected)");
+        state
+    };
     tokio::spawn(messaging::conversations::service::run_expiry(
         state.clone(),
         config.conversations.expiry_interval,
@@ -240,6 +254,10 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(messaging::attachments::lifecycle::run(
         state.clone(),
         std::time::Duration::from_secs(30),
+    ));
+    tokio::spawn(messaging::sms_bridge::run(
+        state.clone(),
+        config.workers.interval,
     ));
     tokio::spawn(messaging::workers::run_maintenance(
         state.clone(),

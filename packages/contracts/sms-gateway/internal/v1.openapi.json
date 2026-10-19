@@ -1,0 +1,280 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet SMS Gateway internal API",
+    "version": "1.0.0",
+    "description": "Service-authenticated /internal/v1 surface of services/sms-gateway: the Part V H SMS Bridge. Every path, unknown ones included, requires a valid Ed25519 service token whose issuer the SMS Gateway's trust bundle grants sms-bridge.submit (Messaging only) and the signed delegated platform context of the application environment; Numbering re-checks the number's ownership in that scope on every send."
+  },
+  "components": {
+    "securitySchemes": {
+      "serviceToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Service-Authorization",
+        "description": "Ed25519 compact JWS (typ cf-service+jwt) from packages/service-auth, audience cfmeet.sms-gateway."
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/Error"
+            }
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/internal/v1/sms-bridge/bindings": {
+      "post": {
+        "operationId": "createBridgeBinding",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Idempotent per bridgeRef; one ACTIVE binding per (number, party) — PARTY_ALREADY_BRIDGED otherwise.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/BridgeBindingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/BridgeBinding"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Already present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/BridgeBinding"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sms-bridge/bindings/{bridgeRef}/close": {
+      "post": {
+        "operationId": "closeBridgeBinding",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "No further SMS of the party reaches Messaging; no further bridged send.",
+        "parameters": [
+          {
+            "name": "bridgeRef",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/BridgeBinding"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sms-bridge/messages": {
+      "post": {
+        "operationId": "submitBridgeMessage",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "A bridged outbound SMS: the customer-send controls (sender capability, opt-out, prefixes, spend, abuse, rate windows, provider) apply; refusals answer SMS_BLOCKED with the reason and are recorded.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/BridgeSubmission"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/BridgeTransport"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Already present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/BridgeTransport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sms-bridge/messages/{smsMessageId}": {
+      "get": {
+        "operationId": "getBridgeTransport",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Transport state of a bridged message.",
+        "parameters": [
+          {
+            "name": "smsMessageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/BridgeTransport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  }
+}

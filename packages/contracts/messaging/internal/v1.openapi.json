@@ -375,6 +375,60 @@
           }
         }
       }
+    },
+    "/internal/v1/sms-bridge/inbound": {
+      "post": {
+        "operationId": "deliverInboundSms",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Permission messaging-sms-bridge.deliver (SMS Gateway only), signed delegated scope re-validated against Platform Access. An inbound SMS of a bridged party becomes a MANAGED message with channel SMS (idempotent per SMS id); never injected into an E2EE conversation.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/InboundSms"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/InboundSmsResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {

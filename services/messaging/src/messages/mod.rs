@@ -93,6 +93,8 @@ pub struct MessageRow {
     pub original_created_at: Option<DateTime<Utc>>,
     /// MANAGED only: `STANDARD` / `ANNOUNCEMENT` (`None`: standard).
     pub managed_presentation: Option<String>,
+    /// `IN_APP` or `SMS` (arrived through the SMS Bridge; MANAGED only).
+    pub channel: String,
 }
 
 pub const MESSAGE_COLUMNS: &str = "m.id, m.conversation_id, m.sequence, m.message_kind, m.security_profile, \
@@ -100,7 +102,7 @@ pub const MESSAGE_COLUMNS: &str = "m.id, m.conversation_id, m.sequence, m.messag
      m.mls_ciphertext, m.ciphertext_sha256, m.acceptance_digest, m.managed_sealed, m.managed_seal_nonce, \
      m.managed_seal_key_id, m.attachment_count, m.lifecycle, m.lifecycle_reason, m.edit_count, m.edited_at, \
      m.created_at, m.tenant_id, m.application_id, m.environment_id, m.security_provenance, m.original_created_at, \
-     m.managed_presentation";
+     m.managed_presentation, m.channel";
 
 impl MessageRow {
     pub fn profile(&self) -> SecurityProfile {
@@ -141,6 +143,7 @@ pub async fn render(state: &AppState, row: &MessageRow, hidden: bool) -> Value {
         "attachmentIds": if show { json!(attachments) } else { json!([]) },
         "securityProvenance": row.security_provenance,
         "originalCreatedAt": row.original_created_at.map(rfc3339),
+        "channel": row.channel,
     });
     match row.profile() {
         SecurityProfile::PrivateE2ee => {

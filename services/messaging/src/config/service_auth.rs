@@ -10,6 +10,7 @@
 //! | `CF_SERVICE_TOKEN_TTL_SECONDS` | no | 10–300 (default 120) |
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | outbound timeout (100–30000, default 5000) |
 //! | `CF_PLATFORM_ACCESS_BASE_URL` | yes (server) | Platform Access, the identity authority |
+//! | `CF_SMS_GATEWAY_BASE_URL` | no | SMS Gateway (SMS Bridge transport); unset: bridges are refused |
 //!
 //! Inbound, every `/internal/v1` route requires a service token whose issuer Messaging's
 //! own trust bundle grants the route's permission. The internal operations (Part V H) are
@@ -101,7 +102,11 @@ impl ServiceAuthRuntime {
 }
 
 /// Base-URL variables of the services Messaging calls.
-const TARGETS: &[(&str, &str)] = &[("CF_PLATFORM_ACCESS_BASE_URL", services::PLATFORM_ACCESS)];
+const TARGETS: &[(&str, &str)] = &[
+    ("CF_PLATFORM_ACCESS_BASE_URL", services::PLATFORM_ACCESS),
+    // Part V H SMS Bridge: carrier transport (sms-bridge.submit).
+    ("CF_SMS_GATEWAY_BASE_URL", services::SMS_GATEWAY),
+];
 
 #[derive(Debug, Clone)]
 pub struct ServiceAuthSettings {

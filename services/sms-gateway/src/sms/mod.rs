@@ -16,6 +16,7 @@
 //! UNKNOWN means the provider MAY hold the message: nothing resubmits it; only provider
 //! evidence (a delivery receipt or a status query) resolves it.
 
+pub mod bridge;
 pub mod controls;
 pub mod dispatch;
 pub mod e164;

@@ -656,6 +656,130 @@
           "format": "date-time"
         }
       }
+    },
+    "BridgeBindingRequest": {
+      "description": "Part V H §108: bind a Messaging bridge to one external party of one number (the number is sealed here and never returned).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bridgeRef",
+        "numberResourceId",
+        "to"
+      ],
+      "properties": {
+        "bridgeRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^\\+[1-9][0-9]{6,14}$"
+        }
+      }
+    },
+    "BridgeBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bindingId",
+        "bridgeRef",
+        "numberResourceId",
+        "remote",
+        "status"
+      ],
+      "properties": {
+        "bindingId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "bridgeRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "numberResourceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "remote": {
+          "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/RemoteParty"
+        },
+        "status": {
+          "enum": [
+            "ACTIVE",
+            "CLOSED"
+          ]
+        }
+      }
+    },
+    "BridgeSubmission": {
+      "description": "One bridged outbound SMS (idempotent per messageRef; every customer-send control applies).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bridgeRef",
+        "messageRef",
+        "text"
+      ],
+      "properties": {
+        "bridgeRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "messageRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "BridgeTransport": {
+      "description": "Transport state only: never the content or a number.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "smsMessageId",
+        "direction",
+        "status"
+      ],
+      "properties": {
+        "smsMessageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "direction": {
+          "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/Direction"
+        },
+        "status": {
+          "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/Status"
+        },
+        "segmentCount": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "failureCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "blockedReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cost": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/sms-gateway/common/v1.schema.json#/$defs/Cost"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
     }
   }
 }

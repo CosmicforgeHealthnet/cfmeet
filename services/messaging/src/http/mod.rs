@@ -47,6 +47,7 @@ pub fn customer_routes() -> Router<AppState> {
         .merge(crate::compliance::http::routes())
         .merge(crate::moderation::http::customer_routes())
         .merge(crate::search::http::customer_routes())
+        .merge(crate::sms_bridge::http::messaging_routes())
 }
 
 /// Routes nested under `/v1/conversations`.
@@ -58,6 +59,7 @@ pub fn conversation_tree() -> Router<AppState> {
         .merge(crate::attachments::http::routes())
         .merge(crate::moderation::http::conversation_routes())
         .merge(crate::search::http::conversation_routes())
+        .merge(crate::sms_bridge::http::conversation_routes())
 }
 
 pub fn app(state: AppState) -> Router {
@@ -105,6 +107,7 @@ pub fn app(state: AppState) -> Router {
             Router::new()
                 .nest("/delegated", delegated)
                 .merge(crate::integrations::http::internal_routes())
+                .merge(crate::sms_bridge::http::internal_routes())
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )

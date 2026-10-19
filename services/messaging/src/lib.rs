@@ -37,6 +37,7 @@ pub mod moderation;
 pub mod realtime;
 pub mod safety;
 pub mod search;
+pub mod sms_bridge;
 pub mod state;
 pub mod transparency;
 pub mod workers;

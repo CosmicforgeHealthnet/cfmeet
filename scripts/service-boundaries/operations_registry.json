@@ -5,6 +5,13 @@
     "usage-finalizer", "artifact-worker", "webhook-delivery-worker"
   ],
   "responsibilities": [
+    {"id": "messaging-sms-bridge-transport", "owner": "messaging", "source": "src/sms_bridge/mod.rs", "entry": "run_due",
+     "tests": ["tests/sms_bridge.rs::a_managed_conversation_bridges_to_sms_with_explicit_disclosure_and_separate_transport_state"]},
+    {"id": "sms-bridge-inbound-delivery", "owner": "sms-gateway", "source": "src/sms/bridge.rs", "entry": "deliver_due",
+     "tests": ["tests/bridge.rs::inbound_sms_of_a_bridged_party_reach_messaging_durably"]},
+    {"id": "privacy-relay-messaging-authority", "owner": "privacy-relay", "source": "src/messaging_authority.rs", "entry": "run_messaging_authority_sweep",
+     "tests": ["tests/messaging_authority.rs::every_context_version_reaches_messaging_once_in_order_without_contact_data",
+               "tests/messaging_authority.rs::messaging_outages_are_retried_and_stale_answers_count_as_applied"]},
     {"id": "meeting-unified-messaging-sync", "owner": "meeting-service", "source": "src/services/unified_messaging/mod.rs", "entry": "sync_once",
      "tests": ["tests/unified_messaging_e2e.rs::meeting_chat_migrates_to_unified_messaging_across_real_services"]},
     {"id": "meeting-messaging-session-revocation", "owner": "meeting-service", "source": "src/services/unified_messaging/identity.rs", "entry": "process_revocations",

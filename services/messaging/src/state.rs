@@ -40,9 +40,17 @@ pub struct AppState {
     /// Self-hosted scanner of MANAGED attachments (unconfigured: scans stay pending).
     pub scanner: Arc<dyn crate::attachments::scanner::AttachmentScanner>,
     pub attachments: AttachmentSettings,
+    /// Part V H: the SMS Gateway's bridge API (unconfigured: bridges are refused).
+    pub sms: Arc<dyn crate::sms_bridge::SmsTransport>,
 }
 
 impl AppState {
+    /// Part V H: connects the SMS Bridge to the SMS Gateway.
+    pub fn with_sms_transport(mut self, sms: Arc<dyn crate::sms_bridge::SmsTransport>) -> Self {
+        self.sms = sms;
+        self
+    }
+
     pub fn new(
         db: DatabaseConnection,
         clock: SharedClock,
@@ -64,6 +72,7 @@ impl AppState {
             storage: Arc::new(cf_object_storage::UnconfiguredStore),
             scanner: Arc::new(crate::attachments::scanner::UnconfiguredScanner),
             attachments: AttachmentSettings::default(),
+            sms: Arc::new(crate::sms_bridge::UnconfiguredSmsTransport),
         }
     }
 

@@ -266,7 +266,7 @@ pub fn stored_text_of(state: &AppState, row: &MessageRow) -> Option<String> {
     )
 }
 
-fn admit(text: String) -> Result<ManagedContent> {
+pub(crate) fn admit(text: String) -> Result<ManagedContent> {
     match MessagePayload::accept(
         SecurityProfile::Managed,
         SubmittedContent::ManagedText(text),
@@ -360,6 +360,44 @@ async fn insert<C: ConnectionTrait>(
     )
     .await?;
     load_message(db, conversation.id, id, false)
+        .await?
+        .ok_or(Error::code(ErrorCode::InternalError))
+}
+
+/// A MANAGED message that arrived on another channel (the SMS Bridge): stored like any
+/// MANAGED message, labelled with its channel.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn insert_channel<C: ConnectionTrait>(
+    db: &C,
+    ring: &ManagedKeyring,
+    ctx: &TrustedContext,
+    conversation: &ConversationRow,
+    sender: Uuid,
+    client_message_id: Uuid,
+    content: &ManagedContent,
+    channel: &'static str,
+    now: DateTime<Utc>,
+) -> Result<MessageRow> {
+    let row = insert(
+        db,
+        ring,
+        ctx,
+        conversation,
+        sender,
+        client_message_id,
+        content,
+        0,
+        None,
+        now,
+    )
+    .await?;
+    db::exec(
+        db,
+        "UPDATE messaging_messages SET channel = $2 WHERE id = $1",
+        vec![row.id.into(), channel.into()],
+    )
+    .await?;
+    load_message(db, conversation.id, row.id, false)
         .await?
         .ok_or(Error::code(ErrorCode::InternalError))
 }
@@ -468,6 +506,8 @@ pub async fn send(
                 crate::attachments::link_to_message(txn, &conversation, row.id, acting.principal_id, &attachments)
                     .await?;
                 super::record_created_notify(txn, &ctx2, &row, &request_ctx, now, notify).await?;
+                // A bridged conversation: queue the SMS copy in the same transaction.
+                crate::sms_bridge::enqueue_outbound(txn, &conversation, &row, now).await?;
                 Ok((201, row))
             })
         })
