@@ -18,7 +18,7 @@
 
 use axum::{
     extract::{ws::WebSocketUpgrade, Path, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post, put},
     Json, Router,
@@ -48,7 +48,7 @@ use crate::{
 pub fn device_routes() -> Router<AppState> {
     Router::new()
         .route("/v1/realtime", get(connect))
-        .route("/v1/realtime/tickets", post(ticket))
+        .route("/v1/realtime/tickets", post(ticket).options(ticket_preflight))
 }
 
 /// Application-backend routes nested under `/v1/messaging`.
@@ -76,10 +76,75 @@ fn client_token(headers: &HeaderMap) -> Option<String> {
         .filter(|t| !t.is_empty())
 }
 
+/// Browser token-to-ticket exchange uses the SAME exact-origin allowlist as the
+/// WebSocket upgrade. Never return a wildcard or reflect an arbitrary Origin.
+fn ticket_origin(
+    settings: &super::RealtimeSettings,
+    headers: &HeaderMap,
+) -> Result<Option<HeaderValue>, ApiError> {
+    let mut values = headers.get_all(header::ORIGIN).iter();
+    let Some(origin) = values.next() else {
+        // Native clients do not send Origin; still require CF-Client-Token.
+        return Ok(None);
+    };
+    if values.next().is_some()
+        || !origin.to_str().is_ok_and(|value| {
+            settings.allowed_origins.iter().any(|allowed| allowed == value)
+        })
+    {
+        return Err(ApiError::reason(
+            ErrorCode::AuthenticationFailed,
+            "ORIGIN_NOT_ALLOWED",
+        ));
+    }
+    Ok(Some(origin.clone()))
+}
+
+fn allow_ticket_cors(response: &mut Response, origin: HeaderValue) {
+    let headers = response.headers_mut();
+    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin);
+    headers.insert(header::VARY, HeaderValue::from_static("Origin"));
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("POST, OPTIONS"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        HeaderValue::from_static("Authorization, Accept"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_MAX_AGE,
+        HeaderValue::from_static("300"),
+    );
+}
+
+/// Preflight is only for configured browser origins and the ticket POST;
+/// it does not authorize the client or issue a ticket.
+async fn ticket_preflight(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Response {
+    let origin = match ticket_origin(&state.realtime.settings, &headers) {
+        Ok(Some(origin)) => origin,
+        _ => return StatusCode::FORBIDDEN.into_response(),
+    };
+    if headers
+        .get(header::ACCESS_CONTROL_REQUEST_METHOD)
+        .and_then(|value| value.to_str().ok())
+        != Some("POST")
+    {
+        return StatusCode::METHOD_NOT_ALLOWED.into_response();
+    }
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    allow_ticket_cors(&mut response, origin);
+    response
+}
+
 async fn ticket(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<Response, ApiError> {
+    let origin = ticket_origin(&state.realtime.settings, &headers)?;
     let token = zeroize::Zeroizing::new(
         client_token(&headers).ok_or(ApiError::code(ErrorCode::AuthenticationFailed))?,
     );
@@ -88,10 +153,13 @@ async fn ticket(
     if !session.has_scope(MESSAGES_READ) {
         return Err(ApiError::code(ErrorCode::InsufficientScope));
     }
-    Ok((
-        StatusCode::CREATED,
-        Json(sessions::issue_ticket(&state, &session).await?),
-    ))
+    let mut response =
+        (StatusCode::CREATED, Json(sessions::issue_ticket(&state, &session).await?))
+            .into_response();
+    if let Some(origin) = origin {
+        allow_ticket_cors(&mut response, origin);
+    }
+    Ok(response)
 }
 
 fn refuse(status: StatusCode, code: ErrorCode, reason: &'static str) -> Response {
@@ -289,4 +357,38 @@ async fn unregister_push(
     Ok(Json(
         push::unregister(&state, caller.context(), &acting, device).await?,
     ))
+}
+
+#[cfg(test)]
+mod ticket_cors_tests {
+    use super::*;
+
+    #[test]
+    fn allows_only_single_configured_origin_and_native_no_origin() {
+        let mut settings = super::super::RealtimeSettings::default();
+        settings.allowed_origins = vec!["https://meet.example.com".to_string()];
+        let mut headers = HeaderMap::new();
+        assert!(ticket_origin(&settings, &headers).unwrap().is_none());
+        headers.insert(header::ORIGIN, HeaderValue::from_static("https://meet.example.com"));
+        assert!(ticket_origin(&settings, &headers).unwrap().is_some());
+        headers.append(header::ORIGIN, HeaderValue::from_static("https://meet.example.com"));
+        assert!(ticket_origin(&settings, &headers).is_err());
+        headers.remove(header::ORIGIN);
+        headers.insert(header::ORIGIN, HeaderValue::from_static("https://attacker.example"));
+        assert!(ticket_origin(&settings, &headers).is_err());
+    }
+
+    #[test]
+    fn ticket_cors_headers_never_use_wildcard() {
+        let mut response = StatusCode::NO_CONTENT.into_response();
+        allow_ticket_cors(&mut response, HeaderValue::from_static("https://meet.example.com"));
+        assert_eq!(
+            response.headers().get(header::ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(),
+            "https://meet.example.com"
+        );
+        assert_eq!(
+            response.headers().get(header::ACCESS_CONTROL_ALLOW_HEADERS).unwrap(),
+            "Authorization, Accept"
+        );
+    }
 }
