@@ -41,7 +41,9 @@ pub async fn api_key_middleware(
 
     // Check if API key is active
     if api_key.status != ApiKeyStatus::Active {
-        return Err(ApiError::Unauthorized("API key has been revoked".to_string()));
+        return Err(ApiError::Unauthorized(
+            "API key has been revoked".to_string(),
+        ));
     }
 
     // Check if API key has expired
@@ -106,7 +108,9 @@ pub async fn combined_auth_middleware(
             {
                 // Check if API key is active
                 if api_key.status != ApiKeyStatus::Active {
-                    return Err(ApiError::Unauthorized("API key has been revoked".to_string()));
+                    return Err(ApiError::Unauthorized(
+                        "API key has been revoked".to_string(),
+                    ));
                 }
 
                 // Check if API key has expired

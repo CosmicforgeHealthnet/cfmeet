@@ -1,5 +1,5 @@
-use axum::Router;
 use axum::http::{header, Method}; // Add this line
+use axum::Router;
 use backend::config::logging;
 use dotenvy::dotenv;
 use sea_orm::{ConnectOptions, Database};
@@ -72,7 +72,13 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("✅ Redis connected successfully");
 
     // Create application state
-    let state = AppState::new(db.clone(), redis_service, &app_config, &email_config, &livekit_config);
+    let state = AppState::new(
+        db.clone(),
+        redis_service,
+        &app_config,
+        &email_config,
+        &livekit_config,
+    );
     tracing::info!("✅ Hosted UI URL: {}", app_config.app_url);
 
     // Start email worker (only if SMTP is configured)
@@ -159,6 +165,13 @@ async fn main() -> anyhow::Result<()> {
             poll,
         )
     });
+    // Part V H: Unified Messaging integration (FEATURE_UNIFIED_MESSAGING).
+    let _unified_messaging_sync = state.meeting.core.unified.clone().map(|um| {
+        backend::workers::unified_messaging_sync::spawn_unified_messaging_sync(
+            um,
+            backend::workers::unified_messaging_sync::sync_interval(),
+        )
+    });
     tracing::info!(
         "Part E: realtime={} provider_control={} provider={} capabilities={:?}",
         flags.conference_realtime_enabled,
@@ -182,12 +195,12 @@ async fn main() -> anyhow::Result<()> {
     let cors = CorsLayer::new()
         .allow_origin(allowed_origins)
         .allow_methods([
-            Method::GET, 
-            Method::POST, 
-            Method::PUT, 
-            Method::DELETE, 
-            Method::OPTIONS, 
-            Method::PATCH
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+            Method::PATCH,
         ])
         // Specify the exact headers your frontend will send
         .allow_headers([

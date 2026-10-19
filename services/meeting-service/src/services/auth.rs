@@ -92,18 +92,19 @@ pub fn check_email_verification(
     require_verification: bool,
 ) -> ApiResult<()> {
     use crate::models::users::UserStatus;
-    
+
     // If verification not required, allow all non-inactive users
     if !require_verification {
         return Ok(());
     }
-    
+
     // If verification required, check status
     if user.status == UserStatus::PendingVerification {
         return Err(ApiError::Forbidden(
-            "Email verification required. Please check your email and verify your account.".to_string()
+            "Email verification required. Please check your email and verify your account."
+                .to_string(),
         ));
     }
-    
+
     Ok(())
 }

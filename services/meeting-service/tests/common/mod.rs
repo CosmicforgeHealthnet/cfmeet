@@ -417,6 +417,8 @@ pub struct TestOptions {
     pub config: Option<MeetingV2Config>,
     /// Part N: keep the in-memory object store across an app restart (rollback drill).
     pub reuse_storage: Option<Arc<backend::services::artifacts::storage::MemoryArtifactStorage>>,
+    /// Part V H: the signed gateway to real Platform Access / Messaging processes.
+    pub unified_messaging: Option<backend::services::unified_messaging::SharedGateway>,
 }
 
 impl Default for TestOptions {
@@ -438,6 +440,7 @@ impl Default for TestOptions {
             telemetry: None,
             config: None,
             reuse_storage: None,
+            unified_messaging: None,
         }
     }
 }
@@ -717,6 +720,7 @@ impl TestApp {
             appointments: opts.appointments.unwrap_or_else(|| {
                 Arc::new(backend::services::appointment_authorization::UnconfiguredAppointmentAuthorization)
             }),
+            unified_messaging: opts.unified_messaging.clone(),
         };
         let state = AppState::with_meeting_deps(
             db.conn.clone(),

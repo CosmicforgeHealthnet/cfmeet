@@ -327,6 +327,54 @@
           }
         }
       }
+    },
+    "/internal/v1/context-authorities": {
+      "post": {
+        "operationId": "applyContextAuthority",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Applies Privacy Relay's authority for one of its communication contexts to every conversation of that context in the signed delegated environment: SUSPENDED locks, REVOKED closes (and blocks reopening / new conversations), ACTIVE allows creation and unlocks what the authority locked. Permission messaging-context-authority.apply (Privacy Relay only).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ContextAuthorityUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ContextAuthorityResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {

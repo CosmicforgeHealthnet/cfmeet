@@ -49,7 +49,7 @@ pub async fn auth_middleware(
     // Check for Guest Role
     if claims.role == "guest" {
         use crate::models::participants::Entity as Participants;
-        
+
         let participant_id = Uuid::parse_str(&claims.sub).map_err(|_| {
             ApiError::Unauthorized("Invalid participant identifier in token".to_string())
         })?;
@@ -76,9 +76,8 @@ pub async fn auth_middleware(
     }
 
     // Parse user ID from claims
-    let user_id = Uuid::parse_str(&claims.sub).map_err(|_| {
-        ApiError::Unauthorized("Invalid user identifier in token".to_string())
-    })?;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|_| ApiError::Unauthorized("Invalid user identifier in token".to_string()))?;
 
     // Query user from database
     let user = users::Entity::find_by_id(user_id)

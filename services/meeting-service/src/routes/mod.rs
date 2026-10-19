@@ -33,19 +33,13 @@ pub fn create_routes(state: AppState) -> Router {
             "/api/v1/participants",
             legacy_writes(participants::participant_routes(state.clone()), &state),
         )
-        .nest(
-            "/api/v1/api-keys",
-            api_keys::api_key_routes(state.clone()),
-        )
+        .nest("/api/v1/api-keys", api_keys::api_key_routes(state.clone()))
         .nest(
             "/api/v1/api",
             legacy_writes(api::api_routes(state.clone()), &state),
         )
         .nest("/api/v1/users", users::users_routes(state.clone()))
-        .nest(
-            "/api/v1/webhooks",
-            webhooks::webhook_routes(state.clone()),
-        )
+        .nest("/api/v1/webhooks", webhooks::webhook_routes(state.clone()))
         .nest("/api/v1/admin", admin::admin_routes(state.clone()))
         .nest("/api/v2", v2::v2_routes(state.clone()))
         // Internal provider routes (signature / internal-token protected; Part E).
@@ -62,7 +56,10 @@ pub fn create_routes(state: AppState) -> Router {
             "/internal/transcription/events",
             axum::routing::post(handlers::internal::transcription_events),
         )
-        .route("/internal/metrics", get(handlers::internal::prometheus_metrics))
+        .route(
+            "/internal/metrics",
+            get(handlers::internal::prometheus_metrics),
+        )
         .route(
             "/internal/operations/conferences/health",
             get(handlers::internal::operations_conferences),

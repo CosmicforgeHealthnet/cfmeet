@@ -151,7 +151,9 @@ pub async fn verify_email(
 
     // Check if already verified
     if user.status == users::UserStatus::Active {
-        return Err(ApiError::BadRequest("Email is already verified".to_string()));
+        return Err(ApiError::BadRequest(
+            "Email is already verified".to_string(),
+        ));
     }
 
     // Verify token from Redis (includes rate limiting and auto-deletion on success)
@@ -161,7 +163,9 @@ pub async fn verify_email(
         .await?;
 
     if !is_valid {
-        return Err(ApiError::BadRequest("Invalid verification code".to_string()));
+        return Err(ApiError::BadRequest(
+            "Invalid verification code".to_string(),
+        ));
     }
 
     // Update user status
@@ -209,7 +213,9 @@ pub async fn login(
     {
         Some(user) => user,
         None => {
-            return Err(ApiError::Unauthorized("Invalid email or password".to_string()));
+            return Err(ApiError::Unauthorized(
+                "Invalid email or password".to_string(),
+            ));
         }
     };
 
@@ -229,7 +235,9 @@ pub async fn login(
     // Only block inactive users, allow pending verification users to login
     // Frontend will handle redirect to verify page based on status
     if user.status == users::UserStatus::Inactive {
-        return Err(ApiError::Forbidden("Account has been deactivated".to_string()));
+        return Err(ApiError::Forbidden(
+            "Account has been deactivated".to_string(),
+        ));
     }
 
     // Clear rate limit on successful login
@@ -256,7 +264,9 @@ pub async fn login(
             id: user.id,
             username: user.username,
             role: role_str,
-            status: format!("{:?}", user.status).to_lowercase().replace('_', "_"),
+            status: format!("{:?}", user.status)
+                .to_lowercase()
+                .replace('_', "_"),
         },
     };
 
@@ -350,6 +360,15 @@ pub async fn logout(
             .token_blacklist
             .blacklist_token(token, ttl_secs)
             .await?;
+    }
+
+    // Part V H §104: logging out of CF Meet also ends the account's Messaging client
+    // sessions (durable job; a Messaging outage never blocks the logout).
+    if let (Some(um), Ok(user_id)) = (
+        state.meeting.core.unified.as_ref(),
+        uuid::Uuid::parse_str(&claims.sub),
+    ) {
+        um.revoke_sessions_for_user(user_id, "LOGOUT").await;
     }
 
     Ok(Json(MessageResponse {
@@ -531,7 +550,9 @@ pub async fn reset_password(
         .await?;
 
     if !is_valid {
-        return Err(ApiError::BadRequest("Invalid or expired reset code".to_string()));
+        return Err(ApiError::BadRequest(
+            "Invalid or expired reset code".to_string(),
+        ));
     }
 
     // Update password
@@ -582,7 +603,9 @@ pub async fn verify_reset_token(
         .await?;
 
     if !has_code {
-        return Err(ApiError::BadRequest("No password reset request found".to_string()));
+        return Err(ApiError::BadRequest(
+            "No password reset request found".to_string(),
+        ));
     }
 
     // Note: We don't verify the actual code here to avoid consuming verification attempts
@@ -642,7 +665,9 @@ pub async fn change_password(
 
     let is_valid = verify_password(&payload.current_password, password_hash)?;
     if !is_valid {
-        return Err(ApiError::BadRequest("Current password is incorrect".to_string()));
+        return Err(ApiError::BadRequest(
+            "Current password is incorrect".to_string(),
+        ));
     }
 
     // Hash new password and update
@@ -657,7 +682,6 @@ pub async fn change_password(
         message: "Password changed successfully".to_string(),
     }))
 }
-
 
 // ============================================================================
 // Google OAuth Handlers
@@ -682,9 +706,7 @@ const OAUTH_STATE_TTL_SECS: u64 = 10 * 60;
         (status = 500, description = "Internal server error"),
     )
 )]
-pub async fn oauth_google_init(
-    State(state): State<AppState>,
-) -> ApiResult<Redirect> {
+pub async fn oauth_google_init(State(state): State<AppState>) -> ApiResult<Redirect> {
     // Generate cryptographically secure random state (32 bytes, hex encoded)
     let state_value: String = rand::thread_rng()
         .sample_iter(&rand::distributions::Alphanumeric)
@@ -821,8 +843,14 @@ async fn oauth_google_callback_inner(
         .map_err(|e| ApiError::InternalError(format!("Token exchange failed: {}", e)))?;
 
     if !token_response.status().is_success() {
-        let error_text = token_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(ApiError::InternalError(format!("Token exchange failed: {}", error_text)));
+        let error_text = token_response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(ApiError::InternalError(format!(
+            "Token exchange failed: {}",
+            error_text
+        )));
     }
 
     let token_data: serde_json::Value = token_response
@@ -830,28 +858,34 @@ async fn oauth_google_callback_inner(
         .await
         .map_err(|e| ApiError::InternalError(format!("Failed to parse token response: {}", e)))?;
 
-    let id_token = token_data["id_token"].as_str()
+    let id_token = token_data["id_token"]
+        .as_str()
         .ok_or_else(|| ApiError::InternalError("No ID token in response".to_string()))?;
 
     // Decode ID token (basic decoding without signature verification for now)
     let token_parts: Vec<&str> = id_token.split('.').collect();
     if token_parts.len() != 3 {
-        return Err(ApiError::InternalError("Invalid ID token format".to_string()));
+        return Err(ApiError::InternalError(
+            "Invalid ID token format".to_string(),
+        ));
     }
 
-    use base64::{Engine as _, engine::general_purpose};
-    let payload = general_purpose::URL_SAFE_NO_PAD.decode(token_parts[1])
+    use base64::{engine::general_purpose, Engine as _};
+    let payload = general_purpose::URL_SAFE_NO_PAD
+        .decode(token_parts[1])
         .map_err(|e| ApiError::InternalError(format!("Failed to decode ID token: {}", e)))?;
 
     let claims: serde_json::Value = serde_json::from_slice(&payload)
         .map_err(|e| ApiError::InternalError(format!("Failed to parse ID token claims: {}", e)))?;
 
     // Extract user info from claims
-    let email = claims["email"].as_str()
+    let email = claims["email"]
+        .as_str()
         .ok_or_else(|| ApiError::InternalError("No email in ID token".to_string()))?
         .to_string();
     let name = claims["name"].as_str().unwrap_or("Google User").to_string();
-    let _google_sub = claims["sub"].as_str()
+    let _google_sub = claims["sub"]
+        .as_str()
         .ok_or_else(|| ApiError::InternalError("No sub in ID token".to_string()))?
         .to_string();
 
@@ -869,7 +903,9 @@ async fn oauth_google_callback_inner(
 
     let user = if let Some(mut user) = existing_user {
         if user.status == users::UserStatus::Inactive {
-            return Err(ApiError::Forbidden("Account has been deactivated".to_string()));
+            return Err(ApiError::Forbidden(
+                "Account has been deactivated".to_string(),
+            ));
         }
 
         if user.status == users::UserStatus::PendingVerification {
@@ -904,7 +940,9 @@ async fn oauth_google_callback_inner(
 
     // Generate JWT tokens
     let role_str = format!("{:?}", user.role).to_lowercase();
-    let status_str = format!("{:?}", user.status).to_lowercase().replace('_', "_");
+    let status_str = format!("{:?}", user.status)
+        .to_lowercase()
+        .replace('_', "_");
     let access_token = state
         .jwt_service
         .generate_access_token(user.id, &role_str)?;

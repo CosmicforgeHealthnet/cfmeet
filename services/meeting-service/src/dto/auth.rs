@@ -206,4 +206,3 @@ fn validate_change_passwords(req: &ChangePasswordRequest) -> Result<(), Validati
 
     Ok(())
 }
-

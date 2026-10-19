@@ -28,18 +28,15 @@ use axum::{
     http::StatusCode,
     Extension, Json,
 };
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use uuid::Uuid;
 use validator::Validate;
 
 use crate::{
     dto::{
-        ApiResponse, ChatMessageResponse, ChatMessagesListResponse,
-        ChatMessagesQuery, SendChatMessageRequest,
+        ApiResponse, ChatMessageResponse, ChatMessagesListResponse, ChatMessagesQuery,
+        SendChatMessageRequest,
     },
-    utils::{format_utc, now_utc},
     error::{ApiError, ApiResult},
     models::{
         chat_messages::{self, Entity as ChatMessages},
@@ -48,6 +45,7 @@ use crate::{
     },
     services::auth::Claims,
     state::AppState,
+    utils::{format_utc, now_utc},
 };
 
 /// Send a chat message in a meeting
@@ -343,8 +341,7 @@ pub async fn get_messages(
 
     // Filter by timestamp if provided (input is already in Nigeria time)
     if let Some(after) = query.after {
-        messages_query =
-            messages_query.filter(chat_messages::Column::CreatedAt.gt(after));
+        messages_query = messages_query.filter(chat_messages::Column::CreatedAt.gt(after));
     }
 
     // Get messages with participant info
@@ -376,5 +373,8 @@ pub async fn get_messages(
         })
         .collect();
 
-    Ok(Json(ChatMessagesListResponse { success: true, data }))
+    Ok(Json(ChatMessagesListResponse {
+        success: true,
+        data,
+    }))
 }

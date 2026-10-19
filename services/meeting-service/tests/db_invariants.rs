@@ -348,6 +348,7 @@ async fn i07_migrations_idempotent() {
     // 18 through Parts A–D + 1 additive Part E migration (rtc control plane)
     // + 1 additive Part F migration (collaboration)
     // + 1 additive Parts G–I migration (artefacts, profiles, operations)
-    // + 1 additive Part M index (main-room message cursor).
-    assert_eq!(applied.len(), 22);
+    // + 1 additive Part M index (main-room message cursor)
+    // + 1 additive Part V H migration (Unified Messaging integration state).
+    assert_eq!(applied.len(), 23);
 }

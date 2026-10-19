@@ -165,6 +165,24 @@ async fn members<C: ConnectionTrait>(db: &C, id: Uuid) -> Result<Vec<MemberRow>>
     .await?)
 }
 
+/// Live conversations of the caller's environment with this context reference, locked.
+pub async fn load_by_context<C: ConnectionTrait>(
+    db: &C,
+    ctx: &TrustedContext,
+    namespace: &str,
+    reference: &str,
+) -> Result<Vec<ConversationRow>> {
+    Ok(db::all(
+        db,
+        &format!(
+            "SELECT {COLUMNS} FROM {FROM} WHERE c.environment_id = $1 AND c.context_namespace = $2 AND c.context_ref = $3 \
+               AND c.lifecycle_state IN ('ACTIVE', 'LOCKED', 'CLOSED', 'ARCHIVED') ORDER BY c.id FOR UPDATE OF c"
+        ),
+        vec![ctx.scope.environment_id.into(), namespace.into(), reference.into()],
+    )
+    .await?)
+}
+
 pub async fn full_view<C: ConnectionTrait>(db: &C, row: &ConversationRow) -> Result<Value> {
     Ok(view(row, &members(db, row.id).await?))
 }
@@ -227,6 +245,15 @@ pub async fn create(
     }
     if let Some(c) = &request.context {
         c.validate().map_err(Error::validation)?;
+        // A peer-owned context (e.g. a Privacy Relay context) is usable only while its
+        // owner says it is ACTIVE.
+        crate::integrations::context_authority::require_active(
+            &state.db,
+            ctx.scope.environment_id,
+            &c.namespace,
+            &c.reference,
+        )
+        .await?;
     }
     let counterpart = match (request.context_class, request.counterpart_principal_id) {
         (ContextClass::Direct, Some(p)) if p == acting.principal_id => {
@@ -893,6 +920,17 @@ pub async fn patch(
                             ErrorCode::InvalidTransition,
                             "TRANSITION_NOT_ALLOWED",
                         ));
+                    }
+                    if next == LifecycleState::Active {
+                        if let (Some(ns), Some(r)) = (&row.context_namespace, &row.context_ref) {
+                            crate::integrations::context_authority::require_active(
+                                txn,
+                                ctx.scope.environment_id,
+                                ns,
+                                r,
+                            )
+                            .await?;
+                        }
                     }
                     if current == LifecycleState::Closed && next == LifecycleState::Active {
                         let reopen: Option<bool> = policy_flag(

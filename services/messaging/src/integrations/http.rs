@@ -7,6 +7,7 @@
 //! | `POST /meeting-conversations/{conversationId}/lifecycle` | `messaging-meeting.sync` |
 //! | `POST /meeting-conversations/{conversationId}/legacy-imports` | `messaging-meeting.sync` |
 //! | `POST /meeting-conversations/{conversationId}/messages/{messageId}/moderation` | `messaging-meeting.sync` |
+//! | `POST /context-authorities` | `messaging-context-authority.apply` (Privacy Relay) |
 
 use axum::{
     extract::{Path, State},
@@ -24,7 +25,9 @@ use super::meeting::{
 use crate::{
     http::{
         error::ApiError,
-        middleware::{delegated_context, verify_principal, InternalCaller},
+        middleware::{
+            delegated_context, delegated_context_for_restriction, verify_principal, InternalCaller,
+        },
     },
     identity::TrustedContext,
     state::AppState,
@@ -49,6 +52,7 @@ pub fn internal_routes() -> Router<AppState> {
             "/meeting-conversations/:conversation_id/messages/:message_id/moderation",
             post(moderate),
         )
+        .route("/context-authorities", post(context_authority))
 }
 
 /// The meeting-sync caller's re-validated first-party scope.
@@ -129,6 +133,24 @@ async fn moderate(
 ) -> Result<impl IntoResponse, ApiError> {
     let ctx = meeting_scope(&state, &caller).await?;
     let view = meeting::moderate_message(&state, &ctx, conversation_id, message_id, body).await?;
+    state.wake_outbox();
+    Ok(Json(view))
+}
+
+async fn context_authority(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    Json(body): Json<super::context_authority::AuthorityUpdate>,
+) -> Result<impl IntoResponse, ApiError> {
+    caller.require_permission(InternalPermission::MessagingContextAuthorityApply)?;
+    // Restrictions apply even to a suspended tenant / application; granting (ACTIVE)
+    // needs the full authority of the chain.
+    let (ctx, full) = delegated_context_for_restriction(&state, &caller).await?;
+    if body.state == "ACTIVE" && !full {
+        return Err(ApiError::code(crate::error::ErrorCode::AuthoritySuspended));
+    }
+    let issuer = caller.context().authenticated_service().to_string();
+    let view = super::context_authority::apply(&state, &ctx, &issuer, body).await?;
     state.wake_outbox();
     Ok(Json(view))
 }

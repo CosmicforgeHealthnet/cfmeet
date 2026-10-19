@@ -35,6 +35,7 @@ pub mod rtc_provider;
 pub mod rtc_webhooks;
 pub mod secrets;
 pub mod specialized;
+pub mod unified_messaging;
 
 pub use otp::OtpService;
 pub use rate_limiter::RateLimiterService;

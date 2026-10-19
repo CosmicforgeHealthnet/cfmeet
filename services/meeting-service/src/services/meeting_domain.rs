@@ -42,6 +42,8 @@ pub struct MeetingDomainDeps {
     pub artifacts: crate::services::artifacts::ArtifactBackends,
     /// Part I telemetry sink.
     pub telemetry: Arc<dyn crate::services::quality::sink::QualityTelemetrySink>,
+    /// Part V H: signed gateway to Platform Access / Messaging (`None` = integration off).
+    pub unified_messaging: Option<crate::services::unified_messaging::SharedGateway>,
 }
 
 impl MeetingDomainDeps {
@@ -58,7 +60,30 @@ impl MeetingDomainDeps {
             },
             artifacts: artifact_backends_from_env(livekit),
             telemetry: Arc::new(crate::services::quality::sink::PrometheusSink::new()),
+            unified_messaging: unified_messaging_from_env(),
         }
+    }
+}
+
+/// Fail closed: an enabled but misconfigured integration stops startup instead of
+/// running half-integrated (e.g. cut over without a reachable authority).
+fn unified_messaging_from_env() -> Option<crate::services::unified_messaging::SharedGateway> {
+    use crate::services::unified_messaging::{
+        config::UnifiedMessagingConfig, gateway::ServiceAuthGateway,
+    };
+    match UnifiedMessagingConfig::from_env() {
+        Ok(None) => None,
+        Ok(Some(config)) => match ServiceAuthGateway::new(&config) {
+            Ok(g) => {
+                tracing::info!(
+                    environment = %config.scope.environment_id,
+                    "Unified Messaging integration enabled"
+                );
+                Some(Arc::new(g))
+            }
+            Err(e) => panic!("FEATURE_UNIFIED_MESSAGING is on but misconfigured: {e}"),
+        },
+        Err(e) => panic!("FEATURE_UNIFIED_MESSAGING is on but misconfigured: {e}"),
     }
 }
 
@@ -135,6 +160,12 @@ impl MeetingDomain {
             deps.config.passcode_max_attempts,
             deps.config.passcode_window_secs,
         );
+        let unified = deps.unified_messaging.map(|g| {
+            Arc::new(crate::services::unified_messaging::UnifiedMessaging::new(
+                db.clone(),
+                g,
+            ))
+        });
         let core: Core = Arc::new(DomainCore {
             db,
             flags: deps.flags,
@@ -147,6 +178,7 @@ impl MeetingDomain {
             collab_limiter: crate::services::collaboration::CollabLimiter::new(redis.clone()),
             artifacts: deps.artifacts,
             telemetry: deps.telemetry,
+            unified,
             redis,
         });
         Self {
@@ -164,7 +196,8 @@ impl MeetingDomain {
             media: crate::services::collaboration::media::MediaControlService::new(core.clone()),
             messaging: crate::services::collaboration::messaging::MeetingMessagingService::new(
                 core.clone(),
-            ),
+            )
+            .with_unified(core.unified.clone()),
             engagement: crate::services::collaboration::engagement::EngagementService::new(
                 core.clone(),
             ),

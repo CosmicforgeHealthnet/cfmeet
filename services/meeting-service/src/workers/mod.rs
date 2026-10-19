@@ -11,6 +11,7 @@
 //! - `conference_scheduler` - Phase 2: recurrence materialization + scheduled end (v2)
 //! - `outbox_relay` - Phase 2: transactional outbox delivery (realtime fanout + provider commands)
 //! - `conference_reconciler` - Phase 2 Part E: PostgreSQL ↔ RTC provider drift repair
+//! - `unified_messaging_sync` - Part V H: Meeting ↔ Unified Messaging membership / mirror / rollback / revocation
 //!
 //! ## Adding a New Worker
 //!
@@ -28,6 +29,7 @@ pub mod email;
 pub mod meeting_auto_end;
 pub mod meeting_auto_start;
 pub mod outbox_relay;
+pub mod unified_messaging_sync;
 
 pub use breakout_closer::{spawn_breakout_closer, BreakoutCloser};
 pub use conference_reconciler::{

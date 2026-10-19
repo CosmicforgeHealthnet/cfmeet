@@ -18,6 +18,7 @@ pub mod quality;
 pub mod realtime;
 pub mod spaces;
 pub mod specialized;
+pub mod unified_messaging;
 pub mod views;
 
 use axum::{

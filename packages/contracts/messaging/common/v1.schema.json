@@ -4998,6 +4998,71 @@
           "type": "boolean"
         }
       }
+    },
+    "ContextAuthorityUpdate": {
+      "description": "Part V H §103: the current authority of a peer-owned communication context (opaque reference only; never a telephone number or contact value). Version-fenced; REVOKED / SUSPENDED apply even to a suspended tenant, ACTIVE needs full authority.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "reference",
+        "state",
+        "sourceVersion"
+      ],
+      "properties": {
+        "namespace": {
+          "enum": [
+            "privacy-relay"
+          ]
+        },
+        "reference": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:/-]{1,256}$"
+        },
+        "state": {
+          "enum": [
+            "ACTIVE",
+            "SUSPENDED",
+            "REVOKED"
+          ]
+        },
+        "sourceVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        }
+      }
+    },
+    "ContextAuthorityResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "applied"
+      ],
+      "properties": {
+        "applied": {
+          "type": "boolean"
+        },
+        "reason": {
+          "enum": [
+            "STALE_VERSION"
+          ]
+        },
+        "state": {
+          "enum": [
+            "ACTIVE",
+            "SUSPENDED",
+            "REVOKED"
+          ]
+        },
+        "conversationsAffected": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     }
   }
 }

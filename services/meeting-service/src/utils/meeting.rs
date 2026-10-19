@@ -3,16 +3,16 @@
 use rand::Rng;
 
 /// Generate a short, human-friendly meeting identifier (8-character code)
-/// 
+///
 /// Creates a random 8-character code using uppercase letters and numbers,
 /// excluding ambiguous characters (0, O, I, 1, etc.) for better readability.
-/// 
+///
 /// # Example
 /// ```ignore
 /// let code = generate_meeting_identifier();
 /// println!("Meeting code: {}", code); // e.g., "ABCD1234"
 /// ```
-/// 
+///
 /// # Returns
 /// An 8-character string containing only uppercase letters (A-Z, excluding I and O)
 /// and numbers (2-9, excluding 0 and 1 to avoid confusion with letters).

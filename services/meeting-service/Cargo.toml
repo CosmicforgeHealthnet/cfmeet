@@ -60,6 +60,9 @@ hmac = "0.12"
 md-5 = "0.10"
 hex = "0.4"
 url = "2"
+# Part V H: signed internal service calls to Platform Access and Messaging (no service
+# credential ever reaches a browser or mobile client).
+cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
 
 [[bin]]
 name = "test_email"
@@ -75,3 +78,5 @@ tower = { version = "0.4", features = ["util"] }
 # Mock LiveKit RoomService (decodes the same protobuf messages as livekit-server)
 prost = "0.12"
 tokio-tungstenite = "0.24"
+# Part V H end-to-end: a real OpenMLS client device (keys stay in the test "client").
+cf-messaging-crypto = { path = "../../packages/messaging-crypto", features = ["client"] }

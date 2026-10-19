@@ -1,0 +1,98 @@
+name: Unified Messaging integration journeys
+
+# Part V H: the Meeting chat migration and the CF Meet identity bridge across the ACTUAL
+# service boundaries — real Platform Access and Messaging processes (each with its own
+# database and migrations) around Meeting Service's real router and integration
+# (services/meeting-service/tests/unified_messaging_e2e.rs), signed internal HTTP between
+# them and a real OpenMLS client device. Mandatory scenarios 1 (meeting migration),
+# 2 (native identity), 6 (no automatic downgrade: MANAGED stays MANAGED, LEGACY_MANAGED
+# provenance) and 7 (failure recovery). Software integration evidence only — no
+# production deployment, no external certification.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/meeting-service/**"
+      - "services/messaging/**"
+      - "services/platform-access/**"
+      - "packages/service-auth/**"
+      - "packages/messaging-crypto/**"
+      - "packages/contracts/**"
+      - ".github/workflows/unified-messaging-e2e.yml"
+  pull_request:
+    paths:
+      - "services/meeting-service/**"
+      - "services/messaging/**"
+      - "services/platform-access/**"
+      - "packages/service-auth/**"
+      - "packages/messaging-crypto/**"
+      - "packages/contracts/**"
+      - ".github/workflows/unified-messaging-e2e.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: unified-messaging-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  # One target directory: every service's binaries next to each other.
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target
+
+jobs:
+  journeys:
+    name: Meeting ↔ Messaging ↔ Platform Access (real processes)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      TEST_REDIS_URL: redis://127.0.0.1:6379
+      # Missing binaries FAIL here (they only skip on a developer machine).
+      UNIFIED_MESSAGING_E2E_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: unified-messaging-e2e
+
+      - name: Build the service binaries (Platform Access, Messaging + their migrations)
+        run: |
+          set -euo pipefail
+          for s in platform-access messaging; do
+            (cd "services/$s" && cargo build --workspace --bins --locked)
+          done
+
+      - name: Journey (Scenarios 1, 2, 6, 7)
+        working-directory: services/meeting-service
+        env:
+          PLATFORM_ACCESS_BIN: ${{ github.workspace }}/target/debug/platform-access
+          PLATFORM_ACCESS_MIGRATION_BIN: ${{ github.workspace }}/target/debug/platform-access-migration
+          MESSAGING_BIN: ${{ github.workspace }}/target/debug/messaging
+          MESSAGING_MIGRATION_BIN: ${{ github.workspace }}/target/debug/messaging-migration
+        run: cargo test --locked --test unified_messaging_e2e -- --nocapture
+
+      - name: Disk usage
+        if: always()
+        run: df -h / && (du -sh target 2>/dev/null || true)

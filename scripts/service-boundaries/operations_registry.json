@@ -5,6 +5,12 @@
     "usage-finalizer", "artifact-worker", "webhook-delivery-worker"
   ],
   "responsibilities": [
+    {"id": "meeting-unified-messaging-sync", "owner": "meeting-service", "source": "src/services/unified_messaging/mod.rs", "entry": "sync_once",
+     "tests": ["tests/unified_messaging_e2e.rs::meeting_chat_migrates_to_unified_messaging_across_real_services"]},
+    {"id": "meeting-messaging-session-revocation", "owner": "meeting-service", "source": "src/services/unified_messaging/identity.rs", "entry": "process_revocations",
+     "tests": ["tests/unified_messaging_e2e.rs::meeting_chat_migrates_to_unified_messaging_across_real_services"]},
+    {"id": "meeting-chat-rollback-copy", "owner": "meeting-service", "source": "src/services/unified_messaging/mirror.rs", "entry": "copy_back_native",
+     "tests": ["tests/unified_messaging_e2e.rs::meeting_chat_migrates_to_unified_messaging_across_real_services"]},
     {"id": "messaging-conversation-expiry", "owner": "messaging", "source": "src/conversations/service.rs", "entry": "expire_due",
      "tests": ["tests/conversations.rs::reopening_and_expiry_follow_the_conversations_policy_snapshot"]},
     {"id": "messaging-outbox-publisher", "owner": "messaging", "source": "src/events/outbox.rs", "entry": "publish_due",

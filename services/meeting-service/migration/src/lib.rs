@@ -23,6 +23,7 @@ mod m20261004_000003_rtc_control_plane;
 mod m20261004_000004_collaboration;
 mod m20261005_000005_artifacts_profiles_operations;
 mod m20261005_000006_message_main_cursor_index;
+mod m20261019_000001_unified_messaging_integration;
 
 pub mod phase2_backfill;
 
@@ -54,6 +55,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261004_000004_collaboration::Migration),
             Box::new(m20261005_000005_artifacts_profiles_operations::Migration),
             Box::new(m20261005_000006_message_main_cursor_index::Migration),
+            Box::new(m20261019_000001_unified_messaging_integration::Migration),
         ]
     }
 }

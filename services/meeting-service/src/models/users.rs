@@ -14,7 +14,6 @@ pub struct Model {
     pub status: UserStatus,
     // Note: OTP tokens (verification_token, reset_token) are now stored in Redis
     // with automatic expiration. See services/otp.rs for details.
-
     pub created_at: DateTime,
     pub updated_at: DateTime,
     pub last_login: Option<DateTime>,

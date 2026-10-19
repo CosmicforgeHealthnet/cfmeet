@@ -211,6 +211,16 @@ pub async fn sync_member(
                     "BANNED" if !owner => {
                         membership::ban_in(txn, &ctx, &conversation, principal, &reason, None, &rctx, now).await?;
                         rekey = active && conversation.profile() == SecurityProfile::PrivateE2ee;
+                        if current.is_none() {
+                            record_former_member(txn, &ctx, conversation.id, principal, "REMOVED", &reason, now).await?;
+                        }
+                    }
+                    // Someone who left before the conversation existed (history import):
+                    // a FORMER membership that never grants access, so their legacy
+                    // messages keep their true author.
+                    "REMOVED" | "LEFT" if current.is_none() => {
+                        let state = if request.state == "LEFT" { "LEFT" } else { "REMOVED" };
+                        record_former_member(txn, &ctx, conversation.id, principal, state, &reason, now).await?;
                     }
                     "REMOVED" | "LEFT" if active && !owner => {
                         let view = membership::remove_in(
@@ -262,6 +272,37 @@ pub async fn sync_member(
         })
         .await
         .map_err(Error::from)
+}
+
+/// A membership row in a terminal state: nothing becomes visible (its window starts after
+/// the newest message) and no membership event is emitted.
+async fn record_former_member<C: sea_orm::ConnectionTrait>(
+    txn: &C,
+    ctx: &TrustedContext,
+    conversation_id: Uuid,
+    principal: Uuid,
+    state: &str,
+    reason: &str,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    db::exec(
+        txn,
+        "INSERT INTO messaging_conversation_members (conversation_id, principal_id, environment_id, role, state, \
+           joined_at, updated_at, removed_at, removed_reason, visible_from_sequence, visible_from_event) \
+         SELECT $1, $2, $3, 'MEMBER', $4, $5, $5, $5, $6, s.next_sequence, s.next_event_sequence \
+           FROM messaging_conversation_sequences s WHERE s.conversation_id = $1 \
+         ON CONFLICT (conversation_id, principal_id) DO NOTHING",
+        vec![
+            conversation_id.into(),
+            principal.into(),
+            ctx.scope.environment_id.into(),
+            state.into(),
+            now.into(),
+            reason.into(),
+        ],
+    )
+    .await?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Deserialize)]

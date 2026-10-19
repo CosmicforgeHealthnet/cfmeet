@@ -354,6 +354,36 @@ pub async fn require_internal_service(
 /// The trusted context of an internal caller acting inside its signed delegated scope,
 /// re-validated against Platform Access now (forged / stale chains and suspended
 /// tenants, applications or environments are refused). Fail closed.
+/// Like [`delegated_context`] but also accepts a valid chain whose authority is
+/// SUSPENDED, returning whether it is at full authority. For restrictions (revocations)
+/// that must apply precisely when the restricted authority is suspended.
+pub async fn delegated_context_for_restriction(
+    state: &AppState,
+    caller: &InternalCaller,
+) -> Result<(TrustedContext, bool), ApiError> {
+    let Some(ctx) = caller.context().delegated_platform_context() else {
+        return Err(ApiError::code(ErrorCode::DelegatedContextRequired));
+    };
+    use crate::identity::CustomerAuthority;
+    match state.authority.validate_delegated(ctx).await {
+        Ok(crate::identity::DelegatedScope::Valid {
+            first_party,
+            full_authority,
+        }) => Ok((
+            TrustedContext::delegated(ctx, first_party, full_authority),
+            full_authority,
+        )),
+        Ok(crate::identity::DelegatedScope::Invalid) => {
+            crate::metrics::inc("messaging_delegated_context_rejected_total", &[]);
+            Err(ApiError::code(ErrorCode::DelegatedContextInvalid))
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "identity authority unavailable");
+            Err(ApiError::code(ErrorCode::ServiceUnavailable))
+        }
+    }
+}
+
 pub async fn delegated_context(
     state: &AppState,
     caller: &InternalCaller,

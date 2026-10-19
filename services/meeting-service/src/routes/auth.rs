@@ -1,5 +1,9 @@
 use crate::{handlers::auth, middleware::auth_middleware, state::AppState};
-use axum::{middleware, routing::{get, post}, Router};
+use axum::{
+    middleware,
+    routing::{get, post},
+    Router,
+};
 
 pub fn auth_routes() -> Router<AppState> {
     Router::new()

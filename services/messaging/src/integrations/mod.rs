@@ -5,6 +5,7 @@
 //! |---|---|---|
 //! | Meeting Service (first-party backend) | `messaging-application.delegate` | `/internal/v1/delegated/**` (the customer surface, [`crate::http::middleware::require_delegated_application`]) |
 //! | Meeting Service | `messaging-meeting.sync` | [`meeting`] |
+//! | Privacy Relay | `messaging-context-authority.apply` | [`context_authority`] |
 //!
 //! Every operation requires the peer's signed DELEGATED scope, re-validated against
 //! Platform Access ([`crate::http::middleware::delegated_context`]); the scope is never
@@ -12,6 +13,7 @@
 //! ([`advance_fence`]): an update at or below the last applied source version is stale
 //! and is never re-applied, so a delayed or replayed update cannot restore access.
 
+pub mod context_authority;
 pub mod http;
 pub mod meeting;
 

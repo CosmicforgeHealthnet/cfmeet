@@ -63,7 +63,7 @@ async fn j_api_01_every_documented_operation_is_routed_with_standard_errors() {
             assert_no_secrets(&app, &format!("{method} {path}"), &v);
         }
     }
-    assert_eq!(probed, 136, "all v2 operations probed");
+    assert_eq!(probed, 145, "all v2 operations probed");
 }
 
 /// Unknown v2 paths and unsupported methods keep the standard envelope.

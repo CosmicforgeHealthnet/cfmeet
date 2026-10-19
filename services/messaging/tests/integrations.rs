@@ -869,3 +869,181 @@ async fn the_meeting_authority_removes_messages_without_reading_them_back() {
         .await;
     assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
 }
+
+#[tokio::test]
+async fn former_participants_keep_authorship_without_ever_gaining_access() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(true);
+    h.meeting_policy(&c, json!({})).await;
+    let host = h.principal_of_kind(&c, "NATIVE_CF_USER");
+    let left = h.principal_of_kind(&c, "TEMPORARY_EXTERNAL_PARTICIPANT");
+    let r = h.resolve_meeting(&c, host, "conference:former").await;
+    let cid = r.json["conversation"]["conversationId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // The participant left the meeting before the conversation existed.
+    let r = h
+        .sync(
+            &c,
+            &cid,
+            left,
+            json!({ "state": "LEFT", "sourceVersion": 1 }),
+        )
+        .await;
+    assert_eq!(r.json["applied"], true, "{}", r.text);
+    assert_eq!(r.json["member"]["state"], "LEFT", "{}", r.text);
+    let r = h
+        .as_meeting(
+            &c,
+            Method::POST,
+            &format!("/internal/v1/meeting-conversations/{cid}/legacy-imports"),
+            Some(json!({ "legacySource": "meeting.conference-messages", "messages": [
+                { "legacyMessageId": "x-1", "senderPrincipalId": left, "text": "bye", "sentAt": "2026-10-01T09:00:00Z" } ] })),
+            None,
+        )
+        .await;
+    assert_eq!(r.json["imported"], 1, "{}", r.text);
+    // A former member reads nothing and cannot post.
+    let read = h
+        .get(&c, Some(left), &format!("/v1/conversations/{cid}/messages"))
+        .await;
+    assert!(read.status.is_client_error(), "{}", read.text);
+    // No membership event announced a member who was never there.
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_outbox_events WHERE aggregate_id = '{cid}' \
+             AND event_type IN ('messaging.member.added','messaging.member.removed') AND payload::text LIKE '%{left}%'"
+        ))
+        .await,
+        0
+    );
+}
+
+async fn relay_create(h: &Harness, c: &Customer, alice: Uuid) -> Response {
+    h.create_conversation(
+        c,
+        alice,
+        json!({ "contextClass": "GROUP", "securityProfile": "MANAGED",
+                "context": { "namespace": "privacy-relay", "reference": "relay-context:7f3a" } }),
+    )
+    .await
+}
+
+async fn relay_apply(h: &Harness, c: &Customer, state: &str, v: i64) -> Response {
+    let body = json!({ "namespace": "privacy-relay", "reference": "relay-context:7f3a", "state": state, "sourceVersion": v });
+    h.call_internal(
+        &peers().privacy_relay,
+        Method::POST,
+        "/internal/v1/context-authorities",
+        Some(body),
+        Some(delegated(c)),
+        &[],
+    )
+    .await
+}
+
+async fn lifecycle_code(h: &Harness, cid: &str) -> i64 {
+    h.scalar(&format!(
+        "SELECT CASE lifecycle_state WHEN 'ACTIVE' THEN 1 WHEN 'LOCKED' THEN 2 WHEN 'CLOSED' THEN 3 ELSE 0 END::bigint FROM messaging_conversations WHERE id = '{cid}'"
+    ))
+    .await
+}
+
+#[tokio::test]
+async fn privacy_relay_context_authority_gates_and_withdraws_conversations() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    // An EXTERNAL tenant's protected-communication context (opaque id only).
+    let c = h.first_party(false);
+    h.meeting_policy(&c, json!({})).await;
+    let alice = h.principal(&c);
+    let peers = peers();
+    // Unknown to Privacy Relay → no conversation can claim the context.
+    let r = relay_create(&h, &c, alice).await;
+    assert_eq!(r.reason(), "CONTEXT_AUTHORITY_UNKNOWN", "{}", r.text);
+    let r = relay_apply(&h, &c, "ACTIVE", 1).await;
+    assert_eq!(r.json["applied"], true, "{}", r.text);
+    let r = relay_create(&h, &c, alice).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let cid = r.json["conversationId"].as_str().unwrap().to_string();
+    // SUSPENDED locks; a delayed older ACTIVE never unlocks it.
+    assert_eq!(
+        relay_apply(&h, &c, "SUSPENDED", 2).await.json["conversationsAffected"],
+        1
+    );
+    assert_eq!(lifecycle_code(&h, &cid).await, 2);
+    let stale = relay_apply(&h, &c, "ACTIVE", 1).await;
+    assert_eq!(
+        (
+            stale.json["applied"].as_bool(),
+            stale.json["reason"].as_str()
+        ),
+        (Some(false), Some("STALE_VERSION"))
+    );
+    assert_eq!(lifecycle_code(&h, &cid).await, 2);
+    // A newer ACTIVE unlocks what the authority locked.
+    relay_apply(&h, &c, "ACTIVE", 3).await;
+    assert_eq!(lifecycle_code(&h, &cid).await, 1);
+    // REVOKED closes it and it cannot be reopened or re-created while revoked.
+    assert_eq!(
+        relay_apply(&h, &c, "REVOKED", 4).await.json["applied"],
+        true
+    );
+    assert_eq!(lifecycle_code(&h, &cid).await, 3);
+    let v = h
+        .scalar(&format!(
+            "SELECT version::bigint FROM messaging_conversations WHERE id = '{cid}'"
+        ))
+        .await;
+    let r = h
+        .patch(
+            &c,
+            Some(alice),
+            &format!("/v1/conversations/{cid}"),
+            json!({ "expectedVersion": v, "lifecycleState": "ACTIVE" }),
+        )
+        .await;
+    assert!(r.status.is_client_error(), "{}", r.text);
+    assert_eq!(lifecycle_code(&h, &cid).await, 3);
+    assert_eq!(
+        relay_create(&h, &c, alice).await.reason(),
+        "CONTEXT_AUTHORITY_WITHDRAWN"
+    );
+    // Only Privacy Relay speaks for its namespace; other namespaces are not controlled.
+    let r = h
+        .call_internal(&peers.meeting, Method::POST, "/internal/v1/context-authorities",
+            Some(json!({ "namespace": "privacy-relay", "reference": "relay-context:7f3a", "state": "ACTIVE", "sourceVersion": 9 })),
+            Some(delegated(&c)), &[])
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    let r = h
+        .call_internal(&peers.privacy_relay, Method::POST, "/internal/v1/context-authorities",
+            Some(json!({ "namespace": "meeting", "reference": "x", "state": "REVOKED", "sourceVersion": 9 })),
+            Some(delegated(&c)), &[])
+        .await;
+    assert_eq!(r.code(), "VALIDATION_ERROR", "{}", r.text);
+    // No delegated scope → refused; nothing in the record names a contact value.
+    let r = h
+        .call_internal(&peers.privacy_relay, Method::POST, "/internal/v1/context-authorities",
+            Some(json!({ "namespace": "privacy-relay", "reference": "relay-context:7f3a", "state": "REVOKED", "sourceVersion": 10 })),
+            None, &[])
+        .await;
+    assert_eq!(r.code(), "DELEGATED_CONTEXT_REQUIRED");
+    // A suspended tenant still receives revocations, never grants.
+    h.authority.delegated.lock().unwrap().insert(
+        c.context.scope.environment_id,
+        (c.context.scope, false, false),
+    );
+    assert_eq!(
+        relay_apply(&h, &c, "REVOKED", 11).await.json["applied"],
+        true
+    );
+    assert_eq!(
+        relay_apply(&h, &c, "ACTIVE", 12).await.code(),
+        "AUTHORITY_SUSPENDED"
+    );
+}
