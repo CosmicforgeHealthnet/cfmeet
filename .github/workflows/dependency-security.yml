@@ -21,6 +21,11 @@ on:
       - "services/privacy-relay/**"
       - "services/telephony/**"
       - "services/messaging/**"
+      - "services/platform-access/**"
+      - "services/sms-gateway/**"
+      - "services/numbering/**"
+      - "services/meeting-service/**"
+      - "scripts/sbom/**"
       - "packages/**"
       - "scripts/secret-scan/**"
       - ".github/workflows/dependency-security.yml"
@@ -30,6 +35,11 @@ on:
       - "services/privacy-relay/**"
       - "services/telephony/**"
       - "services/messaging/**"
+      - "services/platform-access/**"
+      - "services/sms-gateway/**"
+      - "services/numbering/**"
+      - "services/meeting-service/**"
+      - "scripts/sbom/**"
       - "packages/**"
       - "scripts/secret-scan/**"
       - ".github/workflows/dependency-security.yml"
@@ -59,6 +69,11 @@ jobs:
           - packages/contracts/validator
           - packages/messaging-crypto
           - services/messaging
+          # Part V K §158: every service lockfile is audited (these four were not).
+          - services/platform-access
+          - services/sms-gateway
+          - services/numbering
+          - services/meeting-service
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -76,7 +91,7 @@ jobs:
       # libcrux-kem is in no build graph (any target, all features); the ignore is lifted
       # when hpke-rs releases a fixed pin (ADR 0045).
       - name: libcrux-kem is never compiled into the Messaging crypto core
-        if: matrix.lockfile == 'packages/messaging-crypto' || matrix.lockfile == 'services/messaging'
+        if: matrix.lockfile == 'packages/messaging-crypto' || matrix.lockfile == 'services/messaging' || matrix.lockfile == 'services/meeting-service'
         working-directory: ${{ matrix.lockfile }}
         run: |
           set -euo pipefail
@@ -87,7 +102,23 @@ jobs:
         working-directory: ${{ matrix.lockfile }}
         run: >-
           cargo audit --ignore RUSTSEC-2023-0071
-          ${{ (matrix.lockfile == 'packages/messaging-crypto' || matrix.lockfile == 'services/messaging') && '--ignore RUSTSEC-2026-0330 --ignore RUSTSEC-2026-0331' || '' }}
+          ${{ (matrix.lockfile == 'packages/messaging-crypto' || matrix.lockfile == 'services/messaging' || matrix.lockfile == 'services/meeting-service') && '--ignore RUSTSEC-2026-0330 --ignore RUSTSEC-2026-0331' || '' }}
+
+  sbom:
+    # Part V K §158: a CycloneDX software bill of materials of every tracked Cargo.lock
+    # (exact versions, sources, registry checksums), kept as a build artifact.
+    name: SBOM (CycloneDX, every Rust lockfile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: generate
+        run: |
+          set -euo pipefail
+          python3 scripts/sbom/cargo_lock_sbom.py cfmeet-backend.cdx.json $(git ls-files '*Cargo.lock')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cfmeet-backend-sbom
+          path: cfmeet-backend.cdx.json
 
   image:
     name: image security (${{ matrix.service }})
