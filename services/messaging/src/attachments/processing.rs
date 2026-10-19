@@ -9,8 +9,9 @@
 //!   thumbnail, a waveform) are created by the sending client, encrypted like any
 //!   attachment and referenced from the MLS-protected descriptor ([`E2eeDerivative`]
 //!   documents that contract).
-//! * No processor is registered in this deployment ([`registered`] is empty): nothing
-//!   claims a derivative exists.
+//! * Registered processors: [`Derivative::Thumbnail`] for MANAGED PNG / JPEG images
+//!   ([`super::derivatives`], `MESSAGING_MEDIA_PROCESSING`). No transcoding, waveform,
+//!   preview or text-extraction processor exists: nothing claims those derivatives.
 
 use uuid::Uuid;
 
@@ -70,7 +71,7 @@ pub fn eligible(
     })
 }
 
-/// Processors registered in this deployment (none yet).
+/// Processors registered in this deployment.
 pub fn registered() -> &'static [Derivative] {
-    &[]
+    &[Derivative::Thumbnail]
 }

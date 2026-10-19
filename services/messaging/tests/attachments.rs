@@ -1509,3 +1509,272 @@ async fn concurrent_finalization_and_expiry_settle_exactly_once() {
     assert_eq!(e.usage(&c).await, (bytes.len() as i64, 0));
     println!("EVIDENCE finalize_race concurrent_finalizes=16 finalize_vs_expiry=8x4 outcomes=1");
 }
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut c = 0xFFFF_FFFFu32;
+    for &b in bytes {
+        c ^= u32::from(b);
+        for _ in 0..8 {
+            c = if c & 1 == 1 {
+                (c >> 1) ^ 0xEDB8_8320
+            } else {
+                c >> 1
+            };
+        }
+    }
+    !c
+}
+
+fn chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+    let mut out = (data.len() as u32).to_be_bytes().to_vec();
+    out.extend_from_slice(kind);
+    out.extend_from_slice(data);
+    let mut crc_input = kind.to_vec();
+    crc_input.extend_from_slice(data);
+    out.extend_from_slice(&crc32(&crc_input).to_be_bytes());
+    out
+}
+
+/// A real PNG (gradient) with an optional private tEXt chunk before IEND.
+fn real_png(w: u32, h: u32, text: Option<&str>) -> Vec<u8> {
+    let img = image::RgbImage::from_fn(w, h, |x, y| {
+        image::Rgb([(x % 256) as u8, (y % 256) as u8, 128])
+    });
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgb8(img)
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    if let Some(t) = text {
+        let iend = png.len() - 12;
+        let mut data = b"Comment\0".to_vec();
+        data.extend_from_slice(t.as_bytes());
+        let c = chunk(b"tEXt", &data);
+        png.splice(iend..iend, c);
+    }
+    png
+}
+
+#[tokio::test]
+async fn managed_images_get_safe_thumbnails_and_e2ee_attachments_never_do() {
+    let Some(e) = env().await else { return };
+    let c = e.h.customer(ALL_SCOPES);
+    e.policy(&c, json!({})).await;
+    let (conv, people) = e.managed_group(&c, 3).await;
+    let (alice, bob, outsider_conv_member) = (people[0], people[1], people[2]);
+    let id = cid(&conv);
+    let secret_note = "GPS 51.5007,-0.1246 private-comment-7f3a";
+    let png = real_png(1200, 800, Some(secret_note));
+    let jpeg = {
+        let img = image::RgbImage::from_fn(640, 480, |x, y| {
+            image::Rgb([(x % 251) as u8, (y % 241) as u8, 9])
+        });
+        let mut b = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut std::io::Cursor::new(&mut b), image::ImageFormat::Jpeg)
+            .unwrap();
+        b
+    };
+    // A decompression-bomb header: a valid 1x1 PNG whose IHDR claims 9000 x 9000.
+    let bomb = {
+        let mut b = real_png(1, 1, None);
+        let mut ihdr = b[16..29].to_vec();
+        ihdr[0..4].copy_from_slice(&9000u32.to_be_bytes());
+        ihdr[4..8].copy_from_slice(&9000u32.to_be_bytes());
+        b[16..29].copy_from_slice(&ihdr);
+        let mut crc_input = b"IHDR".to_vec();
+        crc_input.extend_from_slice(&ihdr);
+        b[29..33].copy_from_slice(&crc32(&crc_input).to_be_bytes());
+        b
+    };
+    let mut ids = Vec::new();
+    for (name, media, bytes) in [
+        ("photo.png", "image/png", png.clone()),
+        ("photo.jpg", "image/jpeg", jpeg),
+        ("bomb.png", "image/png", bomb),
+        ("broken.png", "image/png", self::png(3000)),
+    ] {
+        let r = e
+            .managed_upload(&c, &conv, alice, "IMAGE", media, name, &bytes)
+            .await;
+        assert_eq!(r.json["state"], "READY", "{}", r.text);
+        ids.push(r.json["attachmentId"].as_str().unwrap().to_string());
+    }
+    let sent =
+        e.h.post(
+            &c,
+            Some(alice),
+            &format!("/v1/conversations/{id}/messages"),
+            json!({ "clientMessageId": Uuid::new_v4(), "text": "pictures", "attachmentIds": ids }),
+        )
+        .await;
+    assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+
+    // An E2EE attachment in another conversation: ciphertext, never processed.
+    let (e2ee_conv, alice_d, _bob_d) = e.h.e2ee_direct(&c).await;
+    let enc =
+        attachment::encrypt_attachment(&real_png(64, 64, None), "image/png", "x.png").unwrap();
+    let intent = e
+        .intent(&c, &e2ee_conv, alice_d.principal, json!({ "kind": "IMAGE", "size": enc.ciphertext.len(), "sha256": enc.descriptor.ciphertext_sha256, "deviceId": alice_d.device_id(), "cryptoFormat": attachment::ATTACHMENT_FORMAT_V1 }))
+        .await;
+    assert_eq!(intent.status, StatusCode::CREATED, "{}", intent.text);
+    e.store
+        .upload_signed(
+            &write_of(&intent.json["upload"]),
+            e.h.now(),
+            enc.ciphertext.clone(),
+        )
+        .unwrap();
+    let e2ee_id = intent.json["attachmentId"].clone();
+    let r = e
+        .finalize(&c, &e2ee_conv, alice_d.principal, &e2ee_id)
+        .await;
+    assert_eq!(r.json["state"], "READY", "{}", r.text);
+
+    let report = lifecycle::run_once(&e.h.state).await.unwrap();
+    assert_eq!(
+        (report.derivatives_ready, report.derivatives_failed),
+        (2, 2),
+        "{report:?}"
+    );
+    let e2ee = e2ee_id.as_str().unwrap();
+    assert_eq!(
+        e.h.scalar(&format!(
+            "SELECT count(*) FROM messaging_attachment_derivatives WHERE attachment_id = '{e2ee}'"
+        ))
+        .await,
+        0,
+        "E2EE ciphertext is never processed"
+    );
+    assert!(
+        e.h.sql(&format!(
+            "INSERT INTO messaging_attachment_derivatives (id, attachment_id, environment_id, security_profile, kind, status, next_attempt_at, created_at) \
+             SELECT gen_random_uuid(), id, environment_id, 'MANAGED', 'THUMBNAIL', 'PENDING', now(), now() FROM messaging_attachments WHERE id = '{e2ee}'"
+        ))
+        .await
+        .is_err(),
+        "the database refuses a derivative of a PRIVATE_E2EE attachment"
+    );
+
+    // Another member sees the derivative metadata and gets a thumbnail grant.
+    let meta =
+        e.h.get(
+            &c,
+            Some(bob),
+            &format!("/v1/conversations/{id}/attachments/{}", ids[0]),
+        )
+        .await;
+    assert_eq!(meta.status, StatusCode::OK, "{}", meta.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/Attachment",
+        &meta.json,
+    );
+    let d = &meta.json["derivatives"][0];
+    assert_eq!(
+        (d["kind"].as_str(), d["status"].as_str()),
+        (Some("THUMBNAIL"), Some("READY")),
+        "{d}"
+    );
+    assert_eq!(
+        (d["width"].as_i64(), d["height"].as_i64()),
+        (Some(320), Some(213))
+    );
+    assert_eq!(
+        (d["sourceWidth"].as_i64(), d["sourceHeight"].as_i64()),
+        (Some(1200), Some(800))
+    );
+    let g =
+        e.h.post(
+            &c,
+            Some(bob),
+            &format!(
+                "/v1/conversations/{id}/attachments/{}/thumbnail-grants",
+                ids[0]
+            ),
+            json!({}),
+        )
+        .await;
+    assert_eq!(g.status, StatusCode::OK, "{}", g.text);
+    assert_eq!(g.json["mediaType"], "image/png");
+    // The thumbnail is a re-encoded PNG: bounded, decodable, and the private text is gone.
+    let key = messaging::attachments::derivatives::thumbnail_key(
+        c.context.scope.environment_id,
+        Uuid::parse_str(&ids[0]).unwrap(),
+    );
+    let thumb = e.store.get(&key, 10 << 20).await.unwrap().unwrap();
+    let decoded = image::load_from_memory(&thumb).unwrap();
+    assert!(decoded.width() <= 320 && decoded.height() <= 320);
+    assert!(!thumb
+        .windows(secret_note.len())
+        .any(|w| w == secret_note.as_bytes()));
+    assert!(
+        png.windows(secret_note.len())
+            .any(|w| w == secret_note.as_bytes()),
+        "the original had it"
+    );
+    // Failures are truthful and never produce an object.
+    let failed: Vec<String> = ids[2..].iter().map(|i| format!("'{i}'")).collect();
+    assert_eq!(
+        e.h.scalar(&format!(
+            "SELECT count(*) FROM messaging_attachment_derivatives WHERE attachment_id IN ({}) AND status = 'FAILED' AND object_key IS NULL \
+               AND error_code IN ('TOO_MANY_PIXELS', 'UNDECODABLE')",
+            failed.join(",")
+        ))
+        .await,
+        2
+    );
+    let r =
+        e.h.post(
+            &c,
+            Some(bob),
+            &format!(
+                "/v1/conversations/{id}/attachments/{}/thumbnail-grants",
+                ids[2]
+            ),
+            json!({}),
+        )
+        .await;
+    assert_eq!(r.reason(), "THUMBNAIL_NOT_READY", "{}", r.text);
+    // A non-member gets nothing.
+    let stranger = e.h.principal(&c);
+    let r =
+        e.h.post(
+            &c,
+            Some(stranger),
+            &format!(
+                "/v1/conversations/{id}/attachments/{}/thumbnail-grants",
+                ids[0]
+            ),
+            json!({}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    let _ = outsider_conv_member;
+    // Deleting the attachment queues its thumbnail object for deletion too.
+    let row = messaging::attachments::load(
+        &e.h.state.db,
+        Uuid::parse_str(&id).unwrap(),
+        Uuid::parse_str(&ids[0]).unwrap(),
+        false,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        lifecycle::delete_attachment(&e.h.state.db, &row, "TEST_DELETE", e.h.now())
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        e.h.scalar(&format!(
+            "SELECT count(*) FROM messaging_object_deletions WHERE object_key = '{key}'"
+        ))
+        .await,
+        1
+    );
+    lifecycle::run_once(&e.h.state).await.unwrap();
+    assert!(
+        e.store.get(&key, 10 << 20).await.unwrap().is_none(),
+        "the thumbnail object is gone"
+    );
+    println!("EVIDENCE derivatives thumbnails=2 refused=2 e2ee_processed=0");
+}

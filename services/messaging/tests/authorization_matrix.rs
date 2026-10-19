@@ -394,7 +394,20 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
     // Attachments: one READY, one uploaded but not finalized.
     let mut attachment_ids = Vec::new();
     for finalize in [true, false] {
-        let bytes = png(256);
+        // The finalized one is a real image (it gets a server thumbnail).
+        let bytes = if finalize {
+            let mut b = Vec::new();
+            image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                32,
+                32,
+                image::Rgb([1, 2, 3]),
+            ))
+            .write_to(&mut std::io::Cursor::new(&mut b), image::ImageFormat::Png)
+            .unwrap();
+            b
+        } else {
+            png(256)
+        };
         let r = h
             .post(
                 &a,
@@ -423,6 +436,11 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
         }
         attachment_ids.push(id);
     }
+    // Server-side derivatives (the finalized MANAGED image's thumbnail).
+    let report = messaging::attachments::lifecycle::run_once(&h.state)
+        .await
+        .unwrap();
+    assert_eq!(report.derivatives_ready, 1, "{report:?}");
 
     // SMS bridge (TELEPHONE_ENDPOINT party) and a bridged message.
     let party = h.principal_of_kind(&a, "TELEPHONE_ENDPOINT");
@@ -1006,6 +1024,9 @@ fn ops() -> Vec<Op> {
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         Op { method: M::POST, template: "/v1/conversations/{conversationId}/attachments/{attachmentId}/download-grants", scopes: AR, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/attachments/{}/download-grants", f.conv, f.attachment), Some(f.owner.principal), Some(json!({}))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/conversations/{conversationId}/attachments/{attachmentId}/thumbnail-grants", scopes: AR, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/conversations/{}/attachments/{}/thumbnail-grants", f.conv, f.attachment), Some(f.owner.principal), Some(json!({}))),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         Op { method: M::GET, template: "/v1/conversations/{conversationId}/attachments/{attachmentId}/content", scopes: AR, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/attachments/{}/content", f.conv, f.attachment), Some(f.owner.principal), None),

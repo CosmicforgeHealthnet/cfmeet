@@ -27,6 +27,7 @@
 //!   transcodes, waveforms …) — MANAGED only; E2EE derivatives are client-created.
 
 pub mod content;
+pub mod derivatives;
 pub mod http;
 pub mod lifecycle;
 pub mod processing;
@@ -162,7 +163,7 @@ fn attachments_enabled(policy: &EffectivePolicy, conversation: &ConversationRow)
     policy.attachments.enabled && context != Some(false)
 }
 
-fn require_storage(state: &AppState) -> Result<()> {
+pub(crate) fn require_storage(state: &AppState) -> Result<()> {
     if state.storage.configured() {
         Ok(())
     } else {
@@ -942,7 +943,10 @@ pub async fn get(
     attachment_id: Uuid,
 ) -> Result<Value> {
     let row = authorize_metadata(state, ctx, acting, conversation_id, attachment_id).await?;
-    Ok(view(&row))
+    let mut v = view(&row);
+    // Server-made derivatives exist only for MANAGED attachments.
+    v["derivatives"] = derivatives::views(state, row.id).await?;
+    Ok(v)
 }
 
 async fn authorize_metadata(
@@ -974,7 +978,7 @@ async fn authorize_metadata(
 }
 
 /// Current authorization to READ an attachment's bytes.
-async fn authorize_read(
+pub(crate) async fn authorize_read(
     state: &AppState,
     ctx: &TrustedContext,
     acting: &Acting,

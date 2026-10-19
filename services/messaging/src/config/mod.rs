@@ -43,6 +43,7 @@
 //! | `MESSAGING_PUSH_WEB_VAPID_KEY_FILE` / `_VAPID_SUBJECT` | no | Web Push adapter (both, or neither): the VAPID P-256 key (PKCS#8 PEM) and its `mailto:` / `https:` contact. `MESSAGING_PUSH_WEB_ALLOWED_HOSTS` replaces the push-service host allowlist (comma-separated, `*.` = subdomains) |
 //! | (unset adapters) | | jobs for that platform end `NOT_CONFIGURED`, never reported as delivered |
 //! | `MESSAGING_ATTACHMENTS_S3_ENDPOINT` … | no | the PRIVATE attachment bucket (`ENDPOINT`, `PUBLIC_ENDPOINT`, `REGION`, `BUCKET`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY[_FILE]`, `PATH_STYLE`, `SERVER_SIDE_ENCRYPTION`; see `packages/object-storage`). Unset: attachments fail closed |
+//! | `MESSAGING_MEDIA_PROCESSING` | no | `true` (default) / `false`: server-side thumbnails of READY MANAGED PNG / JPEG images (never PRIVATE_E2EE) |
 //! | `MESSAGING_CLAMAV_ADDRESS` | no | self-hosted clamd `host:port` scanning MANAGED attachments. Unset: scans stay pending (never READY where policy requires scanning) |
 //! | `MESSAGING_UPLOAD_INTENT_SECONDS` / `MESSAGING_DOWNLOAD_GRANT_SECONDS` | no | defaults 900 / 60 (residual access window of a grant) |
 //! | `MESSAGING_STORAGE_BUDGET_BYTES` | no | deployment cap of stored bytes per environment (default: none; policies may set lower) |
@@ -178,6 +179,8 @@ pub struct AttachmentSettings {
     pub proxy_max_bytes: usize,
     pub unlinked_ttl: chrono::Duration,
     pub scan_retry_max: i32,
+    /// Server-side thumbnails of MANAGED images (never PRIVATE_E2EE).
+    pub media_processing: bool,
 }
 
 impl Default for AttachmentSettings {
@@ -191,6 +194,7 @@ impl Default for AttachmentSettings {
             proxy_max_bytes: 32 * 1024 * 1024,
             unlinked_ttl: chrono::Duration::hours(24),
             scan_retry_max: 10,
+            media_processing: true,
         }
     }
 }
@@ -891,6 +895,16 @@ impl MessagingConfig {
                 720,
             )?),
             scan_retry_max: 10,
+            media_processing: match get("MESSAGING_MEDIA_PROCESSING").as_deref() {
+                None | Some("true") => true,
+                Some("false") => false,
+                Some(_) => {
+                    return Err(ConfigError::invalid(
+                        "MESSAGING_MEDIA_PROCESSING",
+                        "must be `true` or `false`",
+                    ))
+                }
+            },
         };
         let attachment_store =
             cf_object_storage::S3Config::from_lookup("MESSAGING_ATTACHMENTS_S3_", &|k: &str| {

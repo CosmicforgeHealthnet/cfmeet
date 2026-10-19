@@ -3117,6 +3117,14 @@
         "intentExpiresAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "derivatives": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/AttachmentDerivative"
+          },
+          "description": "Server-made derivatives (metadata reads only; empty for PRIVATE_E2EE)."
         }
       },
       "required": [
@@ -6054,6 +6062,167 @@
           "pattern": "^[A-Z_]{1,32}$"
         }
       }
+    },
+    "AttachmentDerivative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "status",
+        "mediaType",
+        "width",
+        "height",
+        "sourceWidth",
+        "sourceHeight",
+        "size",
+        "sha256",
+        "errorCode",
+        "completedAt"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "THUMBNAIL"
+          ]
+        },
+        "status": {
+          "enum": [
+            "PENDING",
+            "READY",
+            "FAILED"
+          ]
+        },
+        "mediaType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "width": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "height": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "sourceWidth": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "sourceHeight": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "size": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "errorCode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Z][A-Z0-9_]{1,31}$"
+        },
+        "completedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "description": "A server-made derivative of a MANAGED image (a re-encoded PNG thumbnail without the original's metadata). Never produced for PRIVATE_E2EE attachments, whose thumbnails the sending client encrypts itself."
+    },
+    "ThumbnailGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attachmentId",
+        "kind",
+        "method",
+        "url",
+        "expiresAt",
+        "mediaType",
+        "size",
+        "sha256",
+        "width",
+        "height",
+        "residualAccessSeconds"
+      ],
+      "properties": {
+        "attachmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "THUMBNAIL"
+        },
+        "method": {
+          "const": "GET"
+        },
+        "url": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "mediaType": {
+          "const": "image/png"
+        },
+        "size": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "width": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "height": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "residualAccessSeconds": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "description": "A short-lived read of a MANAGED image's thumbnail, authorized exactly like a download grant of the original."
     }
   }
 }

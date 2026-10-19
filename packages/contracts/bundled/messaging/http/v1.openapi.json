@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging API",
-    "version": "1.10.0",
+    "version": "1.11.0",
     "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are refused there with CLIENT_TOKENS_NOT_ENABLED; the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB."
   },
   "paths": {
@@ -5773,6 +5773,77 @@
           }
         }
       }
+    },
+    "/v1/conversations/{conversationId}/attachments/{attachmentId}/thumbnail-grants": {
+      "post": {
+        "operationId": "createThumbnailGrant",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope attachments.read, a member who may read the original: a short-lived read of the server thumbnail of a MANAGED image (409 ATTACHMENT_NOT_READY / THUMBNAIL_NOT_READY until it exists). PRIVATE_E2EE attachments have no server thumbnail.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "attachmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.ThumbnailGrant"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6235,6 +6306,14 @@
           "intentExpiresAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "derivatives": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "$ref": "#/components/schemas/messaging.common.v1.AttachmentDerivative"
+            },
+            "description": "Server-made derivatives (metadata reads only; empty for PRIVATE_E2EE)."
           }
         },
         "required": [
@@ -6258,6 +6337,100 @@
           "intentExpiresAt"
         ],
         "description": "An attachment's authorized metadata and lifecycle. Bytes live in protected object storage under a server-generated key."
+      },
+      "messaging.common.v1.AttachmentDerivative": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "status",
+          "mediaType",
+          "width",
+          "height",
+          "sourceWidth",
+          "sourceHeight",
+          "size",
+          "sha256",
+          "errorCode",
+          "completedAt"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "THUMBNAIL"
+            ]
+          },
+          "status": {
+            "enum": [
+              "PENDING",
+              "READY",
+              "FAILED"
+            ]
+          },
+          "mediaType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "width": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "height": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "sourceWidth": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "sourceHeight": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "errorCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{1,31}$"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "description": "A server-made derivative of a MANAGED image (a re-encoded PNG thumbnail without the original's metadata). Never produced for PRIVATE_E2EE attachments, whose thumbnails the sending client encrypts itself."
       },
       "messaging.common.v1.AttachmentDownloadGrant": {
         "type": "object",
@@ -10929,6 +11102,73 @@
             "const": true
           }
         }
+      },
+      "messaging.common.v1.ThumbnailGrant": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "attachmentId",
+          "kind",
+          "method",
+          "url",
+          "expiresAt",
+          "mediaType",
+          "size",
+          "sha256",
+          "width",
+          "height",
+          "residualAccessSeconds"
+        ],
+        "properties": {
+          "attachmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "kind": {
+            "const": "THUMBNAIL"
+          },
+          "method": {
+            "const": "GET"
+          },
+          "url": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "mediaType": {
+            "const": "image/png"
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "width": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "height": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "residualAccessSeconds": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "description": "A short-lived read of a MANAGED image's thumbnail, authorized exactly like a download grant of the original."
       },
       "messaging.common.v1.TransparencyProof": {
         "type": "object",

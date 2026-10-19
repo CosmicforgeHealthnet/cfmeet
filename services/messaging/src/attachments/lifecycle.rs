@@ -48,6 +48,8 @@ pub async fn enqueue_deletion<C: ConnectionTrait>(
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct LifecycleReport {
+    pub derivatives_ready: usize,
+    pub derivatives_failed: usize,
     pub expired_intents: usize,
     pub abandoned: usize,
     pub rescanned: usize,
@@ -114,6 +116,7 @@ pub async fn delete_attachment<C: ConnectionTrait>(
     .await?
         == 1;
     if ok {
+        super::derivatives::delete_for_attachment(db, row, reason, now).await?;
         super::quota::free(db, row, now).await?;
         enqueue_deletion(
             db,
@@ -374,6 +377,9 @@ pub async fn run_once(state: &AppState) -> Result<LifecycleReport> {
         rescanned: rescan_due(state, 50).await?,
         ..Default::default()
     };
+    let d = super::derivatives::process_due(state, 20).await?;
+    r.derivatives_ready = d.ready;
+    r.derivatives_failed = d.failed;
     process_deletions(state, 500, &mut r).await?;
     Ok(r)
 }

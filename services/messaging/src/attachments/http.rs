@@ -7,6 +7,7 @@
 //! | `GET /{id}/attachments/{attachmentId}` (metadata, lifecycle) | `attachments.read` |
 //! | `POST /{id}/attachments/{attachmentId}/download-grants` | `attachments.read` |
 //! | `GET /{id}/attachments/{attachmentId}/content` (proxied, re-authorized read) | `attachments.read` |
+//! | `POST /{id}/attachments/{attachmentId}/thumbnail-grants` (server thumbnail of a MANAGED image) | `attachments.read` |
 
 use axum::{
     extract::{Path, State},
@@ -46,6 +47,23 @@ pub fn routes() -> Router<AppState> {
             "/:conversation_id/attachments/:attachment_id/content",
             get(content),
         )
+        .route(
+            "/:conversation_id/attachments/:attachment_id/thumbnail-grants",
+            post(thumbnail_grant),
+        )
+}
+
+async fn thumbnail_grant(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, attachment)): Path<(Uuid, Uuid)>,
+) -> Result<impl IntoResponse, ApiError> {
+    let acting = acting_with(&state, &caller, &headers, ATTACHMENTS_READ).await?;
+    Ok(Json(
+        super::derivatives::thumbnail_grant(&state, caller.context(), &acting, id, attachment)
+            .await?,
+    ))
 }
 
 async fn intent(
