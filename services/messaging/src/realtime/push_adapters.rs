@@ -14,7 +14,10 @@
 //!   minutes (Apple accepts 20–60), FCM OAuth access tokens until a minute before expiry,
 //!   and both are dropped at once when the provider reports them expired or invalid.
 //! * Signing uses constant-time implementations: ES256 with RustCrypto `p256`, RS256 with
-//!   `ring` — never the `rsa` crate (RUSTSEC-2023-0071 stays inapplicable).
+//!   `ring` — never the `rsa` crate (RUSTSEC-2023-0071 stays inapplicable). The Web Push
+//!   content encoding (RFC 8188 / 8291) mandates AES-128-GCM; it is `ring`'s AEAD and
+//!   encrypts notification METADATA to a browser's subscription key — never contact
+//!   data, which only Privacy Relay's Contact Vault handles.
 //! * Web Push endpoints are client-supplied URLs: only HTTPS endpoints whose host is on
 //!   the configured allowlist of push services are accepted (at registration AND at send
 //!   time) and HTTP redirects are never followed — the adapter cannot be aimed at an
@@ -32,7 +35,6 @@ use std::{
     time::Duration,
 };
 
-use aes_gcm::{aead::Aead, Aes128Gcm, KeyInit, Nonce};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64URL, Engine};
 use hmac::{Hmac, Mac};
 use p256::{
@@ -567,12 +569,11 @@ pub fn encrypt_aes128gcm(
     let nonce = hmac_sha256(&prk, &[b"Content-Encoding: nonce\0", &[1]]);
     let mut record = plaintext.to_vec();
     record.push(2); // last-record delimiter, no padding
-    let cipher = Aes128Gcm::new_from_slice(&cek[..16]).expect("16-byte key");
-    let ct = cipher
-        .encrypt(
-            &Nonce::from(<[u8; 12]>::try_from(&nonce[..12]).expect("12 bytes")),
-            record.as_slice(),
-        )
+    use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_128_GCM};
+    let key = LessSafeKey::new(UnboundKey::new(&AES_128_GCM, &cek[..16]).expect("16-byte key"));
+    let nonce = Nonce::assume_unique_for_key(<[u8; 12]>::try_from(&nonce[..12]).expect("12 bytes"));
+    let mut ct = record;
+    key.seal_in_place_append_tag(nonce, Aad::empty(), &mut ct)
         .expect("encrypts");
     let rs: u32 = 4096;
     let mut out = Vec::with_capacity(16 + 4 + 1 + 65 + ct.len());

@@ -15,7 +15,6 @@ use std::{
     time::Duration,
 };
 
-use aes_gcm::{aead::Aead, Aes128Gcm, KeyInit};
 use axum::{
     body::Bytes,
     extract::{Path, State},
@@ -255,10 +254,17 @@ fn decrypt(body: &[u8], ua_secret: &SecretKey, auth: &[u8; 16]) -> Vec<u8> {
     let prk = hmac256(salt, &[&ikm]);
     let cek = hmac256(&prk, &[b"Content-Encoding: aes128gcm\0", &[1]]);
     let nonce = hmac256(&prk, &[b"Content-Encoding: nonce\0", &[1]]);
-    let mut pt = Aes128Gcm::new_from_slice(&cek[..16])
-        .unwrap()
-        .decrypt(&<[u8; 12]>::try_from(&nonce[..12]).unwrap().into(), ct)
-        .expect("the subscriber decrypts");
+    use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_128_GCM};
+    let key = LessSafeKey::new(UnboundKey::new(&AES_128_GCM, &cek[..16]).unwrap());
+    let mut buf = ct.to_vec();
+    let mut pt = key
+        .open_in_place(
+            Nonce::assume_unique_for_key(nonce[..12].try_into().unwrap()),
+            Aad::empty(),
+            &mut buf,
+        )
+        .expect("the subscriber decrypts")
+        .to_vec();
     assert_eq!(pt.pop(), Some(2), "single last record");
     pt
 }
