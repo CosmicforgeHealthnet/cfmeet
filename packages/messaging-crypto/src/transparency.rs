@@ -20,9 +20,16 @@
 //!   evidence of equivocation.
 //!
 //! This is a verifiable append-only structure. On its own it does NOT prevent a
-//! malicious log from showing different views to different clients (equivocation): that
-//! needs independent witnesses / gossip (AD-05), an open architecture decision
-//! (ADR 0045).
+//! malicious log from showing different views to different clients (equivocation).
+//!
+//! * Witness cosignatures (anti-equivocation interface): an independent witness that
+//!   pins the log's public key cosigns a tree head only after verifying the log's
+//!   signature and a consistency proof from the last head IT cosigned, so it never
+//!   cosigns two different roots for one size or a smaller tree. A witness signs
+//!   [`witness_cosignature_input`] with its own Ed25519 key; clients accept a head as
+//!   WITNESSED with [`verify_witnessed_tree_head`] when at least `quorum` distinct pinned
+//!   witnesses cosigned it. How many independent witness operators exist (and who runs
+//!   them) is a deployment decision outside this code (AD-05).
 
 use std::collections::BTreeSet;
 
@@ -68,6 +75,124 @@ pub fn verify_tree_head_signature(public_key: &[u8], input: &[u8], signature: &[
         && RustCrypto::default()
             .verify_signature(SignatureScheme::ED25519, input, public_key, signature)
             .is_ok()
+}
+
+/// Domain separation of a witness cosignature.
+pub const WITNESS_COSIGNATURE_LABEL: &[u8] = b"cfmeet-messaging-kt-witness-cosignature:v1";
+
+/// The bytes a witness signs to cosign one tree head: length-prefixed (u32 BE) label,
+/// witness id, log id, tree size (u64 BE), root hash, the head's timestamp (Unix
+/// microseconds, i64 BE) and the cosigning time (Unix microseconds, i64 BE).
+pub fn witness_cosignature_input(
+    witness_id: &str,
+    log_id: &str,
+    tree_size: u64,
+    root_hash: &Hash,
+    head_timestamp_micros: i64,
+    cosigned_at_micros: i64,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(160);
+    for field in [
+        WITNESS_COSIGNATURE_LABEL,
+        witness_id.as_bytes(),
+        log_id.as_bytes(),
+        &tree_size.to_be_bytes(),
+        root_hash,
+        &head_timestamp_micros.to_be_bytes(),
+        &cosigned_at_micros.to_be_bytes(),
+    ] {
+        out.extend_from_slice(&(field.len() as u32).to_be_bytes());
+        out.extend_from_slice(field);
+    }
+    out
+}
+
+/// One witness's cosignature of a tree head.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cosignature {
+    pub witness_id: String,
+    pub cosigned_at_micros: i64,
+    pub signature: Vec<u8>,
+}
+
+/// A witness a client trusts: its id and pinned Ed25519 public key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrustedWitness {
+    pub witness_id: String,
+    pub public_key: [u8; 32],
+}
+
+/// A signed tree head as served.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignedHead<'a> {
+    pub log_id: &'a str,
+    pub tree_size: u64,
+    pub root_hash: Hash,
+    pub timestamp_micros: i64,
+    pub log_signature: &'a [u8],
+}
+
+/// Why a head is not accepted as witnessed.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum WitnessError {
+    #[error("the log signature does not verify under the pinned log key")]
+    LogSignature,
+    #[error("a quorum of 0 accepts nothing as witnessed")]
+    NoQuorum,
+    #[error("only {valid} of the required {quorum} pinned witnesses cosigned this head")]
+    BelowQuorum { valid: usize, quorum: usize },
+}
+
+/// Verifies a served head: the log signature under `log_public_key`, then counts
+/// DISTINCT pinned witnesses whose cosignature verifies (unknown witnesses, duplicates
+/// and bad signatures count for nothing). `Ok(n)` with `n >= quorum`.
+pub fn verify_witnessed_tree_head(
+    head: &SignedHead<'_>,
+    log_public_key: &[u8],
+    cosignatures: &[Cosignature],
+    trusted: &[TrustedWitness],
+    quorum: usize,
+) -> Result<usize, WitnessError> {
+    if quorum == 0 {
+        return Err(WitnessError::NoQuorum);
+    }
+    let input = tree_head_signing_input(
+        head.log_id,
+        head.tree_size,
+        &head.root_hash,
+        head.timestamp_micros,
+    );
+    if !verify_tree_head_signature(log_public_key, &input, head.log_signature) {
+        return Err(WitnessError::LogSignature);
+    }
+    let mut counted = BTreeSet::new();
+    for c in cosignatures {
+        let Some(w) = trusted.iter().find(|w| w.witness_id == c.witness_id) else {
+            continue;
+        };
+        if counted.contains(&w.witness_id) {
+            continue;
+        }
+        let input = witness_cosignature_input(
+            &w.witness_id,
+            head.log_id,
+            head.tree_size,
+            &head.root_hash,
+            head.timestamp_micros,
+            c.cosigned_at_micros,
+        );
+        if verify_tree_head_signature(&w.public_key, &input, &c.signature) {
+            counted.insert(w.witness_id.clone());
+        }
+    }
+    if counted.len() >= quorum {
+        Ok(counted.len())
+    } else {
+        Err(WitnessError::BelowQuorum {
+            valid: counted.len(),
+            quorum,
+        })
+    }
 }
 
 /// Coordinates of a stored perfect subtree.
@@ -592,5 +717,125 @@ mod tests {
             root(9, |id| log.get(id)),
             Err(ProofError::MissingNode((3, 0)))
         );
+    }
+
+    fn keypair() -> (Vec<u8>, [u8; 32]) {
+        let c = RustCrypto::default();
+        let (sk, pk) = c.signature_key_gen(SignatureScheme::ED25519).unwrap();
+        (sk, pk.try_into().unwrap())
+    }
+
+    fn sign(sk: &[u8], data: &[u8]) -> Vec<u8> {
+        RustCrypto::default()
+            .sign(SignatureScheme::ED25519, data, sk)
+            .unwrap()
+    }
+
+    #[test]
+    fn witnessed_heads_need_a_quorum_of_distinct_pinned_witnesses() {
+        let (log_sk, log_pk) = keypair();
+        let root = [7u8; 32];
+        let log_sig = sign(
+            &log_sk,
+            &tree_head_signing_input("cfmeet-kt", 42, &root, 1000),
+        );
+        let head = SignedHead {
+            log_id: "cfmeet-kt",
+            tree_size: 42,
+            root_hash: root,
+            timestamp_micros: 1000,
+            log_signature: &log_sig,
+        };
+        let witnesses: Vec<(String, Vec<u8>, [u8; 32])> = (0..3)
+            .map(|i| {
+                let (sk, pk) = keypair();
+                (format!("w{i}"), sk, pk)
+            })
+            .collect();
+        let trusted: Vec<TrustedWitness> = witnesses
+            .iter()
+            .map(|(id, _, pk)| TrustedWitness {
+                witness_id: id.clone(),
+                public_key: *pk,
+            })
+            .collect();
+        let cosign = |i: usize, at: i64, size: u64, root: &Hash| Cosignature {
+            witness_id: witnesses[i].0.clone(),
+            cosigned_at_micros: at,
+            signature: sign(
+                &witnesses[i].1,
+                &witness_cosignature_input(&witnesses[i].0, "cfmeet-kt", size, root, 1000, at),
+            ),
+        };
+        let two = vec![cosign(0, 5, 42, &root), cosign(1, 6, 42, &root)];
+        assert_eq!(
+            verify_witnessed_tree_head(&head, &log_pk, &two, &trusted, 2),
+            Ok(2)
+        );
+        // The same witness twice counts once.
+        let dup = vec![cosign(0, 5, 42, &root), cosign(0, 9, 42, &root)];
+        assert_eq!(
+            verify_witnessed_tree_head(&head, &log_pk, &dup, &trusted, 2),
+            Err(WitnessError::BelowQuorum {
+                valid: 1,
+                quorum: 2
+            })
+        );
+        // A cosignature of another root / size, an unpinned witness, a tampered signature:
+        // nothing.
+        let (rogue_sk, _) = keypair();
+        let mut bad = vec![cosign(0, 5, 42, &[8u8; 32]), cosign(1, 5, 41, &root)];
+        bad.push(Cosignature {
+            witness_id: "w2".into(),
+            cosigned_at_micros: 5,
+            signature: sign(
+                &rogue_sk,
+                &witness_cosignature_input("w2", "cfmeet-kt", 42, &root, 1000, 5),
+            ),
+        });
+        let mut tampered = cosign(2, 5, 42, &root);
+        tampered.cosigned_at_micros = 6;
+        bad.push(tampered);
+        bad.push(Cosignature {
+            witness_id: "stranger".into(),
+            ..cosign(0, 5, 42, &root)
+        });
+        assert_eq!(
+            verify_witnessed_tree_head(&head, &log_pk, &bad, &trusted, 1),
+            Err(WitnessError::BelowQuorum {
+                valid: 0,
+                quorum: 1
+            })
+        );
+        // A forged log signature is refused before any cosignature counts.
+        let forged = SignedHead {
+            log_signature: &two[0].signature,
+            ..head.clone()
+        };
+        assert_eq!(
+            verify_witnessed_tree_head(&forged, &log_pk, &two, &trusted, 1),
+            Err(WitnessError::LogSignature)
+        );
+        assert_eq!(
+            verify_witnessed_tree_head(&head, &log_pk, &two, &trusted, 0),
+            Err(WitnessError::NoQuorum)
+        );
+    }
+
+    #[test]
+    fn cosignature_input_separates_every_field() {
+        let base = witness_cosignature_input("w", "log", 1, &[0; 32], 2, 3);
+        for other in [
+            witness_cosignature_input("x", "log", 1, &[0; 32], 2, 3),
+            witness_cosignature_input("w", "lof", 1, &[0; 32], 2, 3),
+            witness_cosignature_input("w", "log", 2, &[0; 32], 2, 3),
+            witness_cosignature_input("w", "log", 1, &[1; 32], 2, 3),
+            witness_cosignature_input("w", "log", 1, &[0; 32], 3, 3),
+            witness_cosignature_input("w", "log", 1, &[0; 32], 2, 4),
+            witness_cosignature_input("wl", "og", 1, &[0; 32], 2, 3),
+        ] {
+            assert_ne!(base, other);
+        }
+        assert_ne!(base, tree_head_signing_input("log", 1, &[0; 32], 2));
     }
 }

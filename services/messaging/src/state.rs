@@ -31,6 +31,8 @@ pub struct AppState {
     /// Signs every served key-transparency tree head. `None` (not configured): the
     /// directory / proof endpoints fail closed instead of serving an unsigned head.
     pub tree_heads: Option<Arc<TreeHeadSigner>>,
+    /// Key-transparency witnesses and the quorum a served head needs (none: UNWITNESSED).
+    pub witnesses: Arc<crate::transparency::witness::WitnessSet>,
     /// Seals MANAGED message text at rest. `None`: MANAGED sending fails closed.
     pub managed_keys: Option<Arc<ManagedKeyring>>,
     /// The realtime gateway runtime of this instance.
@@ -67,6 +69,7 @@ impl AppState {
             conversations: ConversationSettings::default(),
             workers: WorkerSettings::default(),
             tree_heads: None,
+            witnesses: Arc::new(Default::default()),
             managed_keys: None,
             realtime: Arc::new(Realtime::disabled()),
             storage: Arc::new(cf_object_storage::UnconfiguredStore),
@@ -98,6 +101,11 @@ impl AppState {
 
     pub fn with_tree_head_signer(mut self, signer: Arc<TreeHeadSigner>) -> Self {
         self.tree_heads = Some(signer);
+        self
+    }
+
+    pub fn with_witnesses(mut self, set: Arc<crate::transparency::witness::WitnessSet>) -> Self {
+        self.witnesses = set;
         self
     }
 

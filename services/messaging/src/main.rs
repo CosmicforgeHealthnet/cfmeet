@@ -56,6 +56,12 @@ async fn main() -> anyhow::Result<()> {
             .load()
             .unwrap_or_else(|e| fatal("key-transparency configuration error", e)),
     );
+    let witnesses = Arc::new(
+        config
+            .transparency
+            .load_witnesses()
+            .unwrap_or_else(|e| fatal("key-transparency witness configuration error", e)),
+    );
     let runtime = service_auth.signer().runtime_environment();
     if !config.devices.enabled {
         tracing::warn!("E2EE device registration and KeyPackage publication are disabled (MESSAGING_E2EE_DEVICES_ENABLED)");
@@ -123,7 +129,8 @@ async fn main() -> anyhow::Result<()> {
         .with_devices(config.devices)
         .with_conversations(config.conversations)
         .with_workers(config.workers)
-        .with_tree_head_signer(tree_heads);
+        .with_tree_head_signer(tree_heads)
+        .with_witnesses(witnesses.clone());
     state.managed_keys = managed_keys;
     // Protected attachment storage and self-hosted scanning (Part F). Both fail closed
     // when unconfigured: no upload intent is issued, no MANAGED scan reports CLEAN.
@@ -286,6 +293,22 @@ async fn main() -> anyhow::Result<()> {
         state.clone(),
         config.workers.interval,
     ));
+    if witnesses.is_configured() {
+        tracing::info!(
+            witnesses = witnesses.endpoints.len(),
+            quorum = witnesses.quorum,
+            "key-transparency witnesses configured"
+        );
+        tokio::spawn(messaging::transparency::witness::run(
+            state.clone(),
+            witnesses.clone(),
+            config.transparency.witness_interval,
+        ));
+    } else {
+        tracing::warn!(
+            "no key-transparency witnesses configured: tree heads are served UNWITNESSED"
+        );
+    }
     tokio::spawn(messaging::compliance::run(
         state.clone(),
         std::time::Duration::from_secs(60),

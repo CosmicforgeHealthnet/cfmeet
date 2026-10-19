@@ -983,7 +983,20 @@ async fn quotas_are_atomic_and_released() {
     assert_eq!(e.usage(&c).await, (0, 0));
     assert!(e.store.is_empty(), "{:?}", e.store.keys());
 
-    // The daily upload volume and the concurrent-upload limit.
+    // The daily upload volume and the concurrent-upload limit. The window is a UTC
+    // calendar day and the harness clock follows real time: keep the steps below inside
+    // one day (otherwise this check depends on the hour the suite runs at).
+    let now = e.h.now();
+    let midnight = (now + chrono::Duration::days(1))
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_utc();
+    if midnight - now < chrono::Duration::hours(1) {
+        e.h.clock
+            .advance(midnight - now + chrono::Duration::minutes(1));
+        lifecycle::run_once(&e.h.state).await.unwrap();
+    }
     e.policy(
         &c,
         json!({ "dailyUploadBytes": 1500, "maxConcurrentUploads": 2 }),

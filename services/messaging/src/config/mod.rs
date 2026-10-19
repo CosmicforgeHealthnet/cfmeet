@@ -20,6 +20,8 @@
 //! | `MESSAGING_EXPIRY_INTERVAL_MS` | no | conversation expiry worker interval (250–600000, default 5000) |
 //! | `MESSAGING_WORKER_INTERVAL_MS` / `MESSAGING_WORKER_LEASE_SECONDS` / `MESSAGING_OUTBOX_MAX_ATTEMPTS` | no | outbox publisher (defaults 1000 / 60 / 12) |
 //! | `MESSAGING_KT_LOG_ID` | yes | identifier of this deployment's key-transparency log, signed into every tree head (`[a-z0-9][a-z0-9.:-]{2,63}`, stable across key rotation) |
+//! | `MESSAGING_KT_WITNESSES_FILE` | no | key-transparency witnesses (JSON array of `{witnessId, url, publicKey}`; HTTPS outside local / test). Unset: heads are served `UNWITNESSED` |
+//! | `MESSAGING_KT_WITNESS_QUORUM` / `MESSAGING_KT_WITNESS_INTERVAL_SECONDS` | no | distinct cosignatures a head needs to be `WITNESSED` (default: a majority) / submission interval (default 30) |
 //! | `MESSAGING_KT_SIGNING_KEY_FILE` | yes | PKCS#8 PEM Ed25519 private key FILE that signs tree heads (Part V G.5 / §142). A server secret distinct from the service-authentication key; inline `MESSAGING_KT_SIGNING_KEY` is refused |
 //! | `MESSAGING_MAX_MEMBERS` | no | ACTIVE members per conversation (2–100000, default 10000; policy may lower it) |
 //! | `MESSAGING_ENVIRONMENT_MESSAGES_PER_MINUTE` | no | tenant-fairness bound per application environment (default 60000) |
@@ -211,6 +213,12 @@ impl Default for WorkerSettings {
 pub struct TransparencySettings {
     pub log_id: String,
     pub signing_key_file: std::path::PathBuf,
+    /// Witnesses this log submits to: a JSON array of `{witnessId, url, publicKey}`.
+    pub witnesses_file: Option<std::path::PathBuf>,
+    /// How many distinct witnesses must cosign a head for it to be WITNESSED.
+    pub witness_quorum: Option<usize>,
+    pub witness_interval: Duration,
+    pub allow_insecure_witness_urls: bool,
 }
 
 impl TransparencySettings {
@@ -227,6 +235,67 @@ impl TransparencySettings {
         })?;
         crate::transparency::TreeHeadSigner::new(&self.log_id, key)
             .ok_or_else(|| ConfigError::invalid("MESSAGING_KT_LOG_ID", "invalid log id"))
+    }
+
+    /// Loads and checks the witness list (none configured: an empty set).
+    pub fn load_witnesses(&self) -> Result<crate::transparency::witness::WitnessSet, ConfigError> {
+        use crate::transparency::{valid_log_id, witness::*};
+        const VAR: &str = "MESSAGING_KT_WITNESSES_FILE";
+        let Some(path) = &self.witnesses_file else {
+            if self.witness_quorum.is_some() {
+                return Err(ConfigError::invalid(
+                    "MESSAGING_KT_WITNESS_QUORUM",
+                    "needs MESSAGING_KT_WITNESSES_FILE",
+                ));
+            }
+            return Ok(WitnessSet::default());
+        };
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Entry {
+            witness_id: String,
+            url: String,
+            public_key: String,
+        }
+        let bytes = std::fs::read(path).map_err(|_| ConfigError::invalid(VAR, "cannot be read"))?;
+        let entries: Vec<Entry> = serde_json::from_slice(&bytes).map_err(|_| {
+            ConfigError::invalid(VAR, "is not a JSON array of {witnessId, url, publicKey}")
+        })?;
+        let mut out: Vec<WitnessEndpoint> = Vec::new();
+        for e in entries {
+            if !valid_log_id(&e.witness_id) || out.iter().any(|o| o.witness_id == e.witness_id) {
+                return Err(ConfigError::invalid(
+                    VAR,
+                    "witness ids must be valid and distinct",
+                ));
+            }
+            if !(e.url.starts_with("https://")
+                || (self.allow_insecure_witness_urls && e.url.starts_with("http://")))
+            {
+                return Err(ConfigError::invalid(VAR, "witness URLs must be HTTPS"));
+            }
+            use base64::Engine as _;
+            let public_key: [u8; 32] = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(e.public_key.trim_end_matches('='))
+                .ok()
+                .and_then(|k| k.try_into().ok())
+                .ok_or_else(|| {
+                    ConfigError::invalid(VAR, "publicKey must be a base64url Ed25519 key")
+                })?;
+            out.push(WitnessEndpoint {
+                witness_id: e.witness_id,
+                url: e.url,
+                public_key,
+            });
+        }
+        let quorum = self.witness_quorum.unwrap_or(out.len().div_ceil(2).max(1));
+        if out.is_empty() || quorum == 0 || quorum > out.len() {
+            return Err(ConfigError::invalid(
+                "MESSAGING_KT_WITNESS_QUORUM",
+                "must be between 1 and the number of witnesses",
+            ));
+        }
+        Ok(WitnessSet::new(out, quorum))
     }
 }
 
@@ -520,6 +589,32 @@ impl MessagingConfig {
                 .ok_or(ConfigError::Missing {
                     var: "MESSAGING_KT_SIGNING_KEY_FILE",
                 })?,
+            witnesses_file: get("MESSAGING_KT_WITNESSES_FILE").map(std::path::PathBuf::from),
+            witness_quorum: match get("MESSAGING_KT_WITNESS_QUORUM") {
+                None => None,
+                Some(q) => Some(q.parse().map_err(|_| {
+                    ConfigError::invalid(
+                        "MESSAGING_KT_WITNESS_QUORUM",
+                        "must be a positive integer",
+                    )
+                })?),
+            },
+            witness_interval: Duration::from_secs(
+                match get("MESSAGING_KT_WITNESS_INTERVAL_SECONDS") {
+                    None => 30,
+                    Some(v) => v
+                        .parse::<u64>()
+                        .ok()
+                        .filter(|n| (1..=3600).contains(n))
+                        .ok_or_else(|| {
+                            ConfigError::invalid(
+                                "MESSAGING_KT_WITNESS_INTERVAL_SECONDS",
+                                "must be 1-3600",
+                            )
+                        })?,
+                },
+            ),
+            allow_insecure_witness_urls: runtime.allows_insecure_transport(),
         };
         let secs = |var: &'static str,
                     default: i64,
@@ -937,6 +1032,10 @@ mod tests {
         let settings = TransparencySettings {
             log_id: "cfmeet-messaging:test".into(),
             signing_key_file: path.clone(),
+            witnesses_file: None,
+            witness_quorum: None,
+            witness_interval: Duration::from_secs(30),
+            allow_insecure_witness_urls: false,
         };
         assert!(settings.load().is_err(), "missing file");
         std::fs::write(&path, "not a key").unwrap();

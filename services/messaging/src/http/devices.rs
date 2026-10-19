@@ -129,17 +129,24 @@ async fn directory(
     Ok(Json(json!({
         "principalId": principal_id,
         "devices": rows.iter().map(devices::device_view).collect::<Vec<_>>(),
-        "treeHead": tree_head_view(&state, &head)?,
+        "treeHead": tree_head_view(&state, &head).await?,
     })))
 }
 
-/// The signed tree head (Part V G.5). Fails closed without a configured signer.
-fn tree_head_view(state: &AppState, head: &transparency::TreeHead) -> Result<Value, ApiError> {
+/// The signed tree head (Part V G.5) with its witness cosignatures. Fails closed without
+/// a configured signer.
+async fn tree_head_view(
+    state: &AppState,
+    head: &transparency::TreeHead,
+) -> Result<Value, ApiError> {
     let Some(signer) = &state.tree_heads else {
         tracing::error!("key-transparency tree-head signer not configured");
         return Err(ApiError::code(ErrorCode::ServiceUnavailable));
     };
     let signed = signer.sign(head);
+    let set = &state.witnesses;
+    let cosignatures = transparency::witness::cosignatures(&state.db, set, head).await?;
+    let witnessed = set.is_configured() && cosignatures.len() >= set.quorum;
     Ok(json!({
         "logId": signed.log_id,
         "treeSize": head.tree_size,
@@ -151,7 +158,13 @@ fn tree_head_view(state: &AppState, head: &transparency::TreeHead) -> Result<Val
         "signatureAlgorithm": "Ed25519",
         "keyId": signed.key_id,
         "signature": URL_SAFE_NO_PAD.encode(signed.signature),
-        "witnessStatus": transparency::WITNESS_STATUS,
+        "witnessStatus": if witnessed { transparency::WITNESSED } else { transparency::WITNESS_STATUS },
+        "witnessQuorum": set.quorum,
+        "cosignatures": cosignatures.iter().map(|c| json!({
+            "witnessId": c.witness_id,
+            "cosignedAtMicros": c.cosigned_at_micros,
+            "signature": URL_SAFE_NO_PAD.encode(&c.signature),
+        })).collect::<Vec<_>>(),
     }))
 }
 
@@ -207,7 +220,7 @@ async fn proofs(
     };
     Ok(Json(json!({
         "deviceId": q.device_id,
-        "treeHead": tree_head_view(&state, &head)?,
+        "treeHead": tree_head_view(&state, &head).await?,
         "entries": entries,
         "consistency": consistency,
     })))

@@ -22,6 +22,10 @@ path = "src/main.rs"
 name = "messaging-admin"
 path = "src/bin/messaging-admin.rs"
 
+[[bin]]
+name = "messaging-kt-witness"
+path = "src/bin/messaging-kt-witness.rs"
+
 [dependencies]
 messaging-migration = { path = "migration" }
 # Shared internal service authentication protocol (packages/, never another service).

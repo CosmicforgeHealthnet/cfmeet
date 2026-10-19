@@ -259,6 +259,11 @@ jobs:
         run: cargo test --locked --test foundation --test startup --test migrations --test outbox
       - name: Devices and key directory (C) — proof of possession, KeyPackages, revocation, transparency
         run: cargo test --locked --test devices --test transparency
+      # Key-transparency witnesses (AD-05 interface): reference witnesses over real HTTP,
+      # quorum cosignatures verified client-side, forged cosignatures dropped, forks /
+      # rollbacks refused, a restored (older) database detected and appends failing closed.
+      - name: Key-transparency witnesses — quorum cosigning, fork / rollback refusal, restored-backup detection
+        run: cargo test --locked --test transparency_witness -- --nocapture
       - name: Conversation domain (D) — profiles, policy, lifecycle, concurrency, isolation, idempotency, sequencing
         run: cargo test --locked --test conversations
       - name: Membership, messages and MLS Delivery Service (Parts E-G prerequisites) — real OpenMLS devices, profile isolation, blocks

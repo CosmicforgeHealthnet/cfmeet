@@ -413,7 +413,9 @@
         "signatureAlgorithm",
         "keyId",
         "signature",
-        "witnessStatus"
+        "witnessStatus",
+        "witnessQuorum",
+        "cosignatures"
       ],
       "properties": {
         "logId": {
@@ -458,11 +460,27 @@
           "description": "base64url Ed25519 signature (64 bytes) over the length-prefixed encoding of label 'cfmeet-messaging-kt-tree-head:v1', logId, treeSize (u64 BE), rootHash and timestampMicros (i64 BE) — packages/messaging-crypto transparency::tree_head_signing_input / verify_tree_head_signature (Part V G.5)."
         },
         "witnessStatus": {
-          "const": "UNWITNESSED",
-          "description": "The log is verifiable but not independently witnessed: not anti-equivocation, not production-certified key transparency."
+          "enum": [
+            "UNWITNESSED",
+            "WITNESSED"
+          ],
+          "description": "WITNESSED only when at least witnessQuorum distinct configured witnesses cosigned exactly this head (verify with packages/messaging-crypto transparency::verify_witnessed_tree_head against witness keys you pin). UNWITNESSED: verifiable but not, by itself, anti-equivocation."
+        },
+        "witnessQuorum": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct witness cosignatures this deployment requires for WITNESSED (0: no witnesses configured)."
+        },
+        "cosignatures": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/WitnessCosignature"
+          },
+          "description": "Witness cosignatures of exactly this head (logId, treeSize, rootHash, timestampMicros), each already verified by Messaging under the witness's pinned key; clients verify them again."
         }
       },
-      "description": "A SIGNED tree head (Part V G.5). The signing key is a server secret distinct from the service-authentication key. Signed but not independently witnessed (AD-05): two valid signatures over different roots for one log and size prove equivocation, but nothing yet forces a log to show every client the same view."
+      "description": "A SIGNED tree head (Part V G.5) with the cosignatures of independent key-transparency witnesses (AD-05). The log signing key is a server secret distinct from the service-authentication key. A witness cosigns a head only after verifying the log signature and a consistency proof from the last head it cosigned, so a quorum of witnesses prevents the log from showing different views."
     },
     "DeviceDirectory": {
       "type": "object",
@@ -5808,6 +5826,31 @@
         "pricing"
       ],
       "description": "Usage facts of the caller's application environment (Part V I §129): quantities only, no price, rate or cost."
+    },
+    "WitnessCosignature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "witnessId",
+        "cosignedAtMicros",
+        "signature"
+      ],
+      "properties": {
+        "witnessId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.:-]{2,63}$"
+        },
+        "cosignedAtMicros": {
+          "type": "integer",
+          "description": "When the witness cosigned (Unix microseconds); signed."
+        },
+        "signature": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{86}$",
+          "description": "base64url Ed25519 signature over the length-prefixed encoding of label 'cfmeet-messaging-kt-witness-cosignature:v1', witnessId, logId, treeSize (u64 BE), rootHash, timestampMicros (i64 BE) and cosignedAtMicros (i64 BE) — packages/messaging-crypto transparency::witness_cosignature_input."
+        }
+      },
+      "description": "One witness's cosignature of a tree head."
     }
   }
 }

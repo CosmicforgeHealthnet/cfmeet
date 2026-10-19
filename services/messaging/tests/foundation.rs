@@ -329,9 +329,11 @@ async fn the_served_contract_lists_exactly_the_implemented_routes() {
                 .join("/");
             let route = route.trim_end_matches('/').to_string();
             routes += 1;
-            // The nest prefix itself (`/v1/conversations`) and the separate operations
-            // listener (`/metrics`, never on the API port) are not API routes.
-            if route.is_empty() || route == "/metrics" {
+            // The nest prefix itself (`/v1/conversations`), the separate operations
+            // listener (`/metrics`, never on the API port) and the reference
+            // key-transparency witness (`/witness/**`, its own binary and listener,
+            // run by an independent party) are not API routes.
+            if route.is_empty() || route == "/metrics" || route.starts_with("/witness/") {
                 continue;
             }
             assert!(

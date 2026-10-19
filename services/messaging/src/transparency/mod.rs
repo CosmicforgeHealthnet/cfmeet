@@ -10,10 +10,13 @@
 //!   [`cf_messaging_crypto::transparency::tree_head_signing_input`] with a dedicated
 //!   server key (§142) — never the service-authentication key. Without a configured
 //!   signer the proof / directory endpoints fail closed; an unsigned head is never served.
-//! * Status is explicit: [`WITNESS_STATUS`] — the log is verifiable (inclusion /
-//!   consistency, signed heads) but NOT independently witnessed, so it does not by itself
-//!   prevent equivocation and is not production-certified key transparency (AD-05,
-//!   ADR 0045 / 0047).
+//! * Status is explicit: a served head is `WITNESSED` only when a quorum of distinct
+//!   configured witnesses cosigned exactly that head ([`witness`]); otherwise it is
+//!   [`WITNESS_STATUS`] (`UNWITNESSED`): verifiable (inclusion / consistency, signed
+//!   heads) but not, by itself, a defence against equivocation. Which independent
+//!   operators run witnesses is a deployment decision (AD-05, ADR 0045 / 0047).
+
+pub mod witness;
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -30,8 +33,11 @@ use crate::{
     error::{Error, ErrorCode, Result},
 };
 
-/// Reported with every tree head and proof.
+/// Reported with a tree head that lacks a witness quorum.
 pub const WITNESS_STATUS: &str = "UNWITNESSED";
+
+/// Reported with a tree head cosigned by a quorum of configured witnesses.
+pub const WITNESSED: &str = "WITNESSED";
 
 /// Kind of a log entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
