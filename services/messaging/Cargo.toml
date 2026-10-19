@@ -63,6 +63,14 @@ zeroize = "1.8"
 # Seals MANAGED message text at rest (XChaCha20-Poly1305; RustCrypto, already in the
 # OpenMLS provider graph). Never used for PRIVATE_E2EE content.
 chacha20poly1305 = "0.10"
+# Push adapters (src/realtime/push_adapters.rs), all already in the dependency graph:
+# ES256 provider / VAPID tokens and Web Push (RFC 8291) ECDH with RustCrypto, RS256 FCM
+# service-account assertions with ring (constant-time RSA; never the `rsa` crate).
+p256 = { version = "0.13", default-features = false, features = ["ecdh", "ecdsa", "pkcs8", "pem", "std"] }
+aes-gcm = "0.10"
+hmac = "0.12"
+ring = "0.17"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "http2"] }
 
 [dev-dependencies]
 # Tests act as client devices: they generate real MLS KeyPackages (never the server).

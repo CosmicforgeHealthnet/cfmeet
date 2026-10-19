@@ -82,7 +82,10 @@ jobs:
       # RUSTSEC-2023-0071 (rsa, Marvin timing attack; no fixed release exists): `rsa` is
       # linked only through jsonwebtoken's rust_crypto backend. No Part III code loads,
       # accepts or uses an RSA key: service tokens are EdDSA-only (RS256 is rejected by
-      # packages/service-auth, tested), signaling / media credentials are HS256.
+      # packages/service-auth, tested), signaling / media credentials are HS256. The one
+      # RSA key in the platform — Messaging's FCM service-account key — is parsed and used
+      # for RS256 signing by `ring` (constant time), never by the `rsa` crate
+      # (services/messaging/tests/architecture.rs rsa_keys_are_never_handled_by_the_rsa_crate).
       #
       # RUSTSEC-2026-0330 / RUSTSEC-2026-0331 (libcrux-kem 0.0.9; packages/messaging-crypto
       # only): hpke-rs 0.7.0 pins its optional libcrux backend (hpke-rs-libcrux =0.7.0 ->

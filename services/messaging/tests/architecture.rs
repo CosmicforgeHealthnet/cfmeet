@@ -323,3 +323,22 @@ fn keys_tokens_and_content_are_never_logged() {
         }
     }
 }
+
+/// RUSTSEC-2023-0071 (the `rsa` crate's timing side channel, no fixed release) is ignored
+/// by the dependency audit only because no Messaging code uses an RSA key through that
+/// crate. The FCM adapter's RS256 assertions are signed with `ring`; keep it that way.
+#[test]
+fn rsa_keys_are_never_handled_by_the_rsa_crate() {
+    let doc = manifest();
+    for section in ["dependencies", "dev-dependencies"] {
+        assert!(
+            !doc.section(section)
+                .lines()
+                .any(|l| l.starts_with("rsa ") || l.starts_with("rsa=")),
+            "`rsa` is a direct {section} entry"
+        );
+    }
+    for (file, code) in sources() {
+        assert!(!code.contains("rsa::"), "{file}: uses the `rsa` crate");
+    }
+}

@@ -265,6 +265,11 @@ jobs:
         run: cargo test --locked --test messaging
       - name: Realtime gateway (Part E) — client tokens, tickets, WebSocket auth / revocation, subscriptions, replay, ordering, backpressure, broker outage, typing, presence, push, draining
         run: cargo test --locked --test realtime
+      # APNs (ES256 provider tokens), FCM HTTP v1 (RS256 service-account OAuth exchange)
+      # and Web Push (RFC 8291 encryption, RFC 8292 VAPID, host allowlist) against
+      # deterministic local fakes that verify signatures and decrypt. Not live certification.
+      - name: Push adapters — APNs, FCM, Web Push against verifying local fakes
+        run: cargo test --locked --test push_adapters -- --nocapture
       - name: Realtime across two gateway instances through real Redis (fan-out, presence, revocation)
         run: cargo test --locked --test realtime_redis
       - name: Attachments (Part F) — intents, signed uploads, verification, content security, scanning (real clamd), quotas, grants, E2EE client encryption, lifecycle, legal holds, real MinIO

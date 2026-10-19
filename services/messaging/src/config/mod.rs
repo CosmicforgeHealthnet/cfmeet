@@ -34,7 +34,11 @@
 //! | `MESSAGING_REALTIME_MAX_FRAME_BYTES` / `_SEND_QUEUE` / `_MAX_SUBSCRIPTIONS` / `_MAX_REPLAY` | no | defaults 65536 / 512 / 200 / 500 |
 //! | `MESSAGING_REALTIME_MAX_CONNECTIONS` / `_PER_TENANT_CONNECTIONS` / `_PER_PRINCIPAL_CONNECTIONS` / `_PER_DEVICE_CONNECTIONS` | no | per instance: defaults 50000 / 10000 / 20 / 5 |
 //! | `MESSAGING_REALTIME_FRAMES_PER_SECOND` / `_DRAIN_SECONDS` | no | defaults 20 / 10 |
-//! | `MESSAGING_PUSH_PROVIDER` | no | `none` (default) or `local-test` (local / test runtimes only). APNs / FCM adapters are not implemented: jobs end `NOT_CONFIGURED` |
+//! | `MESSAGING_PUSH_PROVIDER` | no | `none` (default) or `local-test` (local / test runtimes only): the explicitly local adapter |
+//! | `MESSAGING_PUSH_APNS_KEY_FILE` / `_KEY_ID` / `_TEAM_ID` / `_TOPIC` | no | APNs token-based adapter (all four, or none): the `.p8` key file, its key id, the team id, the bundle id. `MESSAGING_PUSH_APNS_ENVIRONMENT` `production` (default) / `sandbox`; `MESSAGING_PUSH_APNS_BASE_URL` overrides the endpoint in local / test runtimes only |
+//! | `MESSAGING_PUSH_FCM_SERVICE_ACCOUNT_FILE` | no | FCM HTTP v1 adapter: the Google service-account key file (secret). `MESSAGING_PUSH_FCM_BASE_URL` overrides the endpoint in local / test runtimes only |
+//! | `MESSAGING_PUSH_WEB_VAPID_KEY_FILE` / `_VAPID_SUBJECT` | no | Web Push adapter (both, or neither): the VAPID P-256 key (PKCS#8 PEM) and its `mailto:` / `https:` contact. `MESSAGING_PUSH_WEB_ALLOWED_HOSTS` replaces the push-service host allowlist (comma-separated, `*.` = subdomains) |
+//! | (unset adapters) | | jobs for that platform end `NOT_CONFIGURED`, never reported as delivered |
 //! | `MESSAGING_ATTACHMENTS_S3_ENDPOINT` … | no | the PRIVATE attachment bucket (`ENDPOINT`, `PUBLIC_ENDPOINT`, `REGION`, `BUCKET`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY[_FILE]`, `PATH_STYLE`, `SERVER_SIDE_ENCRYPTION`; see `packages/object-storage`). Unset: attachments fail closed |
 //! | `MESSAGING_CLAMAV_ADDRESS` | no | self-hosted clamd `host:port` scanning MANAGED attachments. Unset: scans stay pending (never READY where policy requires scanning) |
 //! | `MESSAGING_UPLOAD_INTENT_SECONDS` / `MESSAGING_DOWNLOAD_GRANT_SECONDS` | no | defaults 900 / 60 (residual access window of a grant) |
@@ -241,10 +245,41 @@ pub struct MessagingConfig {
     pub client_token_key_file: Option<std::path::PathBuf>,
     pub realtime_redis_url: Option<SecretString>,
     pub push_provider: PushProviderKind,
+    pub push_adapters: PushAdapterConfig,
     pub attachments: AttachmentSettings,
     pub attachment_store: Option<cf_object_storage::S3Config>,
     pub clamav_address: Option<String>,
     pub log_format: LogFormat,
+}
+
+/// The live push adapters' configuration (files are read and checked at startup).
+#[derive(Debug, Clone, Default)]
+pub struct PushAdapterConfig {
+    pub apns: Option<ApnsConfig>,
+    pub fcm: Option<FcmConfig>,
+    pub web: Option<WebPushConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ApnsConfig {
+    pub key_file: std::path::PathBuf,
+    pub key_id: String,
+    pub team_id: String,
+    pub topic: String,
+    pub base_url: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct FcmConfig {
+    pub service_account_file: std::path::PathBuf,
+    pub base_url: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct WebPushConfig {
+    pub vapid_key_file: std::path::PathBuf,
+    pub subject: String,
+    pub allowed_hosts: Vec<String>,
 }
 
 /// Which push adapter dispatches notification jobs.
@@ -606,6 +641,96 @@ impl MessagingConfig {
                 ))
             }
         };
+        let push_adapters = {
+            let insecure = runtime.allows_insecure_transport();
+            let override_url = |var: &'static str, default: &str| -> Result<String, ConfigError> {
+                match get(var) {
+                    None => Ok(default.to_string()),
+                    Some(u) if insecure => Ok(u),
+                    Some(_) => Err(ConfigError::invalid(
+                        var,
+                        "may be set in local / test runtimes only",
+                    )),
+                }
+            };
+            let apns_vars = [
+                "MESSAGING_PUSH_APNS_KEY_FILE",
+                "MESSAGING_PUSH_APNS_KEY_ID",
+                "MESSAGING_PUSH_APNS_TEAM_ID",
+                "MESSAGING_PUSH_APNS_TOPIC",
+            ];
+            let apns_set: Vec<Option<String>> = apns_vars.iter().map(|v| get(v)).collect();
+            let apns = match apns_set.iter().filter(|v| v.is_some()).count() {
+                0 => None,
+                4 => {
+                    let sandbox = match get("MESSAGING_PUSH_APNS_ENVIRONMENT").as_deref() {
+                        None | Some("production") => false,
+                        Some("sandbox") => true,
+                        Some(_) => {
+                            return Err(ConfigError::invalid(
+                                "MESSAGING_PUSH_APNS_ENVIRONMENT",
+                                "must be `production` or `sandbox`",
+                            ))
+                        }
+                    };
+                    let v = |i: usize| apns_set[i].clone().unwrap();
+                    Some(ApnsConfig {
+                        key_file: std::path::PathBuf::from(v(0)),
+                        key_id: v(1),
+                        team_id: v(2),
+                        topic: v(3),
+                        base_url: override_url(
+                            "MESSAGING_PUSH_APNS_BASE_URL",
+                            crate::realtime::push_adapters::Apns::production_url(sandbox),
+                        )?,
+                    })
+                }
+                _ => {
+                    return Err(ConfigError::invalid(
+                        "MESSAGING_PUSH_APNS_KEY_FILE",
+                        "the APNs adapter needs KEY_FILE, KEY_ID, TEAM_ID and TOPIC together",
+                    ))
+                }
+            };
+            let fcm = match get("MESSAGING_PUSH_FCM_SERVICE_ACCOUNT_FILE") {
+                None => None,
+                Some(f) => Some(FcmConfig {
+                    service_account_file: std::path::PathBuf::from(f),
+                    base_url: override_url(
+                        "MESSAGING_PUSH_FCM_BASE_URL",
+                        crate::realtime::push_adapters::Fcm::default_base_url(),
+                    )?,
+                }),
+            };
+            let web = match (
+                get("MESSAGING_PUSH_WEB_VAPID_KEY_FILE"),
+                get("MESSAGING_PUSH_WEB_VAPID_SUBJECT"),
+            ) {
+                (None, None) => None,
+                (Some(f), Some(subject)) => Some(WebPushConfig {
+                    vapid_key_file: std::path::PathBuf::from(f),
+                    subject,
+                    allowed_hosts: match get("MESSAGING_PUSH_WEB_ALLOWED_HOSTS") {
+                        Some(h) => h
+                            .split(',')
+                            .map(|x| x.trim().to_string())
+                            .filter(|x| !x.is_empty())
+                            .collect(),
+                        None => crate::realtime::push_adapters::DEFAULT_WEB_PUSH_HOSTS
+                            .iter()
+                            .map(|h| h.to_string())
+                            .collect(),
+                    },
+                }),
+                _ => {
+                    return Err(ConfigError::invalid(
+                        "MESSAGING_PUSH_WEB_VAPID_KEY_FILE",
+                        "the Web Push adapter needs VAPID_KEY_FILE and VAPID_SUBJECT together",
+                    ))
+                }
+            };
+            PushAdapterConfig { apns, fcm, web }
+        };
         let attachments = AttachmentSettings {
             intent_ttl: chrono::Duration::seconds(bounded(
                 &get,
@@ -708,6 +833,7 @@ impl MessagingConfig {
                 .map(std::path::PathBuf::from),
             realtime_redis_url: get("MESSAGING_REALTIME_REDIS_URL").map(SecretString::from),
             push_provider,
+            push_adapters,
             attachments,
             attachment_store,
             clamav_address,

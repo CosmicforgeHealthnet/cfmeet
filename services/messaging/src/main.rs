@@ -184,12 +184,20 @@ async fn main() -> anyhow::Result<()> {
                     )
                 }
             };
-        let push_provider: Arc<dyn push::PushProvider> = match config.push_provider {
+        let local = match config.push_provider {
             messaging::config::PushProviderKind::LocalTest => {
-                Arc::new(push::LocalTestPush::default())
+                Some(Arc::new(push::LocalTestPush::default()))
             }
-            messaging::config::PushProviderKind::None => Arc::new(push::UnconfiguredPush),
+            messaging::config::PushProviderKind::None => None,
         };
+        let adapters = messaging::realtime::push_adapters::PushAdapters::build(
+            &config.push_adapters,
+            runtime.allows_insecure_transport(),
+            local,
+        )
+        .map_err(|e| anyhow::anyhow!("push adapter configuration: {e}"))?;
+        tracing::info!(platforms = ?adapters.configured(), "push adapters");
+        let push_provider: Arc<dyn push::PushProvider> = Arc::new(adapters);
         let rt = Arc::new(Realtime::new(
             config.realtime.clone(),
             keys,

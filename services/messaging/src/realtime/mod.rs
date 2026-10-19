@@ -31,6 +31,7 @@ pub mod http;
 pub mod hub;
 pub mod presence;
 pub mod push;
+pub mod push_adapters;
 pub mod sessions;
 pub mod token;
 

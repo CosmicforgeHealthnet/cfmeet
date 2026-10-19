@@ -189,6 +189,47 @@ async fn configuration_fails_closed() {
         "MESSAGING_E2EE_DEVICES_ENABLED",
     )
     .await;
+    // Push adapters: all-or-nothing settings, readable and valid key material.
+    refuses(
+        with(&env, "MESSAGING_PUSH_APNS_KEY_ID", "KEYID12345"),
+        &cwd,
+        "MESSAGING_PUSH_APNS_KEY_FILE is invalid",
+    )
+    .await;
+    let apns = [
+        ("MESSAGING_PUSH_APNS_KEY_ID", "KEYID12345"),
+        ("MESSAGING_PUSH_APNS_TEAM_ID", "TEAMID1234"),
+        ("MESSAGING_PUSH_APNS_TOPIC", "com.cfmeet.app"),
+    ];
+    let mut e = with(
+        &env,
+        "MESSAGING_PUSH_APNS_KEY_FILE",
+        &files.path("trust.json"),
+    );
+    for (k, v) in apns {
+        e = with(&e, k, v);
+    }
+    refuses(e, &cwd, "the APNs key is not a PKCS#8 P-256 private key").await;
+    refuses(
+        with(
+            &env,
+            "MESSAGING_PUSH_WEB_VAPID_KEY_FILE",
+            &files.path("trust.json"),
+        ),
+        &cwd,
+        "MESSAGING_PUSH_WEB_VAPID_KEY_FILE is invalid",
+    )
+    .await;
+    refuses(
+        with(
+            &env,
+            "MESSAGING_PUSH_FCM_SERVICE_ACCOUNT_FILE",
+            &files.path("missing.json"),
+        ),
+        &cwd,
+        "cannot read the FCM service account file",
+    )
+    .await;
     // Production refuses plaintext internal targets.
     let prod_files = Files::new("production");
     let prod = prod_files.env("production", &db.url, "127.0.0.1:0");

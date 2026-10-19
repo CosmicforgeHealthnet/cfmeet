@@ -9,8 +9,9 @@
 //!   content-like payload keys.
 //! * Jobs are leased (`FOR UPDATE SKIP LOCKED`), retried with bounded backoff and expire.
 //!   Without a configured provider they end as `NOT_CONFIGURED` — never reported as
-//!   delivered. APNs / FCM adapters need production credentials and are NOT implemented
-//!   here; [`LocalTestPush`] is an explicitly local adapter for tests and development.
+//!   delivered. The APNs, FCM and Web Push adapters live in
+//!   [`super::push_adapters`] (each enabled only with its credentials);
+//!   [`LocalTestPush`] is an explicitly local adapter for tests and development.
 //! * A push is never proof of message delivery.
 
 use std::sync::Mutex;
@@ -48,6 +49,11 @@ pub trait PushProvider: Send + Sync {
     fn name(&self) -> &'static str;
     /// Whether this provider can deliver to `platform` in this deployment.
     fn supports(&self, platform: &str) -> bool;
+    /// Provider-specific checks of a handle at registration (e.g. the Web Push host
+    /// allowlist); structural checks run regardless.
+    fn validate_handle(&self, _platform: &str, _handle: &str) -> Result<(), &'static str> {
+        Ok(())
+    }
     async fn send(&self, platform: &str, handle: &str, payload: &Value) -> PushOutcome;
 }
 
@@ -132,6 +138,14 @@ pub async fn register(
             "handle must be 8-4096 printable characters",
         ));
     }
+    super::push_adapters::validate_handle_shape(&request.platform, &request.handle)
+        .and_then(|_| {
+            state
+                .realtime
+                .push
+                .validate_handle(&request.platform, &request.handle)
+        })
+        .map_err(Error::validation)?;
     crate::messages::e2ee::require_own_device(&state.db, ctx, acting.principal_id, device_id)
         .await?;
     let now = state.now();

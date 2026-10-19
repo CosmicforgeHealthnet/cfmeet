@@ -726,7 +726,7 @@ async fn push_payloads_are_metadata_only_and_revoked_devices_get_none() {
                 "/v1/messaging/devices/{}/push-registration",
                 alice.device_id()
             ),
-            json!({ "platform": "APNS", "handle": "apns-handle-alice-0001" }),
+            json!({ "platform": "APNS", "handle": "a1".repeat(32) }),
         )
         .await;
     assert_eq!(

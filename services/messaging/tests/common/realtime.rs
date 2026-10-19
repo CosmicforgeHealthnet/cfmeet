@@ -76,6 +76,33 @@ impl Rt {
         broker: Arc<dyn messaging::realtime::broker::Broker>,
         presence: Arc<dyn messaging::realtime::ephemeral::PresenceStore>,
     ) -> Option<Self> {
+        Self::assemble(settings, local, broker, presence, None).await
+    }
+
+    /// An instance whose push jobs go to `provider` (e.g. the live adapters aimed at
+    /// local fakes) instead of the local test recorder.
+    pub async fn with_push(
+        settings: RealtimeSettings,
+        provider: Arc<dyn messaging::realtime::push::PushProvider>,
+    ) -> Option<Self> {
+        let broker = Arc::new(LocalBroker::default());
+        Self::assemble(
+            settings,
+            broker.clone(),
+            broker,
+            Arc::new(MemoryPresence::default()),
+            Some(provider),
+        )
+        .await
+    }
+
+    async fn assemble(
+        settings: RealtimeSettings,
+        local: Arc<LocalBroker>,
+        broker: Arc<dyn messaging::realtime::broker::Broker>,
+        presence: Arc<dyn messaging::realtime::ephemeral::PresenceStore>,
+        provider: Option<Arc<dyn messaging::realtime::push::PushProvider>>,
+    ) -> Option<Self> {
         let push = Arc::new(LocalTestPush::default());
         let keys = ClientTokenKeys::generate();
         let realtime = Arc::new(Realtime::new(
@@ -83,7 +110,7 @@ impl Rt {
             Some(keys),
             broker,
             presence,
-            push.clone(),
+            provider.unwrap_or_else(|| push.clone()),
         ));
         let broker = local;
         let rt2 = realtime.clone();

@@ -2314,6 +2314,7 @@ dependencies = [
 name = "messaging"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "async-trait",
  "axum",
@@ -2327,12 +2328,15 @@ dependencies = [
  "ed25519-dalek",
  "futures-util",
  "hex",
+ "hmac 0.12.1",
  "http-body-util",
  "jsonschema",
  "messaging-migration",
+ "p256",
  "rand 0.8.8",
  "redis",
  "reqwest",
+ "ring",
  "sea-orm",
  "secrecy",
  "serde",
@@ -3234,6 +3238,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "futures-core",
+ "h2",
  "http",
  "http-body",
  "http-body-util",
