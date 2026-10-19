@@ -38,7 +38,7 @@ use cf_service_auth::{
     ApplicationEnvironmentKind, DelegatedPlatformContext, KeyId, OutboundServiceRequest, PublicJwk,
     RuntimeEnvironment, ServiceId, ServiceSigningKey, ServiceTokenSigner, SystemClock, TokenTtl,
 };
-use common::{with_db, TestDb};
+use common::{gate::TcpGate, with_db, TestDb};
 use messaging_migration::MigratorTrait;
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, Statement};
 use serde_json::{json, Value};
@@ -2003,69 +2003,6 @@ async fn scenario_9_messaging_events_reach_customer_webhooks_through_real_callin
 // =====================================================================================
 // Failure injection — PostgreSQL loss during active messaging (real Messaging process)
 // =====================================================================================
-
-/// A TCP gate between Messaging and PostgreSQL: `cut()` drops every live connection and
-/// refuses new ones until `restore()` (no other test's database is affected).
-#[derive(Clone)]
-struct TcpGate {
-    open: Arc<std::sync::atomic::AtomicBool>,
-    epoch: Arc<std::sync::atomic::AtomicU64>,
-    port: u16,
-}
-
-impl TcpGate {
-    async fn start(target: std::net::SocketAddr) -> TcpGate {
-        use std::sync::atomic::Ordering;
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let gate = TcpGate {
-            open: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            port: listener.local_addr().unwrap().port(),
-        };
-        let g = gate.clone();
-        tokio::spawn(async move {
-            loop {
-                let Ok((mut inbound, _)) = listener.accept().await else {
-                    continue;
-                };
-                if !g.open.load(Ordering::SeqCst) {
-                    drop(inbound);
-                    continue;
-                }
-                let g2 = g.clone();
-                let epoch = g.epoch.load(Ordering::SeqCst);
-                tokio::spawn(async move {
-                    let Ok(mut outbound) = tokio::net::TcpStream::connect(target).await else {
-                        return;
-                    };
-                    let watch = async {
-                        loop {
-                            if g2.epoch.load(Ordering::SeqCst) != epoch {
-                                return;
-                            }
-                            tokio::time::sleep(Duration::from_millis(20)).await;
-                        }
-                    };
-                    tokio::select! {
-                        _ = tokio::io::copy_bidirectional(&mut inbound, &mut outbound) => {}
-                        _ = watch => {}
-                    }
-                });
-            }
-        });
-        gate
-    }
-
-    fn cut(&self) {
-        use std::sync::atomic::Ordering;
-        self.open.store(false, Ordering::SeqCst);
-        self.epoch.fetch_add(1, Ordering::SeqCst);
-    }
-
-    fn restore(&self) {
-        self.open.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-}
 
 #[tokio::test]
 async fn postgresql_loss_during_active_messaging_loses_nothing_acknowledged_and_duplicates_nothing()

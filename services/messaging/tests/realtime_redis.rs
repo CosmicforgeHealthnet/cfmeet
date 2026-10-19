@@ -113,3 +113,110 @@ async fn two_gateway_instances_share_fanout_and_presence_through_redis() {
 fn unb64_value(ev: &serde_json::Value) -> Vec<u8> {
     common::unb64(&ev["data"]["message"]["e2ee"]["ciphertext"])
 }
+
+/// Redis outage between two gateway instances: Redis is reached through a cuttable TCP
+/// gate. While it is cut, sends still commit (Redis is never the authority) and reach
+/// the other instance's connection through database catch-up; when it returns, nothing is
+/// redelivered and live fan-out resumes.
+#[tokio::test]
+async fn a_redis_outage_loses_nothing_committed_and_fanout_resumes() {
+    use common::gate::TcpGate;
+    let Some(url) = redis_url() else { return };
+    // redis://[cred@]host[:port][/db] — reroute host:port through the gate.
+    let rest = url.strip_prefix("redis://").expect("redis:// URL");
+    let (authority, tail) = match rest.split_once('/') {
+        Some((a, t)) => (a, format!("/{t}")),
+        None => (rest, String::new()),
+    };
+    let (cred, hostport) = match authority.rsplit_once('@') {
+        Some((c, h)) => (format!("{c}@"), h),
+        None => (String::new(), authority),
+    };
+    let hostport = hostport.replace("localhost", "127.0.0.1");
+    let hostport = if hostport.contains(':') {
+        hostport
+    } else {
+        format!("{hostport}:6379")
+    };
+    let gate = TcpGate::start(hostport.parse().unwrap()).await;
+    let gated = format!("redis://{cred}127.0.0.1:{}{tail}", gate.port);
+
+    let Some(mut rt) = Rt::with_backends(
+        test_settings(),
+        Arc::new(LocalBroker::default()),
+        Arc::new(RedisBroker::new(&gated).unwrap()),
+        Arc::new(RedisPresence::new(&gated).unwrap()),
+    )
+    .await
+    else {
+        return;
+    };
+    let (b_addr, _b) = rt
+        .second_instance(
+            Arc::new(RedisBroker::new(&gated).unwrap()),
+            Arc::new(RedisPresence::new(&gated).unwrap()),
+        )
+        .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let h = &rt.h;
+    let c = h.customer(ALL_SCOPES);
+    let (conv, mut alice, mut bob) = h.e2ee_direct(&c).await;
+    let t = rt.ticket(&c, &bob).await;
+    let mut wb = rt.open_at(b_addr, &t).await.unwrap();
+    wb.subscribe(&conv, None).await;
+
+    let mut next_plaintext = |ev: serde_json::Value| -> Vec<u8> {
+        let ct = unb64_value(&ev);
+        match bob
+            .device
+            .process(bob.group.as_mut().unwrap(), &ct)
+            .unwrap()
+        {
+            cf_messaging_crypto::group::Processed::Application { plaintext, .. } => plaintext,
+            other => panic!("{other:?}"),
+        }
+    };
+    // Baseline: fan-out across instances works.
+    let r = h
+        .send_e2ee(&c, &conv, &mut alice, "before the outage")
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    assert_eq!(
+        next_plaintext(wb.events(1).await.remove(0)),
+        b"before the outage"
+    );
+
+    // Redis goes away: the send still commits (Redis is never the authority), and B's
+    // connection still receives it — each failed broker reconnect makes the instance
+    // catch its connections up from the DATABASE (degraded latency, nothing lost).
+    gate.cut();
+    let cut_at = std::time::Instant::now();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let started = std::time::Instant::now();
+    let r = h
+        .send_e2ee(&c, &conv, &mut alice, "during the outage")
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let send_ms = started.elapsed().as_millis();
+    let during = wb.events(1).await.remove(0);
+    let degraded_ms = started.elapsed().as_millis();
+    assert_eq!(next_plaintext(during), b"during the outage");
+
+    // Redis returns: the reconnect's catch-up redelivers NOTHING already delivered, and
+    // live fan-out resumes.
+    gate.restore();
+    let restored = std::time::Instant::now();
+    wb.quiet("event", Duration::from_millis(1500)).await;
+    let started = std::time::Instant::now();
+    let r = h.send_e2ee(&c, &conv, &mut alice, "after the outage").await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    assert_eq!(
+        next_plaintext(wb.events(1).await.remove(0)),
+        b"after the outage"
+    );
+    let live_ms = started.elapsed().as_millis();
+    println!(
+        "EVIDENCE redis_outage outage_ms={} send_during_outage_ms={send_ms} delivered_during_outage_ms={degraded_ms} live_after_restore_ms={live_ms}",
+        restored.duration_since(cut_at).as_millis()
+    );
+}

@@ -11,6 +11,7 @@
 #![allow(dead_code)]
 
 pub mod flows;
+pub mod gate;
 pub mod realtime;
 
 use std::{
