@@ -42,7 +42,11 @@ jobs:
       - name: npm ci
         run: npm ci
 
-      # Device-side Messaging transport: ticket, replay, duplicate, auth boundary.\n      - name: Messaging realtime transport tests\n        run: node --experimental-strip-types --test tests/messaging-realtime.test.mjs\n\n      # Pre-existing ESLint errors were imported from rtc_frontend unchanged.
+      # Device-side Messaging transport: ticket, replay, duplicate, auth boundary.
+      - name: Messaging realtime transport tests
+        run: node --experimental-strip-types --test tests/messaging-realtime.test.mjs
+
+      # Pre-existing ESLint errors were imported from rtc_frontend unchanged.
       # Reported but non-blocking until they are fixed in a dedicated change.
       - name: lint
         continue-on-error: true
