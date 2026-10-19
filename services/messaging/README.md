@@ -41,7 +41,14 @@ credential's own environment. Client tokens are refused there
 | `GET /v1/conversations`, `GET /v1/conversations/{id}` | `messages.read` (own, with acting principal) or `conversations.manage` (environment) |
 | `PATCH /v1/conversations/{id}` | `conversations.manage` (owner when a principal acts) |
 | `GET` / `PUT /v1/messaging/policy` | `conversations.manage` |
-| Members: `GET` / `POST /v1/conversations/{id}/members`, `DELETE …/members/{principalId}` | `conversations.manage` / member rules |
+| Members: `GET` / `POST /v1/conversations/{id}/members`, `PATCH` (role) / `DELETE …/members/{principalId}` | `conversations.manage` / member rules |
+| Bans: `GET` / `POST /v1/conversations/{id}/bans`, `DELETE …/bans/{principalId}` | `conversations.manage` (OWNER / ADMIN) |
+| Replies / threads: `replyToMessageId` on send, `?threadRootId=` on list | `messages.send` / `messages.read` |
+| Reactions (MANAGED; E2EE reactions are messages): `GET …/messages/{id}/reactions`, `PUT` / `DELETE …/reactions/{reaction}` | `messages.read` / `messages.send` |
+| Pins: `GET /v1/conversations/{id}/pins`, `PUT` / `DELETE …/pins/{messageId}` (OWNER / ADMIN) | `messages.read` / `messages.send` |
+| Unread: `GET /v1/conversations/{id}/unread` | `messages.read` |
+| SMS Bridge (MANAGED only, explicit disclosure): `GET /v1/messaging/sms-bridge/disclosure`, `GET` / `POST …/sms-bridges`, `POST …/{bridgeId}/close`, `GET …/messages/{id}/sms-transport` | `messages.read` / `conversations.manage` |
+| Usage facts (no prices): `GET /v1/messaging/usage?from=&to=` | `usage.read` |
 | Messages: `GET` / `POST /v1/conversations/{id}/messages`, `GET` / `PATCH` / `DELETE …/messages/{messageId}`, `PUT …/read-cursor`, `GET …/events` | `messages.read` / `messages.send` |
 | MLS Delivery Service: `…/mls/*` (commits, group state, KeyPackage claims, Welcomes) | `messages.read` / `messages.send` |
 | Realtime: `POST /v1/messaging/client-tokens`, `POST /v1/messaging/client-sessions/{id}/revoke`, presence settings, push registrations | `messages.read` / `messages.send` |
@@ -53,7 +60,15 @@ credential's own environment. Client tokens are refused there
 | Compliance (administration): legal holds, deletion requests, `GET /v1/messaging/audit` | `conversations.manage` |
 | Exports (administration, MANAGED only): `POST /v1/messaging/exports`, `GET …/{id}`, `POST …/{id}/download-grants` | `messaging.export` |
 
-`/internal/v1/**` is service-authenticated and exposes no operation yet.
+`/internal/v1/**` is service-authenticated per operation (receiver trust bundle): the
+delegated first-party surface `/internal/v1/delegated/**` and Meeting conversation sync
+(Meeting Service), `/internal/v1/context-authorities` (Privacy Relay) and
+`/internal/v1/sms-bridge/inbound` (SMS Gateway); see contract
+`cfmeet.messaging.internal-api`.
+
+Customer webhooks are NOT a Messaging feature: public events are relayed to Calling's
+platform-event ingress and delivered by the existing platform webhook system
+(`conversation.*`, `message.*` — ids, sequences and codes only, never content).
 
 ## Running locally (no Docker required)
 
@@ -64,9 +79,20 @@ make messaging            # 127.0.0.1:8097
 curl http://127.0.0.1:8097/ready
 ```
 
-Platform Access's trust bundle must grant `cfmeet.messaging`
-`platform-credential.authenticate`, `platform-principal.resolve` and
-`platform-identity.read`. Messaging's own bundle trusts no issuer.
+Only PostgreSQL (and, for the realtime tests, Redis) is needed: no container runtime.
+Platform Access must run too (`make platform-access`); its trust bundle must grant
+`cfmeet.messaging` `platform-credential.authenticate`, `platform-principal.resolve` and
+`platform-identity.read`. Messaging's own bundle may trust no issuer (internal
+operations then refuse every caller). SMS Gateway / Calling are optional
+(`CF_SMS_GATEWAY_BASE_URL`, `CF_CALLING_BASE_URL`); without them bridges are refused and
+webhook relays wait, in-app messaging is unaffected.
+
+Operator CLI (no network API):
+
+```bash
+DATABASE_URL=… CF_OPERATOR_ID=ops-1 cargo run --bin messaging-admin -- kill-switch engage --switch MESSAGE_SEND --reason ABUSE_WAVE
+cargo run --bin messaging-admin -- kill-switch list | incidents list | kt checkpoint --out FILE | kt verify --checkpoint FILE
+```
 
 ## Tests
 
@@ -79,16 +105,22 @@ Suites: `conversations`, `foundation`, `startup` (the real binary), `migrations`
 algorithms), `architecture`, `messaging` (message store and MLS Delivery Service with real
 devices), `realtime` (real WebSocket clients), `realtime_redis` (two gateway instances,
 `MESSAGING_TEST_REDIS_URL`), `attachments` (real MinIO with `OBJECT_STORAGE_TEST_ENDPOINT`,
-real clamd with `MESSAGING_TEST_CLAMAV_ADDRESS`), `compliance`, and `platform_access_e2e`
-(the real Platform Access process and the real Messaging binary). `load` holds the
+real clamd with `MESSAGING_TEST_CLAMAV_ADDRESS`), `compliance`, `platform_access_e2e`
+(the real Platform Access process and the real Messaging binary), `integrations`
+(delegation, Meeting sync, context authority), `sms_bridge`, `engagement` (roles, bans,
+replies, reactions, pins, unread, usage), `webhook_relay`, `query_plans` (EXPLAIN
+evidence), `operations` (kill switches, incidents, KT rollback, operator CLI) and
+`disaster_recovery` (backup / restore with `infra/deployment/backup`). `load` holds the
 `#[ignore]`d measurements (`cargo test --release --test load -- --ignored --nocapture`).
 
 ## Deployment
 
 Its own image (`services/messaging/Dockerfile`, repository-root context) and its own
 release. Nothing deploys it automatically, and it is never part of the Meeting Service
-deployment. E2EE device operations are disabled in staging / production until
-`MESSAGING_E2EE_DEVICES_ENABLED=true` is set after the owner decisions of ADR 0045.
+deployment. E2EE device operations are disabled in staging until
+`MESSAGING_E2EE_DEVICES_ENABLED=true` is set after the owner decisions of ADR 0045; in
+production the value `true` is refused (production E2EE stays disabled pending external
+cryptographic certification).
 Optional capabilities fail closed when unconfigured: realtime (no
 `MESSAGING_CLIENT_TOKEN_SIGNING_KEY_FILE`), MANAGED text (no
 `MESSAGING_MANAGED_KEYRING_FILE`), attachments (no `MESSAGING_ATTACHMENTS_S3_*`),
