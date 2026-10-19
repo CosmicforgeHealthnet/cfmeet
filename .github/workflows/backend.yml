@@ -18,12 +18,14 @@ on:
     paths:
       - "services/meeting-service/**"
       - "packages/contracts/openapi/**"
+      - "packages/contracts/bundled/**"
       - "packages/service-auth/**"
       - ".github/workflows/backend.yml"
   pull_request:
     paths:
       - "services/meeting-service/**"
       - "packages/contracts/openapi/**"
+      - "packages/contracts/bundled/**"
       - "packages/service-auth/**"
       - ".github/workflows/backend.yml"
   workflow_dispatch:

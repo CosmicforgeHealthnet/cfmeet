@@ -1,0 +1,1311 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet Messaging internal API",
+    "version": "1.0.0",
+    "description": "Service-authenticated /internal/v1 surface of services/messaging (Part V H §§97–112, I §116). Every path, including unknown ones, requires a valid Ed25519 service token whose issuer Messaging's trust bundle grants the operation's permission; customer credentials are refused. Scope comes only from the signed delegated platform context, re-validated against Platform Access (forged chains: DELEGATED_CONTEXT_INVALID; suspended: AUTHORITY_SUSPENDED). In addition, /internal/v1/delegated/v1/messaging/** and /internal/v1/delegated/v1/conversations/** expose exactly the customer operations of cfmeet.messaging.http-api to a FIRST_PARTY backend granted messaging-application.delegate, with the standard scopes messages.send, messages.read, conversations.create, conversations.manage, attachments.write and attachments.read (never moderation, export or administration); CF-Acting-Principal is verified as on /v1."
+  },
+  "paths": {
+    "/internal/v1/meeting-conversations": {
+      "post": {
+        "operationId": "resolveMeetingConversation",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Idempotently resolves the MEETING conversation of a meeting reference (context namespace meeting). Never a silent profile fallback. Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.MeetingConversationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.MeetingConversation"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Already resolved (idempotent).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.MeetingConversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/meeting-conversations/{conversationId}/members/{principalId}": {
+      "put": {
+        "operationId": "syncMeetingMember",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Applies a version-fenced meeting membership change (admission, removal, ban, leave, role). Stale / replayed versions change nothing. Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access.",
+        "parameters": [
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "principalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.MeetingMemberSync"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.SyncResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/meeting-conversations/{conversationId}/lifecycle": {
+      "post": {
+        "operationId": "syncMeetingLifecycle",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Applies a version-fenced meeting lifecycle change (e.g. CLOSED when the meeting ends). Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access.",
+        "parameters": [
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.MeetingLifecycleSync"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.SyncResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/meeting-conversations/{conversationId}/legacy-imports": {
+      "post": {
+        "operationId": "importLegacyMeetingChat",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Imports legacy meeting chat with LEGACY_MANAGED provenance into a MANAGED meeting conversation (never PRIVATE_E2EE), idempotently, keeping original times. Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access.",
+        "parameters": [
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.LegacyImportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.LegacyImportResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/meeting-conversations/{conversationId}/messages/{messageId}/moderation": {
+      "post": {
+        "operationId": "moderateMeetingMessage",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Removes (tombstones as MODERATED) a message of a meeting conversation on behalf of the meeting authority. Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access. The content is never returned.",
+        "parameters": [
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.MeetingMessageModeration"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.MeetingMessageModerationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/context-authorities": {
+      "post": {
+        "operationId": "applyContextAuthority",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Applies Privacy Relay's authority for one of its communication contexts to every conversation of that context in the signed delegated environment: SUSPENDED locks, REVOKED closes (and blocks reopening / new conversations), ACTIVE allows creation and unlocks what the authority locked. Permission messaging-context-authority.apply (Privacy Relay only).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.ContextAuthorityUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.ContextAuthorityResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sms-bridge/inbound": {
+      "post": {
+        "operationId": "deliverInboundSms",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Permission messaging-sms-bridge.deliver (SMS Gateway only), signed delegated scope re-validated against Platform Access. An inbound SMS of a bridged party becomes a MANAGED message with channel SMS (idempotent per SMS id); never injected into an E2EE conversation.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.InboundSms"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.InboundSmsResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "serviceToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Service-Authorization",
+        "description": "Ed25519 compact JWS (typ cf-service+jwt) from packages/service-auth, audience cfmeet.messaging."
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/messaging.common.v1.Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "messaging.common.v1.Ciphersuite": {
+        "type": "string",
+        "enum": [
+          "MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519"
+        ]
+      },
+      "messaging.common.v1.ContextAuthorityResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "applied"
+        ],
+        "properties": {
+          "applied": {
+            "type": "boolean"
+          },
+          "reason": {
+            "enum": [
+              "STALE_VERSION"
+            ]
+          },
+          "state": {
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              "REVOKED"
+            ]
+          },
+          "conversationsAffected": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "messaging.common.v1.ContextAuthorityUpdate": {
+        "description": "Part V H §103: the current authority of a peer-owned communication context (opaque reference only; never a telephone number or contact value). Version-fenced; REVOKED / SUSPENDED apply even to a suspended tenant, ACTIVE needs full authority.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "namespace",
+          "reference",
+          "state",
+          "sourceVersion"
+        ],
+        "properties": {
+          "namespace": {
+            "enum": [
+              "privacy-relay"
+            ]
+          },
+          "reference": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:/-]{1,256}$"
+          },
+          "state": {
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              "REVOKED"
+            ]
+          },
+          "sourceVersion": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+          }
+        }
+      },
+      "messaging.common.v1.ContextClass": {
+        "type": "string",
+        "enum": [
+          "DIRECT",
+          "GROUP",
+          "MEETING",
+          "TRANSACTION",
+          "CONSULTATION",
+          "SUPPORT",
+          "ENTERPRISE",
+          "DEVELOPER_DEFINED"
+        ],
+        "description": "Generic context classes; a product's order, trip, consultation or case is only an opaque ContextRef."
+      },
+      "messaging.common.v1.ContextRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "namespace",
+          "reference"
+        ],
+        "properties": {
+          "namespace": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,62}$"
+          },
+          "reference": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:/-]{1,256}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        },
+        "description": "An opaque reference in the application's own namespace. Never authority, never a membership grant."
+      },
+      "messaging.common.v1.Conversation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conversationId",
+          "contextClass",
+          "context",
+          "securityProfile",
+          "encryption",
+          "lifecycleState",
+          "lifecycleReason",
+          "policy",
+          "version",
+          "createdByPrincipalId",
+          "ownerPrincipalId",
+          "members",
+          "createdAt",
+          "updatedAt",
+          "stateChangedAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "conversationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "contextClass": {
+            "$ref": "#/components/schemas/messaging.common.v1.ContextClass"
+          },
+          "context": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/messaging.common.v1.ContextRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "securityProfile": {
+            "$ref": "#/components/schemas/messaging.common.v1.SecurityProfile"
+          },
+          "encryption": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "protocol",
+              "ciphersuite",
+              "mlsGroupId",
+              "securityPolicyVersion",
+              "serverCanReadContent"
+            ],
+            "properties": {
+              "protocol": {
+                "$ref": "#/components/schemas/messaging.common.v1.Protocol"
+              },
+              "ciphersuite": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/messaging.common.v1.Ciphersuite"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mlsGroupId": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "securityPolicyVersion": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "serverCanReadContent": {
+                "type": "boolean"
+              }
+            }
+          },
+          "lifecycleState": {
+            "$ref": "#/components/schemas/messaging.common.v1.LifecycleState"
+          },
+          "lifecycleReason": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "policy": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "snapshotId",
+              "digest",
+              "applicationPolicyVersion"
+            ],
+            "properties": {
+              "snapshotId": {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "applicationPolicyVersion": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "createdByPrincipalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "ownerPrincipalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "members": {
+            "type": "array",
+            "maxItems": 2,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "principalId",
+                "role"
+              ],
+              "properties": {
+                "principalId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "OWNER",
+                    "MEMBER"
+                  ]
+                }
+              }
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stateChangedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "The canonical Conversation aggregate. PRIVATE_E2EE: MLS 1.0 with the server-assigned 32-byte MLS group id; serverCanReadContent is false. MANAGED: no MLS binding; serverCanReadContent is true.",
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "securityProfile": {
+                  "const": "PRIVATE_E2EE"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "encryption": {
+                  "properties": {
+                    "protocol": {
+                      "const": "MLS_1_0"
+                    },
+                    "serverCanReadContent": {
+                      "const": false
+                    },
+                    "mlsGroupId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "encryption": {
+                  "properties": {
+                    "protocol": {
+                      "const": "CFMEET_MANAGED_V1"
+                    },
+                    "serverCanReadContent": {
+                      "const": true
+                    },
+                    "mlsGroupId": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "messaging.common.v1.Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message",
+              "requestId"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/messaging.common.v1.ErrorCode"
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "requestId": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/platform.common.v1.RequestId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+              }
+            }
+          }
+        },
+        "description": "Error envelope. Messages never contain key material, ciphertext, content, a credential or database text."
+      },
+      "messaging.common.v1.ErrorCode": {
+        "type": "string",
+        "enum": [
+          "VALIDATION_ERROR",
+          "AUTHENTICATION_FAILED",
+          "CLIENT_TOKENS_NOT_ENABLED",
+          "AUTHORITY_SUSPENDED",
+          "INSUFFICIENT_SCOPE",
+          "ACTING_PRINCIPAL_REQUIRED",
+          "PRINCIPAL_NOT_AUTHORIZED",
+          "NOT_FOUND",
+          "METHOD_NOT_ALLOWED",
+          "PAYLOAD_TOO_LARGE",
+          "RATE_LIMITED",
+          "INTERNAL_AUTHENTICATION_FAILED",
+          "INTERNAL_PERMISSION_DENIED",
+          "DELEGATED_CONTEXT_REQUIRED",
+          "DELEGATED_CONTEXT_INVALID",
+          "AUTHORIZATION_REVOKED",
+          "FEATURE_DISABLED",
+          "CHALLENGE_INVALID",
+          "KEY_PACKAGE_REJECTED",
+          "DEVICE_REVOKED",
+          "DEVICE_LIMIT_REACHED",
+          "KEY_PACKAGE_LIMIT_REACHED",
+          "IDEMPOTENCY_KEY_REQUIRED",
+          "IDEMPOTENCY_KEY_REUSED",
+          "CONTEXT_NOT_ALLOWED",
+          "SECURITY_PROFILE_NOT_ALLOWED",
+          "SECURITY_PROFILE_IMMUTABLE",
+          "E2EE_NOT_AVAILABLE",
+          "VERSION_CONFLICT",
+          "INVALID_TRANSITION",
+          "CONVERSATION_NOT_ACTIVE",
+          "POLICY_VERSION_CONFLICT",
+          "CONFLICT",
+          "SERVICE_UNAVAILABLE",
+          "INTERNAL_ERROR",
+          "EPOCH_MISMATCH",
+          "MLS_REKEY_REQUIRED",
+          "SEND_RESTRICTED",
+          "DELIVERY_REFUSED",
+          "CONTENT_REJECTED",
+          "MESSAGE_NOT_MODIFIABLE",
+          "QUOTA_EXCEEDED",
+          "ATTACHMENT_NOT_READY",
+          "INTEGRITY_CHECK_FAILED",
+          "LOCAL_SEARCH_ONLY",
+          "E2EE_EXPORT_NOT_AVAILABLE",
+          "LEGAL_HOLD_ACTIVE",
+          "STORAGE_UNAVAILABLE"
+        ]
+      },
+      "messaging.common.v1.InboundSms": {
+        "description": "An inbound SMS of a bridged party (SMS Gateway → Messaging, messaging-sms-bridge.deliver).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bridgeRef",
+          "smsMessageId",
+          "text"
+        ],
+        "properties": {
+          "bridgeRef": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "smsMessageId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "segmentCount": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "receivedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "messaging.common.v1.InboundSmsResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "messageId",
+          "sequence",
+          "channel",
+          "securityProfile"
+        ],
+        "properties": {
+          "messageId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "channel": {
+            "const": "SMS"
+          },
+          "securityProfile": {
+            "const": "MANAGED"
+          }
+        }
+      },
+      "messaging.common.v1.LegacyImportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "legacySource": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9.-]{1,47}$"
+          },
+          "messages": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "legacyMessageId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+                },
+                "senderPrincipalId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "sentAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "presentation": {
+                  "enum": [
+                    "STANDARD",
+                    "ANNOUNCEMENT"
+                  ]
+                }
+              },
+              "required": [
+                "legacyMessageId",
+                "senderPrincipalId",
+                "sentAt"
+              ]
+            }
+          }
+        },
+        "required": [
+          "legacySource",
+          "messages"
+        ]
+      },
+      "messaging.common.v1.LegacyImportResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "imported": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "duplicates": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "refused": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "legacyMessageId": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+                }
+              },
+              "required": [
+                "legacyMessageId",
+                "reason"
+              ]
+            }
+          },
+          "items": {
+            "description": "The canonical Messaging message of every imported or already-imported legacy message (the legacy system's stable id mapping).",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "legacyMessageId",
+                "messageId",
+                "sequence",
+                "status"
+              ],
+              "properties": {
+                "legacyMessageId": {
+                  "type": "string"
+                },
+                "messageId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "status": {
+                  "enum": [
+                    "IMPORTED",
+                    "DUPLICATE"
+                  ]
+                }
+              }
+            }
+          },
+          "securityProvenance": {
+            "const": "LEGACY_MANAGED"
+          }
+        },
+        "required": [
+          "imported",
+          "duplicates",
+          "refused",
+          "securityProvenance",
+          "items"
+        ]
+      },
+      "messaging.common.v1.LifecycleState": {
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "LOCKED",
+          "CLOSED",
+          "ARCHIVED",
+          "EXPIRED",
+          "DELETED"
+        ]
+      },
+      "messaging.common.v1.MeetingConversation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "created": {
+            "type": "boolean"
+          },
+          "conversation": {
+            "$ref": "#/components/schemas/messaging.common.v1.Conversation"
+          }
+        },
+        "required": [
+          "created",
+          "conversation"
+        ]
+      },
+      "messaging.common.v1.MeetingConversationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "meetingRef": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:/-]{1,256}$"
+          },
+          "ownerPrincipalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "securityProfile": {
+            "enum": [
+              "PRIVATE_E2EE",
+              "MANAGED"
+            ]
+          },
+          "managedDisclosureAcknowledged": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "meetingRef",
+          "ownerPrincipalId",
+          "securityProfile"
+        ]
+      },
+      "messaging.common.v1.MeetingLifecycleSync": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "lifecycleState": {
+            "enum": [
+              "ACTIVE",
+              "LOCKED",
+              "CLOSED",
+              "ARCHIVED"
+            ]
+          },
+          "sourceVersion": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+          }
+        },
+        "required": [
+          "lifecycleState",
+          "sourceVersion"
+        ]
+      },
+      "messaging.common.v1.MeetingMemberSync": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "enum": [
+              "ACTIVE",
+              "REMOVED",
+              "BANNED",
+              "LEFT"
+            ]
+          },
+          "role": {
+            "enum": [
+              "MEMBER",
+              "ADMIN"
+            ]
+          },
+          "sourceVersion": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+          }
+        },
+        "required": [
+          "state",
+          "sourceVersion"
+        ]
+      },
+      "messaging.common.v1.MeetingMessageModeration": {
+        "description": "Removal of a meeting-conversation message by the meeting authority (which already compared the host's role with the sender's). Idempotent.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "enum": [
+              "REMOVE"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+          }
+        }
+      },
+      "messaging.common.v1.MeetingMessageModerationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "messageId",
+          "lifecycle",
+          "changed"
+        ],
+        "properties": {
+          "messageId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "lifecycle": {
+            "type": "string"
+          },
+          "changed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "messaging.common.v1.Protocol": {
+        "type": "string",
+        "enum": [
+          "MLS_1_0",
+          "CFMEET_MANAGED_V1"
+        ]
+      },
+      "messaging.common.v1.SecurityProfile": {
+        "type": "string",
+        "enum": [
+          "PRIVATE_E2EE",
+          "MANAGED"
+        ],
+        "description": "PRIVATE_E2EE: client-side MLS 1.0 encryption, the server holds no decryption key. MANAGED: server-processable, never presented as E2EE."
+      },
+      "messaging.common.v1.SyncResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "applied": {
+            "type": "boolean"
+          },
+          "reason": {
+            "const": "STALE_VERSION"
+          },
+          "member": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "principalId": {
+                    "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                  },
+                  "state": {
+                    "enum": [
+                      "ACTIVE",
+                      "REMOVED",
+                      "LEFT"
+                    ]
+                  },
+                  "role": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "principalId",
+                  "state",
+                  "role"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mlsRekeyRequired": {
+            "type": "boolean"
+          },
+          "cryptographicRemoval": {
+            "enum": [
+              "PENDING_MEMBER_COMMIT",
+              "NOT_APPLICABLE"
+            ]
+          },
+          "lifecycleState": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "applied"
+        ],
+        "description": "applied=false: the update is stale or a replay (source version at or below the last applied one) and changed nothing."
+      },
+      "platform.common.v1.RequestId": {
+        "description": "Server-generated identifier of one request / one service hop.",
+        "type": "string",
+        "pattern": "^req_[0-9a-f]{32}$"
+      },
+      "platform.common.v1.Uuid": {
+        "description": "Lower-case hyphenated UUID.",
+        "type": "string",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      }
+    }
+  }
+}

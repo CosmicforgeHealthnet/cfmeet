@@ -1455,7 +1455,7 @@
       }
     },
     "EnsurePrincipalRequest": {
-      "description": "POST /internal/v1/principals/ensure (Part V H §104): the first-party login authority maps an account it authenticated itself to its communication principal in its signed FIRST_PARTY delegated scope. Idempotent per (environment, kind, externalReference). The reference is the login authority's opaque account id, never an email or telephone number.",
+      "description": "POST /internal/v1/principals/ensure (Part V H §104): the first-party login authority maps an account it authenticated itself to its communication principal in its signed FIRST_PARTY delegated scope. Idempotent per (environment, kind, externalReference). The reference is the login authority's opaque account id (or, for BOT_OR_SERVICE, the opaque id of the application's own non-human participant such as a meeting chat's system owner), never an email or telephone number.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1466,7 +1466,8 @@
         "kind": {
           "enum": [
             "NATIVE_CF_USER",
-            "TEMPORARY_EXTERNAL_PARTICIPANT"
+            "TEMPORARY_EXTERNAL_PARTICIPANT",
+            "BOT_OR_SERVICE"
           ]
         },
         "externalReference": {

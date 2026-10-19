@@ -15,11 +15,13 @@ on:
     paths:
       - "packages/contracts/**"
       - "packages/service-auth/**"
+      - "scripts/contracts/**"
       - ".github/workflows/contracts.yml"
   pull_request:
     paths:
       - "packages/contracts/**"
       - "packages/service-auth/**"
+      - "scripts/contracts/**"
       - ".github/workflows/contracts.yml"
   workflow_dispatch:
 
@@ -65,6 +67,13 @@ jobs:
       # counter-examples, OpenAPI documents and their versions.
       - name: validate packages/contracts
         run: cargo run -q --locked -- ../ ../../..
+
+      # Swagger-facing bundles (packages/contracts/bundled/**) are regenerated from the
+      # authoritative contracts and must be current and self-contained (no reference to
+      # the schemas.cfmeet.com naming host, every local $ref resolves).
+      - name: bundled OpenAPI documents are current and self-contained
+        working-directory: .
+        run: python3 scripts/contracts/bundle_openapi.py --check
 
   service-auth:
     name: service-auth (${{ matrix.features.name }})

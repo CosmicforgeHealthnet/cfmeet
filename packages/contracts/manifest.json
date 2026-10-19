@@ -192,18 +192,18 @@
     },
     {
       "id": "cfmeet.platform-access.identity",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "platform-access/identity/v1.schema.json",
       "owner": "platform-access",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Messages of the shared identity authority (Part IV Workstream B, ADR 0032): identity snapshots (tenant, application, environment, service account, credential WITHOUT verifier material, principal, scopes), credential authentication outcomes with the trusted authority chain and throttling, the trusted delegated context, credential status, authorization evaluation, the scope registry (Calling, Numbering and SMS scopes; PRIVILEGED_OPERATOR trust for numbers.admin), the commit-ordered identity change feed, Part III import receipts, principal resolution / telephone-endpoint registration / first-party principal ensure (Part V H §104) / tombstones and the error envelope."
+      "description": "Messages of the shared identity authority (Part IV Workstream B, ADR 0032): identity snapshots (tenant, application, environment, service account, credential WITHOUT verifier material, principal, scopes), credential authentication outcomes with the trusted authority chain and throttling, the trusted delegated context, credential status, authorization evaluation, the scope registry (Calling, Numbering and SMS scopes; PRIVILEGED_OPERATOR trust for numbers.admin), the commit-ordered identity change feed, Part III import receipts, principal resolution / telephone-endpoint registration / first-party principal ensure (Part V H §104) / tombstones and the error envelope. 1.2.0: principals/ensure also accepts BOT_OR_SERVICE (a first-party application's own non-human participant, e.g. the system owner of meeting breakout / private chat conversations)."
     },
     {
       "id": "cfmeet.platform-access.internal-api",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "openapi",
       "path": "platform-access/internal/v1.openapi.json",
       "owner": "platform-access",
@@ -607,6 +607,138 @@
       "lifecycle": "beta",
       "authority": "contract-first",
       "description": "Messaging realtime WebSocket protocol v1 (Part V Part E): client frames (subscribe, unsubscribe, ack, typing, presence.set, presence.query, auth.refresh, ping) and server frames (welcome, subscribed, event, sync.required, subscription.revoked, typing, presence, presence.snapshot, device.event, server.draining, error …), close codes and compatibility rules. Durable events reference the ConversationEvent of cfmeet.messaging.common; no plaintext of PRIVATE_E2EE conversations ever appears."
+    },
+    {
+      "id": "cfmeet.calling.http-api-bundled",
+      "version": "1.11.0",
+      "kind": "openapi",
+      "path": "bundled/calling/http/v1.openapi.json",
+      "owner": "calling",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.calling.http-api (calling/http/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.calling.http-api stays the authority."
+    },
+    {
+      "id": "cfmeet.messaging.http-api-bundled",
+      "version": "1.9.0",
+      "kind": "openapi",
+      "path": "bundled/messaging/http/v1.openapi.json",
+      "owner": "messaging",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.messaging.http-api (messaging/http/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.messaging.http-api stays the authority."
+    },
+    {
+      "id": "cfmeet.messaging.internal-api-bundled",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "bundled/messaging/internal/v1.openapi.json",
+      "owner": "messaging",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.messaging.internal-api (messaging/internal/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.messaging.internal-api stays the authority."
+    },
+    {
+      "id": "cfmeet.numbering.internal-api-bundled",
+      "version": "1.12.0",
+      "kind": "openapi",
+      "path": "bundled/numbering/internal/v1.openapi.json",
+      "owner": "numbering",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.numbering.internal-api (numbering/internal/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.numbering.internal-api stays the authority."
+    },
+    {
+      "id": "cfmeet.platform-access.internal-api-bundled",
+      "version": "1.2.0",
+      "kind": "openapi",
+      "path": "bundled/platform-access/internal/v1.openapi.json",
+      "owner": "platform-access",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.platform-access.internal-api (platform-access/internal/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.platform-access.internal-api stays the authority."
+    },
+    {
+      "id": "cfmeet.platform.internal-http-bundled",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "bundled/platform/internal-http/v1.openapi.json",
+      "owner": "platform",
+      "visibility": "internal",
+      "lifecycle": "stable",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.platform.internal-http (platform/internal-http/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.platform.internal-http stays the authority."
+    },
+    {
+      "id": "cfmeet.privacy-relay.http-api-bundled",
+      "version": "1.2.0",
+      "kind": "openapi",
+      "path": "bundled/privacy-relay/http/v1.openapi.json",
+      "owner": "privacy-relay",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.privacy-relay.http-api (privacy-relay/http/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.privacy-relay.http-api stays the authority."
+    },
+    {
+      "id": "cfmeet.privacy-relay.internal-api-bundled",
+      "version": "1.4.0",
+      "kind": "openapi",
+      "path": "bundled/privacy-relay/internal/v1.openapi.json",
+      "owner": "privacy-relay",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.privacy-relay.internal-api (privacy-relay/internal/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.privacy-relay.internal-api stays the authority."
+    },
+    {
+      "id": "cfmeet.sms-gateway.http-api-bundled",
+      "version": "1.2.0",
+      "kind": "openapi",
+      "path": "bundled/sms-gateway/http/v1.openapi.json",
+      "owner": "sms-gateway",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.sms-gateway.http-api (sms-gateway/http/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.sms-gateway.http-api stays the authority."
+    },
+    {
+      "id": "cfmeet.sms-gateway.internal-api-bundled",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "bundled/sms-gateway/internal/v1.openapi.json",
+      "owner": "sms-gateway",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.sms-gateway.internal-api (sms-gateway/internal/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.sms-gateway.internal-api stays the authority."
+    },
+    {
+      "id": "cfmeet.telephony.internal-http-api-bundled",
+      "version": "1.2.0",
+      "kind": "openapi",
+      "path": "bundled/telephony/internal/v1.openapi.json",
+      "owner": "telephony",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.telephony.internal-http-api (telephony/internal/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.telephony.internal-http-api stays the authority."
     }
   ]
 }

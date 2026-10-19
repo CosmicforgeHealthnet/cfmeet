@@ -11,7 +11,7 @@
 //! | `GET /internal/v1/scopes` | `platform-identity.read` | — |
 //! | `POST /internal/v1/principals/resolve` | `platform-principal.resolve` | signed delegated context |
 //! | `POST /internal/v1/principals/telephone-endpoints` | `platform-principal.register` | signed delegated context |
-//! | `POST /internal/v1/principals/ensure` | `platform-principal.ensure` | signed delegated context of a FIRST_PARTY tenant (NATIVE_CF_USER / TEMPORARY_EXTERNAL_PARTICIPANT only) |
+//! | `POST /internal/v1/principals/ensure` | `platform-principal.ensure` | signed delegated context of a FIRST_PARTY tenant (NATIVE_CF_USER / TEMPORARY_EXTERNAL_PARTICIPANT / BOT_OR_SERVICE only) |
 //! | `POST /internal/v1/principals/{id}/tombstone` | `platform-principal.register` | — (a named operator's retention decision, audited) |
 //!
 //! A tenant / application / environment identifier in a request BODY is never
@@ -732,6 +732,10 @@ async fn ensure_principal(
     let kind = match body.kind.as_str() {
         "NATIVE_CF_USER" => PrincipalKind::NativeCfUser,
         "TEMPORARY_EXTERNAL_PARTICIPANT" => PrincipalKind::TemporaryExternalParticipant,
+        // Part V remediation (meeting breakout / private chat): the first-party
+        // application's own non-human participant, e.g. the owner of conversations no
+        // person may own. Nobody authenticates as it through Platform Access.
+        "BOT_OR_SERVICE" => PrincipalKind::BotOrService,
         _ => return Err(AccessError::Refused(ErrorCode::ValidationError)),
     };
     let (principal, created) = state

@@ -49,6 +49,11 @@ async fn first_party_backend_ensures_principals_idempotently() {
     )
     .await;
     assert_eq!(g.status, StatusCode::OK, "{}", g.body);
+    // The application's own non-human participant (e.g. a meeting chat's system owner).
+    let bot = ensure(&h, &cfmeet, "BOT_OR_SERVICE", "meeting-chat-system").await;
+    assert_eq!(bot.status, StatusCode::OK, "{}", bot.body);
+    assert_eq!(bot.body["principal"]["kind"], "BOT_OR_SERVICE");
+    assert_ne!(bot.body["principal"]["id"], a.body["principal"]["id"]);
     // Another environment of the same application gets its own principal.
     let other_env = h
         .call(

@@ -1,0 +1,558 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet SMS Gateway internal API",
+    "version": "1.0.0",
+    "description": "Service-authenticated /internal/v1 surface of services/sms-gateway: the Part V H SMS Bridge. Every path, unknown ones included, requires a valid Ed25519 service token whose issuer the SMS Gateway's trust bundle grants sms-bridge.submit (Messaging only) and the signed delegated platform context of the application environment; Numbering re-checks the number's ownership in that scope on every send."
+  },
+  "components": {
+    "securitySchemes": {
+      "serviceToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Service-Authorization",
+        "description": "Ed25519 compact JWS (typ cf-service+jwt) from packages/service-auth, audience cfmeet.sms-gateway."
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/sms-gateway.common.v1.Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "platform.common.v1.RequestId": {
+        "description": "Server-generated identifier of one request / one service hop.",
+        "type": "string",
+        "pattern": "^req_[0-9a-f]{32}$"
+      },
+      "platform.common.v1.Uuid": {
+        "description": "Lower-case hyphenated UUID.",
+        "type": "string",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      },
+      "sms-gateway.common.v1.BridgeBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bindingId",
+          "bridgeRef",
+          "numberResourceId",
+          "remote",
+          "status"
+        ],
+        "properties": {
+          "bindingId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "bridgeRef": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "numberResourceId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "remote": {
+            "$ref": "#/components/schemas/sms-gateway.common.v1.RemoteParty"
+          },
+          "status": {
+            "enum": [
+              "ACTIVE",
+              "CLOSED"
+            ]
+          }
+        }
+      },
+      "sms-gateway.common.v1.BridgeBindingRequest": {
+        "description": "Part V H §108: bind a Messaging bridge to one external party of one number (the number is sealed here and never returned).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bridgeRef",
+          "numberResourceId",
+          "to"
+        ],
+        "properties": {
+          "bridgeRef": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "numberResourceId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^\\+[1-9][0-9]{6,14}$"
+          }
+        }
+      },
+      "sms-gateway.common.v1.BridgeSubmission": {
+        "description": "One bridged outbound SMS (idempotent per messageRef; every customer-send control applies).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bridgeRef",
+          "messageRef",
+          "text"
+        ],
+        "properties": {
+          "bridgeRef": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "messageRef": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "sms-gateway.common.v1.BridgeTransport": {
+        "description": "Transport state only: never the content or a number.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "smsMessageId",
+          "direction",
+          "status"
+        ],
+        "properties": {
+          "smsMessageId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/sms-gateway.common.v1.Direction"
+          },
+          "status": {
+            "$ref": "#/components/schemas/sms-gateway.common.v1.Status"
+          },
+          "segmentCount": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "failureCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "blockedReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cost": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/sms-gateway.common.v1.Cost"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "sms-gateway.common.v1.Cost": {
+        "description": "Estimated / provider-confirmed cost in minor units.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "estimatedMinor",
+          "confirmedMinor",
+          "currency"
+        ],
+        "properties": {
+          "estimatedMinor": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confirmedMinor": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          }
+        }
+      },
+      "sms-gateway.common.v1.Direction": {
+        "type": "string",
+        "enum": [
+          "OUTBOUND",
+          "INBOUND"
+        ]
+      },
+      "sms-gateway.common.v1.Error": {
+        "description": "The SMS Gateway error envelope.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "description": "One error.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message",
+              "requestId"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "VALIDATION_ERROR",
+                  "AUTHENTICATION_FAILED",
+                  "INSUFFICIENT_SCOPE",
+                  "NOT_FOUND",
+                  "METHOD_NOT_ALLOWED",
+                  "PAYLOAD_TOO_LARGE",
+                  "RATE_LIMITED",
+                  "INTERNAL_AUTHENTICATION_FAILED",
+                  "INTERNAL_PERMISSION_DENIED",
+                  "CALLBACK_REJECTED",
+                  "IDEMPOTENCY_KEY_REQUIRED",
+                  "IDEMPOTENCY_KEY_REUSED",
+                  "CONTENT_TOO_LONG",
+                  "SMS_BLOCKED",
+                  "CONFLICT",
+                  "NUMBERING_UNAVAILABLE",
+                  "PROVIDER_UNAVAILABLE",
+                  "SERVICE_UNAVAILABLE",
+                  "INTERNAL_ERROR"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "requestId": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/platform.common.v1.RequestId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+              },
+              "messageId": {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              }
+            }
+          }
+        }
+      },
+      "sms-gateway.common.v1.RemoteParty": {
+        "description": "The remote party (masked only).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "masked"
+        ],
+        "properties": {
+          "masked": {
+            "type": "string",
+            "pattern": "^\\+\\*{3}[0-9]{0,4}$",
+            "description": "The remote party, masked: `+***` and the last four digits. The full number is never returned."
+          }
+        }
+      },
+      "sms-gateway.common.v1.Status": {
+        "description": "Transport status. UNKNOWN: the provider may hold the message; it is never resubmitted, only provider evidence resolves it.",
+        "type": "string",
+        "enum": [
+          "REQUESTED",
+          "AUTHORIZED",
+          "SUBMITTING",
+          "SUBMITTED",
+          "DELIVERED",
+          "RECEIVED",
+          "FAILED",
+          "UNKNOWN",
+          "EXPIRED"
+        ]
+      }
+    }
+  },
+  "paths": {
+    "/internal/v1/sms-bridge/bindings": {
+      "post": {
+        "operationId": "createBridgeBinding",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Idempotent per bridgeRef; one ACTIVE binding per (number, party) — PARTY_ALREADY_BRIDGED otherwise.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/sms-gateway.common.v1.BridgeBindingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/sms-gateway.common.v1.BridgeBinding"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Already present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/sms-gateway.common.v1.BridgeBinding"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sms-bridge/bindings/{bridgeRef}/close": {
+      "post": {
+        "operationId": "closeBridgeBinding",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "No further SMS of the party reaches Messaging; no further bridged send.",
+        "parameters": [
+          {
+            "name": "bridgeRef",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/sms-gateway.common.v1.BridgeBinding"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sms-bridge/messages": {
+      "post": {
+        "operationId": "submitBridgeMessage",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "A bridged outbound SMS: the customer-send controls (sender capability, opt-out, prefixes, spend, abuse, rate windows, provider) apply; refusals answer SMS_BLOCKED with the reason and are recorded.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/sms-gateway.common.v1.BridgeSubmission"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/sms-gateway.common.v1.BridgeTransport"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Already present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/sms-gateway.common.v1.BridgeTransport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sms-bridge/messages/{smsMessageId}": {
+      "get": {
+        "operationId": "getBridgeTransport",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Transport state of a bridged message.",
+        "parameters": [
+          {
+            "name": "smsMessageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/sms-gateway.common.v1.BridgeTransport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  }
+}
