@@ -46,9 +46,10 @@ use crate::{
 
 /// Device-direct routes (merged into the public router; they authenticate themselves).
 pub fn device_routes() -> Router<AppState> {
-    Router::new()
-        .route("/v1/realtime", get(connect))
-        .route("/v1/realtime/tickets", post(ticket).options(ticket_preflight))
+    Router::new().route("/v1/realtime", get(connect)).route(
+        "/v1/realtime/tickets",
+        post(ticket).options(ticket_preflight),
+    )
 }
 
 /// Application-backend routes nested under `/v1/messaging`.
@@ -89,7 +90,10 @@ fn ticket_origin(
     };
     if values.next().is_some()
         || !origin.to_str().is_ok_and(|value| {
-            settings.allowed_origins.iter().any(|allowed| allowed == value)
+            settings
+                .allowed_origins
+                .iter()
+                .any(|allowed| allowed == value)
         })
     {
         return Err(ApiError::reason(
@@ -120,10 +124,7 @@ fn allow_ticket_cors(response: &mut Response, origin: HeaderValue) {
 
 /// Preflight is only for configured browser origins and the ticket POST;
 /// it does not authorize the client or issue a ticket.
-async fn ticket_preflight(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Response {
+async fn ticket_preflight(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let origin = match ticket_origin(&state.realtime.settings, &headers) {
         Ok(Some(origin)) => origin,
         _ => return StatusCode::FORBIDDEN.into_response(),
@@ -140,10 +141,7 @@ async fn ticket_preflight(
     response
 }
 
-async fn ticket(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<Response, ApiError> {
+async fn ticket(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, ApiError> {
     let origin = ticket_origin(&state.realtime.settings, &headers)?;
     let token = zeroize::Zeroizing::new(
         client_token(&headers).ok_or(ApiError::code(ErrorCode::AuthenticationFailed))?,
@@ -153,9 +151,11 @@ async fn ticket(
     if !session.has_scope(MESSAGES_READ) {
         return Err(ApiError::code(ErrorCode::InsufficientScope));
     }
-    let mut response =
-        (StatusCode::CREATED, Json(sessions::issue_ticket(&state, &session).await?))
-            .into_response();
+    let mut response = (
+        StatusCode::CREATED,
+        Json(sessions::issue_ticket(&state, &session).await?),
+    )
+        .into_response();
     if let Some(origin) = origin {
         allow_ticket_cors(&mut response, origin);
     }
@@ -369,25 +369,43 @@ mod ticket_cors_tests {
         settings.allowed_origins = vec!["https://meet.example.com".to_string()];
         let mut headers = HeaderMap::new();
         assert!(ticket_origin(&settings, &headers).unwrap().is_none());
-        headers.insert(header::ORIGIN, HeaderValue::from_static("https://meet.example.com"));
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://meet.example.com"),
+        );
         assert!(ticket_origin(&settings, &headers).unwrap().is_some());
-        headers.append(header::ORIGIN, HeaderValue::from_static("https://meet.example.com"));
+        headers.append(
+            header::ORIGIN,
+            HeaderValue::from_static("https://meet.example.com"),
+        );
         assert!(ticket_origin(&settings, &headers).is_err());
         headers.remove(header::ORIGIN);
-        headers.insert(header::ORIGIN, HeaderValue::from_static("https://attacker.example"));
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://attacker.example"),
+        );
         assert!(ticket_origin(&settings, &headers).is_err());
     }
 
     #[test]
     fn ticket_cors_headers_never_use_wildcard() {
         let mut response = StatusCode::NO_CONTENT.into_response();
-        allow_ticket_cors(&mut response, HeaderValue::from_static("https://meet.example.com"));
+        allow_ticket_cors(
+            &mut response,
+            HeaderValue::from_static("https://meet.example.com"),
+        );
         assert_eq!(
-            response.headers().get(header::ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(),
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .unwrap(),
             "https://meet.example.com"
         );
         assert_eq!(
-            response.headers().get(header::ACCESS_CONTROL_ALLOW_HEADERS).unwrap(),
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
+                .unwrap(),
             "Authorization, Accept"
         );
     }
