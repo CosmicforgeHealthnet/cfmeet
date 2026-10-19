@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging API",
-    "version": "1.9.1",
+    "version": "1.10.0",
     "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are refused there with CLIENT_TOKENS_NOT_ENABLED; the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB."
   },
   "paths": {
@@ -5317,6 +5317,462 @@
           }
         }
       }
+    },
+    "/v1/messaging/history-transfers": {
+      "post": {
+        "operationId": "createHistoryTransfer",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.send. The NEW (target) device's request for history held by an existing (source) device of the same principal: a single-use transfer public key and an expiry, signed with the target's device key (verified against its registered key). E2EE devices only (FEATURE_DISABLED where production E2EE is off).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.HistoryTransfer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.HistoryTransferRequest"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listHistoryTransfers",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.read. The transfers of one of the acting principal's ACTIVE devices (as source or target), newest first.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "deviceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.HistoryTransferList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/history-transfers/{transferId}": {
+      "get": {
+        "operationId": "getHistoryTransfer",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.read. One transfer of the acting principal.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.HistoryTransfer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/history-transfers/{transferId}/sealed-history": {
+      "put": {
+        "operationId": "sealHistoryTransfer",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.send. The SOURCE device's sealed history (accepted only when its signature verifies under the source device key for exactly this transfer; at most MESSAGING_HISTORY_TRANSFER_MAX_BYTES). Messaging stores ciphertext only.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.HistoryTransfer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.SealedHistoryUpload"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "getSealedHistory",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.read. The sealed history, for the TARGET device to verify and open (while SEALED and unexpired).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.SealedHistory"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/history-transfers/{transferId}/complete": {
+      "post": {
+        "operationId": "completeHistoryTransfer",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.send. The target opened the history; the sealed bytes are deleted.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.HistoryTransfer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/history-transfers/{transferId}/cancel": {
+      "post": {
+        "operationId": "cancelHistoryTransfer",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.send. Either device ends the transfer (e.g. the comparison codes differed); the sealed bytes are deleted.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment); both devices must be its ACTIVE devices.",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "transferId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.HistoryTransfer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.HistoryTransferCancel"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -7890,6 +8346,166 @@
           }
         }
       },
+      "messaging.common.v1.HistoryTransfer": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transferId",
+          "principalId",
+          "sourceDeviceId",
+          "targetDeviceId",
+          "transferPublicKey",
+          "requestSignature",
+          "status",
+          "expiresAt",
+          "createdAt",
+          "sealedAt",
+          "endedAt",
+          "endReason",
+          "sealedBytes",
+          "sealedSha256"
+        ],
+        "properties": {
+          "transferId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "principalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "sourceDeviceId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "targetDeviceId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "transferPublicKey": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          },
+          "requestSignature": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{86}$"
+          },
+          "status": {
+            "enum": [
+              "REQUESTED",
+              "SEALED",
+              "COMPLETED",
+              "CANCELLED",
+              "EXPIRED"
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sealedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "endReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z_]{1,31}$"
+          },
+          "sealedBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "sealedSha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "description": "A device-to-device history transfer. Messaging relays an opaque sealed history between two ACTIVE devices of one principal; it holds no key that opens it (no recovery key, no escrow) and deletes the sealed bytes on completion, cancellation, revocation or expiry."
+      },
+      "messaging.common.v1.HistoryTransferCancel": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string",
+            "pattern": "^[A-Z_]{1,32}$"
+          }
+        }
+      },
+      "messaging.common.v1.HistoryTransferList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transfers"
+        ],
+        "properties": {
+          "transfers": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/messaging.common.v1.HistoryTransfer"
+            }
+          }
+        }
+      },
+      "messaging.common.v1.HistoryTransferRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transferId",
+          "sourceDeviceId",
+          "targetDeviceId",
+          "transferPublicKey",
+          "expiresAt",
+          "requestSignature"
+        ],
+        "properties": {
+          "transferId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "sourceDeviceId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "targetDeviceId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "transferPublicKey": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "description": "base64url X25519 HPKE public key (32 bytes) generated by the TARGET device for this transfer only."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "At most one hour from now (whole seconds are signed)."
+          },
+          "requestSignature": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{86}$",
+            "description": "Ed25519 signature by the TARGET device key over packages/messaging-crypto history_transfer::request_signing_input."
+          }
+        },
+        "description": "A new device's request for the history its existing device holds (ADR 0052 AD-07)."
+      },
       "messaging.common.v1.KeyPackageClaim": {
         "type": "object",
         "additionalProperties": false,
@@ -9932,6 +10548,49 @@
         "required": [
           "role"
         ]
+      },
+      "messaging.common.v1.SealedHistory": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transferId",
+          "sourceDeviceId",
+          "sealedHistory",
+          "sealedSha256"
+        ],
+        "properties": {
+          "transferId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "sourceDeviceId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "sealedHistory": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "sealedSha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      },
+      "messaging.common.v1.SealedHistoryUpload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sealedHistory"
+        ],
+        "properties": {
+          "sealedHistory": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "description": "base64url of the sealed history: HPKE (RFC 9180) ciphertext to the transfer key, signed by the SOURCE device (history_transfer::seal_history)."
+          }
+        }
       },
       "messaging.common.v1.SearchResults": {
         "type": "object",

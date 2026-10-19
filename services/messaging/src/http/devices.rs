@@ -10,6 +10,11 @@
 //! | `POST /devices/{device_id}/revoke` | `messages.send` |
 //! | `GET /principals/{principal_id}/devices` | `messages.read` |
 //! | `GET /key-transparency/proofs` | `messages.read` |
+//! | `POST /history-transfers` | `messages.send` |
+//! | `GET /history-transfers?deviceId=`, `GET /history-transfers/{id}` | `messages.read` |
+//! | `PUT /history-transfers/{id}/sealed-history` | `messages.send` |
+//! | `GET /history-transfers/{id}/sealed-history` | `messages.read` |
+//! | `POST /history-transfers/{id}/complete`, `POST /history-transfers/{id}/cancel` | `messages.send` |
 
 use axum::{
     extract::{Path, Query, State},
@@ -45,6 +50,124 @@ pub fn routes() -> Router<AppState> {
         .route("/devices/:device_id/revoke", post(revoke))
         .route("/principals/:principal_id/devices", get(directory))
         .route("/key-transparency/proofs", get(proofs))
+        .route(
+            "/history-transfers",
+            post(transfer_create).get(transfer_list),
+        )
+        .route("/history-transfers/:transfer_id", get(transfer_get))
+        .route(
+            "/history-transfers/:transfer_id/sealed-history",
+            axum::routing::put(transfer_seal)
+                // base64url of the largest allowed sealed history (MESSAGING_HISTORY_TRANSFER_MAX_BYTES ≤ 64 MiB).
+                .layer(axum::extract::DefaultBodyLimit::max(90 * 1024 * 1024))
+                .get(transfer_download),
+        )
+        .route(
+            "/history-transfers/:transfer_id/complete",
+            post(transfer_complete),
+        )
+        .route(
+            "/history-transfers/:transfer_id/cancel",
+            post(transfer_cancel),
+        )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TransferListQuery {
+    device_id: Uuid,
+}
+
+async fn transfer_create(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Json(body): Json<devices::history_transfer::CreateTransfer>,
+) -> Result<impl IntoResponse, ApiError> {
+    let ctx = caller.require_scope(MESSAGES_SEND)?;
+    let acting = require_acting(&state, &caller, &headers).await?;
+    let v = devices::history_transfer::create(&state, ctx, &acting, body).await?;
+    Ok((StatusCode::CREATED, Json(v)))
+}
+
+async fn transfer_list(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Query(q): Query<TransferListQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let ctx = caller.require_scope(MESSAGES_READ)?;
+    let acting = require_acting(&state, &caller, &headers).await?;
+    Ok(Json(
+        devices::history_transfer::list(&state, ctx, &acting, q.device_id).await?,
+    ))
+}
+
+async fn transfer_get(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    let ctx = caller.require_scope(MESSAGES_READ)?;
+    let acting = require_acting(&state, &caller, &headers).await?;
+    Ok(Json(
+        devices::history_transfer::get(&state, ctx, &acting, id).await?,
+    ))
+}
+
+async fn transfer_seal(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<devices::history_transfer::SealedHistoryUpload>,
+) -> Result<impl IntoResponse, ApiError> {
+    let ctx = caller.require_scope(MESSAGES_SEND)?;
+    let acting = require_acting(&state, &caller, &headers).await?;
+    Ok(Json(
+        devices::history_transfer::upload_sealed(&state, ctx, &acting, id, body).await?,
+    ))
+}
+
+async fn transfer_download(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    let ctx = caller.require_scope(MESSAGES_READ)?;
+    let acting = require_acting(&state, &caller, &headers).await?;
+    Ok(Json(
+        devices::history_transfer::download_sealed(&state, ctx, &acting, id).await?,
+    ))
+}
+
+async fn transfer_complete(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    let ctx = caller.require_scope(MESSAGES_SEND)?;
+    let acting = require_acting(&state, &caller, &headers).await?;
+    Ok(Json(
+        devices::history_transfer::complete(&state, ctx, &acting, id).await?,
+    ))
+}
+
+async fn transfer_cancel(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<devices::history_transfer::CancelTransfer>,
+) -> Result<impl IntoResponse, ApiError> {
+    let ctx = caller.require_scope(MESSAGES_SEND)?;
+    let acting = require_acting(&state, &caller, &headers).await?;
+    Ok(Json(
+        devices::history_transfer::cancel(&state, ctx, &acting, id, body).await?,
+    ))
 }
 
 async fn create_challenge(

@@ -23,6 +23,8 @@
 //!
 //! Nothing here sees a private key: there is none on the server.
 
+pub mod history_transfer;
+
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use cf_messaging_crypto::{
     binding,
@@ -61,7 +63,7 @@ fn rfc3339(t: DateTime<Utc>) -> String {
     t.to_rfc3339_opts(SecondsFormat::Micros, true)
 }
 
-fn require_enabled(state: &AppState) -> Result<()> {
+pub(crate) fn require_enabled(state: &AppState) -> Result<()> {
     if state.devices.enabled {
         Ok(())
     } else {
@@ -883,6 +885,7 @@ pub async fn revoke(
                 // gateways close its connections when the event below is published.
                 crate::realtime::sessions::revoke_device_sessions(txn, device.id, now).await?;
                 crate::realtime::push::disable_device(txn, device.id, now).await?;
+                history_transfer::cancel_for_device(txn, device.id, now).await?;
                 crate::metrics::inc("messaging_devices_revoked_total", &[]);
                 load_device(txn, &ctx, device.id, false)
                     .await?

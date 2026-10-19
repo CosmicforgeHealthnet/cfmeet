@@ -9,6 +9,7 @@
 //! | `MESSAGING_METRICS_ADDRESS` | no | separate `GET /metrics` listener (e.g. `127.0.0.1:9197`) |
 //! | `MESSAGING_E2EE_DEVICES_ENABLED` | no | `true` / `false`: device registration and KeyPackage publication. Default `true` only in `local` / `test` runtimes; staging requires an explicit `true` (owner approval of the cryptographic decisions, ADR 0045); `true` is refused in `production` (Part V J: production E2EE stays disabled pending external certification) |
 //! | `MESSAGING_DEVICE_CHALLENGE_TTL_SECONDS` | no | registration challenge validity (60–3600, default 300) |
+//! | `MESSAGING_HISTORY_TRANSFER_MAX_BYTES` | no | largest sealed history a device-to-device transfer relays (64 KiB–64 MiB, default 8 MiB) |
 //! | `MESSAGING_DEVICE_CHALLENGES_PER_HOUR` | no | challenges per principal per hour (1–1000, default 20) |
 //! | `MESSAGING_MAX_ACTIVE_DEVICES` | no | active devices per principal (1–100, default 10) |
 //! | `MESSAGING_MAX_KEY_PACKAGES_PER_DEVICE` | no | AVAILABLE KeyPackages per device (1–1000, default 100) |
@@ -92,6 +93,8 @@ pub struct DeviceSettings {
     pub max_key_packages_per_device: i64,
     pub key_package_max_lifetime_days: u64,
     pub directory_lookups_per_minute: i64,
+    /// Largest sealed history a device-to-device transfer may carry.
+    pub history_transfer_max_bytes: usize,
 }
 
 impl Default for DeviceSettings {
@@ -104,6 +107,7 @@ impl Default for DeviceSettings {
             max_key_packages_per_device: 100,
             key_package_max_lifetime_days: 90,
             directory_lookups_per_minute: 600,
+            history_transfer_max_bytes: 8 * 1024 * 1024,
         }
     }
 }
@@ -493,6 +497,13 @@ impl MessagingConfig {
                 1,
                 100_000,
             )?,
+            history_transfer_max_bytes: bounded(
+                &get,
+                "MESSAGING_HISTORY_TRANSFER_MAX_BYTES",
+                8 * 1024 * 1024,
+                64 * 1024,
+                64 * 1024 * 1024,
+            )? as usize,
         };
         let auth_cache = AuthCacheSettings {
             ttl: Duration::from_secs(

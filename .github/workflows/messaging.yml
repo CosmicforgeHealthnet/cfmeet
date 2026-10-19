@@ -264,6 +264,10 @@ jobs:
       # rollbacks refused, a restored (older) database detected and appends failing closed.
       - name: Key-transparency witnesses — quorum cosigning, fork / rollback refusal, restored-backup detection
         run: cargo test --locked --test transparency_witness -- --nocapture
+      # Device-to-device history transfer (ADR 0052 AD-07) with real client device keys:
+      # the server relays opaque HPKE-sealed bytes, holds no key, refuses forgeries.
+      - name: History transfer — new device receives history sealed by the old one, no server key
+        run: cargo test --locked --test history_transfer -- --nocapture
       - name: Conversation domain (D) — profiles, policy, lifecycle, concurrency, isolation, idempotency, sequencing
         run: cargo test --locked --test conversations
       - name: Membership, messages and MLS Delivery Service (Parts E-G prerequisites) — real OpenMLS devices, profile isolation, blocks

@@ -33,7 +33,10 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use async_trait::async_trait;
 use axum::http::Method;
-use cf_messaging_crypto::device::Device;
+use cf_messaging_crypto::{
+    device::Device,
+    history_transfer::{self as ht, TransferContext, TransferKeys},
+};
 use cf_object_storage::{sha256_hex, MemoryObjectStore, SignedWrite};
 use cf_service_auth::DelegatedPlatformContext;
 use common::{flows::*, realtime::test_settings, *};
@@ -204,6 +207,13 @@ struct Fx {
     party2: Uuid,
     policy_version: i64,
     conv_version: i64,
+    /// History transfers of the owner's devices (ADR 0052 AD-07), one per operation.
+    transfer_create_body: Value,
+    transfer_requested: String,
+    transfer_seal_body: Value,
+    transfer_download: String,
+    transfer_complete: String,
+    transfer_cancel: String,
 }
 
 impl Fx {
@@ -222,12 +232,44 @@ impl Fx {
             self.report.clone(),
             self.session.clone(),
             self.bridge.clone(),
+            self.transfer_requested.clone(),
+            self.transfer_download.clone(),
+            self.transfer_complete.clone(),
+            self.transfer_cancel.clone(),
             self.owner.device_id().to_string(),
             self.member.principal.to_string(),
         ];
         v.retain(|x| !x.is_empty());
         v
     }
+}
+
+/// A signed history-transfer request from `target` for history held by `source`.
+fn transfer_request(
+    h: &Harness,
+    a: &Customer,
+    principal: Uuid,
+    source: &Device,
+    target: &Device,
+) -> (Value, TransferContext, TransferKeys) {
+    let id = Uuid::new_v4();
+    let tc = TransferContext {
+        transfer_id: id,
+        tenant_id: a.context.scope.tenant_id,
+        application_id: a.context.scope.application_id,
+        environment_id: a.context.scope.environment_id,
+        principal_id: principal,
+        source_device_id: source.device_id(),
+        target_device_id: target.device_id(),
+    };
+    let keys = TransferKeys::generate().unwrap();
+    let exp = h.now().timestamp() + 1800;
+    let sig = ht::sign_request(target, &tc, &keys, exp).unwrap();
+    let body = json!({ "transferId": id, "sourceDeviceId": source.device_id(), "targetDeviceId": target.device_id(),
+        "transferPublicKey": b64(keys.public_key()),
+        "expiresAt": chrono::DateTime::from_timestamp(exp, 0).unwrap().to_rfc3339(),
+        "requestSignature": b64(&sig) });
+    (body, tc, keys)
 }
 
 /// A MANAGED group: owner OWNER, `members` MEMBER, `removed` REMOVED, `banned` BANNED.
@@ -582,7 +624,59 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
     ok(&cv, "conversation");
     let conv_version = cv.json["version"].as_i64().unwrap();
     let party2 = h.principal_of_kind(&a, "TELEPHONE_ENDPOINT");
+
+    // History transfers between the owner's devices: one open transfer per target device.
+    let mut targets = Vec::new();
+    for _ in 0..5 {
+        targets.push(h.active_device(&a, owner.principal).await);
+    }
+    let transfer = |i: usize, seal: bool| {
+        let (body, tc, keys) = transfer_request(h, &a, owner.principal, &owner.device, &targets[i]);
+        let sealed =
+            ht::seal_history(&owner.device, &tc, keys.public_key(), b"matrix history").unwrap();
+        (
+            body,
+            json!({ "sealedHistory": b64(&sealed) }),
+            seal,
+            tc.transfer_id.to_string(),
+        )
+    };
+    let mut transfer_ids = Vec::new();
+    let mut seal_body = Value::Null;
+    for (i, seal) in [(0, false), (1, true), (2, true), (3, false)] {
+        let (body, sealed, seal, id) = transfer(i, seal);
+        let r = h
+            .post(
+                &a,
+                Some(owner.principal),
+                "/v1/messaging/history-transfers",
+                body,
+            )
+            .await;
+        ok(&r, "history transfer");
+        if seal {
+            let r = h
+                .put(
+                    &a,
+                    Some(owner.principal),
+                    &format!("/v1/messaging/history-transfers/{id}/sealed-history"),
+                    sealed,
+                )
+                .await;
+            ok(&r, "sealed history");
+        } else if i == 0 {
+            seal_body = sealed;
+        }
+        transfer_ids.push(id);
+    }
+    let (transfer_create_body, _, _, _) = transfer(4, false);
     Fx {
+        transfer_create_body,
+        transfer_requested: transfer_ids[0].clone(),
+        transfer_seal_body: seal_body,
+        transfer_download: transfer_ids[1].clone(),
+        transfer_complete: transfer_ids[2].clone(),
+        transfer_cancel: transfer_ids[3].clone(),
         party2,
         sms_conv,
         policy_version,
@@ -744,6 +838,29 @@ fn ops() -> Vec<Op> {
              req: |f| r(format!("/v1/messaging/key-transparency/proofs?deviceId={}", f.member.device_id()), Some(f.owner.principal), None),
              ok: 200, skip: NO_SKIP,
              expect: &[(Case::CrossTenantIds, 404, "NOT_FOUND")] },
+        // ------------------------------------------------ history transfers (AD-07)
+        Op { method: M::POST, template: "/v1/messaging/history-transfers", scopes: SEND, acting: AM, res: Res::Device,
+             req: |f| r("/v1/messaging/history-transfers".into(), Some(f.owner.principal), Some(f.transfer_create_body.clone())),
+             ok: 201, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/messaging/history-transfers", scopes: READ, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/history-transfers?deviceId={}", f.owner.device_id()), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/messaging/history-transfers/{transferId}", scopes: READ, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/history-transfers/{}", f.transfer_requested), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::PUT, template: "/v1/messaging/history-transfers/{transferId}/sealed-history", scopes: SEND, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/history-transfers/{}/sealed-history", f.transfer_requested), Some(f.owner.principal),
+                        Some(f.transfer_seal_body.clone())),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/messaging/history-transfers/{transferId}/sealed-history", scopes: READ, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/history-transfers/{}/sealed-history", f.transfer_download), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/messaging/history-transfers/{transferId}/complete", scopes: SEND, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/history-transfers/{}/complete", f.transfer_complete), Some(f.owner.principal), Some(json!({}))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/messaging/history-transfers/{transferId}/cancel", scopes: SEND, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/history-transfers/{}/cancel", f.transfer_cancel), Some(f.owner.principal), Some(json!({ "reason": "MATRIX" }))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         // ---------------------------------------------------------- conversations
         Op { method: M::POST, template: "/v1/conversations", scopes: CREATE, acting: AM, res: Res::Env,
              req: |f| Req { path: "/v1/conversations".into(), actor: Some(f.owner.principal),

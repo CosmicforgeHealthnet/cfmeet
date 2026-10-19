@@ -24,6 +24,7 @@ mod m20261113_000011_engagement_usage;
 mod m20261114_000012_webhook_relay;
 mod m20261115_000013_operations;
 mod m20261116_000014_kt_witnesses;
+mod m20261117_000015_history_transfers;
 
 /// Name of the table recording which Messaging migrations have been applied.
 pub const MIGRATION_TABLE: &str = "messaging_seaql_migrations";
@@ -48,6 +49,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261114_000012_webhook_relay::Migration),
             Box::new(m20261115_000013_operations::Migration),
             Box::new(m20261116_000014_kt_witnesses::Migration),
+            Box::new(m20261117_000015_history_transfers::Migration),
         ]
     }
 

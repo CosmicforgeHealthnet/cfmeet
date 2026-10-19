@@ -9,6 +9,9 @@ pub async fn run_maintenance(state: AppState, interval: std::time::Duration) {
         if let Err(e) = crate::realtime::sessions::cleanup_expired(&state).await {
             tracing::warn!(error = %e, "realtime maintenance pass failed");
         }
+        if let Err(e) = crate::devices::history_transfer::expire_due(&state).await {
+            tracing::warn!(error = %e, "history-transfer expiry pass failed");
+        }
         tokio::time::sleep(interval).await;
     }
 }
