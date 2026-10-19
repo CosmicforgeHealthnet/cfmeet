@@ -7,7 +7,7 @@
 //! | `MESSAGING_DATABASE_MAX_CONNECTIONS` | no | pool size (1–500, default 10) |
 //! | `MESSAGING_BIND_ADDRESS` | no | default `127.0.0.1:8097` |
 //! | `MESSAGING_METRICS_ADDRESS` | no | separate `GET /metrics` listener (e.g. `127.0.0.1:9197`) |
-//! | `MESSAGING_E2EE_DEVICES_ENABLED` | no | `true` / `false`: device registration and KeyPackage publication. Default `true` only in `local` / `test` runtimes; staging / production require an explicit `true` (owner approval of the cryptographic decisions, ADR 0045) |
+//! | `MESSAGING_E2EE_DEVICES_ENABLED` | no | `true` / `false`: device registration and KeyPackage publication. Default `true` only in `local` / `test` runtimes; staging requires an explicit `true` (owner approval of the cryptographic decisions, ADR 0045); `true` is refused in `production` (Part V J: production E2EE stays disabled pending external certification) |
 //! | `MESSAGING_DEVICE_CHALLENGE_TTL_SECONDS` | no | registration challenge validity (60–3600, default 300) |
 //! | `MESSAGING_DEVICE_CHALLENGES_PER_HOUR` | no | challenges per principal per hour (1–1000, default 20) |
 //! | `MESSAGING_MAX_ACTIVE_DEVICES` | no | active devices per principal (1–100, default 10) |
@@ -334,6 +334,14 @@ impl MessagingConfig {
         }
         let enabled = match get("MESSAGING_E2EE_DEVICES_ENABLED").as_deref() {
             None => runtime.allows_insecure_transport(),
+            // Part V J: production E2EE stays disabled until the cryptographic design
+            // has external certification; no configuration value enables it.
+            Some("true") if runtime == RuntimeEnvironment::Production => {
+                return Err(ConfigError::invalid(
+                    "MESSAGING_E2EE_DEVICES_ENABLED",
+                    "production E2EE is disabled pending external cryptographic certification",
+                ))
+            }
             Some("true") => true,
             Some("false") => false,
             Some(_) => {
@@ -742,19 +750,24 @@ mod tests {
     }
 
     #[test]
-    fn e2ee_device_operations_need_an_explicit_decision_in_staging_and_production() {
+    fn e2ee_device_operations_need_an_explicit_decision_in_staging_and_never_run_in_production() {
         for env in [RuntimeEnvironment::Staging, RuntimeEnvironment::Production] {
             let cfg = MessagingConfig::from_lookup(env, lookup(BASE)).unwrap();
             assert!(!cfg.devices.enabled, "{env}");
-            let mut on = BASE.to_vec();
-            on.push(("MESSAGING_E2EE_DEVICES_ENABLED", "true"));
-            assert!(
-                MessagingConfig::from_lookup(env, lookup(&on))
-                    .unwrap()
-                    .devices
-                    .enabled
-            );
         }
+        let mut on = BASE.to_vec();
+        on.push(("MESSAGING_E2EE_DEVICES_ENABLED", "true"));
+        assert!(
+            MessagingConfig::from_lookup(RuntimeEnvironment::Staging, lookup(&on))
+                .unwrap()
+                .devices
+                .enabled
+        );
+        // Part V J: production E2EE stays disabled (pending external certification).
+        let err = MessagingConfig::from_lookup(RuntimeEnvironment::Production, lookup(&on))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("MESSAGING_E2EE_DEVICES_ENABLED"), "{err}");
     }
 
     #[test]

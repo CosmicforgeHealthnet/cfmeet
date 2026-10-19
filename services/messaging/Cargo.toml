@@ -18,6 +18,10 @@ path = "src/lib.rs"
 name = "messaging"
 path = "src/main.rs"
 
+[[bin]]
+name = "messaging-admin"
+path = "src/bin/messaging-admin.rs"
+
 [dependencies]
 messaging-migration = { path = "migration" }
 # Shared internal service authentication protocol (packages/, never another service).

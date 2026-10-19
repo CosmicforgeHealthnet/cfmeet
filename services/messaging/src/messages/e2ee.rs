@@ -203,6 +203,12 @@ pub async fn send(
     effective: &EffectivePolicy,
     request: SendRequest,
 ) -> Result<(u16, Value)> {
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::MessageSend,
+        ctx.scope.environment_id,
+    )
+    .await?;
     if request.text.is_some() {
         // Never accept plaintext into an E2EE conversation (no downgrade).
         return Err(Error::reason(

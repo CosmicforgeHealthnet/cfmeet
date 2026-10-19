@@ -283,6 +283,7 @@ pub async fn register(
     request: RegisterRequest,
 ) -> Result<Registered> {
     require_enabled(state)?;
+    crate::operations::require_kt_appendable(&state.db, ctx.scope.environment_id).await?;
     let label = match request.display_label.as_deref().map(str::trim) {
         None | Some("") => None,
         Some(l) if l.chars().count() <= 64 && !l.chars().any(char::is_control) => {
@@ -565,6 +566,7 @@ pub async fn publish_key_packages(
     request: PublishRequest,
 ) -> Result<Vec<PublishedKeyPackage>> {
     require_enabled(state)?;
+    crate::operations::require_kt_appendable(&state.db, ctx.scope.environment_id).await?;
     if request.key_packages.is_empty() || request.key_packages.len() > MAX_KEY_PACKAGES_PER_REQUEST
     {
         return Err(Error::validation(format!(

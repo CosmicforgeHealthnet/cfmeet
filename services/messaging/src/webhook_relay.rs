@@ -107,6 +107,8 @@ pub struct RelayReport {
     pub relayed: usize,
     pub retried: usize,
     pub dead_lettered: usize,
+    /// Rows deferred while the WEBHOOK_RELAY kill switch is engaged.
+    pub paused: usize,
 }
 
 fn backoff(attempts: i32) -> Duration {
@@ -151,6 +153,24 @@ pub async fn relay_due(
             txn.rollback().await?;
             break;
         };
+        // Kill switch: relayed events wait PENDING (not an attempt), nothing is lost.
+        if crate::operations::engaged(
+            &txn,
+            crate::operations::KillSwitch::WebhookRelay,
+            Some(event.environment_id),
+        )
+        .await?
+        {
+            db::exec(
+                &txn,
+                "UPDATE messaging_webhook_relay SET next_attempt_at = $2, last_error = 'KILL_SWITCH_ENGAGED' WHERE event_id = $1",
+                vec![event.id.into(), (now + Duration::seconds(60)).into()],
+            )
+            .await?;
+            txn.commit().await?;
+            report.paused += 1;
+            continue;
+        }
         let attempts = event.attempts + 1;
         let outcome = sink
             .publish(&envelope(&event, &state.runtime_environment().to_string()))
@@ -202,6 +222,15 @@ pub async fn relay_due(
             }
         }
         txn.commit().await?;
+        if matches!(outcome, Err(RelayFailure::Rejected)) {
+            crate::operations::raise(
+                &state.db,
+                crate::operations::IncidentCategory::WebhookRelayDeadLetter,
+                &event.event_id(),
+                now,
+            )
+            .await;
+        }
         if outcome.is_err() {
             // Back off the pass: the sink is down or unconfigured.
             break;

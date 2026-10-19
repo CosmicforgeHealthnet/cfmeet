@@ -340,6 +340,13 @@ impl OutboxPublisher {
             if label == "dead_letter" {
                 tracing::error!(event_id = %event.event_id(), event_type = %event.event_type, attempts,
                     "outbox event dead-lettered");
+                crate::operations::raise(
+                    &self.db,
+                    crate::operations::IncidentCategory::OutboxDeadLetter,
+                    &event.event_id(),
+                    self.clock.now(),
+                )
+                .await;
             }
         } else {
             report.lost_claims += 1;

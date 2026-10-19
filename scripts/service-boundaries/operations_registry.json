@@ -5,6 +5,9 @@
     "usage-finalizer", "artifact-worker", "webhook-delivery-worker"
   ],
   "responsibilities": [
+    {"id": "messaging-kt-rollback-monitor", "owner": "messaging", "source": "src/operations.rs", "entry": "kt_monitor_once",
+     "tests": ["tests/operations.rs::a_rolled_back_or_forked_transparency_log_is_detected_and_appends_fail_closed",
+               "tests/disaster_recovery.rs::a_restored_backup_serves_history_drains_relays_once_and_detects_the_kt_rollback"]},
     {"id": "messaging-webhook-relay", "owner": "messaging", "source": "src/webhook_relay.rs", "entry": "relay_due",
      "tests": ["tests/webhook_relay.rs::public_events_are_relayed_as_platform_envelopes_without_content",
                "tests/webhook_relay.rs::relay_failures_retry_dead_letter_and_wait_for_configuration"]},

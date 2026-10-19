@@ -281,6 +281,12 @@ jobs:
         run: cargo test --locked --test webhook_relay
       - name: Query plans (Part V I §§119–122) — every hot query of the new APIs and workers is index-served
         run: cargo test --locked --test query_plans -- --nocapture
+      - name: Operations (Part V J) — kill switches, incidents, KT rollback detection, operator CLI
+        run: cargo test --locked --test operations
+      - name: Disaster recovery (Part V J) — backup / restore with the shipped tooling, KT rollback after restore
+        env:
+          DISASTER_RECOVERY_CERT_REQUIRED: "1"
+        run: cargo test --locked --test disaster_recovery -- --nocapture
       - name: cargo test (whole workspace, incl. the Platform Access certification)
         env:
           PLATFORM_ACCESS_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access

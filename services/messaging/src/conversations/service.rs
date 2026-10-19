@@ -238,6 +238,12 @@ pub async fn create(
     request: CreateRequest,
     idempotency_key: &str,
 ) -> Result<Created> {
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::ConversationCreate,
+        ctx.scope.environment_id,
+    )
+    .await?;
     if !valid_idempotency_key(idempotency_key) {
         return Err(Error::validation(
             "Idempotency-Key must be 8-128 characters of [A-Za-z0-9._:-]",

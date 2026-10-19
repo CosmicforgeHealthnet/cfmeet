@@ -252,6 +252,12 @@ pub async fn create(
     conversation_id: Uuid,
     request: CreateBridge,
 ) -> Result<Value> {
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::SmsBridge,
+        ctx.scope.environment_id,
+    )
+    .await?;
     let conversation = administered(state, ctx, acting, conversation_id).await?;
     if conversation.profile() != SecurityProfile::Managed {
         crate::metrics::inc("messaging_sms_bridge_refusals_total", &[("reason", "e2ee")]);
@@ -629,6 +635,7 @@ fn backoff(attempts: i32) -> Duration {
 /// (row locks, SKIP LOCKED). Returns how many transports changed.
 pub async fn run_due(state: &AppState, limit: i64) -> Result<usize> {
     let mut changed = 0;
+    let mut gave_up = Vec::new();
     for _ in 0..limit {
         let txn = state.db.begin().await?;
         let now = state.now();
@@ -646,6 +653,23 @@ pub async fn run_due(state: &AppState, limit: i64) -> Result<usize> {
             txn.rollback().await?;
             break;
         };
+        // Kill switch: the transport waits (durably queued), nothing is lost.
+        if crate::operations::engaged(
+            &txn,
+            crate::operations::KillSwitch::SmsBridge,
+            Some(d.environment_id),
+        )
+        .await?
+        {
+            db::exec(
+                &txn,
+                "UPDATE messaging_sms_transports SET next_attempt_at = $2 WHERE message_id = $1",
+                vec![d.message_id.into(), (now + Duration::seconds(60)).into()],
+            )
+            .await?;
+            txn.commit().await?;
+            continue;
+        }
         let scope = crate::identity::OwnerScope {
             tenant_id: d.tenant_id,
             application_id: d.application_id,
@@ -759,10 +783,22 @@ pub async fn run_due(state: &AppState, limit: i64) -> Result<usize> {
                     ],
                 )
                 .await?;
+                if give_up {
+                    gave_up.push(d.message_id);
+                }
             }
         }
         txn.commit().await?;
         changed += 1;
+    }
+    for id in gave_up {
+        crate::operations::raise(
+            &state.db,
+            crate::operations::IncidentCategory::SmsTransportFailed,
+            &id.to_string(),
+            state.now(),
+        )
+        .await;
     }
     Ok(changed)
 }

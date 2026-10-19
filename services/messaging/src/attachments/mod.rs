@@ -255,6 +255,12 @@ pub async fn create_intent(
     request: IntentRequest,
 ) -> Result<(u16, Value)> {
     require_storage(state)?;
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::AttachmentUpload,
+        ctx.scope.environment_id,
+    )
+    .await?;
     let now = state.now();
     let (conversation, member) =
         access::as_member(&state.db, ctx, conversation_id, acting.principal_id).await?;

@@ -35,6 +35,7 @@ pub mod messages;
 pub mod metrics;
 pub mod mls;
 pub mod moderation;
+pub mod operations;
 pub mod realtime;
 pub mod safety;
 pub mod search;

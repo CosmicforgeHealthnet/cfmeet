@@ -420,6 +420,12 @@ pub async fn send(
     effective: &EffectivePolicy,
     request: SendRequest,
 ) -> Result<(u16, Value)> {
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::MessageSend,
+        ctx.scope.environment_id,
+    )
+    .await?;
     if request.ciphertext.is_some() || request.device_id.is_some() || request.epoch.is_some() {
         return Err(Error::reason(
             ErrorCode::ContentRejected,

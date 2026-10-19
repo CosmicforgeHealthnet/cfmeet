@@ -284,6 +284,13 @@ pub async fn process_deletions(
                 .await?;
                 if dead {
                     report.dead += 1;
+                    crate::operations::raise(
+                        &state.db,
+                        crate::operations::IncidentCategory::AttachmentDeleteDeadLetter,
+                        &d.id.to_string(),
+                        now,
+                    )
+                    .await;
                     tracing::error!(
                         attempts,
                         "object deletion dead-lettered (kept for operators)"

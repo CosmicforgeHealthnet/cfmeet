@@ -215,6 +215,19 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("CF_SMS_GATEWAY_BASE_URL is not set: SMS bridges are refused (in-app messaging unaffected)");
         state
     };
+    // Part V J: key-transparency rollback detection against an operator checkpoint kept
+    // outside the database (and its backups).
+    match std::env::var("MESSAGING_KT_CHECKPOINT_FILE") {
+        Ok(path) if !path.is_empty() => {
+            tokio::spawn(messaging::operations::run_kt_monitor(
+                db.clone(),
+                state.clock.clone(),
+                std::path::PathBuf::from(path),
+                Duration::from_secs(60),
+            ));
+        }
+        _ => tracing::warn!("MESSAGING_KT_CHECKPOINT_FILE is not set: key-transparency rollback detection relies on external auditors only"),
+    }
     // Part V I: customer webhooks through the existing platform webhook system (Calling).
     let calling_configured = settings
         .targets
