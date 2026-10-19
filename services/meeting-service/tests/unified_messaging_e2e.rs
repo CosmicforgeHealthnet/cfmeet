@@ -960,9 +960,9 @@ async fn meeting_chat_migrates_to_unified_messaging_across_real_services() {
     )
     .await;
     assert_eq!(
-        s,
-        StatusCode::CREATED,
-        "private chat stays on the meeting store: {v}"
+        (s, v["error"]["code"].as_str()),
+        (StatusCode::SERVICE_UNAVAILABLE, Some("CHAT_UNAVAILABLE")),
+        "private chat is in Messaging too after cutover (never silently written to the legacy store): {v}"
     );
     world.restart_messaging().await;
     let (s, v) = collab::send(&app, cid, g0.auth(), json!({ "body": "back again" })).await;
@@ -1040,4 +1040,389 @@ async fn meeting_chat_migrates_to_unified_messaging_across_real_services() {
     );
     let (s, v) = collab::send(&app, cid, g0.auth(), json!({ "body": "after the end" })).await;
     assert!(s.is_client_error(), "{v}");
+}
+
+/// Breakout-room and private chat follow the same migration: each scope is its own
+/// MEETING conversation in Messaging, its membership follows breakout assignment /
+/// meeting admission (version-fenced), private chats never include a host or the
+/// meeting owner, and the legacy store refuses every scope after cutover.
+#[tokio::test]
+async fn breakout_and_private_chat_migrate_to_unified_messaging_across_real_services() {
+    let Some(world) = setup().await else {
+        return;
+    };
+    let app = meeting_app(&world).await;
+    let um = um(&app);
+    let ops = app.admin("ops").await;
+    let (owner, cid, guests) = collab::meeting(&app, collab::public(), 3).await;
+    let _host = collab::owner_joined(&app, cid, &owner).await;
+    let (g0, g1, g2) = (&guests[0], &guests[1], &guests[2]);
+    let base = collab::base(cid);
+    let rooms = collab::create_rooms(&app, cid, &owner, json!({ "names": ["A", "B"] })).await;
+    let (ra, rb) = (rooms[0], rooms[1]);
+    let (s, v) = app
+        .post(
+            &format!("{base}/breakouts/assign"),
+            Auth::Bearer(&owner.token),
+            json!({ "mode": "MANUAL", "assignments": [
+                { "participantId": g0.participant_id, "breakoutId": ra },
+                { "participantId": g1.participant_id, "breakoutId": rb } ] }),
+        )
+        .await;
+    assert!(s.is_success(), "{v}");
+    collab::open_room(&app, cid, &owner, ra).await;
+    collab::open_room(&app, cid, &owner, rb).await;
+
+    // ---- LEGACY_PRIMARY: breakout and private chat in the legacy store.
+    let (s, v) = collab::send(
+        &app,
+        cid,
+        g0.auth(),
+        json!({ "body": "legacy in A", "breakoutId": ra }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let (s, v) = collab::send(
+        &app,
+        cid,
+        g2.auth(),
+        json!({ "body": "legacy private", "recipientParticipantId": g0.participant_id }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+
+    // ---- SHADOW_VALIDATION: every scope gets its own conversation, history mirrored.
+    let (s, v) = transition(&app, &ops, "SHADOW_VALIDATION", None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let r = um.sync_once().await.unwrap();
+    assert_eq!(r.failures, 0, "{r:?}");
+    assert_eq!(r.messages_mirrored, 2, "{r:?}");
+    let refs = |kind: &str| {
+        format!("SELECT count(*) FROM messaging_conversations WHERE context_class = 'MEETING' AND security_profile = 'MANAGED' AND context_ref LIKE 'conference:{cid}:{kind}:%'")
+    };
+    assert_eq!(
+        world.m_scalar(&refs("breakout")).await,
+        1,
+        "room A (B has no history yet)"
+    );
+    assert_eq!(world.m_scalar(&refs("private")).await, 1);
+    assert_eq!(
+        world.m_scalar("SELECT count(*) FROM messaging_messages WHERE security_provenance = 'LEGACY_MANAGED'").await,
+        2
+    );
+    let conv_of = |scope: &str| {
+        let app = &app;
+        let scope = scope.to_string();
+        async move {
+            let r = app
+                .db
+                .conn
+                .query_one(sea_orm::Statement::from_string(
+                    sea_orm::DbBackend::Postgres,
+                    format!("SELECT conversation_id::text FROM conference_chat_scope_links WHERE conference_id = '{cid}' AND {scope}"),
+                ))
+                .await
+                .unwrap()
+                .unwrap();
+            Uuid::parse_str(&r.try_get_by_index::<String>(0).unwrap()).unwrap()
+        }
+    };
+    let conv_a = conv_of(&format!("breakout_room_id = '{ra}'")).await;
+    let conv_p = conv_of("scope_kind = 'PRIVATE'").await;
+    let principal_of = |pid: Uuid| {
+        let app = &app;
+        async move {
+            let r = app
+                .db
+                .conn
+                .query_one(sea_orm::Statement::from_string(
+                    sea_orm::DbBackend::Postgres,
+                    format!("SELECT principal_id::text FROM communication_principal_links WHERE subject_kind = 'PARTICIPANT' AND subject_id = '{pid}'"),
+                ))
+                .await
+                .unwrap()
+                .expect("guest principal");
+            Uuid::parse_str(&r.try_get_by_index::<String>(0).unwrap()).unwrap()
+        }
+    };
+    let active = |conv: Uuid| {
+        format!("SELECT count(*) FROM messaging_conversation_members WHERE conversation_id = '{conv}' AND state = 'ACTIVE'")
+    };
+    // Room A: the space owner (OWNER) and g0 (assigned).
+    assert_eq!(world.m_scalar(&active(conv_a)).await, 2);
+    // The private chat: ONLY its two parties besides the non-human system owner; no
+    // host, no meeting owner.
+    assert_eq!(world.m_scalar(&active(conv_p)).await, 3);
+    let owner_principal = app
+        .scalar("SELECT count(*) FROM communication_principal_links WHERE subject_kind = 'SYSTEM' AND principal_kind = 'BOT_OR_SERVICE'")
+        .await;
+    assert_eq!(owner_principal, 1, "one system principal per environment");
+    assert_eq!(
+        world.m_scalar(&format!(
+            "SELECT count(*) FROM messaging_conversation_members m JOIN messaging_conversations c ON c.id = m.conversation_id \
+             WHERE m.conversation_id = '{conv_p}' AND m.role = 'OWNER' AND m.principal_id = c.owner_principal_id"
+        )).await,
+        1
+    );
+    let host_link = app
+        .scalar(&format!(
+            "SELECT count(*) FROM communication_principal_links WHERE subject_kind = 'USER' AND subject_id = '{}'",
+            owner.id
+        ))
+        .await;
+    assert_eq!(host_link, 1);
+    // Parity covers every scope.
+    let (s, parity) = app
+        .post(
+            "/api/v2/admin/chat-migration/parity-runs",
+            Auth::Bearer(&ops.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{parity}");
+    assert_eq!(parity["status"], "PASSED", "{parity}");
+    assert_eq!(parity["messagesChecked"], 2, "{parity}");
+    let (_, status) = app
+        .get("/api/v2/admin/chat-migration", Auth::Bearer(&ops.token))
+        .await;
+    assert_eq!(status["scope"]["legacy"], json!([]), "{status}");
+
+    // ---- MESSAGING_PRIMARY: every scope is written to and read from Messaging.
+    let (s, v) = transition(&app, &ops, "MESSAGING_PRIMARY", Some("second-operator")).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let legacy_rows = app
+        .scalar(&format!(
+            "SELECT count(*) FROM conference_messages WHERE conference_id = '{cid}'"
+        ))
+        .await;
+    let (s, v) = collab::send(
+        &app,
+        cid,
+        g0.auth(),
+        json!({ "body": "native in A", "breakoutId": ra }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let (s, v) = collab::send(
+        &app,
+        cid,
+        g1.auth(),
+        json!({ "body": "native in B", "breakoutId": rb }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let (s, v) = collab::send(
+        &app,
+        cid,
+        g2.auth(),
+        json!({ "body": "native private", "recipientParticipantId": g0.participant_id }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM conference_messages WHERE conference_id = '{cid}'"
+        ))
+        .await,
+        legacy_rows,
+        "no authoritative legacy write of any scope after cutover"
+    );
+    let sneaky = app
+        .db
+        .conn
+        .execute_unprepared(&format!(
+            "INSERT INTO conference_messages (id, conference_id, breakout_room_id, sender_participant_id, body) VALUES ('{}', '{cid}', '{ra}', '{}', 'sneaky')",
+            Uuid::new_v4(),
+            g0.participant_id
+        ))
+        .await;
+    assert!(sneaky.unwrap_err().to_string().contains("CHAT_MIGRATED"));
+    // Reads: one ordered history per scope, legacy ids kept.
+    let bodies = |page: &Value| -> Vec<String> {
+        page["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["body"].as_str().unwrap_or("").to_string())
+            .collect()
+    };
+    let (s, page) = collab::messages(
+        &app,
+        cid,
+        g0.auth(),
+        &format!("?scope=BREAKOUT&breakoutId={ra}"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{page}");
+    assert_eq!(bodies(&page), vec!["native in A", "legacy in A"], "{page}");
+    assert!(
+        page["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|m| m["breakoutId"] == json!(ra)),
+        "{page}"
+    );
+    let (s, page) = collab::messages(
+        &app,
+        cid,
+        g1.auth(),
+        &format!("?scope=BREAKOUT&breakoutId={ra}"),
+    )
+    .await;
+    assert!(s.is_client_error(), "B's member cannot read A: {page}");
+    let (s, page) = collab::messages(
+        &app,
+        cid,
+        g0.auth(),
+        &format!("?scope=PRIVATE&peerId={}", g2.participant_id),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{page}");
+    assert_eq!(
+        bodies(&page),
+        vec!["native private", "legacy private"],
+        "{page}"
+    );
+    let (_, page) = collab::messages(
+        &app,
+        cid,
+        g2.auth(),
+        &format!("?scope=PRIVATE&peerId={}", g0.participant_id),
+    )
+    .await;
+    assert_eq!(
+        bodies(&page),
+        vec!["native private", "legacy private"],
+        "the other party sees the same chat"
+    );
+    let (s, page) = collab::messages(
+        &app,
+        cid,
+        Auth::Bearer(&owner.token),
+        &format!("?scope=PRIVATE&peerId={}", g0.participant_id),
+    )
+    .await;
+    assert!(
+        !(s.is_success() && bodies(&page).contains(&"native private".to_string())),
+        "the host never reads others' private chat: {page}"
+    );
+
+    // Direct Messaging access (a participant's own client) follows the same membership.
+    let as_principal = |p: Uuid, conv: Uuid| {
+        let world = &world;
+        async move {
+            let r = world
+                .http
+                .get(format!(
+                    "{}/v1/conversations/{conv}/messages",
+                    world.messaging_url
+                ))
+                .bearer_auth(&world.credential)
+                .header("cf-acting-principal", p.to_string())
+                .send()
+                .await
+                .unwrap();
+            r.status().as_u16()
+        }
+    };
+    let (p0, p1, p2) = (
+        principal_of(g0.participant_id).await,
+        principal_of(g1.participant_id).await,
+        principal_of(g2.participant_id).await,
+    );
+    assert_eq!(as_principal(p0, conv_a).await, 200);
+    assert_eq!(as_principal(p1, conv_a).await, 404, "not assigned to A");
+    assert_eq!(as_principal(p2, conv_p).await, 200);
+    assert_eq!(as_principal(p1, conv_p).await, 404, "not a party");
+
+    // Moving g0 from A to B: A's access ends (even for an already-issued client), B's begins.
+    let (s, v) = app
+        .post(
+            &format!("{base}/breakouts/move"),
+            Auth::Bearer(&owner.token),
+            json!({ "participantId": g0.participant_id, "toBreakoutId": rb }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let r = um.sync_once().await.unwrap();
+    assert_eq!(r.failures, 0, "{r:?}");
+    assert_eq!(as_principal(p0, conv_a).await, 404, "moved out of A");
+    let conv_b = conv_of(&format!("breakout_room_id = '{rb}'")).await;
+    assert_eq!(as_principal(p0, conv_b).await, 200, "moved into B");
+    let (s, v) = collab::send(
+        &app,
+        cid,
+        g0.auth(),
+        json!({ "body": "now in B", "breakoutId": rb }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    // A stale/delayed membership update is fenced (versions only move forward).
+    assert!(
+        app.scalar(
+            "SELECT count(*) FROM conference_chat_scope_member_sync WHERE synced_state = 'REMOVED'"
+        )
+        .await
+            >= 1
+    );
+
+    // Removing g2 from the meeting removes them from the private chat.
+    let (s, v) = app
+        .post(
+            &format!("{base}/participants/{}/remove", g2.participant_id),
+            Auth::Bearer(&owner.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    um.sync_once().await.unwrap();
+    assert_eq!(
+        as_principal(p2, conv_p).await,
+        404,
+        "removed from the meeting"
+    );
+    assert_eq!(
+        as_principal(p0, conv_p).await,
+        200,
+        "the remaining party keeps the chat"
+    );
+
+    // ---- Rollback: native breakout / private messages go home with their scope.
+    let (s, v) = transition(&app, &ops, "SHADOW_VALIDATION", None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["pendingRollbackCopies"], 0, "{v}");
+    assert_eq!(
+        app.scalar(&format!("SELECT count(*) FROM conference_messages WHERE conference_id = '{cid}' AND origin = 'MESSAGING_ROLLBACK' AND breakout_room_id IS NOT NULL")).await,
+        3
+    );
+    assert_eq!(
+        app.scalar(&format!("SELECT count(*) FROM conference_messages WHERE conference_id = '{cid}' AND origin = 'MESSAGING_ROLLBACK' AND recipient_participant_id = '{}' AND sender_participant_id = '{}'", g0.participant_id, g2.participant_id)).await,
+        1,
+        "the private message keeps its sender and recipient"
+    );
+    let (_, parity) = app
+        .post(
+            "/api/v2/admin/chat-migration/parity-runs",
+            Auth::Bearer(&ops.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(parity["status"], "PASSED", "{parity}");
+
+    // ---- Closing the rooms closes their conversations.
+    let (s, v) = app
+        .post(
+            &format!("{base}/breakouts/close-all"),
+            Auth::Bearer(&owner.token),
+            json!({ "countdownSeconds": 0 }),
+        )
+        .await;
+    assert!(s.is_success(), "{v}");
+    let r = um.sync_once().await.unwrap();
+    assert!(r.lifecycles_synced >= 2, "{r:?}");
+    assert_eq!(
+        world.m_scalar(&format!("SELECT count(*) FROM messaging_conversations WHERE id IN ('{conv_a}', '{conv_b}') AND lifecycle_state = 'CLOSED'")).await,
+        2
+    );
 }

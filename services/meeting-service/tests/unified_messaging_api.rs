@@ -344,9 +344,16 @@ async fn chat_migration_controls_are_platform_admin_only_and_gated() {
         (v["state"].as_str(), v["version"].as_i64()),
         (Some("LEGACY_PRIMARY"), Some(1))
     );
+    // Every chat scope migrates under the same state machine; none stays legacy-only.
+    assert_eq!(v["scope"]["legacy"], json!([]));
     assert_eq!(
-        v["scope"]["legacy"],
-        json!(["BREAKOUT_CHAT", "PRIVATE_CHAT"])
+        v["scope"]["migrated"],
+        json!([
+            "MAIN_ROOM_CHAT",
+            "ANNOUNCEMENTS",
+            "BREAKOUT_CHAT",
+            "PRIVATE_CHAT"
+        ])
     );
     let (s, _) = app.get(status, Auth::Bearer(&user.token)).await;
     assert_eq!(s, StatusCode::FORBIDDEN);

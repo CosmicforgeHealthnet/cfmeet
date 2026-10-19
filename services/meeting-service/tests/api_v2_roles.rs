@@ -373,8 +373,21 @@ async fn r04_instant_meeting_and_conference_views() {
     assert_eq!(v["conference"]["kind"], "INSTANT");
     assert_eq!(v["meetingSpace"]["accessPolicy"], "PUBLIC");
     let cid = uuid(&v["conference"]["id"]);
+    // A provider room name is `cf-` + 32 hex digits (a hyphenated UUID such as
+    // `...-1acf-...` also contains "cf-", so the bare substring was a flaky check).
+    let text = v.to_string();
+    let provider_room = text.match_indices("cf-").any(|(i, _)| {
+        text[i + 3..]
+            .chars()
+            .take(32)
+            .filter(|c| c.is_ascii_hexdigit())
+            .count()
+            == 32
+    });
     assert!(
-        !v.to_string().contains("rtcRoom") && !v.to_string().contains("cf-"),
+        !text.contains("rtcRoom")
+            && !provider_room
+            && !text.contains(&format!("cf-{}", cid.simple())),
         "no provider ids exposed"
     );
     for e in [

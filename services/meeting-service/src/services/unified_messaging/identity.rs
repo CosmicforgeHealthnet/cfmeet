@@ -60,7 +60,7 @@ impl BridgeOperation {
 }
 
 impl UnifiedMessaging {
-    async fn ensure_principal(
+    pub(crate) async fn ensure_principal(
         &self,
         subject_kind: &'static str,
         subject_id: Uuid,
@@ -81,6 +81,7 @@ impl UnifiedMessaging {
         let kind_str = match kind {
             PrincipalKind::NativeCfUser => "NATIVE_CF_USER",
             PrincipalKind::TemporaryExternalParticipant => "TEMPORARY_EXTERNAL_PARTICIPANT",
+            PrincipalKind::BotOrService => "BOT_OR_SERVICE",
             _ => return Err(ApiError::InternalError("unsupported principal kind".into())),
         };
         let v = self

@@ -145,7 +145,7 @@ pub struct MigrationStatusView {
     pub version: i64,
     pub changed_at: String,
     pub changed_by: String,
-    /// Main-room legacy messages of linked conferences not yet mirrored.
+    /// Legacy messages (every scope) of linked conferences not yet mirrored.
     pub pending_mirror: i64,
     /// Messaging-native messages not yet copied back after a rollback.
     pub pending_rollback_copies: i64,
@@ -153,7 +153,7 @@ pub struct MigrationStatusView {
     pub linked_conferences: i64,
     pub latest_parity_run: Option<ParityRunView>,
     pub transitions: Vec<TransitionView>,
-    /// What this increment migrates (breakout / private chat stay legacy).
+    /// What is migrated: every meeting chat scope.
     pub scope: Value,
 }
 
@@ -169,11 +169,12 @@ async fn scalar<C: ConnectionTrait>(db: &C, sql: &str) -> ApiResult<i64> {
         .unwrap_or(0))
 }
 
+/// Legacy messages of linked conferences not yet mirrored: main room, breakout rooms
+/// and private chats alike (all three must be in Messaging before a cutover).
 pub(crate) const PENDING_MIRROR_SQL: &str = "SELECT count(*) FROM conference_messages m \
      JOIN conference_chat_links l ON l.conference_id = m.conference_id \
      LEFT JOIN conference_chat_message_links k ON k.legacy_message_id = m.id \
-     WHERE m.breakout_room_id IS NULL AND m.recipient_participant_id IS NULL \
-       AND m.origin = 'MEETING' AND k.messaging_message_id IS NULL";
+     WHERE m.origin = 'MEETING' AND k.messaging_message_id IS NULL";
 
 pub(crate) const PENDING_ROLLBACK_SQL: &str = "SELECT count(*) FROM conference_chat_message_links \
      WHERE origin = 'MESSAGING_NATIVE' AND legacy_message_id IS NULL";
@@ -250,8 +251,8 @@ impl UnifiedMessaging {
             latest_parity_run: self.latest_parity().await?,
             transitions,
             scope: json!({
-                "migrated": ["MAIN_ROOM_CHAT", "ANNOUNCEMENTS"],
-                "legacy": ["BREAKOUT_CHAT", "PRIVATE_CHAT"],
+                "migrated": ["MAIN_ROOM_CHAT", "ANNOUNCEMENTS", "BREAKOUT_CHAT", "PRIVATE_CHAT"],
+                "legacy": [],
                 "securityProfile": "MANAGED",
                 "historicalProvenance": "LEGACY_MANAGED",
             }),
@@ -322,7 +323,7 @@ impl UnifiedMessaging {
                 let pending = scalar(&txn, PENDING_MIRROR_SQL).await?;
                 if pending > 0 {
                     return Err(refused(format!(
-                        "{pending} main-room messages are not mirrored yet"
+                        "{pending} meeting chat messages are not mirrored yet"
                     )));
                 }
                 let run = one(

@@ -42,10 +42,12 @@ impl UnifiedMessaging {
             principal_id: link.owner_principal_id,
             kind: PrincipalKind::NativeCfUser,
         };
-        let path = format!(
-            "/internal/v1/delegated/v1/conversations/{}/messages",
-            link.conversation_id
-        );
+        self.history_of(link.conversation_id, acting).await
+    }
+
+    /// Any conversation's full canonical history as `acting` sees it (oldest first).
+    pub async fn history_of(&self, conversation_id: Uuid, acting: Acting) -> ApiResult<Vec<Value>> {
+        let path = format!("/internal/v1/delegated/v1/conversations/{conversation_id}/messages");
         let mut out = Vec::new();
         let mut after: i64 = 0;
         loop {
@@ -197,7 +199,7 @@ impl UnifiedMessaging {
     pub async fn mirror_deletions(&self, limit: u64) -> ApiResult<u32> {
         let rows = all(
             &self.db,
-            "SELECT k.messaging_message_id, l.conversation_id FROM conference_chat_message_links k \
+            "SELECT k.messaging_message_id, COALESCE(k.conversation_id, l.conversation_id) FROM conference_chat_message_links k \
                JOIN conference_messages m ON m.id = k.legacy_message_id \
                JOIN conference_chat_links l ON l.conference_id = k.conference_id \
              WHERE m.deleted_at IS NOT NULL AND k.deletion_mirrored_at IS NULL LIMIT $1",
@@ -230,11 +232,12 @@ impl UnifiedMessaging {
         Ok(n)
     }
 
-    /// After a rollback: Messaging-native messages go back into the legacy store.
+    /// After a rollback: Messaging-native messages (every scope) go back into the legacy
+    /// store, labelled `MESSAGING_ROLLBACK`.
     pub async fn copy_back_native(&self, limit: u64) -> ApiResult<u32> {
         let rows = all(
             &self.db,
-            "SELECT DISTINCT conference_id FROM conference_chat_message_links \
+            "SELECT DISTINCT conference_id, conversation_id FROM conference_chat_message_links \
              WHERE origin = 'MESSAGING_NATIVE' AND legacy_message_id IS NULL LIMIT $1",
             vec![(limit as i64).into()],
         )
@@ -242,20 +245,37 @@ impl UnifiedMessaging {
         let mut copied = 0;
         for r in rows {
             let conference_id: Uuid = r.try_get_by_index(0)?;
-            let Some(link) = self.link_of(&self.db, conference_id).await? else {
-                continue;
+            let scoped: Option<Uuid> = r.try_get_by_index(1)?;
+            // (history, scope of the rows: None = main room)
+            let (history, scope) = match scoped {
+                None => {
+                    let Some(link) = self.link_of(&self.db, conference_id).await? else {
+                        continue;
+                    };
+                    (self.history(&link).await?, None)
+                }
+                Some(conversation_id) => {
+                    let Some(link) = self
+                        .scope_link_by_conversation(&self.db, conversation_id)
+                        .await?
+                    else {
+                        continue;
+                    };
+                    (self.scope_history(&link).await?, Some(link.scope))
+                }
             };
             let owed: HashMap<Uuid, i64> = all(
                 &self.db,
                 "SELECT messaging_message_id, messaging_sequence FROM conference_chat_message_links \
-                 WHERE conference_id = $1 AND origin = 'MESSAGING_NATIVE' AND legacy_message_id IS NULL",
-                vec![conference_id.into()],
+                 WHERE conference_id = $1 AND conversation_id IS NOT DISTINCT FROM $2 \
+                   AND origin = 'MESSAGING_NATIVE' AND legacy_message_id IS NULL",
+                vec![conference_id.into(), scoped.into()],
             )
             .await?
             .iter()
             .map(|r| Ok((r.try_get_by_index(0)?, r.try_get_by_index(1)?)))
             .collect::<ApiResult<_>>()?;
-            for m in self.history(&link).await? {
+            for m in history {
                 let Some(mid) = m["messageId"]
                     .as_str()
                     .and_then(|s| Uuid::parse_str(s).ok())
@@ -272,6 +292,11 @@ impl UnifiedMessaging {
                 else {
                     tracing::warn!("rollback copy: sender has no participant in this conference");
                     continue;
+                };
+                let (breakout, recipient) = match scope {
+                    None => (None, None),
+                    Some(super::scoped::ChatScope::Breakout(b)) => (Some(b), None),
+                    Some(sc) => (None, sc.peer_of(sender)),
                 };
                 let active = m["lifecycle"] == "ACTIVE";
                 let text = m["managed"]["text"].as_str().unwrap_or("").to_string();
@@ -290,11 +315,13 @@ impl UnifiedMessaging {
                     &self.db,
                     "INSERT INTO conference_messages (id, conference_id, breakout_room_id, sender_participant_id, \
                        recipient_participant_id, kind, body, created_at, deleted_at, deleted_by, origin) \
-                     VALUES ($1, $2, NULL, $3, NULL, $4, $5, $6, $7, $8, 'MESSAGING_ROLLBACK') ON CONFLICT (id) DO NOTHING",
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'MESSAGING_ROLLBACK') ON CONFLICT (id) DO NOTHING",
                     vec![
                         mid.into(),
                         conference_id.into(),
+                        breakout.into(),
                         sender.into(),
+                        recipient.into(),
                         kind.into(),
                         body.into(),
                         created.into(),
@@ -349,8 +376,9 @@ impl UnifiedMessaging {
         .transpose()?)
     }
 
-    /// Parity of every linked conference that has main-room history. Records the run and
-    /// each mismatch; PASSED only when nothing differs.
+    /// Parity of every linked conversation that has legacy history: the main room,
+    /// every breakout room and every private chat. Records the run and each mismatch;
+    /// PASSED only when nothing differs.
     pub async fn run_parity(&self) -> ApiResult<super::migration::ParityRunView> {
         let run_id = Uuid::new_v4();
         exec(
@@ -359,42 +387,75 @@ impl UnifiedMessaging {
             vec![run_id.into()],
         )
         .await?;
-        let conferences = all(
-            &self.db,
-            "SELECT DISTINCT m.conference_id FROM conference_messages m \
-             WHERE m.breakout_room_id IS NULL AND m.recipient_participant_id IS NULL",
-            vec![],
-        )
-        .await?;
         let (mut checked_conferences, mut checked_messages, mut mismatches) = (0i32, 0i32, 0i32);
         let mut status = "PASSED";
-        let record = |conference: Uuid,
-                      legacy: Option<Uuid>,
-                      mid: Option<Uuid>,
-                      kind: &'static str| {
-            let db = self.db.clone();
-            async move {
-                exec(
-                    &db,
-                    "INSERT INTO conference_chat_mismatches (run_id, conference_id, legacy_message_id, messaging_message_id, kind) \
-                     VALUES ($1, $2, $3, $4, $5)",
-                    vec![run_id.into(), conference.into(), legacy.into(), mid.into(), kind.into()],
-                )
-                .await
-            }
-        };
-        for c in conferences {
-            let conference_id: Uuid = c.try_get_by_index(0)?;
-            checked_conferences += 1;
-            let Some(link) = self.link_of(&self.db, conference_id).await? else {
-                record(conference_id, None, None, "CONVERSATION_MISSING").await?;
-                mismatches += 1;
-                continue;
+        // Units: (conference, scope); None = the main room.
+        let mut units: Vec<(Uuid, Option<super::scoped::ChatScope>)> = Vec::new();
+        for r in all(
+            &self.db,
+            "SELECT DISTINCT conference_id, breakout_room_id, \
+                    CASE WHEN recipient_participant_id IS NULL THEN NULL \
+                         ELSE LEAST(sender_participant_id, recipient_participant_id) END, \
+                    CASE WHEN recipient_participant_id IS NULL THEN NULL \
+                         ELSE GREATEST(sender_participant_id, recipient_participant_id) END \
+               FROM conference_messages",
+            vec![],
+        )
+        .await?
+        {
+            let conference_id: Uuid = r.try_get_by_index(0)?;
+            let breakout: Option<Uuid> = r.try_get_by_index(1)?;
+            let low: Option<Uuid> = r.try_get_by_index(2)?;
+            let high: Option<Uuid> = r.try_get_by_index(3)?;
+            let scope = match (breakout, low, high) {
+                (_, Some(a), Some(b)) => Some(super::scoped::ChatScope::Private(a, b)),
+                (Some(b), _, _) => Some(super::scoped::ChatScope::Breakout(b)),
+                _ => None,
             };
-            let history = match self.history(&link).await {
+            if !units.contains(&(conference_id, scope)) {
+                units.push((conference_id, scope));
+            }
+        }
+        let mut conferences = std::collections::HashSet::new();
+        for (conference_id, scope) in units {
+            if conferences.insert(conference_id) {
+                checked_conferences += 1;
+            }
+            let record = |legacy: Option<Uuid>, mid: Option<Uuid>, kind: &'static str| {
+                let db = self.db.clone();
+                async move {
+                    exec(
+                        &db,
+                        "INSERT INTO conference_chat_mismatches (run_id, conference_id, legacy_message_id, messaging_message_id, kind) \
+                         VALUES ($1, $2, $3, $4, $5)",
+                        vec![run_id.into(), conference_id.into(), legacy.into(), mid.into(), kind.into()],
+                    )
+                    .await
+                }
+            };
+            // The canonical conversation of the unit.
+            let history = match scope {
+                None => match self.link_of(&self.db, conference_id).await? {
+                    Some(link) => self.history(&link).await,
+                    None => {
+                        record(None, None, "CONVERSATION_MISSING").await?;
+                        mismatches += 1;
+                        continue;
+                    }
+                },
+                Some(sc) => match self.scope_link_of(&self.db, conference_id, sc).await? {
+                    Some(link) => self.scope_history(&link).await,
+                    None => {
+                        record(None, None, "CONVERSATION_MISSING").await?;
+                        mismatches += 1;
+                        continue;
+                    }
+                },
+            };
+            let history = match history {
                 Ok(h) => h,
                 Err(_) => {
-                    record(conference_id, None, None, "MESSAGING_UNAVAILABLE").await?;
+                    record(None, None, "MESSAGING_UNAVAILABLE").await?;
                     mismatches += 1;
                     status = "ERROR";
                     continue;
@@ -404,12 +465,29 @@ impl UnifiedMessaging {
                 .iter()
                 .filter_map(|m| Some((Uuid::parse_str(m["messageId"].as_str()?).ok()?, m)))
                 .collect();
+            let (filter, values): (&str, Vec<sea_orm::Value>) = match scope {
+                None => (
+                    "m.breakout_room_id IS NULL AND m.recipient_participant_id IS NULL",
+                    vec![conference_id.into()],
+                ),
+                Some(super::scoped::ChatScope::Breakout(b)) => (
+                    "m.breakout_room_id = $2 AND m.recipient_participant_id IS NULL",
+                    vec![conference_id.into(), b.into()],
+                ),
+                Some(super::scoped::ChatScope::Private(a, b)) => (
+                    "m.recipient_participant_id IS NOT NULL AND LEAST(m.sender_participant_id, m.recipient_participant_id) = $2 \
+                     AND GREATEST(m.sender_participant_id, m.recipient_participant_id) = $3",
+                    vec![conference_id.into(), a.into(), b.into()],
+                ),
+            };
             let legacy = all(
                 &self.db,
-                "SELECT m.id, m.body, m.deleted_at IS NOT NULL, k.messaging_message_id FROM conference_messages m \
-                   LEFT JOIN conference_chat_message_links k ON k.legacy_message_id = m.id \
-                 WHERE m.conference_id = $1 AND m.breakout_room_id IS NULL AND m.recipient_participant_id IS NULL",
-                vec![conference_id.into()],
+                &format!(
+                    "SELECT m.id, m.body, m.deleted_at IS NOT NULL, k.messaging_message_id FROM conference_messages m \
+                       LEFT JOIN conference_chat_message_links k ON k.legacy_message_id = m.id \
+                     WHERE m.conference_id = $1 AND {filter}"
+                ),
+                values,
             )
             .await?;
             let mut accounted = std::collections::HashSet::new();
@@ -420,14 +498,14 @@ impl UnifiedMessaging {
                 let deleted: bool = r.try_get_by_index(2)?;
                 let mid: Option<Uuid> = r.try_get_by_index(3)?;
                 let Some(m) = mid.and_then(|mid| canonical.get(&mid).map(|m| (mid, *m))) else {
-                    record(conference_id, Some(id), mid, "MISSING_IN_MESSAGING").await?;
+                    record(Some(id), mid, "MISSING_IN_MESSAGING").await?;
                     mismatches += 1;
                     continue;
                 };
                 accounted.insert(m.0);
                 let canonical_deleted = m.1["lifecycle"] != "ACTIVE";
                 if canonical_deleted != deleted {
-                    record(conference_id, Some(id), Some(m.0), "DELETION_DIFFERS").await?;
+                    record(Some(id), Some(m.0), "DELETION_DIFFERS").await?;
                     mismatches += 1;
                 } else if !deleted
                     && m.1["managed"]["text"]
@@ -435,7 +513,7 @@ impl UnifiedMessaging {
                         .map(|t| digest(t) != digest(&body))
                         .unwrap_or(true)
                 {
-                    record(conference_id, Some(id), Some(m.0), "CONTENT_DIFFERS").await?;
+                    record(Some(id), Some(m.0), "CONTENT_DIFFERS").await?;
                     mismatches += 1;
                 }
             }
@@ -452,7 +530,7 @@ impl UnifiedMessaging {
                 .await?
                 .is_some();
                 if !native_owed {
-                    record(conference_id, None, Some(*mid), "UNEXPECTED_IN_MESSAGING").await?;
+                    record(None, Some(*mid), "UNEXPECTED_IN_MESSAGING").await?;
                     mismatches += 1;
                 }
             }

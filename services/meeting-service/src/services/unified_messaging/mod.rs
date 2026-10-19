@@ -13,12 +13,14 @@
 //! | migration state machine with gates and rollback (§100) | [`migration`] |
 //! | shadow mirroring as LEGACY_MANAGED, parity, rollback copies (§§100–101) | [`mirror`] |
 //! | compatibility adapter behind `MessageStore` (§99) | [`store`] |
+//! | breakout rooms and private chats: their own conversations, membership, lifecycle | [`scoped`] |
 
 pub mod config;
 pub mod gateway;
 pub mod identity;
 pub mod migration;
 pub mod mirror;
+pub mod scoped;
 pub mod store;
 
 use std::sync::Arc;
@@ -516,12 +518,19 @@ impl UnifiedMessaging {
         }
         step!(conversations_linked, self.link_active_conferences(50).await);
         step!(members_synced, self.sync_members(200).await);
+        step!(members_synced, self.sync_scoped_members(100).await);
         if state == ChatMigrationState::ShadowValidation {
             step!(messages_mirrored, self.mirror_pending(200).await);
+            step!(messages_mirrored, self.mirror_scoped_pending(200).await);
             step!(deletions_mirrored, self.mirror_deletions(200).await);
             step!(rollback_copies, self.copy_back_native(200).await);
+        } else {
+            // After cutover only breakout / private rows written before this release can
+            // still be unmirrored (the database refuses new ones): import them once.
+            step!(messages_mirrored, self.mirror_scoped_pending(200).await);
         }
         step!(lifecycles_synced, self.sync_lifecycles(50).await);
+        step!(lifecycles_synced, self.sync_scoped_lifecycles(50).await);
         Ok(report)
     }
 }

@@ -149,6 +149,18 @@ impl Cursor {
 /// Storage adapter (replaceable by Phase 5 Unified Messaging).
 #[async_trait]
 pub trait MessageStore: Send + Sync {
+    /// Work a store must do BEFORE the send transaction takes its row locks (the
+    /// conference and the sender): e.g. resolving the scope's conversation and its
+    /// membership, whose rows reference those locked rows. Default: nothing.
+    async fn prepare(
+        &self,
+        _conference_id: Uuid,
+        _breakout_room_id: Option<Uuid>,
+        _sender_participant_id: Uuid,
+        _recipient_participant_id: Option<Uuid>,
+    ) -> ApiResult<()> {
+        Ok(())
+    }
     async fn insert(&self, txn: &DatabaseTransaction, m: NewMessage) -> ApiResult<StoredMessage>;
     /// One page, newest first, strictly older than `before`. `reader` scopes private
     /// conversations to (reader, peer).
@@ -439,7 +451,7 @@ impl MeetingMessagingService {
         self
     }
 
-    /// The store of main-room chat now (legacy until the operator cuts over).
+    /// The store of meeting chat now, every scope (legacy until the operator cuts over).
     async fn main_store(&self) -> ApiResult<Arc<dyn MessageStore>> {
         if let Some((um, store)) = &self.unified {
             if um.state().await?.messaging_authoritative() {
@@ -558,6 +570,16 @@ impl MeetingMessagingService {
             .check(RateAction::Chat, &me.id.to_string())
             .await?;
 
+        // Every chat scope follows the migration (main room, breakout rooms, private).
+        let store = self.main_store().await?;
+        store
+            .prepare(
+                conference_id,
+                req.breakout_id,
+                me.id,
+                recipient.as_ref().map(|p| p.id),
+            )
+            .await?;
         let txn = self.core.db.begin().await?;
         let conference = lock_conference(&txn, conference_id).await?;
         // Re-read sender, policy and context under the conference lock: a restriction
@@ -628,11 +650,6 @@ impl MeetingMessagingService {
                 ));
             }
         }
-        let store = if recipient.is_none() && req.breakout_id.is_none() {
-            self.main_store().await?
-        } else {
-            self.store.clone()
-        };
         let stored = store
             .insert(
                 &txn,
@@ -745,11 +762,7 @@ impl MeetingMessagingService {
                 None => None,
             };
         let limit = limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE);
-        let store = if scope == MessageScope::Main {
-            self.main_store().await?
-        } else {
-            self.store.clone()
-        };
+        let store = self.main_store().await?;
         let rows = store
             .page(
                 &self.core.db,
@@ -818,7 +831,7 @@ impl MeetingMessagingService {
         let c = Collab::load(&self.core, ctx, conference_id).await?;
         let txn = self.core.db.begin().await?;
         let conference = lock_conference(&txn, conference_id).await?;
-        // Migrated main-room messages live in Messaging; everything else here.
+        // Migrated messages (any scope) live in Messaging; older unmigrated rows here.
         let main = self.main_store().await?;
         let (m, store) = match main.find(&txn, conference_id, message_id).await? {
             Some(m) if !Arc::ptr_eq(&main, &self.store) => (m, main),

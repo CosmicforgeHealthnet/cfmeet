@@ -672,16 +672,14 @@ fn public_server_url(configured: Option<&str>) -> String {
 /// "Could not resolve reference: Failed to fetch".
 const CALLING_API: &str =
     include_str!("../../../../packages/contracts/bundled/calling/http/v1.openapi.json");
-const PLATFORM_ACCESS_API: &str = include_str!(
-    "../../../../packages/contracts/bundled/platform-access/internal/v1.openapi.json"
-);
+const PLATFORM_ACCESS_API: &str =
+    include_str!("../../../../packages/contracts/bundled/platform-access/internal/v1.openapi.json");
 const NUMBERING_API: &str =
     include_str!("../../../../packages/contracts/bundled/numbering/internal/v1.openapi.json");
 const PRIVACY_RELAY_API: &str =
     include_str!("../../../../packages/contracts/bundled/privacy-relay/http/v1.openapi.json");
-const PRIVACY_RELAY_INTERNAL_API: &str = include_str!(
-    "../../../../packages/contracts/bundled/privacy-relay/internal/v1.openapi.json"
-);
+const PRIVACY_RELAY_INTERNAL_API: &str =
+    include_str!("../../../../packages/contracts/bundled/privacy-relay/internal/v1.openapi.json");
 const TELEPHONY_API: &str =
     include_str!("../../../../packages/contracts/bundled/telephony/internal/v1.openapi.json");
 const SMS_GATEWAY_API: &str =
@@ -698,14 +696,26 @@ const PEER_DOCS: [(&str, &str, &str); 8] = [
         "/api-docs/platform-access.json",
         PLATFORM_ACCESS_API,
     ),
-    ("Numbering / DCNs", "/api-docs/numbering.json", NUMBERING_API),
-    ("Privacy Relay", "/api-docs/privacy-relay.json", PRIVACY_RELAY_API),
+    (
+        "Numbering / DCNs",
+        "/api-docs/numbering.json",
+        NUMBERING_API,
+    ),
+    (
+        "Privacy Relay",
+        "/api-docs/privacy-relay.json",
+        PRIVACY_RELAY_API,
+    ),
     (
         "Privacy Relay (internal)",
         "/api-docs/privacy-relay-internal.json",
         PRIVACY_RELAY_INTERNAL_API,
     ),
-    ("Telephony (internal)", "/api-docs/telephony.json", TELEPHONY_API),
+    (
+        "Telephony (internal)",
+        "/api-docs/telephony.json",
+        TELEPHONY_API,
+    ),
     ("SMS Gateway", "/api-docs/sms-gateway.json", SMS_GATEWAY_API),
     ("Messaging", "/api-docs/messaging.json", MESSAGING_API),
 ];
@@ -721,7 +731,8 @@ const SWAGGER_UI_CSS_SRI: &str =
 const SWAGGER_UI_JS_SRI: &str =
     "sha384-wmyclcVGX/WhUkdkATwhaK1X1JtiNrr2EoYJ+diV3vj4v6OC5yCeSu+yW13SYJep";
 /// The page may load only the pinned assets; documents come from this origin only.
-const SWAGGER_UI_CSP: &str = "default-src 'none'; script-src https://cdn.jsdelivr.net 'sha256-SWAGGER_INIT'; \
+const SWAGGER_UI_CSP: &str =
+    "default-src 'none'; script-src https://cdn.jsdelivr.net 'sha256-SWAGGER_INIT'; \
      style-src https://cdn.jsdelivr.net 'unsafe-inline'; img-src 'self' data:; \
      connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
@@ -791,9 +802,7 @@ pub fn swagger_router(server_addr: &str) -> Router {
     let mut public_server = utoipa::openapi::Server::new(public_server_url(configured.as_deref()));
     public_server.description = Some("Meeting Service deployment".to_string());
     openapi.servers = Some(vec![current_server, public_server]);
-    let meeting_doc = openapi
-        .to_json()
-        .expect("OpenAPI document serializes");
+    let meeting_doc = openapi.to_json().expect("OpenAPI document serializes");
 
     // Internal specifications are *documentation*, not new externally executable routes.
     // Trying another service's operations requires that service's own reachable ingress,
@@ -802,7 +811,10 @@ pub fn swagger_router(server_addr: &str) -> Router {
     let csp = swagger_csp();
     let config = swagger_config().to_string();
     let mut router = Router::new()
-        .route("/swagger-ui", get(|| async { Redirect::permanent("/swagger-ui/") }))
+        .route(
+            "/swagger-ui",
+            get(|| async { Redirect::permanent("/swagger-ui/") }),
+        )
         .route(
             "/swagger-ui/",
             get(move || {
@@ -907,7 +919,10 @@ mod tests {
                         let pointer = r
                             .strip_prefix('#')
                             .unwrap_or_else(|| panic!("{name}: external reference {r}"));
-                        assert!(resolve(doc, pointer).is_some(), "{name}: {r} does not resolve");
+                        assert!(
+                            resolve(doc, pointer).is_some(),
+                            "{name}: {r} does not resolve"
+                        );
                     }
                     map.values().for_each(|v| walk(doc, v, name, refs));
                 }
@@ -933,13 +948,20 @@ mod tests {
     #[test]
     fn swagger_page_pins_its_assets_and_sets_a_restrictive_csp() {
         let page = swagger_page();
-        assert_eq!(page.matches("integrity=\"sha384-").count(), 2, "SRI on CSS and JS");
+        assert_eq!(
+            page.matches("integrity=\"sha384-").count(),
+            2,
+            "SRI on CSS and JS"
+        );
         assert!(page.contains(&format!("swagger-ui-dist@{SWAGGER_UI_VERSION}/")));
         let csp = swagger_csp();
         assert!(csp.contains("default-src 'none'") && csp.contains("connect-src 'self'"));
         assert!(!csp.contains("SWAGGER_INIT") && !csp.contains("'unsafe-eval'"));
         let config = swagger_config();
-        assert_eq!(config["urls"].as_array().unwrap().len(), PEER_DOCS.len() + 1);
+        assert_eq!(
+            config["urls"].as_array().unwrap().len(),
+            PEER_DOCS.len() + 1
+        );
     }
 
     #[test]

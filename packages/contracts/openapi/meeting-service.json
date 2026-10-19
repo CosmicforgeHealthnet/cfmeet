@@ -16446,7 +16446,7 @@
           "pendingMirror": {
             "type": "integer",
             "format": "int64",
-            "description": "Main-room legacy messages of linked conferences not yet mirrored."
+            "description": "Legacy messages (every scope) of linked conferences not yet mirrored."
           },
           "pendingRollbackCopies": {
             "type": "integer",
@@ -16458,7 +16458,7 @@
             "format": "int64"
           },
           "scope": {
-            "description": "What this increment migrates (breakout / private chat stay legacy)."
+            "description": "What is migrated: every meeting chat scope."
           },
           "state": {
             "$ref": "#/components/schemas/ChatMigrationState"
