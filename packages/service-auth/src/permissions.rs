@@ -178,6 +178,32 @@ pub enum InternalPermission {
     /// number for a relay session and resolve its lease — Privacy Relay only.
     #[serde(rename = "number-relay.lease")]
     NumberRelayLease,
+    /// Platform Access (Part V H §104): resolve or idempotently create the NATIVE_CF_USER /
+    /// TEMPORARY_EXTERNAL_PARTICIPANT principal of an account the calling first-party
+    /// backend authenticated, inside the signed delegated scope (FIRST_PARTY tenants only).
+    #[serde(rename = "platform-principal.ensure")]
+    PlatformPrincipalEnsure,
+    /// Messaging (Part V H / I §116): act as the delegated first-party application backend
+    /// on Messaging's standard customer operations (devices, client tokens, conversations,
+    /// members, messages) inside the signed delegated scope. Never moderation or export.
+    #[serde(rename = "messaging-application.delegate")]
+    MessagingApplicationDelegate,
+    /// Messaging (Part V H §§97–101): resolve meeting conversations, apply version-fenced
+    /// meeting membership / lifecycle changes and import legacy meeting chat.
+    #[serde(rename = "messaging-meeting.sync")]
+    MessagingMeetingSync,
+    /// Messaging (Part V H §103): apply a versioned Privacy Relay communication-authority
+    /// update (context status / revocation) to the conversations bound to that context.
+    #[serde(rename = "messaging-context-authority.apply")]
+    MessagingContextAuthorityApply,
+    /// Messaging (Part V H §§109–110): deliver an authenticated inbound SMS for an
+    /// authorized bridge and the transport state of outbound bridge requests.
+    #[serde(rename = "messaging-sms-bridge.deliver")]
+    MessagingSmsBridgeDeliver,
+    /// SMS Gateway (Part V H §108): submit one authorized outbound SMS Bridge transport
+    /// request for a MANAGED bridge copy (Messaging only; never E2EE ciphertext).
+    #[serde(rename = "sms-bridge.submit")]
+    SmsBridgeSubmit,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -205,7 +231,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::CommunicationContextRead,
         name: "communication-context.read",
         receiver: services::PRIVACY_RELAY,
-        grantable_to: &[services::CALLING, services::TELEPHONY],
+        grantable_to: &[services::CALLING, services::TELEPHONY, services::MESSAGING],
         sensitive: false,
         description: "Read the permitted communication context (opaque references only)",
     },
@@ -390,7 +416,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::PlatformEventPublish,
         name: "platform-event.publish",
         receiver: services::CALLING,
-        grantable_to: &[services::PRIVACY_RELAY, services::SMS_GATEWAY],
+        grantable_to: &[services::PRIVACY_RELAY, services::SMS_GATEWAY, services::MESSAGING],
         sensitive: false,
         description: "Publish a committed Privacy Relay or SMS Gateway domain event (platform envelope, the publisher's own events only) for normalized customer webhooks",
     },
@@ -514,6 +540,54 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: true,
         description: "Import Privacy Relay's relay-number inventory into Numbering, lease a relay number for a relay session and resolve its lease (Privacy Relay only)",
     },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformPrincipalEnsure,
+        name: "platform-principal.ensure",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: false,
+        description: "Resolve or create the native-account / meeting-participant principal of a first-party backend's authenticated user in its delegated scope",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::MessagingApplicationDelegate,
+        name: "messaging-application.delegate",
+        receiver: services::MESSAGING,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: false,
+        description: "Act as the delegated first-party application backend on standard Messaging operations (no moderation, no export)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::MessagingMeetingSync,
+        name: "messaging-meeting.sync",
+        receiver: services::MESSAGING,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: false,
+        description: "Resolve meeting conversations, apply version-fenced meeting membership / lifecycle and import legacy meeting chat",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::MessagingContextAuthorityApply,
+        name: "messaging-context-authority.apply",
+        receiver: services::MESSAGING,
+        grantable_to: &[services::PRIVACY_RELAY],
+        sensitive: false,
+        description: "Apply a versioned communication-authority update to the conversations bound to a communication context",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::MessagingSmsBridgeDeliver,
+        name: "messaging-sms-bridge.deliver",
+        receiver: services::MESSAGING,
+        grantable_to: &[services::SMS_GATEWAY],
+        sensitive: false,
+        description: "Deliver an authenticated inbound SMS for an authorized bridge and bridge transport state",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::SmsBridgeSubmit,
+        name: "sms-bridge.submit",
+        receiver: services::SMS_GATEWAY,
+        grantable_to: &[services::MESSAGING],
+        sensitive: false,
+        description: "Submit one authorized outbound SMS Bridge transport request (MANAGED copies only)",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -561,6 +635,12 @@ impl InternalPermission {
         InternalPermission::NumberUsageReport,
         InternalPermission::NumberRiskReport,
         InternalPermission::NumberRelayLease,
+        InternalPermission::PlatformPrincipalEnsure,
+        InternalPermission::MessagingApplicationDelegate,
+        InternalPermission::MessagingMeetingSync,
+        InternalPermission::MessagingContextAuthorityApply,
+        InternalPermission::MessagingSmsBridgeDeliver,
+        InternalPermission::SmsBridgeSubmit,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -803,24 +883,48 @@ mod tests {
             .filter(|d| d.receiver == services::SMS_GATEWAY)
             .map(|d| d.name)
             .collect();
-        assert!(
-            receiving.is_empty(),
-            "no service may call the SMS Gateway internally yet: {receiving:?}"
+        assert_eq!(
+            receiving,
+            ["sms-bridge.submit"],
+            "only Messaging's SMS Bridge submissions are received by the SMS Gateway"
+        );
+        assert_eq!(
+            SmsBridgeSubmit.definition().grantable_to,
+            &[services::MESSAGING]
         );
     }
 
     #[test]
     fn messaging_flows_are_least_privilege() {
-        // Part V A–D: no service calls Messaging internally, and Messaging holds nothing
+        // Part V H: exactly four narrow internal operations reach Messaging, each from
+        // the one peer that owns the corresponding authority, and Messaging holds nothing
         // beyond what the registry lists for it explicitly (never a sensitive grant).
         let receiving: Vec<_> = REGISTRY
             .iter()
             .filter(|d| d.receiver == services::MESSAGING)
-            .map(|d| d.name)
+            .map(|d| (d.name, d.grantable_to))
             .collect();
-        assert!(
-            receiving.is_empty(),
-            "no service may call Messaging internally yet: {receiving:?}"
+        assert_eq!(
+            receiving,
+            [
+                (
+                    "messaging-application.delegate",
+                    &[services::MEETING_SERVICE][..]
+                ),
+                ("messaging-meeting.sync", &[services::MEETING_SERVICE][..]),
+                (
+                    "messaging-context-authority.apply",
+                    &[services::PRIVACY_RELAY][..]
+                ),
+                ("messaging-sms-bridge.deliver", &[services::SMS_GATEWAY][..]),
+            ]
+        );
+        // Principal creation is the Meeting Service's (first-party login authority) only.
+        assert_eq!(
+            InternalPermission::PlatformPrincipalEnsure
+                .definition()
+                .grantable_to,
+            &[services::MEETING_SERVICE]
         );
         let granted: Vec<_> = REGISTRY
             .iter()
@@ -838,12 +942,17 @@ mod tests {
 
     /// Every permission Messaging may ever be granted (registry order).
     /// Part V B: credential verification, principal resolution in the signed delegated
-    /// scope, and identity reads (change feed for bounded authorization caching). Never
-    /// principal registration or identity administration.
+    /// scope, and identity reads (change feed for bounded authorization caching). Part V
+    /// H: reading the communication context it is bound to (reconciliation), publishing
+    /// committed events for customer webhooks and submitting MANAGED SMS Bridge copies.
+    /// Never principal registration or identity administration.
     const MESSAGING_GRANTS: &[&str] = &[
+        "communication-context.read",
+        "platform-event.publish",
         "platform-credential.authenticate",
         "platform-principal.resolve",
         "platform-identity.read",
+        "sms-bridge.submit",
     ];
 
     #[test]

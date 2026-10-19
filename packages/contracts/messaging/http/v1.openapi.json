@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging API",
-    "version": "1.6.0",
+    "version": "1.7.0",
     "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are refused there with CLIENT_TOKENS_NOT_ENABLED; the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB."
   },
   "paths": {
@@ -1102,6 +1102,16 @@
               "minimum": 1,
               "maximum": 500
             }
+          },
+          {
+            "name": "beforeSequence",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "Newest first, strictly before this sequence (history pagination); exclusive with afterSequence."
           }
         ],
         "responses": {
@@ -4007,6 +4017,61 @@
               "application/json": {
                 "schema": {
                   "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/AuditPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/client-sessions/revoke-all": {
+      "post": {
+        "operationId": "revokeAllClientSessions",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.send, acting principal: ends every ACTIVE client session of the principal (logout everywhere); gateways close them after commit.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ClientSessionsRevoked"
                 }
               }
             }

@@ -280,11 +280,21 @@ async fn the_served_contract_lists_exactly_the_implemented_routes() {
         }
     }
     assert!(documented >= 9);
-    // And every route the sources register is documented (`:param` ~ `{param}`).
+    // And every route the sources register is documented (`:param` ~ `{param}`) — in
+    // the served customer contract or the internal contract (`/internal/v1`).
+    let internal: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../packages/contracts/messaging/internal/v1.openapi.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let normalized: Vec<String> = api["paths"]
         .as_object()
         .unwrap()
         .keys()
+        .chain(internal["paths"].as_object().unwrap().keys())
         .map(|p| {
             p.split('/')
                 .map(|s| if s.starts_with('{') { "*" } else { s })

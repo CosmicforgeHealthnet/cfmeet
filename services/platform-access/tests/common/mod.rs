@@ -233,6 +233,8 @@ pub struct Peers {
     /// Trusted Messaging identity name, signing with a key the bundle does not list.
     pub rogue_messaging: Arc<ServiceTokenSigner>,
     pub operator: Arc<ServiceTokenSigner>,
+    /// Part V H: the Meeting Service (first-party login authority).
+    pub meeting: Arc<ServiceTokenSigner>,
     /// Correctly signing, but not in Platform Access's trust bundle.
     pub untrusted: Arc<ServiceTokenSigner>,
     /// Trusted Calling identity name, but signing with a key the bundle does not list.
@@ -270,6 +272,9 @@ pub const MESSAGING_PERMISSIONS: &[&str] = &[
     "platform-principal.resolve",
     "platform-identity.read",
 ];
+/// Part V H §104: the Meeting Service (first-party login authority) ensures the
+/// principals of the accounts it authenticated (nothing else).
+pub const MEETING_PERMISSIONS: &[&str] = &["platform-principal.ensure"];
 pub const NUMBERING_PERMISSIONS: &[&str] = &[
     "platform-credential.authenticate",
     "platform-principal.resolve",
@@ -285,6 +290,7 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
     let numbering = key("numbering-test-1");
     let messaging = key("messaging-test-1");
     let operator = key("operator-test-1");
+    let meeting = key("meeting-test-1");
     let policy = TrustPolicy::from_json(
         &trust_bundle(
             cf_service_auth::services::PLATFORM_ACCESS,
@@ -303,6 +309,11 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
                     cf_service_auth::services::MESSAGING,
                     vec![messaging.public_jwk()],
                     MESSAGING_PERMISSIONS,
+                ),
+                (
+                    cf_service_auth::services::MEETING_SERVICE,
+                    vec![meeting.public_jwk()],
+                    MEETING_PERMISSIONS,
                 ),
                 (
                     cf_service_auth::services::OPERATOR_CONSOLE,
@@ -335,6 +346,7 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
         messaging: signer(ServiceId::messaging(), messaging),
         rogue_messaging: signer(ServiceId::messaging(), key("messaging-rogue-1")),
         operator: signer(ServiceId::operator_console(), operator),
+        meeting: signer(ServiceId::meeting_service(), meeting),
         untrusted: signer(ServiceId::telephony(), key("telephony-test-1")),
         rogue_calling: signer(ServiceId::calling(), key("calling-rogue-1")),
         clock,
@@ -485,6 +497,22 @@ impl Harness {
     ) -> Reply {
         self.call(&self.peers.calling, method, path, body, delegated, None)
             .await
+    }
+
+    /// Number of principals with this external reference (any scope).
+    pub async fn scalar_principals(&self, reference: &str) -> i64 {
+        use sea_orm::{ConnectionTrait, DbBackend, Statement};
+        self.conn()
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT count(*) AS n FROM platform_principals WHERE external_reference = $1",
+                [reference.into()],
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get::<i64>("", "n")
+            .unwrap()
     }
 
     pub async fn authenticate(&self, credential: &str) -> Reply {

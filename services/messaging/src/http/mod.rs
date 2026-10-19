@@ -49,6 +49,17 @@ pub fn customer_routes() -> Router<AppState> {
         .merge(crate::search::http::customer_routes())
 }
 
+/// Routes nested under `/v1/conversations`.
+pub fn conversation_tree() -> Router<AppState> {
+    crate::conversations::http::conversation_routes()
+        .merge(crate::membership::http::routes())
+        .merge(crate::messages::http::routes())
+        .merge(crate::mls::http::conversation_routes())
+        .merge(crate::attachments::http::routes())
+        .merge(crate::moderation::http::conversation_routes())
+        .merge(crate::search::http::conversation_routes())
+}
+
 pub fn app(state: AppState) -> Router {
     let public = Router::new()
         .route("/health", get(health))
@@ -68,13 +79,7 @@ pub fn app(state: AppState) -> Router {
         )
         .nest(
             "/v1/conversations",
-            crate::conversations::http::conversation_routes()
-                .merge(crate::membership::http::routes())
-                .merge(crate::messages::http::routes())
-                .merge(crate::mls::http::conversation_routes())
-                .merge(crate::attachments::http::routes())
-                .merge(crate::moderation::http::conversation_routes())
-                .merge(crate::search::http::conversation_routes())
+            conversation_tree()
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )
@@ -82,10 +87,24 @@ pub fn app(state: AppState) -> Router {
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(from_fn_with_state(state.clone(), require_customer))
         .with_state(state.clone());
+    // `/internal/v1/delegated/v1/...` mirrors the customer surface for first-party
+    // backends acting through a peer service (`messaging-application.delegate`).
+    let delegated = Router::new()
+        .nest("/v1/messaging", customer_routes())
+        .nest("/v1/conversations", conversation_tree())
+        .fallback(not_found)
+        .method_not_allowed_fallback(method_not_allowed)
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        .layer(from_fn_with_state(
+            state.clone(),
+            middleware::require_delegated_application,
+        ));
     let internal = Router::new()
         .nest(
             "/internal/v1",
             Router::new()
+                .nest("/delegated", delegated)
+                .merge(crate::integrations::http::internal_routes())
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )

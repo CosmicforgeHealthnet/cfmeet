@@ -959,7 +959,7 @@ async fn policy_flag<C: ConnectionTrait>(
 
 /// Applies a lifecycle / expiry change (version + 1) and records its event.
 #[allow(clippy::too_many_arguments)]
-async fn transition<C: ConnectionTrait>(
+pub(crate) async fn transition<C: ConnectionTrait>(
     db: &C,
     ctx: &TrustedContext,
     row: &ConversationRow,

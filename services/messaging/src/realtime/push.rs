@@ -206,6 +206,9 @@ pub async fn fanout_jobs(state: &AppState, event: &OutboxEvent) -> Result<u64> {
     else {
         return Ok(0);
     };
+    if event.payload.get("notify").and_then(Value::as_bool) == Some(false) {
+        return Ok(0);
+    }
     let sender = event
         .payload
         .get("sender_principal_id")

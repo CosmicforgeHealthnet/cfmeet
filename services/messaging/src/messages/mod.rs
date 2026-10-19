@@ -88,13 +88,19 @@ pub struct MessageRow {
     pub tenant_id: Uuid,
     pub application_id: Uuid,
     pub environment_id: Uuid,
+    /// `NATIVE` or `LEGACY_MANAGED` (imported legacy chat; MANAGED only, never E2EE).
+    pub security_provenance: String,
+    pub original_created_at: Option<DateTime<Utc>>,
+    /// MANAGED only: `STANDARD` / `ANNOUNCEMENT` (`None`: standard).
+    pub managed_presentation: Option<String>,
 }
 
 pub const MESSAGE_COLUMNS: &str = "m.id, m.conversation_id, m.sequence, m.message_kind, m.security_profile, \
      m.sender_principal_id, m.sender_device_id, m.client_message_id, m.target_message_id, m.mls_epoch, \
      m.mls_ciphertext, m.ciphertext_sha256, m.acceptance_digest, m.managed_sealed, m.managed_seal_nonce, \
      m.managed_seal_key_id, m.attachment_count, m.lifecycle, m.lifecycle_reason, m.edit_count, m.edited_at, \
-     m.created_at, m.tenant_id, m.application_id, m.environment_id";
+     m.created_at, m.tenant_id, m.application_id, m.environment_id, m.security_provenance, m.original_created_at, \
+     m.managed_presentation";
 
 impl MessageRow {
     pub fn profile(&self) -> SecurityProfile {
@@ -133,6 +139,8 @@ pub async fn render(state: &AppState, row: &MessageRow, hidden: bool) -> Value {
         "editedAt": row.edited_at.map(rfc3339),
         "createdAt": rfc3339(row.created_at),
         "attachmentIds": if show { json!(attachments) } else { json!([]) },
+        "securityProvenance": row.security_provenance,
+        "originalCreatedAt": row.original_created_at.map(rfc3339),
     });
     match row.profile() {
         SecurityProfile::PrivateE2ee => {
@@ -149,7 +157,10 @@ pub async fn render(state: &AppState, row: &MessageRow, hidden: bool) -> Value {
             } else {
                 None
             };
-            v["managed"] = json!({ "text": text });
+            v["managed"] = json!({
+                "text": text,
+                "presentation": row.managed_presentation.as_deref().unwrap_or("STANDARD"),
+            });
         }
     }
     v
@@ -241,6 +252,12 @@ pub struct SendRequest {
     pub target_message_id: Option<Uuid>,
     #[serde(default)]
     pub attachment_ids: Vec<Uuid>,
+    /// `false`: no push notification jobs for this message (mirrored / migrated writes).
+    #[serde(default)]
+    pub notify: Option<bool>,
+    /// MANAGED only: `STANDARD` (default) or `ANNOUNCEMENT`.
+    #[serde(default)]
+    pub managed_presentation: Option<String>,
 }
 
 /// Checks shared by both profiles, before the transaction: membership, lifecycle,
@@ -395,6 +412,19 @@ pub(crate) async fn record_created<C: ConnectionTrait>(
     request: &RequestContext,
     now: DateTime<Utc>,
 ) -> Result<i64> {
+    record_created_notify(db, ctx, row, request, now, true).await
+}
+
+/// [`record_created`] with control over push notification jobs (`notify: false` for
+/// mirrored, migrated and imported messages).
+pub(crate) async fn record_created_notify<C: ConnectionTrait>(
+    db: &C,
+    ctx: &TrustedContext,
+    row: &MessageRow,
+    request: &RequestContext,
+    now: DateTime<Utc>,
+    notify: bool,
+) -> Result<i64> {
     let (event_type, payload) = match row.message_kind.as_str() {
         "EDIT" => (
             "messaging.message.edited",
@@ -413,6 +443,8 @@ pub(crate) async fn record_created<C: ConnectionTrait>(
                 "message_kind": row.message_kind,
                 "sender_principal_id": row.sender_principal_id,
                 "sender_device_id": row.sender_device_id,
+                "security_provenance": row.security_provenance,
+                "notify": notify,
             }),
         ),
     };
@@ -453,6 +485,10 @@ pub(crate) async fn record_created<C: ConnectionTrait>(
 pub struct ListQuery {
     #[serde(default)]
     pub after_sequence: Option<i64>,
+    /// Newest first, strictly before this sequence (history pagination); exclusive with
+    /// `afterSequence`.
+    #[serde(default)]
+    pub before_sequence: Option<i64>,
     #[serde(default)]
     pub limit: Option<i64>,
 }
@@ -471,19 +507,37 @@ pub async fn list(
     }
     let (_, member) =
         access::as_member(&state.db, ctx, conversation_id, acting.principal_id).await?;
-    let after = q
-        .after_sequence
-        .unwrap_or(0)
-        .max(member.visible_from_sequence - 1);
-    let rows: Vec<MessageRow> = db::all(
-        &state.db,
-        &format!(
-            "SELECT {MESSAGE_COLUMNS} FROM messaging_messages m WHERE m.conversation_id = $1 AND m.sequence > $2 \
-             ORDER BY m.sequence LIMIT $3"
-        ),
-        vec![conversation_id.into(), after.into(), (limit + 1).into()],
-    )
-    .await?;
+    if q.after_sequence.is_some() && q.before_sequence.is_some() {
+        return Err(Error::validation(
+            "afterSequence and beforeSequence are exclusive",
+        ));
+    }
+    let backwards = q.before_sequence.is_some();
+    let rows: Vec<MessageRow> = if let Some(before) = q.before_sequence {
+        db::all(
+            &state.db,
+            &format!(
+                "SELECT {MESSAGE_COLUMNS} FROM messaging_messages m WHERE m.conversation_id = $1 AND m.sequence < $2 \
+                   AND m.sequence >= $3 ORDER BY m.sequence DESC LIMIT $4"
+            ),
+            vec![conversation_id.into(), before.into(), member.visible_from_sequence.into(), (limit + 1).into()],
+        )
+        .await?
+    } else {
+        let after = q
+            .after_sequence
+            .unwrap_or(0)
+            .max(member.visible_from_sequence - 1);
+        db::all(
+            &state.db,
+            &format!(
+                "SELECT {MESSAGE_COLUMNS} FROM messaging_messages m WHERE m.conversation_id = $1 AND m.sequence > $2 \
+                 ORDER BY m.sequence LIMIT $3"
+            ),
+            vec![conversation_id.into(), after.into(), (limit + 1).into()],
+        )
+        .await?
+    };
     let more = rows.len() as i64 > limit;
     let page: Vec<_> = rows.into_iter().take(limit as usize).collect();
     let hidden = hidden_for(
@@ -498,7 +552,8 @@ pub async fn list(
     }
     Ok(json!({
         "messages": items,
-        "nextAfterSequence": if more { page.last().map(|r| r.sequence) } else { None },
+        "nextAfterSequence": if more && !backwards { page.last().map(|r| r.sequence) } else { None },
+        "nextBeforeSequence": if more && backwards { page.last().map(|r| r.sequence) } else { None },
     }))
 }
 

@@ -220,6 +220,9 @@ pub struct FakeAuthority {
     pub tokens: StdMutex<HashMap<String, TrustedContext>>,
     pub down: StdMutex<bool>,
     pub calls: StdMutex<usize>,
+    /// Delegated scopes Platform Access recognizes: environment -> (scope, first party,
+    /// full authority).
+    pub delegated: StdMutex<HashMap<Uuid, (OwnerScope, bool, bool)>>,
 }
 
 #[async_trait]
@@ -235,6 +238,34 @@ impl CustomerAuthority for FakeAuthority {
                 reason: "unknown".into(),
                 throttle: None,
             },
+        })
+    }
+
+    async fn validate_delegated(
+        &self,
+        ctx: &cf_service_auth::DelegatedPlatformContext,
+    ) -> Result<messaging::identity::DelegatedScope, AuthorityUnavailable> {
+        if *self.down.lock().unwrap() {
+            return Err(AuthorityUnavailable("down".into()));
+        }
+        let known = self
+            .delegated
+            .lock()
+            .unwrap()
+            .get(&ctx.application_environment_id())
+            .cloned();
+        Ok(match known {
+            Some((scope, first_party, full_authority))
+                if scope.tenant_id == ctx.tenant_id()
+                    && scope.application_id == ctx.application_id()
+                    && scope.service_account_id == ctx.initiating_service_account_id() =>
+            {
+                messaging::identity::DelegatedScope::Valid {
+                    first_party,
+                    full_authority,
+                }
+            }
+            _ => messaging::identity::DelegatedScope::Invalid,
         })
     }
 }
@@ -281,15 +312,76 @@ pub fn key(kid: &str) -> ServiceSigningKey {
     ServiceSigningKey::generate(KeyId::parse(kid).unwrap())
 }
 
-/// Messaging's runtime with an EMPTY trust bundle (no internal operation exists, so no
-/// issuer is trusted) and a correctly signing but untrusted Calling peer.
+/// Signing identities of Messaging's peers (Part V H): each trusted with exactly its
+/// own permissions, plus untrusted / rogue signers.
+pub struct Peers {
+    pub meeting: Arc<ServiceTokenSigner>,
+    pub privacy_relay: Arc<ServiceTokenSigner>,
+    pub sms_gateway: Arc<ServiceTokenSigner>,
+    /// The Meeting Service's name with a key Messaging's bundle does not list.
+    pub rogue_meeting: Arc<ServiceTokenSigner>,
+}
+
+pub const MEETING_PERMISSIONS: &[&str] =
+    &["messaging-application.delegate", "messaging-meeting.sync"];
+
+fn peer_keys() -> &'static (ServiceSigningKey, ServiceSigningKey, ServiceSigningKey) {
+    static KEYS: std::sync::OnceLock<(ServiceSigningKey, ServiceSigningKey, ServiceSigningKey)> =
+        std::sync::OnceLock::new();
+    KEYS.get_or_init(|| {
+        (
+            key("meeting-test-1"),
+            key("privacy-relay-test-1"),
+            key("sms-gateway-test-1"),
+        )
+    })
+}
+
+pub fn peers() -> Peers {
+    let clock: SharedClock = Arc::new(SystemClock);
+    let (m, p, s) = peer_keys();
+    let signer = |id: ServiceId, k: &ServiceSigningKey| {
+        let copy = ServiceSigningKey::from_pkcs8_pem(k.kid().clone(), &k.to_pkcs8_pem()).unwrap();
+        Arc::new(ServiceTokenSigner::new(
+            id,
+            ENV,
+            copy,
+            TokenTtl::default(),
+            clock.clone(),
+        ))
+    };
+    Peers {
+        meeting: signer(ServiceId::meeting_service(), m),
+        privacy_relay: signer(ServiceId::privacy_relay(), p),
+        sms_gateway: signer(ServiceId::sms_gateway(), s),
+        rogue_meeting: signer(ServiceId::meeting_service(), &key("meeting-rogue-1")),
+    }
+}
+
+/// Messaging's runtime: its trust bundle grants the Meeting Service, Privacy Relay and
+/// the SMS Gateway exactly their Part V H permissions; Calling (a correctly signing peer)
+/// is not trusted.
 pub fn service_auth() -> (ServiceAuthRuntime, Arc<ServiceTokenSigner>) {
     let clock: SharedClock = Arc::new(SystemClock);
+    let (m, p, s) = peer_keys();
+    let issuer = |name: &str, k: &ServiceSigningKey, permissions: &[&str]| {
+        json!({
+            "issuer": name,
+            "audience": cf_service_auth::services::MESSAGING,
+            "runtime_environment": ENV,
+            "keys": [k.public_jwk()],
+            "permissions": permissions,
+        })
+    };
     let bundle = json!({
         "bundle_version": 1,
         "receiver": cf_service_auth::services::MESSAGING,
         "runtime_environment": ENV,
-        "trusted_issuers": [],
+        "trusted_issuers": [
+            issuer(cf_service_auth::services::MEETING_SERVICE, m, MEETING_PERMISSIONS),
+            issuer(cf_service_auth::services::PRIVACY_RELAY, p, &["messaging-context-authority.apply"]),
+            issuer(cf_service_auth::services::SMS_GATEWAY, s, &["messaging-sms-bridge.deliver"]),
+        ],
     })
     .to_string();
     let policy = TrustPolicy::from_json(&bundle, &ServiceId::messaging(), ENV).unwrap();
@@ -532,6 +624,59 @@ impl Harness {
     }
 
     /// An internal request signed by `signer`.
+    /// A signed internal call with an optional delegated scope.
+    pub async fn call_internal(
+        &self,
+        signer: &ServiceTokenSigner,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        delegated: Option<cf_service_auth::DelegatedPlatformContext>,
+        extra: &[(&str, &str)],
+    ) -> Response {
+        let mut outbound = OutboundServiceRequest::new_operation(ServiceId::messaging());
+        if let Some(d) = delegated {
+            outbound = outbound.with_delegated_context(d);
+        }
+        let signed = signer.sign(&outbound).unwrap();
+        let mut b = Request::builder().method(method).uri(path);
+        for (k, v) in signed.headers().iter() {
+            b = b.header(k, v);
+        }
+        for (k, v) in extra {
+            b = b.header(*k, *v);
+        }
+        let body = match body {
+            Some(v) => {
+                b = b.header("content-type", "application/json");
+                Body::from(v.to_string())
+            }
+            None => Body::empty(),
+        };
+        self.raw(b.body(body).unwrap()).await
+    }
+
+    /// A first-party application environment whose backend acts through a peer service
+    /// (registered with the scripted Platform Access as a valid delegated scope).
+    pub fn first_party(&self, first_party: bool) -> Customer {
+        let c = self.customer(flows::ALL_SCOPES);
+        let mut context = c.context.clone();
+        context.first_party = first_party;
+        self.authority
+            .tokens
+            .lock()
+            .unwrap()
+            .insert(c.token.clone(), context.clone());
+        self.authority.delegated.lock().unwrap().insert(
+            context.scope.environment_id,
+            (context.scope, first_party, true),
+        );
+        Customer {
+            token: c.token,
+            context,
+        }
+    }
+
     pub async fn internal(&self, signer: &ServiceTokenSigner, path: &str) -> Response {
         let signed = signer
             .sign(&OutboundServiceRequest::new_operation(

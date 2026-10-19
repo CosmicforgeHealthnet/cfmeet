@@ -350,3 +350,94 @@ pub async fn require_internal_service(
         }
     }
 }
+
+/// The trusted context of an internal caller acting inside its signed delegated scope,
+/// re-validated against Platform Access now (forged / stale chains and suspended
+/// tenants, applications or environments are refused). Fail closed.
+pub async fn delegated_context(
+    state: &AppState,
+    caller: &InternalCaller,
+) -> Result<TrustedContext, ApiError> {
+    let Some(ctx) = caller.context().delegated_platform_context() else {
+        return Err(ApiError::code(ErrorCode::DelegatedContextRequired));
+    };
+    use crate::identity::CustomerAuthority;
+    match state.authority.validate_delegated(ctx).await {
+        Ok(crate::identity::DelegatedScope::Valid {
+            first_party,
+            full_authority,
+        }) => {
+            if !full_authority {
+                return Err(ApiError::code(ErrorCode::AuthoritySuspended));
+            }
+            Ok(TrustedContext::delegated(ctx, first_party, full_authority))
+        }
+        Ok(crate::identity::DelegatedScope::Invalid) => {
+            crate::metrics::inc("messaging_delegated_context_rejected_total", &[]);
+            tracing::warn!(caller = %caller.context().authenticated_service(), "delegated platform context rejected");
+            Err(ApiError::code(ErrorCode::DelegatedContextInvalid))
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "identity authority unavailable");
+            Err(ApiError::code(ErrorCode::ServiceUnavailable))
+        }
+    }
+}
+
+/// `/internal/v1/delegated/**`: a peer granted `messaging-application.delegate` acts as
+/// the backend of its own (first-party) application environment on the standard
+/// customer operations. The handlers see an ordinary [`CustomerCaller`] holding only
+/// [`crate::identity::DELEGATED_SCOPES`]; acting principals are verified as usual.
+pub async fn require_delegated_application(
+    State(state): State<AppState>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let Some(caller) = request.extensions().get::<InternalCaller>().cloned() else {
+        return ApiError::code(ErrorCode::InternalAuthenticationFailed).into_response();
+    };
+    if let Err(e) = caller.require_permission(InternalPermission::MessagingApplicationDelegate) {
+        return e.into_response();
+    }
+    let ctx = match delegated_context(&state, &caller).await {
+        Ok(ctx) => ctx,
+        Err(e) => return e.into_response(),
+    };
+    if !ctx.first_party {
+        // Only first-party backends act through a peer service; external customers
+        // present their own credential on /v1.
+        return ApiError::code(ErrorCode::DelegatedContextInvalid).into_response();
+    }
+    // The end user the peer acts for travels SIGNED in its token (initiating principal).
+    // A CF-Acting-Principal header may only repeat it; a different one is refused, so an
+    // unsigned header can never re-target a signed request.
+    if let Some(signed) = caller
+        .context()
+        .delegated_platform_context()
+        .and_then(|d| d.initiating_principal())
+    {
+        match acting_header(request.headers()) {
+            Ok(None) => {
+                let value = HeaderValue::from_str(&signed.principal_id.hyphenated().to_string())
+                    .expect("uuid is a valid header value");
+                request.headers_mut().insert(ACTING_PRINCIPAL, value);
+            }
+            Ok(Some(p)) if p == signed.principal_id => {}
+            Ok(Some(_)) => {
+                return ApiError::reason(
+                    ErrorCode::PrincipalNotAuthorized,
+                    "ACTING_PRINCIPAL_MISMATCH",
+                )
+                .into_response()
+            }
+            Err(e) => return e.into_response(),
+        }
+    }
+    let mutation = request.method() != Method::GET && request.method() != Method::HEAD;
+    request.extensions_mut().insert(CustomerCaller(ctx));
+    let response = next.run(request).await;
+    if mutation && response.status().is_success() {
+        state.wake_outbox();
+    }
+    response
+}

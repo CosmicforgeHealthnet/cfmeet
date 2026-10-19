@@ -42,6 +42,9 @@ error_codes! {
     RateLimited = "RATE_LIMITED" => TOO_MANY_REQUESTS, "Too many requests.";
     InternalAuthenticationFailed = "INTERNAL_AUTHENTICATION_FAILED" => UNAUTHORIZED, "Internal service authentication failed.";
     InternalPermissionDenied = "INTERNAL_PERMISSION_DENIED" => FORBIDDEN, "The caller is not permitted to perform this operation.";
+    DelegatedContextRequired = "DELEGATED_CONTEXT_REQUIRED" => FORBIDDEN, "The operation requires a signed delegated platform context.";
+    DelegatedContextInvalid = "DELEGATED_CONTEXT_INVALID" => FORBIDDEN, "The delegated platform context does not describe a valid authority chain.";
+    AuthorizationRevoked = "AUTHORIZATION_REVOKED" => FORBIDDEN, "The communication authority for this conversation was withdrawn.";
     FeatureDisabled = "FEATURE_DISABLED" => SERVICE_UNAVAILABLE, "This capability is not enabled in this deployment.";
     ChallengeInvalid = "CHALLENGE_INVALID" => CONFLICT, "The registration challenge is unknown, expired, consumed or bound to another request.";
     KeyPackageRejected = "KEY_PACKAGE_REJECTED" => UNPROCESSABLE_ENTITY, "The KeyPackage was rejected.";

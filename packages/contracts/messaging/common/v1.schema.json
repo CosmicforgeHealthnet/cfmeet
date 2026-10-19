@@ -85,6 +85,9 @@
         "RATE_LIMITED",
         "INTERNAL_AUTHENTICATION_FAILED",
         "INTERNAL_PERMISSION_DENIED",
+        "DELEGATED_CONTEXT_REQUIRED",
+        "DELEGATED_CONTEXT_INVALID",
+        "AUTHORIZATION_REVOKED",
         "FEATURE_DISABLED",
         "CHALLENGE_INVALID",
         "KEY_PACKAGE_REJECTED",
@@ -1963,6 +1966,17 @@
           "items": {
             "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
           }
+        },
+        "notify": {
+          "type": "boolean",
+          "description": "false: no push notification jobs (mirrored / migrated writes). Default true."
+        },
+        "managedPresentation": {
+          "enum": [
+            "STANDARD",
+            "ANNOUNCEMENT"
+          ],
+          "description": "MANAGED only (refused for PRIVATE_E2EE, whose presentation travels inside the ciphertext)."
         }
       },
       "required": [
@@ -2110,6 +2124,12 @@
                   "type": "null"
                 }
               ]
+            },
+            "presentation": {
+              "enum": [
+                "STANDARD",
+                "ANNOUNCEMENT"
+              ]
             }
           },
           "required": [
@@ -2119,6 +2139,25 @@
         "mlsEpoch": {
           "type": "integer",
           "minimum": 1
+        },
+        "securityProvenance": {
+          "enum": [
+            "NATIVE",
+            "LEGACY_MANAGED"
+          ],
+          "description": "NATIVE: created through Messaging. LEGACY_MANAGED: imported from a legacy chat store (MANAGED only, never presented as end-to-end encrypted)."
+        },
+        "originalCreatedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "description": "LEGACY_MANAGED: the original time at the legacy source."
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -2146,6 +2185,16 @@
           }
         },
         "nextAfterSequence": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nextBeforeSequence": {
           "oneOf": [
             {
               "type": "integer"
@@ -4611,6 +4660,344 @@
         "entries",
         "nextBefore"
       ]
+    },
+    "ClientSessionsRevoked": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "revokedSessions": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "revokedSessions"
+      ]
+    },
+    "MeetingConversationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meetingRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:/-]{1,256}$"
+        },
+        "ownerPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "securityProfile": {
+          "enum": [
+            "PRIVATE_E2EE",
+            "MANAGED"
+          ]
+        },
+        "managedDisclosureAcknowledged": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "meetingRef",
+        "ownerPrincipalId",
+        "securityProfile"
+      ]
+    },
+    "MeetingConversation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "created": {
+          "type": "boolean"
+        },
+        "conversation": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Conversation"
+        }
+      },
+      "required": [
+        "created",
+        "conversation"
+      ]
+    },
+    "MeetingMemberSync": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": [
+            "ACTIVE",
+            "REMOVED",
+            "BANNED",
+            "LEFT"
+          ]
+        },
+        "role": {
+          "enum": [
+            "MEMBER",
+            "ADMIN"
+          ]
+        },
+        "sourceVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        }
+      },
+      "required": [
+        "state",
+        "sourceVersion"
+      ]
+    },
+    "SyncResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "applied": {
+          "type": "boolean"
+        },
+        "reason": {
+          "const": "STALE_VERSION"
+        },
+        "member": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "principalId": {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                },
+                "state": {
+                  "enum": [
+                    "ACTIVE",
+                    "REMOVED",
+                    "LEFT"
+                  ]
+                },
+                "role": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "principalId",
+                "state",
+                "role"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mlsRekeyRequired": {
+          "type": "boolean"
+        },
+        "cryptographicRemoval": {
+          "enum": [
+            "PENDING_MEMBER_COMMIT",
+            "NOT_APPLICABLE"
+          ]
+        },
+        "lifecycleState": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "applied"
+      ],
+      "description": "applied=false: the update is stale or a replay (source version at or below the last applied one) and changed nothing."
+    },
+    "MeetingLifecycleSync": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "lifecycleState": {
+          "enum": [
+            "ACTIVE",
+            "LOCKED",
+            "CLOSED",
+            "ARCHIVED"
+          ]
+        },
+        "sourceVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        }
+      },
+      "required": [
+        "lifecycleState",
+        "sourceVersion"
+      ]
+    },
+    "LegacyImportRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "legacySource": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9.-]{1,47}$"
+        },
+        "messages": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "legacyMessageId": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+              },
+              "senderPrincipalId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "text": {
+                "type": "string"
+              },
+              "sentAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "presentation": {
+                "enum": [
+                  "STANDARD",
+                  "ANNOUNCEMENT"
+                ]
+              }
+            },
+            "required": [
+              "legacyMessageId",
+              "senderPrincipalId",
+              "sentAt"
+            ]
+          }
+        }
+      },
+      "required": [
+        "legacySource",
+        "messages"
+      ]
+    },
+    "LegacyImportResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "imported": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duplicates": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "refused": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "legacyMessageId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+              }
+            },
+            "required": [
+              "legacyMessageId",
+              "reason"
+            ]
+          }
+        },
+        "items": {
+          "description": "The canonical Messaging message of every imported or already-imported legacy message (the legacy system's stable id mapping).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "legacyMessageId",
+              "messageId",
+              "sequence",
+              "status"
+            ],
+            "properties": {
+              "legacyMessageId": {
+                "type": "string"
+              },
+              "messageId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "sequence": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "status": {
+                "enum": [
+                  "IMPORTED",
+                  "DUPLICATE"
+                ]
+              }
+            }
+          }
+        },
+        "securityProvenance": {
+          "const": "LEGACY_MANAGED"
+        }
+      },
+      "required": [
+        "imported",
+        "duplicates",
+        "refused",
+        "securityProvenance",
+        "items"
+      ]
+    },
+    "MeetingMessageModeration": {
+      "description": "Removal of a meeting-conversation message by the meeting authority (which already compared the host's role with the sender's). Idempotent.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "enum": [
+            "REMOVE"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        }
+      }
+    },
+    "MeetingMessageModerationResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "messageId",
+        "lifecycle",
+        "changed"
+      ],
+      "properties": {
+        "messageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "lifecycle": {
+          "type": "string"
+        },
+        "changed": {
+          "type": "boolean"
+        }
+      }
     }
   }
 }

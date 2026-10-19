@@ -27,6 +27,7 @@ pub mod error;
 pub mod events;
 pub mod http;
 pub mod identity;
+pub mod integrations;
 pub mod limits;
 pub mod membership;
 pub mod messages;

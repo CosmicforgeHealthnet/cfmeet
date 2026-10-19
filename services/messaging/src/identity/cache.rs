@@ -230,4 +230,12 @@ impl CustomerAuthority for CachingAuthority {
     async fn authenticate(&self, presented: &str) -> Result<Authentication, AuthorityUnavailable> {
         self.authenticate_with(presented, Freshness::Fresh).await
     }
+
+    /// Always fresh (internal delegated calls are few and change state).
+    async fn validate_delegated(
+        &self,
+        ctx: &cf_service_auth::DelegatedPlatformContext,
+    ) -> Result<super::DelegatedScope, AuthorityUnavailable> {
+        self.inner.validate_delegated(ctx).await
+    }
 }

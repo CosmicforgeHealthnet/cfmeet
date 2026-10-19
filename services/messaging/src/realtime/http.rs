@@ -57,6 +57,7 @@ pub fn customer_routes() -> Router<AppState> {
     Router::new()
         .route("/client-tokens", post(issue))
         .route("/client-sessions/:session_id/revoke", post(revoke))
+        .route("/client-sessions/revoke-all", post(revoke_all))
         .route("/presence/settings", get(get_presence).put(put_presence))
         .route(
             "/devices/:device_id/push-registration",
@@ -308,6 +309,17 @@ async fn revoke(
     let acting = acting_with(&state, &caller, &headers, MESSAGES_SEND).await?;
     Ok(Json(
         sessions::revoke_session(&state, caller.context(), &acting, session).await?,
+    ))
+}
+
+async fn revoke_all(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, ApiError> {
+    let acting = acting_with(&state, &caller, &headers, MESSAGES_SEND).await?;
+    Ok(Json(
+        sessions::revoke_all_sessions(&state, caller.context(), &acting).await?,
     ))
 }
 

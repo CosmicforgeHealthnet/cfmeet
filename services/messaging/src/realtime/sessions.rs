@@ -420,6 +420,57 @@ pub async fn revoke_session(
 }
 
 /// Revokes every ACTIVE session of a device (device revocation; same transaction).
+/// `POST /v1/messaging/client-sessions/revoke-all`: ends every ACTIVE client session of
+/// the acting principal (logout everywhere, account compromise); each connected gateway
+/// closes the sessions after commit.
+pub async fn revoke_all_sessions(
+    state: &AppState,
+    ctx: &TrustedContext,
+    acting: &Acting,
+) -> Result<Value> {
+    use sea_orm::{FromQueryResult, TransactionTrait};
+    #[derive(FromQueryResult)]
+    struct Id {
+        id: Uuid,
+    }
+    let st = state.clone();
+    let ctx2 = ctx.clone();
+    let acting = acting.clone();
+    state
+        .db
+        .transaction::<_, Value, Error>(move |txn| {
+            Box::pin(async move {
+                let now = st.now();
+                let request_ctx = request_context();
+                let revoked: Vec<Id> = db::all(
+                    txn,
+                    "UPDATE messaging_client_sessions SET status = 'REVOKED', revoked_at = $3, revoked_reason = 'USER_REQUESTED' \
+                     WHERE principal_id = $1 AND environment_id = $2 AND status = 'ACTIVE' RETURNING id",
+                    vec![acting.principal_id.into(), ctx2.scope.environment_id.into(), now.into()],
+                )
+                .await?;
+                for r in &revoked {
+                    outbox::enqueue(
+                        txn,
+                        NewEvent {
+                            event_type: "messaging.client-session.revoked",
+                            aggregate_type: "CLIENT_SESSION",
+                            aggregate_id: r.id,
+                            scope: scope_of(&ctx2),
+                            payload: json!({ "session_id": r.id, "principal_id": acting.principal_id }),
+                        },
+                        &request_ctx,
+                        now,
+                    )
+                    .await?;
+                }
+                Ok(json!({ "revokedSessions": revoked.len() }))
+            })
+        })
+        .await
+        .map_err(Error::from)
+}
+
 pub async fn revoke_device_sessions<C: sea_orm::ConnectionTrait>(
     db: &C,
     device_id: Uuid,

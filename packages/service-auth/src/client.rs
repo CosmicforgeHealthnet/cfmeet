@@ -228,6 +228,16 @@ fn valid_internal_path(path: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-' | b'_' | b'.' | b'~'))
 }
 
+fn valid_query(query: &[(&str, &str)]) -> bool {
+    query.len() <= 16
+        && query.iter().all(|(k, v)| {
+            !k.is_empty()
+                && k.len() <= 64
+                && k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                && v.len() <= 256
+        })
+}
+
 impl InternalServiceClient {
     pub fn new(
         signer: Arc<ServiceTokenSigner>,
@@ -262,7 +272,18 @@ impl InternalServiceClient {
         request: &OutboundServiceRequest,
         path: &str,
     ) -> Result<InternalResponse, InternalCallError> {
-        self.send(request, Method::GET, path, None).await
+        self.send(request, Method::GET, path, &[], None).await
+    }
+
+    /// `GET path?query`. Query keys are restricted to `[A-Za-z0-9_]` (at most 16 pairs,
+    /// values at most 256 bytes) and percent-encoded here; the path rules are unchanged.
+    pub async fn get_query(
+        &self,
+        request: &OutboundServiceRequest,
+        path: &str,
+        query: &[(&str, &str)],
+    ) -> Result<InternalResponse, InternalCallError> {
+        self.send(request, Method::GET, path, query, None).await
     }
 
     pub async fn post_json<B: Serialize>(
@@ -272,7 +293,8 @@ impl InternalServiceClient {
         body: &B,
     ) -> Result<InternalResponse, InternalCallError> {
         let bytes = serde_json::to_vec(body).map_err(|_| InternalCallError::Encoding)?;
-        self.send(request, Method::POST, path, Some(bytes)).await
+        self.send(request, Method::POST, path, &[], Some(bytes))
+            .await
     }
 
     /// Like [`post_json`](Self::post_json) but returns every HTTP status as a response
@@ -289,7 +311,24 @@ impl InternalServiceClient {
             Some(body) => Some(serde_json::to_vec(body).map_err(|_| InternalCallError::Encoding)?),
             None => None,
         };
-        self.send_raw(request, method, path, bytes).await
+        self.send_raw(request, method, path, &[], bytes).await
+    }
+
+    /// [`exchange_json`](Self::exchange_json) with a query string (same rules as
+    /// [`get_query`](Self::get_query)).
+    pub async fn exchange_json_query<B: Serialize>(
+        &self,
+        request: &OutboundServiceRequest,
+        method: Method,
+        path: &str,
+        query: &[(&str, &str)],
+        body: Option<&B>,
+    ) -> Result<InternalResponse, InternalCallError> {
+        let bytes = match body {
+            Some(body) => Some(serde_json::to_vec(body).map_err(|_| InternalCallError::Encoding)?),
+            None => None,
+        };
+        self.send_raw(request, method, path, query, bytes).await
     }
 
     async fn send(
@@ -297,9 +336,10 @@ impl InternalServiceClient {
         request: &OutboundServiceRequest,
         method: Method,
         path: &str,
+        query: &[(&str, &str)],
         body: Option<Vec<u8>>,
     ) -> Result<InternalResponse, InternalCallError> {
-        let response = self.send_raw(request, method, path, body).await?;
+        let response = self.send_raw(request, method, path, query, body).await?;
         let status = response.status;
         if !(200..300).contains(&status) {
             let code = response.error_code();
@@ -317,6 +357,7 @@ impl InternalServiceClient {
         request: &OutboundServiceRequest,
         method: Method,
         path: &str,
+        query: &[(&str, &str)],
         body: Option<Vec<u8>>,
     ) -> Result<InternalResponse, InternalCallError> {
         let target = request.audience().clone();
@@ -328,9 +369,15 @@ impl InternalServiceClient {
         if !valid_internal_path(path) {
             return Err(InternalCallError::InvalidPath);
         }
-        let url = base
+        if !valid_query(query) {
+            return Err(InternalCallError::InvalidPath);
+        }
+        let mut url = base
             .join(path)
             .map_err(|_| InternalCallError::InvalidPath)?;
+        if !query.is_empty() {
+            url.query_pairs_mut().extend_pairs(query.iter().copied());
+        }
         let signed = self
             .signer
             .sign(request)
@@ -402,6 +449,21 @@ pub const INTERNAL_HEADERS: [http::HeaderName; 3] = [
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn query_pairs_are_restricted() {
+        assert!(valid_query(&[]));
+        assert!(valid_query(&[
+            ("beforeSequence", "10"),
+            ("limit", "a b&c=d")
+        ]));
+        assert!(!valid_query(&[("", "x")]));
+        assert!(!valid_query(&[("a=b", "x")]));
+        assert!(!valid_query(&[("a&b", "x")]));
+        assert!(!valid_query(&[("k", &"x".repeat(257))]));
+        let many: Vec<(&str, &str)> = (0..17).map(|_| ("k", "v")).collect();
+        assert!(!valid_query(&many));
+    }
 
     #[test]
     fn internal_paths_are_restricted() {

@@ -30,7 +30,7 @@ use serde_json::Value;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-use super::{load_by_client_id, load_message, record_created, render, MessageRow, SendRequest};
+use super::{load_by_client_id, load_message, render, MessageRow, SendRequest};
 use crate::{
     conversations::{
         policy::EffectivePolicy,
@@ -319,6 +319,7 @@ async fn insert<C: ConnectionTrait>(
     client_message_id: Uuid,
     content: &ManagedContent,
     attachment_count: i32,
+    presentation: Option<&str>,
     now: DateTime<Utc>,
 ) -> Result<MessageRow> {
     let sequence = allocate_sequence(db, conversation.id).await?;
@@ -337,8 +338,8 @@ async fn insert<C: ConnectionTrait>(
         db,
         "INSERT INTO messaging_messages (id, conversation_id, tenant_id, application_id, environment_id, sequence, \
            message_kind, security_profile, sender_principal_id, client_message_id, managed_sealed, managed_seal_nonce, \
-           managed_seal_key_id, managed_search, attachment_count, created_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, 'APPLICATION', 'MANAGED', $7, $8, $9, $10, $11, to_tsvector('simple', $12), $13, $14)",
+           managed_seal_key_id, managed_search, attachment_count, created_at, managed_presentation) \
+         VALUES ($1, $2, $3, $4, $5, $6, 'APPLICATION', 'MANAGED', $7, $8, $9, $10, $11, to_tsvector('simple', $12), $13, $14, $15)",
         vec![
             id.into(),
             conversation.id.into(),
@@ -354,6 +355,7 @@ async fn insert<C: ConnectionTrait>(
             content.text().to_string().into(),
             attachment_count.into(),
             now.into(),
+            presentation.map(str::to_string).into(),
         ],
     )
     .await?;
@@ -391,6 +393,16 @@ pub async fn send(
     {
         return Err(Error::validation("MANAGED edits use PATCH on the message"));
     }
+    let presentation = match request.managed_presentation.as_deref() {
+        None | Some("STANDARD") => None,
+        Some("ANNOUNCEMENT") => Some("ANNOUNCEMENT"),
+        Some(_) => {
+            return Err(Error::validation(
+                "managedPresentation must be STANDARD or ANNOUNCEMENT",
+            ))
+        }
+    };
+    let notify = request.notify.unwrap_or(true);
     let text = request
         .text
         .ok_or_else(|| Error::validation("MANAGED messages need text"))?;
@@ -449,12 +461,13 @@ pub async fn send(
                     client_id,
                     &content,
                     attachments.len() as i32,
+                    presentation,
                     now,
                 )
                 .await?;
                 crate::attachments::link_to_message(txn, &conversation, row.id, acting.principal_id, &attachments)
                     .await?;
-                record_created(txn, &ctx2, &row, &request_ctx, now).await?;
+                super::record_created_notify(txn, &ctx2, &row, &request_ctx, now, notify).await?;
                 Ok((201, row))
             })
         })
@@ -569,6 +582,96 @@ pub async fn edit(
         .await
         .map_err(Error::from)?;
     Ok(render(state, &row, false).await)
+}
+
+/// Imports one legacy chat message (Part V H §101) inside the caller's transaction:
+/// provenance `LEGACY_MANAGED`, the ORIGINAL time kept, idempotent per (conversation,
+/// legacy source, legacy id) — `Ok(None)` for an already imported message. A legacy
+/// message deleted at its source is imported as a tombstone without content.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn import_legacy<C: ConnectionTrait>(
+    db: &C,
+    ring: &ManagedKeyring,
+    ctx: &TrustedContext,
+    conversation: &ConversationRow,
+    sender: Uuid,
+    legacy_source: &str,
+    legacy_message_id: &str,
+    text: Option<&str>,
+    presentation: Option<&str>,
+    original_created_at: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> Result<Option<MessageRow>> {
+    let exists = db::scalar_i64(
+        db,
+        "SELECT count(*) FROM messaging_messages WHERE conversation_id = $1 AND legacy_source = $2 AND legacy_message_id = $3",
+        vec![conversation.id.into(), legacy_source.into(), legacy_message_id.into()],
+    )
+    .await?;
+    if exists > 0 {
+        return Ok(None);
+    }
+    let content = match text {
+        Some(t) => Some(admit(t.to_string())?),
+        None => None,
+    };
+    let sequence = allocate_sequence(db, conversation.id).await?;
+    let id = Uuid::new_v4();
+    let sealed = match &content {
+        Some(c) => Some(ring.seal(
+            &SealScope {
+                tenant_id: ctx.scope.tenant_id,
+                application_id: ctx.scope.application_id,
+                environment_id: ctx.scope.environment_id,
+                conversation_id: conversation.id,
+                message_id: id,
+            },
+            c.text(),
+        )?),
+        None => None,
+    };
+    db::exec(
+        db,
+        "INSERT INTO messaging_messages (id, conversation_id, tenant_id, application_id, environment_id, sequence, \
+           message_kind, security_profile, sender_principal_id, client_message_id, managed_sealed, managed_seal_nonce, \
+           managed_seal_key_id, managed_search, attachment_count, created_at, managed_presentation, security_provenance, \
+           legacy_source, legacy_message_id, original_created_at, lifecycle, lifecycle_reason, lifecycle_changed_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, 'APPLICATION', 'MANAGED', $7, $8, $9, $10, $11, \
+           CASE WHEN $12::text IS NULL THEN NULL ELSE to_tsvector('simple', $12) END, 0, $13, $14, 'LEGACY_MANAGED', $15, $16, $17, \
+           CASE WHEN $9::bytea IS NULL THEN 'DELETED' ELSE 'ACTIVE' END, \
+           CASE WHEN $9::bytea IS NULL THEN 'LEGACY_DELETED' ELSE NULL END, \
+           CASE WHEN $9::bytea IS NULL THEN $13 ELSE NULL END)",
+        vec![
+            id.into(),
+            conversation.id.into(),
+            ctx.scope.tenant_id.into(),
+            ctx.scope.application_id.into(),
+            ctx.scope.environment_id.into(),
+            sequence.into(),
+            sender.into(),
+            Uuid::new_v4().into(),
+            sealed.as_ref().map(|s| s.sealed.clone()).into(),
+            sealed.as_ref().map(|s| s.nonce.clone()).into(),
+            sealed.as_ref().map(|s| s.key_id.clone()).into(),
+            content.as_ref().map(|c| c.text().to_string()).into(),
+            now.into(),
+            presentation.map(str::to_string).into(),
+            legacy_source.into(),
+            legacy_message_id.into(),
+            original_created_at.into(),
+        ],
+    )
+    .await?;
+    Ok(Some(
+        load_message(db, conversation.id, id, false)
+            .await?
+            .ok_or(Error::code(ErrorCode::InternalError))?,
+    ))
+}
+
+/// The managed key ring, or `FEATURE_DISABLED` (MANAGED storage not configured).
+pub(crate) fn require_ring(state: &AppState) -> Result<&ManagedKeyring> {
+    ring(state)
 }
 
 #[cfg(test)]

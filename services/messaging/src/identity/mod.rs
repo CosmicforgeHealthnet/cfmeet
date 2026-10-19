@@ -174,9 +174,74 @@ pub enum Authentication {
 #[error("the identity authority is unavailable: {0}")]
 pub struct AuthorityUnavailable(pub String);
 
+/// Platform Access's verdict on a signed delegated scope a peer service presented
+/// (`GET /internal/v1/identity/context`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DelegatedScope {
+    /// The tenant / application / environment / service account chain exists.
+    Valid {
+        first_party: bool,
+        full_authority: bool,
+    },
+    /// The chain does not exist (forged or stale scope).
+    Invalid,
+}
+
+/// Standard Messaging scopes a delegated first-party backend acts with
+/// (`messaging-application.delegate`). Never moderation, export or administration.
+pub const DELEGATED_SCOPES: &[&str] = &[
+    "messages.send",
+    "messages.read",
+    "conversations.create",
+    "conversations.manage",
+    "attachments.write",
+    "attachments.read",
+];
+
+impl TrustedContext {
+    /// The trusted context of a peer service acting as the delegated backend of its own
+    /// application environment. The credential id is the initiating service account (the
+    /// audit actor); the principal restriction is none (principals are still resolved).
+    pub fn delegated(
+        ctx: &cf_service_auth::DelegatedPlatformContext,
+        first_party: bool,
+        full_authority: bool,
+    ) -> Self {
+        use cf_service_auth::ApplicationEnvironmentKind as K;
+        Self {
+            scope: OwnerScope {
+                tenant_id: ctx.tenant_id(),
+                application_id: ctx.application_id(),
+                environment_id: ctx.application_environment_id(),
+                environment_kind: match ctx.application_environment_kind() {
+                    K::Sandbox => EnvironmentKind::Sandbox,
+                    K::Test => EnvironmentKind::Test,
+                    K::Production => EnvironmentKind::Production,
+                },
+                service_account_id: ctx.initiating_service_account_id(),
+            },
+            credential_id: ctx.initiating_service_account_id(),
+            first_party,
+            full_authority,
+            scopes: DELEGATED_SCOPES.iter().map(|s| s.to_string()).collect(),
+            principal_restriction: None,
+        }
+    }
+}
+
 #[async_trait::async_trait]
 pub trait CustomerAuthority: Send + Sync {
     async fn authenticate(&self, presented: &str) -> Result<Authentication, AuthorityUnavailable>;
+
+    /// Re-validates a delegated scope against Platform Access (fail closed by default).
+    async fn validate_delegated(
+        &self,
+        _ctx: &cf_service_auth::DelegatedPlatformContext,
+    ) -> Result<DelegatedScope, AuthorityUnavailable> {
+        Err(AuthorityUnavailable(
+            "delegated scopes are not supported".into(),
+        ))
+    }
 }
 
 fn platform_access() -> ServiceId {
@@ -243,6 +308,53 @@ impl CustomerAuthority for PlatformAccessAuthority {
                 "unknown authentication outcome".into(),
             )),
         }
+    }
+
+    async fn validate_delegated(
+        &self,
+        ctx: &cf_service_auth::DelegatedPlatformContext,
+    ) -> Result<DelegatedScope, AuthorityUnavailable> {
+        self.identity_context(ctx).await
+    }
+}
+
+impl PlatformAccessAuthority {
+    async fn identity_context(
+        &self,
+        ctx: &cf_service_auth::DelegatedPlatformContext,
+    ) -> Result<DelegatedScope, AuthorityUnavailable> {
+        let request = OutboundServiceRequest::new_operation(platform_access())
+            .with_delegated_context(ctx.clone());
+        let response = self
+            .client
+            .get(&request, "/internal/v1/identity/context")
+            .await
+            .map_err(unavailable)?;
+        match response.status() {
+            200 => {}
+            403 if response.error_code().as_deref() == Some("DELEGATED_CONTEXT_INVALID") => {
+                return Ok(DelegatedScope::Invalid)
+            }
+            s => {
+                return Err(AuthorityUnavailable(format!(
+                    "HTTP {s} {}",
+                    response.error_code().unwrap_or_default()
+                )))
+            }
+        }
+        let body: Value = response
+            .json()
+            .map_err(|_| AuthorityUnavailable("malformed identity context".into()))?;
+        let first_party = body
+            .get("tenant")
+            .and_then(|t| t.get("classification"))
+            .and_then(Value::as_str)
+            == Some("FIRST_PARTY");
+        let full_authority = body.get("authorityMode").and_then(Value::as_str) == Some("FULL");
+        Ok(DelegatedScope::Valid {
+            first_party,
+            full_authority,
+        })
     }
 }
 

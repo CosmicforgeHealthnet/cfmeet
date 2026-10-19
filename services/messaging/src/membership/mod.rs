@@ -187,118 +187,175 @@ pub async fn add(
                 let conversation = load(txn, &ctx, conversation_id, true)
                     .await?
                     .ok_or(Error::code(ErrorCode::NotFound))?;
-                require_admin(txn, &conversation, &admin).await?;
-                access::require_accepting(&conversation, now)?;
-                let class = ContextClass::parse(&conversation.context_class)
-                    .ok_or(Error::code(ErrorCode::InternalError))?;
-                if class == ContextClass::Direct {
-                    return Err(Error::reason(
-                        ErrorCode::InvalidTransition,
-                        "DIRECT_MEMBERSHIP_FIXED",
-                    ));
-                }
-                let existing =
-                    access::membership(txn, conversation_id, request.principal_id, true).await?;
-                if existing.as_ref().is_some_and(Membership::is_active) {
-                    let view = member_row(txn, conversation_id, request.principal_id).await?;
-                    return Ok((200, view));
-                }
-                let effective = policy::current(txn, ctx.scope.environment_id).await?;
-                let max = effective
-                    .context(class)
-                    .max_members
-                    .unwrap_or(st.conversations.max_members);
-                let count = db::scalar_i64(
+                add_in(
                     txn,
-                    "SELECT count(*) FROM messaging_conversation_members WHERE conversation_id = $1 AND state = 'ACTIVE'",
-                    vec![conversation_id.into()],
-                )
-                .await?;
-                if count >= max.min(st.conversations.max_members) {
-                    return Err(Error::reason(ErrorCode::Conflict, "MEMBER_LIMIT_REACHED"));
-                }
-                let (next_sequence, _) = positions(txn, conversation_id).await?;
-                let (_, cursor) = outbox::enqueue_conversation(
-                    txn,
-                    conversation_id,
-                    NewEvent {
-                        event_type: "messaging.member.added",
-                        aggregate_type: "CONVERSATION",
-                        aggregate_id: conversation_id,
-                        scope: scope_of(&ctx),
-                        payload: json!({
-                            "conversation_id": conversation_id,
-                            "principal_id": request.principal_id,
-                            "role": role,
-                            "added_by_principal_id": admin.principal_id(),
-                        }),
-                    },
-                    &request_ctx,
-                    now,
-                )
-                .await?;
-                // The new member sees its own `member.added` event and everything after.
-                let visible_event = cursor - 1;
-                if existing.is_some() {
-                    db::exec(
-                        txn,
-                        "UPDATE messaging_conversation_members SET state = 'ACTIVE', role = $3, removed_at = NULL, \
-                           removed_reason = NULL, send_restricted_until = NULL, visible_from_sequence = $4, \
-                           visible_from_event = $5, joined_at = $6, updated_at = $6, version = version + 1 \
-                         WHERE conversation_id = $1 AND principal_id = $2",
-                        vec![
-                            conversation_id.into(),
-                            request.principal_id.into(),
-                            role.into(),
-                            next_sequence.into(),
-                            visible_event.into(),
-                            now.into(),
-                        ],
-                    )
-                    .await?;
-                } else {
-                    db::exec(
-                        txn,
-                        "INSERT INTO messaging_conversation_members (conversation_id, principal_id, environment_id, role, \
-                           joined_at, updated_at, visible_from_sequence, visible_from_event) \
-                         VALUES ($1, $2, $3, $4, $5, $5, $6, $7)",
-                        vec![
-                            conversation_id.into(),
-                            request.principal_id.into(),
-                            ctx.scope.environment_id.into(),
-                            role.into(),
-                            now.into(),
-                            next_sequence.into(),
-                            visible_event.into(),
-                        ],
-                    )
-                    .await?;
-                }
-                // A re-admitted principal's devices are no longer "to be removed".
-                db::exec(
-                    txn,
-                    "DELETE FROM messaging_mls_pending_removals WHERE conversation_id = $1 AND principal_id = $2",
-                    vec![conversation_id.into(), request.principal_id.into()],
-                )
-                .await?;
-                crate::mls::refresh_rekey(txn, conversation_id, now).await?;
-                record_audit(
-                    txn,
+                    &st,
                     &ctx,
                     &admin,
-                    "MEMBER_ADDED",
-                    conversation_id,
-                    json!({ "member_principal_id": request.principal_id, "role": role }),
+                    &conversation,
+                    request.principal_id,
+                    role,
                     &request_ctx,
                     now,
                 )
-                .await?;
-                crate::metrics::inc("messaging_members_added_total", &[]);
-                Ok((201, member_row(txn, conversation_id, request.principal_id).await?))
+                .await
             })
         })
         .await
         .map_err(Error::from)
+}
+
+/// Whether an unlifted ban keeps `principal` out of the conversation.
+pub async fn banned<C: ConnectionTrait>(
+    db: &C,
+    conversation_id: Uuid,
+    principal: Uuid,
+) -> Result<bool> {
+    Ok(db::scalar_i64(
+        db,
+        "SELECT count(*) FROM messaging_conversation_bans WHERE conversation_id = $1 AND principal_id = $2 AND lifted_at IS NULL",
+        vec![conversation_id.into(), principal.into()],
+    )
+    .await?
+        > 0)
+}
+
+/// Adds (or re-admits) an already-resolved ACTIVE principal inside the caller's
+/// transaction holding the conversation row lock. `(200, view)` when already a member.
+#[allow(clippy::too_many_arguments)]
+pub async fn add_in<C: ConnectionTrait>(
+    txn: &C,
+    st: &AppState,
+    ctx: &TrustedContext,
+    admin: &Administrator,
+    conversation: &ConversationRow,
+    principal_id: Uuid,
+    role: &str,
+    request_ctx: &RequestContext,
+    now: DateTime<Utc>,
+) -> Result<(u16, Value)> {
+    let conversation_id = conversation.id;
+    let request = AddRequestRef { principal_id };
+    require_admin(txn, conversation, admin).await?;
+    access::require_accepting(conversation, now)?;
+    let class = ContextClass::parse(&conversation.context_class)
+        .ok_or(Error::code(ErrorCode::InternalError))?;
+    if class == ContextClass::Direct {
+        return Err(Error::reason(
+            ErrorCode::InvalidTransition,
+            "DIRECT_MEMBERSHIP_FIXED",
+        ));
+    }
+    let existing = access::membership(txn, conversation_id, request.principal_id, true).await?;
+    if existing.as_ref().is_some_and(Membership::is_active) {
+        let view = member_row(txn, conversation_id, request.principal_id).await?;
+        return Ok((200, view));
+    }
+    if banned(txn, conversation_id, request.principal_id).await? {
+        return Err(Error::reason(
+            ErrorCode::PrincipalNotAuthorized,
+            "PRINCIPAL_BANNED",
+        ));
+    }
+    let effective = policy::current(txn, ctx.scope.environment_id).await?;
+    let max = effective
+        .context(class)
+        .max_members
+        .unwrap_or(st.conversations.max_members);
+    let count = db::scalar_i64(
+        txn,
+        "SELECT count(*) FROM messaging_conversation_members WHERE conversation_id = $1 AND state = 'ACTIVE'",
+        vec![conversation_id.into()],
+    )
+    .await?;
+    if count >= max.min(st.conversations.max_members) {
+        return Err(Error::reason(ErrorCode::Conflict, "MEMBER_LIMIT_REACHED"));
+    }
+    let (next_sequence, _) = positions(txn, conversation_id).await?;
+    let (_, cursor) = outbox::enqueue_conversation(
+        txn,
+        conversation_id,
+        NewEvent {
+            event_type: "messaging.member.added",
+            aggregate_type: "CONVERSATION",
+            aggregate_id: conversation_id,
+            scope: scope_of(ctx),
+            payload: json!({
+                "conversation_id": conversation_id,
+                "principal_id": request.principal_id,
+                "role": role,
+                "added_by_principal_id": admin.principal_id(),
+            }),
+        },
+        request_ctx,
+        now,
+    )
+    .await?;
+    // The new member sees its own `member.added` event and everything after.
+    let visible_event = cursor - 1;
+    if existing.is_some() {
+        db::exec(
+            txn,
+            "UPDATE messaging_conversation_members SET state = 'ACTIVE', role = $3, removed_at = NULL, \
+               removed_reason = NULL, send_restricted_until = NULL, visible_from_sequence = $4, \
+               visible_from_event = $5, joined_at = $6, updated_at = $6, version = version + 1 \
+             WHERE conversation_id = $1 AND principal_id = $2",
+            vec![
+                conversation_id.into(),
+                request.principal_id.into(),
+                role.into(),
+                next_sequence.into(),
+                visible_event.into(),
+                now.into(),
+            ],
+        )
+        .await?;
+    } else {
+        db::exec(
+            txn,
+            "INSERT INTO messaging_conversation_members (conversation_id, principal_id, environment_id, role, \
+               joined_at, updated_at, visible_from_sequence, visible_from_event) \
+             VALUES ($1, $2, $3, $4, $5, $5, $6, $7)",
+            vec![
+                conversation_id.into(),
+                request.principal_id.into(),
+                ctx.scope.environment_id.into(),
+                role.into(),
+                now.into(),
+                next_sequence.into(),
+                visible_event.into(),
+            ],
+        )
+        .await?;
+    }
+    // A re-admitted principal's devices are no longer "to be removed".
+    db::exec(
+        txn,
+        "DELETE FROM messaging_mls_pending_removals WHERE conversation_id = $1 AND principal_id = $2",
+        vec![conversation_id.into(), request.principal_id.into()],
+    )
+    .await?;
+    crate::mls::refresh_rekey(txn, conversation_id, now).await?;
+    record_audit(
+        txn,
+        ctx,
+        admin,
+        "MEMBER_ADDED",
+        conversation_id,
+        json!({ "member_principal_id": request.principal_id, "role": role }),
+        request_ctx,
+        now,
+    )
+    .await?;
+    crate::metrics::inc("messaging_members_added_total", &[]);
+    Ok((
+        201,
+        member_row(txn, conversation_id, request.principal_id).await?,
+    ))
+}
+
+struct AddRequestRef {
+    principal_id: Uuid,
 }
 
 async fn member_row<C: ConnectionTrait>(
@@ -547,4 +604,120 @@ pub async fn restrict_in<C: ConnectionTrait>(
     )
     .await?;
     Ok(())
+}
+
+/// Changes an ACTIVE member's role (`MEMBER` / `ADMIN`; the OWNER keeps ownership) inside
+/// the caller's transaction. `Ok(false)` when nothing changed.
+pub async fn set_role_in<C: ConnectionTrait>(
+    db: &C,
+    ctx: &TrustedContext,
+    conversation: &ConversationRow,
+    principal: Uuid,
+    role: &str,
+    request: &RequestContext,
+    now: DateTime<Utc>,
+) -> Result<bool> {
+    if !matches!(role, "MEMBER" | "ADMIN") {
+        return Err(Error::validation("role must be MEMBER or ADMIN"));
+    }
+    #[derive(sea_orm::FromQueryResult)]
+    struct Updated {
+        send_restricted_until: Option<DateTime<Utc>>,
+    }
+    let updated: Option<Updated> = db::one(
+        db,
+        "UPDATE messaging_conversation_members SET role = $3, updated_at = $4, version = version + 1 \
+         WHERE conversation_id = $1 AND principal_id = $2 AND state = 'ACTIVE' AND role NOT IN ('OWNER', $3) \
+         RETURNING send_restricted_until",
+        vec![conversation.id.into(), principal.into(), role.into(), now.into()],
+    )
+    .await?;
+    let Some(updated) = updated else {
+        return Ok(false);
+    };
+    outbox::enqueue_conversation(
+        db,
+        conversation.id,
+        NewEvent {
+            event_type: "messaging.member.updated",
+            aggregate_type: "CONVERSATION",
+            aggregate_id: conversation.id,
+            scope: scope_of(ctx),
+            payload: json!({
+                "conversation_id": conversation.id,
+                "principal_id": principal,
+                "role": role,
+                "send_restricted_until": updated.send_restricted_until.map(rfc3339),
+                "reason": "ROLE_CHANGED",
+            }),
+        },
+        request,
+        now,
+    )
+    .await?;
+    Ok(true)
+}
+
+/// Bans `principal` (removing it first when active) inside the caller's transaction: a
+/// banned principal cannot be re-added until [`unban_in`].
+#[allow(clippy::too_many_arguments)]
+pub async fn ban_in<C: ConnectionTrait>(
+    db: &C,
+    ctx: &TrustedContext,
+    conversation: &ConversationRow,
+    principal: Uuid,
+    reason: &str,
+    actor: Option<Uuid>,
+    request: &RequestContext,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    if access::membership(db, conversation.id, principal, true)
+        .await?
+        .is_some_and(|m| m.is_active() && m.role != "OWNER")
+    {
+        remove_in(
+            db,
+            ctx,
+            conversation,
+            principal,
+            false,
+            reason,
+            actor,
+            request,
+            now,
+        )
+        .await?;
+    }
+    db::exec(
+        db,
+        "INSERT INTO messaging_conversation_bans (conversation_id, principal_id, environment_id, reason, created_at) \
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (conversation_id, principal_id) \
+         DO UPDATE SET reason = EXCLUDED.reason, created_at = EXCLUDED.created_at, lifted_at = NULL",
+        vec![
+            conversation.id.into(),
+            principal.into(),
+            ctx.scope.environment_id.into(),
+            reason.into(),
+            now.into(),
+        ],
+    )
+    .await?;
+    crate::metrics::inc("messaging_members_banned_total", &[]);
+    Ok(())
+}
+
+/// Lifts a ban (the principal may be added again).
+pub async fn unban_in<C: ConnectionTrait>(
+    db: &C,
+    conversation_id: Uuid,
+    principal: Uuid,
+    now: DateTime<Utc>,
+) -> Result<bool> {
+    Ok(db::exec(
+        db,
+        "UPDATE messaging_conversation_bans SET lifted_at = $3 WHERE conversation_id = $1 AND principal_id = $2 AND lifted_at IS NULL",
+        vec![conversation_id.into(), principal.into(), now.into()],
+    )
+    .await?
+        == 1)
 }

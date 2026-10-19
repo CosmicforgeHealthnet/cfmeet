@@ -271,6 +271,8 @@ jobs:
         run: cargo test --locked --test attachments
       - name: Search, reports, moderation, retention / purge, legal holds, exports, data deletion, regulated contexts, audit (Part G)
         run: cargo test --locked --test compliance
+      - name: Integrations (Part V H) — delegated first-party scope, Meeting conversation resolve / fenced membership / lifecycle, LEGACY_MANAGED import
+        run: cargo test --locked --test integrations
       - name: cargo test (whole workspace, incl. the Platform Access certification)
         env:
           PLATFORM_ACCESS_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access

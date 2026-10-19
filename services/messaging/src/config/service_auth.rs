@@ -12,10 +12,13 @@
 //! | `CF_PLATFORM_ACCESS_BASE_URL` | yes (server) | Platform Access, the identity authority |
 //!
 //! Inbound, every `/internal/v1` route requires a service token whose issuer Messaging's
-//! own trust bundle grants the route's permission (no internal operation exists yet, so
-//! the production bundle trusts no issuer). Outbound, Messaging calls Platform Access only
-//! (credential verification, principal resolution, the identity change feed). There is no network-location trust,
-//! no inline key and no default key.
+//! own trust bundle grants the route's permission. The internal operations (Part V H) are
+//! `messaging-application.delegate` and `messaging-meeting.sync` (Meeting Service only),
+//! `messaging-context-authority.apply` (Privacy Relay only) and
+//! `messaging-sms-bridge.deliver` (SMS Gateway only); the service-auth REGISTRY refuses a
+//! bundle granting any of them to another issuer. Outbound, Messaging calls Platform Access
+//! (credential verification, principal resolution, identity context, the identity change
+//! feed). There is no network-location trust, no inline key and no default key.
 
 use std::{fmt, path::PathBuf, sync::Arc, time::Duration};
 

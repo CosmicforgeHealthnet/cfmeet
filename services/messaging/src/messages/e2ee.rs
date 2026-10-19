@@ -15,9 +15,7 @@ use sea_orm::{ConnectionTrait, FromQueryResult, TransactionTrait};
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::{
-    decode_b64, load_by_client_id, load_message, record_created, render, MessageRow, SendRequest,
-};
+use super::{decode_b64, load_by_client_id, load_message, render, MessageRow, SendRequest};
 use crate::{
     conversations::{
         policy::EffectivePolicy,
@@ -212,6 +210,14 @@ pub async fn send(
             "PLAINTEXT_IN_E2EE",
         ));
     }
+    if request.managed_presentation.is_some() {
+        // Presentation of E2EE content belongs inside the ciphertext.
+        return Err(Error::reason(
+            ErrorCode::ContentRejected,
+            "MANAGED_FIELDS_IN_E2EE",
+        ));
+    }
+    let notify = request.notify.unwrap_or(true);
     let (Some(device_id), Some(epoch), Some(ciphertext)) = (
         request.device_id,
         request.epoch,
@@ -319,7 +325,7 @@ pub async fn send(
                     &attachments,
                 )
                 .await?;
-                record_created(txn, &ctx, &row, &request_ctx, now).await?;
+                super::record_created_notify(txn, &ctx, &row, &request_ctx, now, notify).await?;
                 Ok((201, row))
             })
         })
