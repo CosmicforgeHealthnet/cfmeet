@@ -5,7 +5,7 @@ mod common;
 
 use axum::http::StatusCode;
 use common::{flows::ALL_SCOPES, *};
-use serde_json::json;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -201,14 +201,30 @@ async fn replies_threads_reactions_pins_and_unread_counts() {
         .put(&c, Some(owner), &format!("{rpath}/hello"), json!({}))
         .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
+    let of = |list: &Value, r: &str| {
+        list["reactions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["reaction"] == r)
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
     let list = h.get(&c, Some(member), &rpath).await;
+    let thumbs = of(&list.json, ":thumbsup:");
     assert_eq!(
-        list.json["reactions"][0]["reaction"], ":thumbsup:",
+        (thumbs["count"].as_i64(), thumbs["reactedByMe"].as_bool()),
+        (Some(2), Some(true)),
         "{}",
         list.text
     );
-    assert_eq!(list.json["reactions"][0]["count"], 2, "{}", list.text);
-    assert_eq!(list.json["reactions"][0]["reactedByMe"], true);
+    let emoji = of(&list.json, "\u{1F44D}");
+    assert_eq!(
+        (emoji["count"].as_i64(), emoji["reactedByMe"].as_bool()),
+        (Some(1), Some(false)),
+        "{}",
+        list.text
+    );
     conforms(
         "messaging/common/v1.schema.json#/$defs/ReactionSummary",
         &list.json,
@@ -216,7 +232,7 @@ async fn replies_threads_reactions_pins_and_unread_counts() {
     h.delete(&c, Some(member), &format!("{rpath}/:thumbsup:"))
         .await;
     let list = h.get(&c, Some(member), &rpath).await;
-    assert_eq!(list.json["reactions"][0]["count"], 1, "{}", list.text);
+    assert_eq!(of(&list.json, ":thumbsup:")["count"], 1, "{}", list.text);
 
     // Pins: administrators only; members see them.
     let ppath = format!("/v1/conversations/{cid}/pins");

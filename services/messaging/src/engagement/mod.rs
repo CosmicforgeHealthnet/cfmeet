@@ -191,7 +191,7 @@ pub async fn reactions(
     let rows: Vec<ReactionCount> = db::all(
         &state.db,
         "SELECT reaction, count(*) AS count, bool_or(principal_id = $2) AS mine FROM messaging_message_reactions \
-         WHERE message_id = $1 GROUP BY reaction ORDER BY min(created_at)",
+         WHERE message_id = $1 GROUP BY reaction ORDER BY min(created_at), reaction",
         vec![message.id.into(), acting.principal_id.into()],
     )
     .await?;
