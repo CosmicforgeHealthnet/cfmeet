@@ -23,11 +23,10 @@ axum = { version = "0.7", features = ["ws"] }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 utoipa = { version = "4.2", features = ["axum_extras", "chrono", "uuid"] }
-utoipa-swagger-ui = { version = "6.0", features = ["axum"] }
 # Authentication & Security
 jsonwebtoken = "9.3"
 bcrypt = "0.15"
-validator = { version = "0.18", features = ["derive"] }
+validator = { version = "0.20", features = ["derive"] }
 regex = "1.10"
 # Email (for verification)
 lettre = { version = "0.11", features = ["tokio1", "tokio1-native-tls", "smtp-transport", "builder"] }
@@ -42,14 +41,13 @@ tokio-stream = "0.1.18"
 futures-util = "0.3.31"
 
 # OAuth
-oauth2 = "4.4"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.12", features = ["json"] }
 base64 = "0.21"
 urlencoding = "2.1"
 
 # LiveKit (RoomService admin API over Twirp; rustls so https LiveKit endpoints work)
-livekit-api = { version = "0.4", features = ["rustls-tls-webpki-roots"] }
-livekit-protocol = "0.6"
+livekit-api = { version = "0.6.4", features = ["rustls-tls-webpki-roots"] }
+livekit-protocol = "0.7"
 
 # Redis
 redis = { version = "0.25", features = ["tokio-comp", "connection-manager"] }

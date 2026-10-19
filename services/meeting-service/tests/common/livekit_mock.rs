@@ -815,7 +815,10 @@ impl MockLiveKit {
                     })
                     .cloned()
                     .collect();
-                ok(proto::ListEgressResponse { items })
+                ok(proto::ListEgressResponse {
+                    items,
+                    next_page_token: None,
+                })
             }
             _ => twirp_error(StatusCode::NOT_FOUND, "bad_route", "unknown method"),
         }

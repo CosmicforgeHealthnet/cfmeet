@@ -287,6 +287,9 @@ impl RecordingProvider for LiveKitEgressRecorder {
                     audio_only: false,
                     video_only: false,
                     custom_base_url: String::new(),
+                    // The provider's default mixing (the behaviour before this field
+                    // existed).
+                    audio_mixing: Default::default(),
                 },
             ))
             .await?;
@@ -310,6 +313,8 @@ impl RecordingProvider for LiveKitEgressRecorder {
             .bounded(self.client.list_egress(EgressListOptions {
                 filter: EgressListFilter::Egress(provider_ref.to_string()),
                 active: false,
+                // A single egress id matches at most one item.
+                page_token: None,
             }))
             .await?;
         Ok(items
@@ -323,6 +328,7 @@ impl RecordingProvider for LiveKitEgressRecorder {
             .bounded(self.client.list_egress(EgressListOptions {
                 filter: EgressListFilter::Room(room_name.to_string()),
                 active: true,
+                page_token: None,
             }))
             .await?;
         Ok(items.iter().map(from_egress_info).collect())
