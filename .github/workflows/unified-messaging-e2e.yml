@@ -13,6 +13,10 @@ on:
   push:
     branches: [main, staging]
     paths:
+      - "services/privacy-relay/**"
+      - "services/sms-gateway/**"
+      - "services/calling/**"
+      - "packages/webhooks/**"
       - "services/meeting-service/**"
       - "services/messaging/**"
       - "services/platform-access/**"
@@ -22,6 +26,10 @@ on:
       - ".github/workflows/unified-messaging-e2e.yml"
   pull_request:
     paths:
+      - "services/privacy-relay/**"
+      - "services/sms-gateway/**"
+      - "services/calling/**"
+      - "packages/webhooks/**"
       - "services/meeting-service/**"
       - "services/messaging/**"
       - "services/platform-access/**"
@@ -92,6 +100,60 @@ jobs:
           MESSAGING_BIN: ${{ github.workspace }}/target/debug/messaging
           MESSAGING_MIGRATION_BIN: ${{ github.workspace }}/target/debug/messaging-migration
         run: cargo test --locked --test unified_messaging_e2e -- --nocapture
+
+      - name: Disk usage
+        if: always()
+        run: df -h / && (du -sh target 2>/dev/null || true)
+
+  cross-service:
+    # Part V K §§151–154: the three scenarios Parts H–J certified only against scripted
+    # peers, now across REAL processes (services/messaging/tests/cross_service_e2e.rs):
+    # 4 Privacy Relay revocation, 5 Managed SMS Bridge (deterministic synthetic carrier,
+    # no real carrier), 9 webhook privacy (Messaging → Calling → signed customer webhook).
+    name: Privacy Relay / SMS Gateway / Calling ↔ Messaging (real processes)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      # Missing binaries FAIL here (they only skip on a developer machine).
+      CROSS_SERVICE_E2E_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cross-service-e2e
+
+      - name: Build the peer service binaries (+ their migrations)
+        run: |
+          set -euo pipefail
+          for s in platform-access privacy-relay sms-gateway calling; do
+            (cd "services/$s" && cargo build --workspace --bins --locked)
+          done
+
+      - name: Journeys (Scenarios 4, 5, 9)
+        working-directory: services/messaging
+        env:
+          PLATFORM_ACCESS_BIN: ${{ github.workspace }}/target/debug/platform-access
+          PLATFORM_ACCESS_MIGRATION_BIN: ${{ github.workspace }}/target/debug/platform-access-migration
+          PRIVACY_RELAY_BIN: ${{ github.workspace }}/target/debug/privacy-relay
+          PRIVACY_RELAY_MIGRATION_BIN: ${{ github.workspace }}/target/debug/privacy-relay-migration
+          SMS_GATEWAY_BIN: ${{ github.workspace }}/target/debug/sms-gateway
+          SMS_GATEWAY_MIGRATION_BIN: ${{ github.workspace }}/target/debug/sms-gateway-migration
+          CALLING_BIN: ${{ github.workspace }}/target/debug/calling
+          CALLING_MIGRATION_BIN: ${{ github.workspace }}/target/debug/calling-migration
+        run: cargo test --locked --test cross_service_e2e -- --nocapture
 
       - name: Disk usage
         if: always()

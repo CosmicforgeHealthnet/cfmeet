@@ -44,7 +44,24 @@ use sea_orm::{ConnectionTrait, Database, DatabaseConnection, Statement};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-const ENV: RuntimeEnvironment = RuntimeEnvironment::Test;
+thread_local! {
+    /// The runtime environment of the journey on this test thread (`test` by default;
+    /// the webhook journey runs as `local`, the only runtime in which Calling accepts a
+    /// loopback webhook receiver).
+    static RUNTIME: std::cell::Cell<RuntimeEnvironment> =
+        const { std::cell::Cell::new(RuntimeEnvironment::Test) };
+}
+
+fn env_rt() -> RuntimeEnvironment {
+    RUNTIME.with(|r| r.get())
+}
+
+fn env_name() -> String {
+    match env_rt() {
+        RuntimeEnvironment::Local => "local".into(),
+        _ => "test".into(),
+    }
+}
 /// Deterministic test-only pepper of the test Platform Access (never used outside tests).
 const TEST_PEPPER: &str = "messaging-xs-e2e-test-pepper-0b7e41c9a2d35f86";
 pub const MESSAGING_SCOPES: [&str; 4] = [
@@ -182,9 +199,9 @@ where
 
 pub fn trust_bundle(receiver: &str, grants: &[(&str, &PublicJwk, &[&str])]) -> String {
     json!({
-        "bundle_version": 1, "receiver": receiver, "runtime_environment": ENV,
+        "bundle_version": 1, "receiver": receiver, "runtime_environment": env_rt(),
         "trusted_issuers": grants.iter().map(|(issuer, key, permissions)| json!({
-            "issuer": issuer, "audience": receiver, "runtime_environment": ENV,
+            "issuer": issuer, "audience": receiver, "runtime_environment": env_rt(),
             "keys": [key], "permissions": permissions,
         })).collect::<Vec<_>>(),
     })
@@ -273,7 +290,7 @@ pub fn key(dir: &Path, file: &str, kid: &str) -> ServiceSigningKey {
 pub fn signer(id: ServiceId, key: ServiceSigningKey) -> Arc<ServiceTokenSigner> {
     Arc::new(ServiceTokenSigner::new(
         id,
-        ENV,
+        env_rt(),
         key,
         TokenTtl::default(),
         Arc::new(SystemClock),
@@ -390,7 +407,7 @@ impl Stack {
             ("DATABASE_URL", pa_db.clone()),
             ("PLATFORM_ACCESS_DATABASE_MAX_CONNECTIONS", "4".into()),
             ("API_CREDENTIAL_PEPPER", TEST_PEPPER.into()),
-            ("CF_RUNTIME_ENVIRONMENT", "test".into()),
+            ("CF_RUNTIME_ENVIRONMENT", env_name()),
             ("CF_SERVICE_AUTH_KEY_ID", "pa-xs-1".into()),
             ("CF_SERVICE_AUTH_PRIVATE_KEY_FILE", p("pa-key.pem")),
             ("CF_SERVICE_TRUST_BUNDLE_FILE", p("pa-trust.json")),
@@ -409,7 +426,7 @@ impl Stack {
         )
         .await;
         let messaging_env: Vec<(String, String)> = [
-            ("CF_RUNTIME_ENVIRONMENT", "test".to_string()),
+            ("CF_RUNTIME_ENVIRONMENT", env_name()),
             ("RUST_LOG", "messaging=warn".into()),
             ("CF_SERVICE_AUTH_KEY_ID", "messaging-xs-1".into()),
             ("CF_SERVICE_AUTH_PRIVATE_KEY_FILE", p("messaging-key.pem")),
@@ -742,10 +759,10 @@ fn now_plus(minutes: i64) -> String {
 
 #[tokio::test]
 async fn scenario_4_privacy_relay_authority_reaches_real_messaging() {
-    let Some(mut st) = Stack::new(&[]).await else {
+    let Some(b) = bins(&["PRIVACY_RELAY_BIN", "PRIVACY_RELAY_MIGRATION_BIN"]) else {
         return;
     };
-    let Some(b) = bins(&["PRIVACY_RELAY_BIN", "PRIVACY_RELAY_MIGRATION_BIN"]) else {
+    let Some(mut st) = Stack::new(&[]).await else {
         return;
     };
     use cf_service_auth::services as s;
@@ -792,7 +809,7 @@ async fn scenario_4_privacy_relay_authority_reaches_real_messaging() {
         ),
         ("PRIVACY_RELAY_ENABLED", "true".into()),
         ("PRIVACY_RELAY_WORKER_INTERVAL_MS", "200".into()),
-        ("CF_RUNTIME_ENVIRONMENT", "test".into()),
+        ("CF_RUNTIME_ENVIRONMENT", env_name()),
         ("CF_SERVICE_AUTH_KEY_ID", "privacy-relay-xs-1".into()),
         ("CF_SERVICE_AUTH_PRIVATE_KEY_FILE", st.path("relay-key.pem")),
         ("CF_SERVICE_TRUST_BUNDLE_FILE", st.path("relay-trust.json")),
@@ -1163,10 +1180,10 @@ async fn numbering_stub(stub: NumberingStub) -> String {
 
 #[tokio::test]
 async fn scenario_5_managed_sms_bridge_between_real_messaging_and_real_sms_gateway() {
-    let Some(mut st) = Stack::new(&[]).await else {
+    let Some(b) = bins(&["SMS_GATEWAY_BIN", "SMS_GATEWAY_MIGRATION_BIN"]) else {
         return;
     };
-    let Some(b) = bins(&["SMS_GATEWAY_BIN", "SMS_GATEWAY_MIGRATION_BIN"]) else {
+    let Some(mut st) = Stack::new(&[]).await else {
         return;
     };
     use cf_service_auth::services as s;
@@ -1237,7 +1254,7 @@ async fn scenario_5_managed_sms_bridge_between_real_messaging_and_real_sms_gatew
             "SMS_GATEWAY_METRICS_ADDRESS",
             format!("127.0.0.1:{}", free_port()),
         ),
-        ("CF_RUNTIME_ENVIRONMENT", "test".into()),
+        ("CF_RUNTIME_ENVIRONMENT", env_name()),
         ("CF_SERVICE_AUTH_KEY_ID", "sms-gateway-xs-1".into()),
         ("CF_SERVICE_AUTH_PRIVATE_KEY_FILE", st.path("gw-key.pem")),
         ("CF_SERVICE_TRUST_BUNDLE_FILE", st.path("gw-trust.json")),
@@ -1642,4 +1659,326 @@ async fn scenario_5_managed_sms_bridge_between_real_messaging_and_real_sms_gatew
     .await
     .unwrap_or_default();
     assert!(!sealed.contains("0123456"), "{sealed}");
+}
+
+// =====================================================================================
+// Scenario 9 — Webhook privacy (real Messaging → real Calling → signed customer webhook)
+// =====================================================================================
+
+/// One webhook request as the customer endpoint received it.
+type Delivery = (axum::http::HeaderMap, Vec<u8>);
+
+#[derive(Clone, Default)]
+struct HookReceiver {
+    seen: Arc<std::sync::Mutex<Vec<Delivery>>>,
+    /// Statuses to answer, in order (then 200).
+    script: Arc<std::sync::Mutex<Vec<u16>>>,
+}
+
+async fn hook_receiver() -> (HookReceiver, String) {
+    use axum::{extract::State, http::StatusCode, routing::post, Router};
+    async fn hook(
+        State(r): State<HookReceiver>,
+        headers: axum::http::HeaderMap,
+        body: axum::body::Bytes,
+    ) -> StatusCode {
+        r.seen.lock().unwrap().push((headers, body.to_vec()));
+        let mut script = r.script.lock().unwrap();
+        let status = if script.is_empty() {
+            200
+        } else {
+            script.remove(0)
+        };
+        StatusCode::from_u16(status).unwrap()
+    }
+    let r = HookReceiver::default();
+    let app = Router::new()
+        .route("/hook", post(hook))
+        .with_state(r.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/hook", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (r, url)
+}
+
+#[tokio::test]
+async fn scenario_9_messaging_events_reach_customer_webhooks_through_real_calling_without_content()
+{
+    RUNTIME.with(|r| r.set(RuntimeEnvironment::Local));
+    let Some(b) = bins(&["CALLING_BIN", "CALLING_MIGRATION_BIN"]) else {
+        return;
+    };
+    use cf_service_auth::services as s;
+    use reqwest::Method as M;
+    let dir_key = ServiceSigningKey::generate(KeyId::parse("calling-xs-1").unwrap());
+    let cjwk = dir_key.public_jwk();
+    let Some(mut st) = Stack::new(&[(
+        s::CALLING,
+        &cjwk,
+        &[
+            "platform-credential.authenticate",
+            "platform-principal.resolve",
+            "platform-principal.register",
+            "platform-identity.read",
+        ],
+    )])
+    .await
+    else {
+        return;
+    };
+    std::fs::write(
+        st.dir.join("calling-key.pem"),
+        dir_key.to_pkcs8_pem().as_bytes(),
+    )
+    .unwrap();
+    let mjwk = st.messaging_key.public_jwk();
+    st.messaging_trust(&[]);
+    // Calling grants Messaging EXACTLY platform-event.publish.
+    std::fs::write(
+        st.dir.join("calling-trust.json"),
+        trust_bundle(
+            s::CALLING,
+            &[(s::MESSAGING, &mjwk, &["platform-event.publish"])],
+        ),
+    )
+    .unwrap();
+    let wh_key: Vec<u8> = (0..32u8)
+        .map(|i| 13u8.wrapping_add(i.wrapping_mul(7)))
+        .collect();
+    std::fs::write(
+        st.dir.join("webhook.key"),
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &wh_key),
+    )
+    .unwrap();
+    std::fs::write(
+        st.dir.join("signaling.key"),
+        "xs-e2e-signaling-signing-key-5d2c8e1f0a9b7364",
+    )
+    .unwrap();
+    let calling_db_url = create_db(&st.admin, "xs_calling").await;
+    migrate(&b[1], &calling_db_url);
+    let calling_db = Database::connect(&calling_db_url).await.unwrap();
+    let calling_port = free_port();
+    let calling_url = format!("http://127.0.0.1:{calling_port}");
+    st.start_messaging(&[("CF_CALLING_BASE_URL", calling_url.clone())])
+        .await;
+    let calling_env: Vec<(String, String)> = [
+        ("DATABASE_URL", calling_db_url.clone()),
+        ("CALLING_DATABASE_MAX_CONNECTIONS", "5".into()),
+        ("CF_RUNTIME_ENVIRONMENT", env_name()),
+        ("CF_SERVICE_AUTH_KEY_ID", "calling-xs-1".into()),
+        (
+            "CF_SERVICE_AUTH_PRIVATE_KEY_FILE",
+            st.path("calling-key.pem"),
+        ),
+        (
+            "CF_SERVICE_TRUST_BUNDLE_FILE",
+            st.path("calling-trust.json"),
+        ),
+        ("CF_PLATFORM_ACCESS_BASE_URL", st.pa.url.clone()),
+        ("CALLING_WEBHOOK_SECRET_KEY_ID", "xs-webhooks-1".into()),
+        ("CALLING_WEBHOOK_SECRET_KEY_FILE", st.path("webhook.key")),
+        // Local runtime only: lets the delivery worker reach this test's loopback receiver.
+        ("CALLING_WEBHOOK_ALLOW_PRIVATE_ENDPOINTS", "true".into()),
+        ("CALLING_IDENTITY_SYNC_INTERVAL_MS", "200".into()),
+        (
+            "CALLING_SIGNALING_SIGNING_KEY_FILE",
+            st.path("signaling.key"),
+        ),
+        ("RUST_LOG", "calling=warn".into()),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect();
+    let _calling = spawn(
+        &st.http,
+        &b[0],
+        "/health",
+        "CALLING_BIND_ADDRESS",
+        &calling_env,
+        Some(calling_port),
+    )
+    .await;
+
+    let mut scopes = MESSAGING_SCOPES.to_vec();
+    scopes.extend(["webhooks.manage", "webhooks.read"]);
+    let t = st.tenant("EXTERNAL", &scopes).await;
+    let token = st.credential(&t, &scopes).await;
+    let alice = st.principal(&t, "EXTERNAL_APPLICATION_PRINCIPAL").await;
+    let bob = st.principal(&t, "EXTERNAL_APPLICATION_PRINCIPAL").await;
+    // A second tenant with its own subscription must never see tenant A's events.
+    let other = st.tenant("EXTERNAL", &scopes).await;
+    let other_token = st.credential(&other, &scopes).await;
+
+    let (receiver, hook_url) = hook_receiver().await;
+    let (other_receiver, other_url) = hook_receiver().await;
+    let types = json!([
+        "conversation.created",
+        "conversation.member_added",
+        "message.created"
+    ]);
+    let subscribe = |tok: String, url: String| {
+        let r = st
+            .http
+            .post(format!("{calling_url}/v1/webhooks"))
+            .bearer_auth(tok)
+            .header("idempotency-key", Uuid::new_v4().to_string())
+            .json(&json!({ "url": url, "eventTypes": types }));
+        send(r)
+    };
+    let sub = subscribe(token.clone(), hook_url).await;
+    assert_eq!(sub.status, 201, "{}", sub.text);
+    let secret = sub.json["signingSecret"].as_str().unwrap().to_string();
+    assert!(secret.starts_with("whsec_"));
+    let sub2 = subscribe(other_token.clone(), other_url).await;
+    assert_eq!(sub2.status, 201, "{}", sub2.text);
+    // A credential without webhooks.manage cannot subscribe (scope escalation denied).
+    let weak = st.credential(&t, &["messages.read"]).await;
+    let r = subscribe(weak, "http://127.0.0.1:9/hook".into()).await;
+    assert_eq!(r.status, 403, "{}", r.text);
+
+    // The first message.created attempt is answered 503 (retry path).
+    receiver.script.lock().unwrap().extend([503]);
+    st.allow_managed(&token, "GROUP").await;
+    let started = std::time::Instant::now();
+    let conv = st
+        .customer(
+            &token,
+            Some(alice),
+            M::POST,
+            "/v1/conversations",
+            Some(json!({ "contextClass": "GROUP", "securityProfile": "MANAGED" })),
+        )
+        .await;
+    assert_eq!(conv.status, 201, "{}", conv.text);
+    let cid = conv.json["conversationId"].as_str().unwrap().to_string();
+    st.add_member(&token, alice, &cid, bob).await;
+    // Wait for the first deliveries so the 503 lands on one of them.
+    eventually(60, "first webhook delivery", || async {
+        (!receiver.seen.lock().unwrap().is_empty()).then_some(())
+    })
+    .await;
+    println!(
+        "EVIDENCE scenario9 first_webhook_visible_ms={}",
+        started.elapsed().as_millis()
+    );
+    const PLAINTEXT: &str = "north gate secret words";
+    let m = st.send_text(&token, bob, &cid, PLAINTEXT).await;
+    assert_eq!(m.status, 201, "{}", m.text);
+    let mid = m.json["messageId"].as_str().unwrap().to_string();
+
+    // The 503 schedules a retry (backoff ≥ 15 s); bring it forward in Calling's database
+    // (test acceleration only; the retry itself is Calling's own worker).
+    eventually(60, "a delivery waits for retry", || async {
+        (scalar(
+            &calling_db,
+            "SELECT count(*) FROM webhook_deliveries WHERE status = 'RETRY_SCHEDULED'",
+        )
+        .await
+            == 1)
+            .then_some(())
+    })
+    .await;
+    calling_db
+        .execute_unprepared("UPDATE webhook_deliveries SET next_attempt_at = now() - interval '1 second' WHERE status = 'RETRY_SCHEDULED'")
+        .await
+        .unwrap();
+    let seen = eventually(60, "all three events delivered", || async {
+        let seen = receiver.seen.lock().unwrap().clone();
+        let delivered = scalar(&calling_db, &format!(
+            "SELECT count(*) FROM webhook_deliveries d JOIN webhook_subscriptions s ON s.id = d.subscription_id \
+             WHERE d.status = 'SUCCEEDED' AND s.environment_id = '{}'", t.env)).await;
+        (delivered == 3).then_some(seen)
+    })
+    .await;
+    assert_eq!(seen.len(), 4, "3 events + 1 retried attempt");
+    assert_eq!(
+        scalar(&calling_db, "SELECT count(*) FROM webhook_delivery_attempts WHERE outcome = 'RETRY' AND http_status = 503").await,
+        1
+    );
+
+    let header =
+        |h: &axum::http::HeaderMap, k: &str| h.get(k).unwrap().to_str().unwrap().to_string();
+    let mut types_seen = Vec::new();
+    let mut delivery_ids = std::collections::HashMap::<String, Vec<String>>::new();
+    for (h, body) in &seen {
+        // Signed: v1=HMAC-SHA256(secret, "v1:{ts}:{deliveryId}:" + body).
+        let ts = header(h, "cf-webhook-timestamp");
+        let did = header(h, "cf-webhook-id");
+        let mut msg = format!("v1:{ts}:{did}:").into_bytes();
+        msg.extend_from_slice(body);
+        assert_eq!(
+            header(h, "cf-webhook-signature"),
+            format!("v1={}", hex::encode(hmac_sha256(secret.as_bytes(), &msg))),
+            "signature verifies"
+        );
+        // A forged body does not verify under the same signature.
+        let mut forged = format!("v1:{ts}:{did}:").into_bytes();
+        forged.extend_from_slice(&[body.as_slice(), b" "].concat());
+        assert_ne!(
+            header(h, "cf-webhook-signature"),
+            format!(
+                "v1={}",
+                hex::encode(hmac_sha256(secret.as_bytes(), &forged))
+            )
+        );
+        delivery_ids
+            .entry(header(h, "cf-webhook-event-id"))
+            .or_default()
+            .push(did);
+        let text = String::from_utf8(body.clone()).unwrap();
+        // No content, ciphertext, key, device, epoch, credential or other tenant's ids.
+        for leak in [
+            "north gate",
+            "secret words",
+            "ciphertext",
+            "\"text\"",
+            "epoch",
+            "device",
+            "keyPackage",
+            "whsec_",
+            token.as_str(),
+            &other.env.to_string(),
+            &other.tenant.to_string(),
+        ] {
+            assert!(!text.contains(leak), "{leak} leaked: {text}");
+        }
+        let v: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["data"]["conversationId"], json!(cid));
+        types_seen.push(v["type"].as_str().unwrap().to_string());
+        if v["type"] == "message.created" {
+            assert_eq!(v["data"]["messageId"], json!(mid));
+        }
+    }
+    types_seen.sort();
+    types_seen.dedup();
+    assert_eq!(
+        types_seen,
+        [
+            "conversation.created",
+            "conversation.member_added",
+            "message.created"
+        ]
+    );
+    // The retried event kept its delivery id and event id (customer-side deduplication).
+    let retried: Vec<_> = delivery_ids.values().filter(|d| d.len() == 2).collect();
+    assert_eq!(retried.len(), 1);
+    assert_eq!(retried[0][0], retried[0][1]);
+    // Messaging relayed everything it queued; nothing waits or died.
+    eventually(30, "relay drained", || async {
+        (scalar(
+            st.mdb(),
+            "SELECT count(*) FROM messaging_webhook_relay WHERE status <> 'RELAYED'",
+        )
+        .await
+            == 0)
+            .then_some(())
+    })
+    .await;
+    // The stored public events are ids-only too.
+    let stored = text(&calling_db, "SELECT string_agg(body::text, ',') FROM webhook_events WHERE producer = 'cfmeet.messaging'").await.unwrap();
+    assert!(!stored.contains("north gate"), "{stored}");
+    // Tenant B received nothing of tenant A.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(other_receiver.seen.lock().unwrap().is_empty());
 }
