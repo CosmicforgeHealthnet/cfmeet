@@ -1004,13 +1004,27 @@ async fn scenario_4_privacy_relay_authority_reaches_real_messaging() {
         create_conv(ctx.clone()).await.reason(),
         "CONTEXT_AUTHORITY_WITHDRAWN"
     );
-    // Every version was applied exactly once, in order, by the real worker.
-    assert_eq!(
-        scalar(&relay_db, &format!(
+    // Every version was applied exactly once, in order, by the real worker (Privacy Relay
+    // records APPLIED just after Messaging answered, so this may lag the close).
+    eventually(20, "all four versions recorded as applied", || async {
+        (scalar(&relay_db, &format!(
             "SELECT count(*) FROM privacy_relay_messaging_authority_jobs WHERE context_id = '{ctx}' AND status = 'APPLIED'"
         ))
+        .await
+            == 4)
+            .then_some(())
+    })
+    .await;
+    assert_eq!(
+        scalar(
+            &relay_db,
+            &format!(
+            "SELECT count(*) FROM privacy_relay_messaging_authority_jobs WHERE context_id = '{ctx}'"
+        )
+        )
         .await,
-        4
+        4,
+        "exactly one job per version"
     );
     assert_eq!(
         text(st.mdb(), &format!(
@@ -1053,13 +1067,16 @@ async fn scenario_4_privacy_relay_authority_reaches_real_messaging() {
         || async { (lifecycle_state(cid2.clone()).await == "CLOSED").then_some(()) },
     )
     .await;
-    assert_eq!(
-        scalar(&relay_db, &format!(
+    // Privacy Relay records APPLIED after Messaging answered (it may lag the close).
+    eventually(20, "Privacy Relay records the job as applied", || async {
+        (scalar(&relay_db, &format!(
             "SELECT count(*) FROM privacy_relay_messaging_authority_jobs WHERE context_id = '{ctx2}' AND status <> 'APPLIED'"
         ))
-        .await,
-        0
-    );
+        .await
+            == 0)
+            .then_some(())
+    })
+    .await;
     // Nothing in Messaging names a contact value or Privacy Relay internals.
     let authorities = text(st.mdb(), &format!(
         "SELECT string_agg(row_to_json(a)::text, ',') FROM messaging_context_authorities a WHERE environment_id = '{}'",
