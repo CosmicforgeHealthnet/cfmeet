@@ -23,6 +23,7 @@ pub const ALL_SCOPES: &[&str] = &[
     "attachments.read",
     "moderation.manage",
     "messaging.export",
+    "usage.read",
 ];
 
 /// One principal with one real client device and its view of the MLS group.

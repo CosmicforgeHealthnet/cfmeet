@@ -721,3 +721,218 @@ pub async fn unban_in<C: ConnectionTrait>(
     .await?
         == 1)
 }
+
+// ---------------------------------------------------------------------------------------
+// Part V I §113 — role changes and conversation bans (administrators).
+// ---------------------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RoleChange {
+    pub role: String,
+}
+
+/// `PATCH /v1/conversations/{id}/members/{principalId}`: MEMBER ↔ ADMIN (never the owner).
+pub async fn change_role(
+    state: &AppState,
+    ctx: &TrustedContext,
+    admin: &Administrator,
+    conversation_id: Uuid,
+    principal: Uuid,
+    request: RoleChange,
+) -> Result<Value> {
+    if !matches!(request.role.as_str(), "MEMBER" | "ADMIN") {
+        return Err(Error::validation("role must be MEMBER or ADMIN"));
+    }
+    let st = state.clone();
+    let ctx = ctx.clone();
+    let admin = admin.clone();
+    let request_ctx = request_context();
+    state
+        .db
+        .transaction::<_, Value, Error>(move |txn| {
+            Box::pin(async move {
+                let now = st.now();
+                let conversation = load(txn, &ctx, conversation_id, true)
+                    .await?
+                    .ok_or(Error::code(ErrorCode::NotFound))?;
+                require_admin(txn, &conversation, &admin).await?;
+                let member = access::membership(txn, conversation_id, principal, true)
+                    .await?
+                    .filter(|m| m.is_active())
+                    .ok_or(Error::code(ErrorCode::NotFound))?;
+                if member.role == "OWNER" {
+                    return Err(Error::reason(ErrorCode::PrincipalNotAuthorized, "OWNER_ROLE_FIXED"));
+                }
+                let changed = if member.role != request.role {
+                    set_role_in(txn, &ctx, &conversation, principal, &request.role, &request_ctx, now).await?
+                } else {
+                    false
+                };
+                if changed {
+                    record_audit(
+                        txn,
+                        &ctx,
+                        &admin,
+                        "MEMBER_ROLE_CHANGED",
+                        conversation_id,
+                        json!({ "member_principal_id": principal, "role": request.role }),
+                        &request_ctx,
+                        now,
+                    )
+                    .await?;
+                }
+                Ok(json!({ "conversationId": conversation_id, "principalId": principal, "role": request.role, "changed": changed }))
+            })
+        })
+        .await
+        .map_err(Error::from)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BanRequest {
+    pub principal_id: Uuid,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+/// `POST /v1/conversations/{id}/bans`: removes the member (if present) and keeps them
+/// from being re-added until the ban is lifted. PRIVATE_E2EE removal still needs the
+/// members' MLS commit (reported as `mlsRekeyRequired`).
+pub async fn ban(
+    state: &AppState,
+    ctx: &TrustedContext,
+    admin: &Administrator,
+    conversation_id: Uuid,
+    request: BanRequest,
+) -> Result<Value> {
+    let reason = request
+        .reason
+        .clone()
+        .unwrap_or_else(|| "BANNED_BY_ADMIN".into());
+    if !valid_reason(&reason) {
+        return Err(Error::validation(
+            "reason must be an UPPER_SNAKE_CASE code of 2-48 characters",
+        ));
+    }
+    let st = state.clone();
+    let ctx = ctx.clone();
+    let admin = admin.clone();
+    let request_ctx = request_context();
+    state
+        .db
+        .transaction::<_, Value, Error>(move |txn| {
+            Box::pin(async move {
+                let now = st.now();
+                let conversation = load(txn, &ctx, conversation_id, true)
+                    .await?
+                    .ok_or(Error::code(ErrorCode::NotFound))?;
+                require_admin(txn, &conversation, &admin).await?;
+                if admin.principal_id() == Some(request.principal_id) {
+                    return Err(Error::validation("an administrator cannot ban themselves"));
+                }
+                let current = access::membership(txn, conversation_id, request.principal_id, true).await?;
+                if current.as_ref().is_some_and(|m| m.role == "OWNER") {
+                    return Err(Error::reason(ErrorCode::PrincipalNotAuthorized, "OWNER_ROLE_FIXED"));
+                }
+                if conversation.context_class == "DIRECT" {
+                    return Err(Error::reason(ErrorCode::InvalidTransition, "DIRECT_MEMBERSHIP_FIXED"));
+                }
+                let was_active = current.as_ref().is_some_and(|m| m.is_active());
+                ban_in(txn, &ctx, &conversation, request.principal_id, &reason, admin.principal_id(), &request_ctx, now).await?;
+                record_audit(
+                    txn,
+                    &ctx,
+                    &admin,
+                    "MEMBER_BANNED",
+                    conversation_id,
+                    json!({ "member_principal_id": request.principal_id, "reason": reason }),
+                    &request_ctx,
+                    now,
+                )
+                .await?;
+                Ok(json!({
+                    "conversationId": conversation_id,
+                    "principalId": request.principal_id,
+                    "banned": true,
+                    "reason": reason,
+                    "mlsRekeyRequired": was_active && conversation.profile() == SecurityProfile::PrivateE2ee,
+                }))
+            })
+        })
+        .await
+        .map_err(Error::from)
+}
+
+/// `DELETE /v1/conversations/{id}/bans/{principalId}` (does not re-add the member).
+pub async fn unban(
+    state: &AppState,
+    ctx: &TrustedContext,
+    admin: &Administrator,
+    conversation_id: Uuid,
+    principal: Uuid,
+) -> Result<Value> {
+    let st = state.clone();
+    let ctx = ctx.clone();
+    let admin = admin.clone();
+    let request_ctx = request_context();
+    state
+        .db
+        .transaction::<_, Value, Error>(move |txn| {
+            Box::pin(async move {
+                let now = st.now();
+                let conversation = load(txn, &ctx, conversation_id, true)
+                    .await?
+                    .ok_or(Error::code(ErrorCode::NotFound))?;
+                require_admin(txn, &conversation, &admin).await?;
+                let lifted = unban_in(txn, conversation_id, principal, now).await?;
+                if lifted {
+                    record_audit(
+                        txn,
+                        &ctx,
+                        &admin,
+                        "MEMBER_UNBANNED",
+                        conversation_id,
+                        json!({ "member_principal_id": principal }),
+                        &request_ctx,
+                        now,
+                    )
+                    .await?;
+                }
+                Ok(json!({ "conversationId": conversation_id, "principalId": principal, "banned": false, "changed": lifted }))
+            })
+        })
+        .await
+        .map_err(Error::from)
+}
+
+#[derive(sea_orm::FromQueryResult)]
+struct BanRow {
+    principal_id: Uuid,
+    reason: Option<String>,
+    created_at: DateTime<Utc>,
+}
+
+/// `GET /v1/conversations/{id}/bans` (administrators).
+pub async fn bans(
+    state: &AppState,
+    ctx: &TrustedContext,
+    admin: &Administrator,
+    conversation_id: Uuid,
+) -> Result<Value> {
+    let conversation = load(&state.db, ctx, conversation_id, false)
+        .await?
+        .ok_or(Error::code(ErrorCode::NotFound))?;
+    require_admin(&state.db, &conversation, admin).await?;
+    let rows: Vec<BanRow> = db::all(
+        &state.db,
+        "SELECT principal_id, reason, created_at FROM messaging_conversation_bans \
+         WHERE conversation_id = $1 AND lifted_at IS NULL ORDER BY created_at",
+        vec![conversation_id.into()],
+    )
+    .await?;
+    Ok(
+        json!({ "bans": rows.iter().map(|b| json!({ "principalId": b.principal_id, "reason": b.reason, "bannedAt": rfc3339(b.created_at) })).collect::<Vec<_>>() }),
+    )
+}

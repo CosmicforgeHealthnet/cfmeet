@@ -20,6 +20,7 @@ mod m20261109_000007_moderation_compliance;
 mod m20261110_000008_integrations;
 mod m20261111_000009_context_authority;
 mod m20261112_000010_sms_bridge;
+mod m20261113_000011_engagement_usage;
 
 /// Name of the table recording which Messaging migrations have been applied.
 pub const MIGRATION_TABLE: &str = "messaging_seaql_migrations";
@@ -40,6 +41,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261110_000008_integrations::Migration),
             Box::new(m20261111_000009_context_authority::Migration),
             Box::new(m20261112_000010_sms_bridge::Migration),
+            Box::new(m20261113_000011_engagement_usage::Migration),
         ]
     }
 

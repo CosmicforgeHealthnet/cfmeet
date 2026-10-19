@@ -48,6 +48,7 @@ pub fn customer_routes() -> Router<AppState> {
         .merge(crate::moderation::http::customer_routes())
         .merge(crate::search::http::customer_routes())
         .merge(crate::sms_bridge::http::messaging_routes())
+        .merge(crate::usage::http::routes())
 }
 
 /// Routes nested under `/v1/conversations`.
@@ -60,6 +61,7 @@ pub fn conversation_tree() -> Router<AppState> {
         .merge(crate::moderation::http::conversation_routes())
         .merge(crate::search::http::conversation_routes())
         .merge(crate::sms_bridge::http::conversation_routes())
+        .merge(crate::engagement::http::routes())
 }
 
 pub fn app(state: AppState) -> Router {

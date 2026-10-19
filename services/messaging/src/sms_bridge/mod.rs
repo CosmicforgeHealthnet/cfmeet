@@ -709,6 +709,27 @@ pub async fn run_due(state: &AppState, limit: i64) -> Result<usize> {
                     ],
                 )
                 .await?;
+                // Segments are metered once the gateway accepted the submission.
+                if let (Some(segments), false) = (
+                    v["segmentCount"].as_i64(),
+                    matches!(status.as_str(), "FAILED" | "BLOCKED" | "UNKNOWN"),
+                ) {
+                    crate::usage::record(
+                        &txn,
+                        crate::usage::Owner {
+                            tenant_id: d.tenant_id,
+                            application_id: d.application_id,
+                            environment_id: d.environment_id,
+                        },
+                        crate::usage::SMS_BRIDGED,
+                        segments,
+                        d.message_id,
+                        Some("MANAGED"),
+                        &format!("sms-outbound:{}", d.message_id),
+                        now,
+                    )
+                    .await?;
+                }
             }
             Err(TransportError::Refused(_, code, reason)) => {
                 // A transport control refused it (opt-out, spend, capability …): recorded

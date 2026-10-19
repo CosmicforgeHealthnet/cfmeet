@@ -218,6 +218,7 @@ pub async fn send(
         ));
     }
     let notify = request.notify.unwrap_or(true);
+    let reply_to = request.reply_to_message_id;
     let (Some(device_id), Some(epoch), Some(ciphertext)) = (
         request.device_id,
         request.epoch,
@@ -325,6 +326,7 @@ pub async fn send(
                     &attachments,
                 )
                 .await?;
+                let row = crate::engagement::set_reply(txn, &conversation, row, reply_to).await?;
                 super::record_created_notify(txn, &ctx, &row, &request_ctx, now, notify).await?;
                 Ok((201, row))
             })

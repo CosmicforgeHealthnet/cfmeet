@@ -189,6 +189,12 @@ async fn a_managed_conversation_bridges_to_sms_with_explicit_disclosure_and_sepa
         "{}",
         t.text
     );
+    // Metered once, as segments only (no price).
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_usage_records WHERE usage_type = 'SMS_BRIDGED' AND quantity = 1")
+            .await,
+        1
+    );
 
     // A transport refusal (the party opted out) never disturbs the in-app message.
     *gw.refuse.lock().unwrap() = Some("RECIPIENT_OPTED_OUT");

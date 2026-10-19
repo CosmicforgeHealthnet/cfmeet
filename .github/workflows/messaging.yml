@@ -275,6 +275,8 @@ jobs:
         run: cargo test --locked --test integrations
       - name: SMS Bridge (Part V H §§106–112) — explicit disclosure, never an E2EE downgrade, separate carrier state, inbound MANAGED SMS
         run: cargo test --locked --test sms_bridge
+      - name: Engagement and usage (Part V I §113 / §129) — roles, bans, replies / threads, reactions, pins, unread, usage facts without prices
+        run: cargo test --locked --test engagement
       - name: cargo test (whole workspace, incl. the Platform Access certification)
         env:
           PLATFORM_ACCESS_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access

@@ -364,6 +364,15 @@ async fn managed_attachment_lifecycle_and_authorized_downloads() {
         (bytes.len() as i64, 0),
         "reservation committed"
     );
+    // Metered once as stored bytes (a usage fact, no price).
+    assert_eq!(
+        e.h.scalar(&format!(
+            "SELECT COALESCE(sum(quantity), 0)::bigint FROM messaging_usage_records WHERE usage_type = 'ATTACHMENT_STORED' AND subject_id = '{}'",
+            aid.as_str().unwrap()
+        ))
+        .await,
+        bytes.len() as i64
+    );
 
     // Only the sender's READY attachment in this conversation can be referenced.
     let r = e

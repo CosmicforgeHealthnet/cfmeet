@@ -1977,6 +1977,9 @@
             "ANNOUNCEMENT"
           ],
           "description": "MANAGED only (refused for PRIVATE_E2EE, whose presentation travels inside the ciphertext)."
+        },
+        "replyToMessageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
         }
       },
       "required": [
@@ -2165,6 +2168,28 @@
             "SMS"
           ],
           "description": "IN_APP, or SMS: arrived through the SMS Bridge (MANAGED only; never end-to-end encrypted)."
+        },
+        "replyToMessageId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The message this one replies to (same conversation, within the sender's history window)."
+        },
+        "threadRootId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The root of the reply thread (the first message replied to)."
         }
       },
       "required": [
@@ -5394,6 +5419,395 @@
           "const": "MANAGED"
         }
       }
+    },
+    "RoleChangeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "enum": [
+            "MEMBER",
+            "ADMIN"
+          ]
+        }
+      },
+      "required": [
+        "role"
+      ]
+    },
+    "RoleChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "role": {
+          "enum": [
+            "MEMBER",
+            "ADMIN"
+          ]
+        },
+        "changed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "conversationId",
+        "principalId",
+        "role",
+        "changed"
+      ]
+    },
+    "BanRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+        }
+      },
+      "required": [
+        "principalId"
+      ]
+    },
+    "Ban": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "banned": {
+          "type": "boolean"
+        },
+        "reason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mlsRekeyRequired": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "conversationId",
+        "principalId",
+        "banned"
+      ]
+    },
+    "Unban": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "banned": {
+          "const": false
+        },
+        "changed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "conversationId",
+        "principalId",
+        "banned",
+        "changed"
+      ]
+    },
+    "BanList": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bans": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "principalId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "reason": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "bannedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "principalId",
+              "reason",
+              "bannedAt"
+            ]
+          }
+        }
+      },
+      "required": [
+        "bans"
+      ]
+    },
+    "ReactionChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "messageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "reaction": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "An emoji sequence or a :short_code:."
+        },
+        "reacted": {
+          "type": "boolean"
+        },
+        "changed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "messageId",
+        "reaction",
+        "reacted",
+        "changed"
+      ]
+    },
+    "ReactionSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "messageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "reactions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "reaction": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "description": "An emoji sequence or a :short_code:."
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "reactedByMe": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "reaction",
+              "count",
+              "reactedByMe"
+            ]
+          }
+        }
+      },
+      "required": [
+        "messageId",
+        "reactions"
+      ]
+    },
+    "PinChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "messageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "changed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "conversationId",
+        "messageId",
+        "pinned",
+        "changed"
+      ]
+    },
+    "PinList": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "messageId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "sequence": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "pinnedByPrincipalId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "pinnedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "messageId",
+              "sequence",
+              "pinnedByPrincipalId",
+              "pinnedAt"
+            ]
+          }
+        }
+      },
+      "required": [
+        "pins"
+      ]
+    },
+    "UnreadCount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "unreadCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastSequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "readSequence": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "conversationId",
+        "unreadCount",
+        "lastSequence",
+        "readSequence"
+      ]
+    },
+    "UsageSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "to": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "totals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "usageType": {
+                "enum": [
+                  "MESSAGE_ACCEPTED",
+                  "ATTACHMENT_STORED",
+                  "SMS_BRIDGED"
+                ]
+              },
+              "unit": {
+                "enum": [
+                  "MESSAGES",
+                  "BYTES",
+                  "SEGMENTS"
+                ]
+              },
+              "securityProfile": {
+                "oneOf": [
+                  {
+                    "enum": [
+                      "MANAGED",
+                      "PRIVATE_E2EE"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "records": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "usageType",
+              "unit",
+              "securityProfile",
+              "quantity",
+              "records"
+            ]
+          }
+        },
+        "pricing": {
+          "const": "NONE",
+          "description": "Messaging records usage facts only; it never prices or bills."
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "totals",
+        "pricing"
+      ],
+      "description": "Usage facts of the caller's application environment (Part V I §129): quantities only, no price, rate or cost."
     }
   }
 }

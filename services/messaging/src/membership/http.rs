@@ -5,6 +5,8 @@
 //! | `GET /{id}/members` | `messages.read` + acting member, or `conversations.manage` (application) |
 //! | `POST /{id}/members` | `conversations.manage`; with an acting principal it must be OWNER / ADMIN |
 //! | `DELETE /{id}/members/{principalId}` | leaving (acting = member): `messages.send`; removing another: `conversations.manage` (+ OWNER / ADMIN when a principal acts) |
+//! | `PATCH /{id}/members/{principalId}` (role MEMBER ↔ ADMIN) | `conversations.manage` (+ OWNER / ADMIN when a principal acts) |
+//! | `GET, POST /{id}/bans`, `DELETE /{id}/bans/{principalId}` | `conversations.manage` (+ OWNER / ADMIN when a principal acts) |
 
 use axum::{
     extract::{Path, Query, State},
@@ -16,7 +18,7 @@ use axum::{
 use serde::Deserialize;
 use uuid::Uuid;
 
-use super::{AddRequest, Administrator};
+use super::{AddRequest, Administrator, BanRequest, RoleChange};
 use crate::{
     conversations::http::{CONVERSATIONS_MANAGE, MESSAGES_READ},
     http::{
@@ -31,7 +33,12 @@ pub const MESSAGES_SEND: &str = "messages.send";
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/:conversation_id/members", get(list).post(add))
-        .route("/:conversation_id/members/:principal_id", delete(remove))
+        .route(
+            "/:conversation_id/members/:principal_id",
+            delete(remove).patch(change_role),
+        )
+        .route("/:conversation_id/bans", get(list_bans).post(ban))
+        .route("/:conversation_id/bans/:principal_id", delete(unban))
 }
 
 /// The administrator of a request: the verified acting principal, or the application.
@@ -106,5 +113,56 @@ async fn remove(
     };
     Ok(Json(
         super::remove(&state, caller.context(), &admin, id, principal, q.reason).await?,
+    ))
+}
+
+async fn change_role(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, principal)): Path<(Uuid, Uuid)>,
+    Json(body): Json<RoleChange>,
+) -> Result<impl IntoResponse, ApiError> {
+    let admin = administrator(&state, &caller, &headers).await?;
+    Ok(Json(
+        super::change_role(&state, caller.context(), &admin, id, principal, body).await?,
+    ))
+}
+
+async fn ban(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<BanRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let admin = administrator(&state, &caller, &headers).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(super::ban(&state, caller.context(), &admin, id, body).await?),
+    ))
+}
+
+async fn unban(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, principal)): Path<(Uuid, Uuid)>,
+) -> Result<impl IntoResponse, ApiError> {
+    let admin = administrator(&state, &caller, &headers).await?;
+    Ok(Json(
+        super::unban(&state, caller.context(), &admin, id, principal).await?,
+    ))
+}
+
+async fn list_bans(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    let admin = administrator(&state, &caller, &headers).await?;
+    Ok(Json(
+        super::bans(&state, caller.context(), &admin, id).await?,
     ))
 }

@@ -441,6 +441,7 @@ pub async fn send(
         }
     };
     let notify = request.notify.unwrap_or(true);
+    let reply_to = request.reply_to_message_id;
     let text = request
         .text
         .ok_or_else(|| Error::validation("MANAGED messages need text"))?;
@@ -505,6 +506,7 @@ pub async fn send(
                 .await?;
                 crate::attachments::link_to_message(txn, &conversation, row.id, acting.principal_id, &attachments)
                     .await?;
+                let row = crate::engagement::set_reply(txn, &conversation, row, reply_to).await?;
                 super::record_created_notify(txn, &ctx2, &row, &request_ctx, now, notify).await?;
                 // A bridged conversation: queue the SMS copy in the same transaction.
                 crate::sms_bridge::enqueue_outbound(txn, &conversation, &row, now).await?;

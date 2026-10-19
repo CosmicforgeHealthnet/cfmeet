@@ -906,6 +906,23 @@ pub async fn finalize(
     let row = load(&state.db, conversation_id, attachment_id, false)
         .await?
         .ok_or(Error::code(ErrorCode::NotFound))?;
+    if let Some(bytes) = row.verified_size {
+        crate::usage::record(
+            &state.db,
+            crate::usage::Owner {
+                tenant_id: row.tenant_id,
+                application_id: row.application_id,
+                environment_id: row.environment_id,
+            },
+            crate::usage::ATTACHMENT_STORED,
+            bytes,
+            row.id,
+            Some(&row.security_profile),
+            &format!("attachment:{}", row.id),
+            state.now(),
+        )
+        .await?;
+    }
     crate::metrics::inc("messaging_attachments_finalized_total", &[]);
     Ok(view(&row))
 }

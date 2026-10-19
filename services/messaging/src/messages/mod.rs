@@ -95,6 +95,8 @@ pub struct MessageRow {
     pub managed_presentation: Option<String>,
     /// `IN_APP` or `SMS` (arrived through the SMS Bridge; MANAGED only).
     pub channel: String,
+    pub reply_to_message_id: Option<Uuid>,
+    pub thread_root_id: Option<Uuid>,
 }
 
 pub const MESSAGE_COLUMNS: &str = "m.id, m.conversation_id, m.sequence, m.message_kind, m.security_profile, \
@@ -102,7 +104,7 @@ pub const MESSAGE_COLUMNS: &str = "m.id, m.conversation_id, m.sequence, m.messag
      m.mls_ciphertext, m.ciphertext_sha256, m.acceptance_digest, m.managed_sealed, m.managed_seal_nonce, \
      m.managed_seal_key_id, m.attachment_count, m.lifecycle, m.lifecycle_reason, m.edit_count, m.edited_at, \
      m.created_at, m.tenant_id, m.application_id, m.environment_id, m.security_provenance, m.original_created_at, \
-     m.managed_presentation, m.channel";
+     m.managed_presentation, m.channel, m.reply_to_message_id, m.thread_root_id";
 
 impl MessageRow {
     pub fn profile(&self) -> SecurityProfile {
@@ -144,6 +146,8 @@ pub async fn render(state: &AppState, row: &MessageRow, hidden: bool) -> Value {
         "securityProvenance": row.security_provenance,
         "originalCreatedAt": row.original_created_at.map(rfc3339),
         "channel": row.channel,
+        "replyToMessageId": row.reply_to_message_id,
+        "threadRootId": row.thread_root_id,
     });
     match row.profile() {
         SecurityProfile::PrivateE2ee => {
@@ -261,6 +265,9 @@ pub struct SendRequest {
     /// MANAGED only: `STANDARD` (default) or `ANNOUNCEMENT`.
     #[serde(default)]
     pub managed_presentation: Option<String>,
+    /// A reply to this earlier message of the conversation (thread metadata, ids only).
+    #[serde(default)]
+    pub reply_to_message_id: Option<Uuid>,
 }
 
 /// Checks shared by both profiles, before the transaction: membership, lifecycle,
@@ -465,6 +472,19 @@ pub(crate) async fn record_created_notify<C: ConnectionTrait>(
         now,
     )
     .await?;
+    if row.message_kind == "APPLICATION" {
+        crate::usage::record(
+            db,
+            ctx.into(),
+            crate::usage::MESSAGE_ACCEPTED,
+            1,
+            row.id,
+            Some(&row.security_profile),
+            &format!("message:{}", row.id),
+            now,
+        )
+        .await?;
+    }
     crate::metrics::inc(
         "messaging_messages_accepted_total",
         &[(
@@ -492,6 +512,9 @@ pub struct ListQuery {
     /// `afterSequence`.
     #[serde(default)]
     pub before_sequence: Option<i64>,
+    /// Only this thread: the root message and its replies.
+    #[serde(default)]
+    pub thread_root_id: Option<Uuid>,
     #[serde(default)]
     pub limit: Option<i64>,
 }
@@ -521,9 +544,10 @@ pub async fn list(
             &state.db,
             &format!(
                 "SELECT {MESSAGE_COLUMNS} FROM messaging_messages m WHERE m.conversation_id = $1 AND m.sequence < $2 \
-                   AND m.sequence >= $3 ORDER BY m.sequence DESC LIMIT $4"
+                   AND m.sequence >= $3 AND ($5::uuid IS NULL OR m.thread_root_id = $5 OR m.id = $5) \
+                 ORDER BY m.sequence DESC LIMIT $4"
             ),
-            vec![conversation_id.into(), before.into(), member.visible_from_sequence.into(), (limit + 1).into()],
+            vec![conversation_id.into(), before.into(), member.visible_from_sequence.into(), (limit + 1).into(), q.thread_root_id.into()],
         )
         .await?
     } else {
@@ -535,9 +559,10 @@ pub async fn list(
             &state.db,
             &format!(
                 "SELECT {MESSAGE_COLUMNS} FROM messaging_messages m WHERE m.conversation_id = $1 AND m.sequence > $2 \
+                   AND ($4::uuid IS NULL OR m.thread_root_id = $4 OR m.id = $4) \
                  ORDER BY m.sequence LIMIT $3"
             ),
-            vec![conversation_id.into(), after.into(), (limit + 1).into()],
+            vec![conversation_id.into(), after.into(), (limit + 1).into(), q.thread_root_id.into()],
         )
         .await?
     };
