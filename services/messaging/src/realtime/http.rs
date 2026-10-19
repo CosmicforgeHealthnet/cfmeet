@@ -365,8 +365,10 @@ mod ticket_cors_tests {
 
     #[test]
     fn allows_only_single_configured_origin_and_native_no_origin() {
-        let mut settings = super::super::RealtimeSettings::default();
-        settings.allowed_origins = vec!["https://meet.example.com".to_string()];
+        let settings = super::super::RealtimeSettings {
+            allowed_origins: vec!["https://meet.example.com".to_string()],
+            ..Default::default()
+        };
         let mut headers = HeaderMap::new();
         assert!(ticket_origin(&settings, &headers).unwrap().is_none());
         headers.insert(
