@@ -969,3 +969,96 @@ async fn regulated_contexts_require_disclosure_and_audit_is_queryable() {
         StatusCode::BAD_REQUEST
     );
 }
+
+/// Race: a legal hold requested while a purge is in flight. The purge checked "not held"
+/// inside its open transaction; the hold must NOT be acknowledged until that purge has
+/// settled (else an acknowledged hold could lose its data). A purge that starts after the
+/// acknowledgement sees the hold.
+#[tokio::test]
+async fn a_legal_hold_is_never_overtaken_by_an_in_flight_purge() {
+    use sea_orm::TransactionTrait;
+    let Some((h, _)) = harness().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    policy(
+        &h,
+        &c,
+        json!({}),
+        json!({ "retention": { "messageDays": 30 } }),
+    )
+    .await;
+    let (conv, people) = managed_group(&h, &c, 2).await;
+    let first = h.send_managed(&c, &conv, people[0], "purged first").await;
+    let second = h.send_managed(&c, &conv, people[0], "held").await;
+    h.clock.advance(chrono::Duration::days(31));
+    let mut report = messaging::compliance::retention::RetentionReport::default();
+    messaging::compliance::retention::expire_due(&h.state, 100, &mut report)
+        .await
+        .unwrap();
+    assert_eq!(report.expired, 2, "{report:?}");
+    let conv_id = Uuid::parse_str(&cid(&conv)).unwrap();
+    let id1 = Uuid::parse_str(first.json["messageId"].as_str().unwrap()).unwrap();
+    let id2 = Uuid::parse_str(second.json["messageId"].as_str().unwrap()).unwrap();
+    let row1 = messaging::messages::load_message(&h.state.db, conv_id, id1, false)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // 1. A purge is mid-transaction (checked, not yet committed) when the hold arrives.
+    let purge = h.state.db.begin().await.unwrap();
+    let outcome = messaging::compliance::retention::purge_message(&purge, &row1, h.state.now())
+        .await
+        .unwrap();
+    assert!(outcome.is_some(), "not held when the purge checked");
+    let hold_body = json!({ "scopeKind": "CONVERSATION", "conversationId": conv_id, "reasonCategory": "LITIGATION" });
+    let finish_purge = async {
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        // While the purge is open the hold is neither committed nor acknowledged.
+        let visible = h
+            .scalar("SELECT count(*) FROM messaging_legal_holds WHERE status = 'ACTIVE'")
+            .await;
+        purge.commit().await.unwrap();
+        visible
+    };
+    let started = std::time::Instant::now();
+    let (hold, visible_during_purge) = tokio::join!(
+        async {
+            let r = h
+                .post(&c, None, "/v1/messaging/legal-holds", hold_body.clone())
+                .await;
+            (r, started.elapsed())
+        },
+        finish_purge
+    );
+    let (hold, waited) = hold;
+    assert_eq!(hold.status, StatusCode::CREATED, "{}", hold.text);
+    assert_eq!(
+        visible_during_purge, 0,
+        "the hold waited for the in-flight purge"
+    );
+    assert!(
+        waited >= std::time::Duration::from_millis(550),
+        "the hold was acknowledged only after the purge settled ({waited:?})"
+    );
+    // The purge that settled first stands (it preceded the hold) ...
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_messages WHERE id = '{id1}' AND lifecycle = 'PURGED'"
+        ))
+        .await,
+        1
+    );
+    // 2. ... and every purge after the acknowledgement honours the hold.
+    let r = messaging::compliance::run_once(&h.state).await.unwrap();
+    assert_eq!((r.purged, r.held), (0, 1), "{r:?}");
+    assert_eq!(
+        h.scalar(&format!("SELECT count(*) FROM messaging_messages WHERE id = '{id2}' AND lifecycle = 'EXPIRED' AND managed_sealed IS NOT NULL")).await,
+        1,
+        "the held message keeps its content"
+    );
+    println!(
+        "EVIDENCE hold_vs_purge hold_acknowledged_after_ms={}",
+        waited.as_millis()
+    );
+}

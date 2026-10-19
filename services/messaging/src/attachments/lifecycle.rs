@@ -216,6 +216,7 @@ pub async fn rescan_due(state: &AppState, batch: i64) -> Result<usize> {
 struct Deletion {
     id: Uuid,
     object_key: String,
+    environment_id: Uuid,
     attachment_id: Option<Uuid>,
     attempts: i32,
 }
@@ -233,15 +234,20 @@ pub async fn process_deletions(
         "WITH due AS (SELECT id FROM messaging_object_deletions WHERE status IN ('PENDING', 'HELD') AND next_attempt_at <= $1 \
              AND (lease_expires_at IS NULL OR lease_expires_at <= $1) ORDER BY next_attempt_at LIMIT $2 FOR UPDATE SKIP LOCKED) \
          UPDATE messaging_object_deletions d SET lease_token = $3, lease_expires_at = $4 FROM due WHERE d.id = due.id \
-         RETURNING d.id, d.object_key, d.attachment_id, d.attempts",
+         RETURNING d.id, d.object_key, d.environment_id, d.attachment_id, d.attempts",
         vec![now.into(), batch.into(), token.into(), (now + chrono::Duration::seconds(120)).into()],
     )
     .await?;
     let retry = RetryPolicy::default();
     for d in due {
-        // Never delete an object an active legal hold protects.
+        // Never delete an object an active legal hold protects. The check and the object
+        // removal run under the environment's destruction lock (one transaction), so a
+        // hold acknowledged meanwhile is never overtaken.
+        let guard = state.db.begin().await?;
+        crate::compliance::holds::lock_for_destruction(&guard, d.environment_id).await?;
         if let Some(a) = d.attachment_id {
-            if crate::compliance::holds::attachment_held(&state.db, a, now).await? {
+            if crate::compliance::holds::attachment_held(&guard, a, now).await? {
+                guard.commit().await?;
                 db::exec(
                     &state.db,
                     "UPDATE messaging_object_deletions SET status = 'HELD', next_attempt_at = $3, lease_token = NULL, lease_expires_at = NULL \
@@ -253,7 +259,9 @@ pub async fn process_deletions(
                 continue;
             }
         }
-        match state.storage.delete(&d.object_key).await {
+        let outcome = state.storage.delete(&d.object_key).await;
+        guard.commit().await?;
+        match outcome {
             Ok(()) => {
                 db::exec(
                     &state.db,

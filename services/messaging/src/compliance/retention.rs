@@ -37,13 +37,15 @@ pub struct RetentionReport {
     pub attachments_deleted: usize,
 }
 
-/// Purges one tombstoned message inside the caller's transaction. Returns `Ok(None)` when
+/// Purges one tombstoned message inside the caller's transaction (which keeps the
+/// environment's destruction lock until it ends). Returns `Ok(None)` when
 /// a legal hold protects it (nothing removed), else the attachments deleted.
 pub async fn purge_message<C: ConnectionTrait>(
     db: &C,
     row: &MessageRow,
     now: DateTime<Utc>,
 ) -> Result<Option<usize>> {
+    holds::lock_for_destruction(db, row.environment_id).await?;
     if holds::message_held(db, row.id, now).await? {
         return Ok(None);
     }

@@ -1403,3 +1403,96 @@ async fn real_clamav_detects_eicar() {
     assert_eq!(f.json["state"], "QUARANTINED", "{}", f.text);
     assert_eq!(f.json["scan"]["engine"], "clamav");
 }
+
+/// Races on finalization: many concurrent finalizes of one upload, and finalizes racing
+/// the intent-expiry worker. Each attachment reaches exactly ONE outcome; its quota is
+/// committed or released exactly once; usage is metered once; a deletion is queued only
+/// for the expired one.
+#[tokio::test]
+async fn concurrent_finalization_and_expiry_settle_exactly_once() {
+    let Some(e) = env().await else { return };
+    let c = e.h.customer(ALL_SCOPES);
+    e.policy(&c, json!({ "maxConcurrentUploads": 50 })).await;
+    let (conv, people) = e.managed_group(&c, 1).await;
+    let alice = people[0];
+    let env_id = c.context.scope.environment_id;
+
+    // 1. 16 concurrent finalizes of the same upload.
+    let bytes = png(4000);
+    let r = e
+        .intent(&c, &conv, alice, json!({ "kind": "IMAGE", "size": bytes.len(), "sha256": sha256_hex(&bytes), "mediaType": "image/png", "fileName": "a.png" }))
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let id = r.json["attachmentId"].clone();
+    e.store
+        .upload_signed(&write_of(&r.json["upload"]), e.h.now(), bytes.clone())
+        .unwrap();
+    let results =
+        futures_util::future::join_all((0..16).map(|_| e.finalize(&c, &conv, alice, &id))).await;
+    for r in &results {
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        assert_eq!(r.json["state"], "READY", "{}", r.text);
+    }
+    assert_eq!(e.usage(&c).await, (bytes.len() as i64, 0), "committed once");
+    let aid = id.as_str().unwrap();
+    assert_eq!(
+        e.h.scalar(&format!("SELECT count(*) FROM messaging_usage_records WHERE environment_id = '{env_id}' AND subject_id = '{aid}'")).await,
+        1,
+        "metered once"
+    );
+    assert_eq!(
+        e.h.scalar(&format!(
+            "SELECT count(*) FROM messaging_object_deletions WHERE attachment_id = '{aid}'"
+        ))
+        .await,
+        0
+    );
+
+    // 2. Finalizes racing the expiry worker once the intent's validity has passed.
+    let late = png(3000);
+    let r = e
+        .intent(&c, &conv, alice, json!({ "kind": "IMAGE", "size": late.len(), "sha256": sha256_hex(&late), "mediaType": "image/png", "fileName": "b.png" }))
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let late_id = r.json["attachmentId"].clone();
+    e.store
+        .upload_signed(&write_of(&r.json["upload"]), e.h.now(), late.clone())
+        .unwrap();
+    e.h.clock.advance(chrono::Duration::minutes(16));
+    let finalizes =
+        futures_util::future::join_all((0..8).map(|_| e.finalize(&c, &conv, alice, &late_id)));
+    let workers = futures_util::future::join_all((0..4).map(|_| lifecycle::run_once(&e.h.state)));
+    let (finalized, swept) = tokio::join!(finalizes, workers);
+    for r in &finalized {
+        assert!(
+            r.reason() == "INTENT_EXPIRED" || r.json["state"] == "EXPIRED",
+            "an expired intent never becomes READY: {}",
+            r.text
+        );
+    }
+    let expired_by_workers: usize = swept
+        .iter()
+        .map(|r| r.as_ref().unwrap().expired_intents)
+        .sum();
+    assert!(expired_by_workers <= 1, "{expired_by_workers}");
+    let lid = late_id.as_str().unwrap();
+    assert_eq!(
+        e.h.scalar(&format!(
+            "SELECT count(*) FROM messaging_attachments WHERE id = '{lid}' AND state = 'EXPIRED'"
+        ))
+        .await,
+        1
+    );
+    assert_eq!(
+        e.h.scalar(&format!(
+            "SELECT count(*) FROM messaging_object_deletions WHERE attachment_id = '{lid}'"
+        ))
+        .await,
+        1,
+        "exactly one deletion queued"
+    );
+    // The first attachment's commitment is untouched; the expired reservation is released
+    // exactly once (never negative).
+    assert_eq!(e.usage(&c).await, (bytes.len() as i64, 0));
+    println!("EVIDENCE finalize_race concurrent_finalizes=16 finalize_vs_expiry=8x4 outcomes=1");
+}

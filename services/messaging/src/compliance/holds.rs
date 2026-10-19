@@ -6,13 +6,17 @@
 //!   ENVIRONMENT. An optional expiry ends a hold automatically.
 //! * Every purge / object deletion asks [`message_held`] / [`attachment_held`] first: a
 //!   held item is preserved (deletion queue `HELD`), never removed.
+//! * Hold creation and destruction are serialised per environment ([`lock_for_destruction`]
+//!   shared, hold creation exclusive): a purge that checked "not held" finishes before a
+//!   concurrent hold is acknowledged, and a purge that starts after the acknowledgement
+//!   sees the hold. An acknowledged hold therefore never loses data to an in-flight purge.
 //! * PRIVATE_E2EE: a hold preserves ciphertext, encrypted attachment objects, metadata and
 //!   voluntarily disclosed report evidence — and NOTHING more. It never creates a way to
 //!   decrypt: content that must be readable by the server belongs in MANAGED from the
 //!   conversation's creation (§92).
 
 use chrono::{DateTime, Utc};
-use sea_orm::{ConnectionTrait, FromQueryResult};
+use sea_orm::{ConnectionTrait, FromQueryResult, TransactionTrait};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -25,6 +29,33 @@ use crate::{
     identity::TrustedContext,
     state::AppState,
 };
+
+/// Advisory-lock key of an environment's hold / destruction serialisation.
+const LOCK_KEY: &str = "hashtextextended('messaging-legal-hold:' || $1::text, 0)";
+
+/// Taken (shared, transaction-scoped) by every purge / deletion BEFORE it checks for a
+/// hold, and held until its transaction ends. MUST run inside a transaction.
+pub async fn lock_for_destruction<C: ConnectionTrait>(db: &C, environment_id: Uuid) -> Result<()> {
+    db::exec(
+        db,
+        &format!("SELECT pg_advisory_xact_lock_shared({LOCK_KEY})"),
+        vec![environment_id.into()],
+    )
+    .await?;
+    Ok(())
+}
+
+/// Taken (exclusive, transaction-scoped) by hold creation: waits for in-flight purges of
+/// the environment, and blocks new ones until the hold is committed.
+async fn lock_for_new_hold<C: ConnectionTrait>(db: &C, environment_id: Uuid) -> Result<()> {
+    db::exec(
+        db,
+        &format!("SELECT pg_advisory_xact_lock({LOCK_KEY})"),
+        vec![environment_id.into()],
+    )
+    .await?;
+    Ok(())
+}
 
 const ACTIVE: &str = "h.status = 'ACTIVE' AND (h.expires_at IS NULL OR h.expires_at > $2)";
 
@@ -156,8 +187,10 @@ pub async fn create(state: &AppState, ctx: &TrustedContext, request: CreateHold)
         }
     }
     let id = Uuid::new_v4();
+    let txn = state.db.begin().await?;
+    lock_for_new_hold(&txn, ctx.scope.environment_id).await?;
     db::exec(
-        &state.db,
+        &txn,
         "INSERT INTO messaging_legal_holds (id, tenant_id, application_id, environment_id, scope_kind, conversation_id, principal_id, \
            reason_category, case_reference, created_by_credential_id, created_at, expires_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
@@ -177,6 +210,7 @@ pub async fn create(state: &AppState, ctx: &TrustedContext, request: CreateHold)
         ],
     )
     .await?;
+    txn.commit().await?;
     audit::record(
         &state.db,
         AuditEntry {

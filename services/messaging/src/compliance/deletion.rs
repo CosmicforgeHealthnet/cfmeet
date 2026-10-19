@@ -234,20 +234,26 @@ async fn process(state: &AppState, d: &DeletionRow) -> Result<Counts> {
     )
     .await?;
     for a in unsent {
-        let now = state.now();
-        if holds::attachment_held(&state.db, a.id, now).await? {
-            counts.held += 1;
-            continue;
-        }
         let st = state.clone();
+        // The hold check and the deletion are one transaction under the destruction lock.
         let deleted = state
             .db
-            .transaction::<_, bool, Error>(move |txn| {
-                Box::pin(async move { delete_attachment(txn, &a, "DATA_ERASURE", st.now()).await })
+            .transaction::<_, Option<bool>, Error>(move |txn| {
+                Box::pin(async move {
+                    let now = st.now();
+                    holds::lock_for_destruction(txn, a.environment_id).await?;
+                    if holds::attachment_held(txn, a.id, now).await? {
+                        return Ok(None);
+                    }
+                    Ok(Some(delete_attachment(txn, &a, "DATA_ERASURE", now).await?))
+                })
             })
             .await
             .map_err(Error::from)?;
-        counts.attachments += i64::from(deleted);
+        match deleted {
+            None => counts.held += 1,
+            Some(d) => counts.attachments += i64::from(d),
+        }
     }
     if let Some(p) = d.principal_id {
         for sql in [
