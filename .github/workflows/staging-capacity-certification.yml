@@ -1,0 +1,141 @@
+name: Hosted staging capacity certification
+
+# Part K gates 16 / 30: runs the hosted-staging kit (scripts/staging) against an
+# ALREADY-DEPLOYED, owner-authorized staging environment and uploads the evidence.
+#
+# * Manual only (workflow_dispatch) and only from the staging branch. Never on push.
+# * Deploys nothing, migrates nothing, changes no DNS / gateway / LiveKit configuration.
+# * Refuses CF Meet production hosts, plain HTTP and any host outside the repository
+#   variable CFMEET_STAGING_ALLOWED_HOSTS (enforced in scripts/staging/lib.mjs).
+# * Disabled until a repository admin sets the variable STAGING_CERTIFICATION_ENABLED=true
+#   and creates the GitHub environment "hosted-staging" with required reviewers; its
+#   secrets hold a SANDBOX credential of a test application only — never a production
+#   credential (docs: scripts/staging/README.md).
+
+on:
+  workflow_dispatch:
+    inputs:
+      authorization:
+        description: "Owner approval reference for this run (issue / change id)"
+        required: true
+      label:
+        description: "Run label for the report"
+        required: false
+        default: ""
+      members:
+        description: "Principals per conversation (needs that many in STAGING_PRINCIPALS_JSON)"
+        required: false
+        default: "20"
+      messages_per_sender:
+        description: "Messages each member sends in managed-send"
+        required: false
+        default: "20"
+      fanout_messages:
+        description: "Messages in the fan-out workload"
+        required: false
+        default: "30"
+      attachments:
+        description: "Attachments in the attachment workload"
+        required: false
+        default: "10"
+      attachment_bytes:
+        description: "Bytes per attachment"
+        required: false
+        default: "262144"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-capacity-certification
+  cancel-in-progress: false
+
+jobs:
+  certify:
+    name: preflight / smoke / capacity / report
+    if: github.ref == 'refs/heads/staging' && vars.STAGING_CERTIFICATION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: hosted-staging
+    timeout-minutes: 60
+    env:
+      CFMEET_STAGING_ALLOWED_HOSTS: ${{ vars.CFMEET_STAGING_ALLOWED_HOSTS }}
+      STAGING_MESSAGING_URL: ${{ vars.STAGING_MESSAGING_URL }}
+      INPUT_AUTHORIZATION: ${{ inputs.authorization }}
+      INPUT_LABEL: ${{ inputs.label }}
+      INPUT_MEMBERS: ${{ inputs.members }}
+      INPUT_MESSAGES: ${{ inputs.messages_per_sender }}
+      INPUT_FANOUT: ${{ inputs.fanout_messages }}
+      INPUT_ATTACHMENTS: ${{ inputs.attachments }}
+      INPUT_ATTACHMENT_BYTES: ${{ inputs.attachment_bytes }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Kit self-test (safety refusals, report logic)
+        run: node --test scripts/staging/test/staging-kit.test.mjs
+
+      - name: Configuration is present and inputs are well-formed
+        run: |
+          set -euo pipefail
+          test -n "$STAGING_MESSAGING_URL" || { echo "vars.STAGING_MESSAGING_URL is not set"; exit 1; }
+          test -n "$CFMEET_STAGING_ALLOWED_HOSTS" || { echo "vars.CFMEET_STAGING_ALLOWED_HOSTS is not set"; exit 1; }
+          for v in "$INPUT_MEMBERS" "$INPUT_MESSAGES" "$INPUT_FANOUT" "$INPUT_ATTACHMENTS" "$INPUT_ATTACHMENT_BYTES"; do
+            [[ "$v" =~ ^[1-9][0-9]{0,7}$ ]] || { echo "numeric input expected"; exit 1; }
+          done
+          [[ "$INPUT_AUTHORIZATION" =~ ^[A-Za-z0-9#:/._-]{3,120}$ ]] || { echo "authorization reference expected"; exit 1; }
+
+      - name: Credential files (mode 600, never printed)
+        env:
+          CREDENTIAL: ${{ secrets.STAGING_MESSAGING_API_CREDENTIAL }}
+          PRINCIPALS: ${{ secrets.STAGING_PRINCIPALS_JSON }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$CREDENTIAL" && test -n "$PRINCIPALS"
+          printf '%s' "$CREDENTIAL" > "$RUNNER_TEMP/credential"
+          printf '%s' "$PRINCIPALS" > "$RUNNER_TEMP/principals.json"
+          mkdir -p "$RUNNER_TEMP/evidence"
+
+      - name: Preflight and smoke
+        run: |
+          node scripts/staging/preflight.mjs --messaging-url "$STAGING_MESSAGING_URL" \
+            --credential-file "$RUNNER_TEMP/credential" --principals-file "$RUNNER_TEMP/principals.json" \
+            --members "$INPUT_MEMBERS" --smoke --out "$RUNNER_TEMP/evidence/preflight.json"
+
+      - name: Capacity run
+        run: |
+          node scripts/staging/capacity-runner.mjs --messaging-url "$STAGING_MESSAGING_URL" \
+            --credential-file "$RUNNER_TEMP/credential" --principals-file "$RUNNER_TEMP/principals.json" \
+            --authorization "$INPUT_AUTHORIZATION" --label "$INPUT_LABEL" \
+            --members "$INPUT_MEMBERS" --messages-per-sender "$INPUT_MESSAGES" \
+            --fanout-messages "$INPUT_FANOUT" --attachments "$INPUT_ATTACHMENTS" \
+            --attachment-bytes "$INPUT_ATTACHMENT_BYTES" --out "$RUNNER_TEMP/evidence/capacity.json"
+
+      - name: Report (owner thresholds from vars.STAGING_CAPACITY_THRESHOLDS_JSON, if set)
+        if: always()
+        env:
+          THRESHOLDS: ${{ vars.STAGING_CAPACITY_THRESHOLDS_JSON }}
+        run: |
+          set -euo pipefail
+          test -f "$RUNNER_TEMP/evidence/capacity.json" || exit 1
+          args=(--in "$RUNNER_TEMP/evidence/capacity.json" --out "$RUNNER_TEMP/evidence/capacity.md")
+          if [ -n "$THRESHOLDS" ]; then
+            printf '%s' "$THRESHOLDS" > "$RUNNER_TEMP/evidence/thresholds.json"
+            args+=(--thresholds "$RUNNER_TEMP/evidence/thresholds.json")
+          fi
+          node scripts/staging/report.mjs "${args[@]}"
+          cat "$RUNNER_TEMP/evidence/capacity.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove credential files
+        if: always()
+        run: rm -f "$RUNNER_TEMP/credential" "$RUNNER_TEMP/principals.json"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: staging-capacity-evidence
+          path: ${{ runner.temp }}/evidence/
+          retention-days: 90

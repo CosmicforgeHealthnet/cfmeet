@@ -29,6 +29,8 @@ on:
       - "packages/contracts/**"
       - "infra/deployment/**"
       - "scripts/messaging/**"
+      - "scripts/staging/**"
+      - "apps/web/public/messaging-crypto/**"
       - ".github/workflows/messaging.yml"
   pull_request:
     paths:
@@ -40,6 +42,8 @@ on:
       - "packages/contracts/**"
       - "infra/deployment/**"
       - "scripts/messaging/**"
+      - "scripts/staging/**"
+      - "apps/web/public/messaging-crypto/**"
       - ".github/workflows/messaging.yml"
   workflow_dispatch:
 
@@ -285,6 +289,11 @@ jobs:
             services/platform-access -> target
           key: test
 
+      # The hosted-staging kit (scripts/staging) is Node 22 (global WebSocket, fetch).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       # Service containers cannot take a command, so MinIO starts here (the pgsty/minio build
       # pinned by digest, as in phase2-backend-certification.yml).
       - name: Start MinIO (private attachment bucket)
@@ -377,6 +386,19 @@ jobs:
           PLATFORM_ACCESS_MIGRATION_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access-migration
           MESSAGING_E2E_REQUIRED: "1"
         run: cargo test --locked --test platform_access_e2e -- --nocapture external_developer_journey
+
+      # Part K gate 16 preparation: the hosted-staging capacity kit, its safety refusals and
+      # its report logic, rehearsed against the real processes above (loopback rehearsal,
+      # not hosted-staging evidence; nothing is deployed).
+      - name: Hosted-staging kit — unit tests and rehearsal (real Platform Access, Messaging binary, MinIO, clamd)
+        env:
+          PLATFORM_ACCESS_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access
+          PLATFORM_ACCESS_MIGRATION_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access-migration
+          MESSAGING_E2E_REQUIRED: "1"
+        run: |
+          set -euo pipefail
+          node --test ../../scripts/staging/test/staging-kit.test.mjs
+          cargo test --locked --test platform_access_e2e -- --nocapture hosted_staging_kit
 
       - name: cargo test (whole workspace, incl. the Platform Access certification)
         env:
