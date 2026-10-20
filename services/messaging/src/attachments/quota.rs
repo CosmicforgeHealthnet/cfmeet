@@ -23,6 +23,15 @@ struct Usage {
     reserved_bytes: i64,
 }
 
+/// The environment's storage budget: the application policy's, bounded by the
+/// deployment's `MESSAGING_STORAGE_BUDGET_BYTES` (`None`: unlimited).
+pub fn effective_budget(policy: &AttachmentPolicy, deployment: Option<i64>) -> Option<i64> {
+    match (policy.storage_budget_bytes, deployment) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
+}
+
 /// Reserves `size` bytes for a new upload intent of `uploader`.
 pub async fn reserve<C: ConnectionTrait>(
     db: &C,
@@ -48,13 +57,7 @@ pub async fn reserve<C: ConnectionTrait>(
     )
     .await?
     .ok_or(Error::code(ErrorCode::InternalError))?;
-    let budget = match (
-        policy.storage_budget_bytes,
-        state.attachments.storage_budget_bytes,
-    ) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (a, b) => a.or(b),
-    };
+    let budget = effective_budget(policy, state.attachments.storage_budget_bytes);
     if budget.is_some_and(|b| usage.committed_bytes + usage.reserved_bytes + size > b) {
         crate::metrics::inc(
             "messaging_attachment_quota_refusals_total",
@@ -155,24 +158,112 @@ pub async fn release<C: ConnectionTrait>(
     Ok(())
 }
 
-/// A deleted object frees its committed bytes.
+/// A deleted attachment gives up its committed bytes and reservation; returns the
+/// committed bytes (read from the locked row, never from a possibly stale copy) so the
+/// caller can move them to the object's deletion request.
 pub async fn free<C: ConnectionTrait>(
     db: &C,
     row: &AttachmentRow,
     now: DateTime<Utc>,
-) -> Result<()> {
-    db::exec(
+) -> Result<i64> {
+    let Some(old) = db::one::<Usage, _>(
         db,
-        "UPDATE messaging_attachments SET committed_bytes = 0, reserved_bytes = 0 WHERE id = $1",
+        "WITH old AS (SELECT id, committed_bytes, reserved_bytes FROM messaging_attachments WHERE id = $1 FOR UPDATE) \
+         UPDATE messaging_attachments a SET committed_bytes = 0, reserved_bytes = 0 FROM old WHERE a.id = old.id \
+         RETURNING old.committed_bytes, old.reserved_bytes",
         vec![row.id.into()],
     )
-    .await?;
+    .await?
+    else {
+        return Ok(0);
+    };
     db::exec(
         db,
         "UPDATE messaging_storage_usage SET committed_bytes = GREATEST(committed_bytes - $2, 0), \
            reserved_bytes = GREATEST(reserved_bytes - $3, 0), updated_at = $4 WHERE environment_id = $1",
-        vec![row.environment_id.into(), row.committed_bytes.into(), row.reserved_bytes.into(), now.into()],
+        vec![row.environment_id.into(), old.committed_bytes.into(), old.reserved_bytes.into(), now.into()],
     )
     .await?;
-    Ok(())
+    Ok(old.committed_bytes)
+}
+
+/// Recorded and recomputed usage of one environment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromQueryResult)]
+pub struct UsageAudit {
+    pub environment_id: Uuid,
+    pub recorded_committed: i64,
+    pub expected_committed: i64,
+    pub recorded_reserved: i64,
+    pub expected_reserved: i64,
+}
+
+impl UsageAudit {
+    pub fn drifted(&self) -> bool {
+        self.recorded_committed != self.expected_committed
+            || self.recorded_reserved != self.expected_reserved
+    }
+}
+
+const AUDIT_SQL: &str = "SELECT u.environment_id, u.committed_bytes AS recorded_committed, u.reserved_bytes AS recorded_reserved, \
+    (COALESCE((SELECT sum(a.committed_bytes) FROM messaging_attachments a WHERE a.environment_id = u.environment_id), 0) \
+     + COALESCE((SELECT sum(d.bytes) FROM messaging_attachment_derivatives d WHERE d.environment_id = u.environment_id \
+                   AND d.kind = 'THUMBNAIL' AND d.status = 'READY'), 0) \
+     + COALESCE((SELECT sum(o.charged_bytes) FROM messaging_object_deletions o WHERE o.environment_id = u.environment_id \
+                   AND o.status IN ('PENDING', 'HELD', 'DEAD')), 0))::bigint AS expected_committed, \
+    (COALESCE((SELECT sum(a.reserved_bytes) FROM messaging_attachments a WHERE a.environment_id = u.environment_id), 0) \
+     + COALESCE((SELECT sum(d.reserved_bytes) FROM messaging_attachment_derivatives d WHERE d.environment_id = u.environment_id), 0) \
+    )::bigint AS expected_reserved \
+    FROM messaging_storage_usage u";
+
+/// Recomputes one environment's usage from the rows it is made of (read-only).
+pub async fn audit<C: ConnectionTrait>(db: &C, environment_id: Uuid) -> Result<Option<UsageAudit>> {
+    Ok(db::one(
+        db,
+        &format!("{AUDIT_SQL} WHERE u.environment_id = $1"),
+        vec![environment_id.into()],
+    )
+    .await?)
+}
+
+/// Every environment whose recorded usage differs from its rows (read-only).
+pub async fn audit_all<C: ConnectionTrait>(db: &C) -> Result<Vec<UsageAudit>> {
+    let all: Vec<UsageAudit> = db::all(db, AUDIT_SQL, vec![]).await?;
+    let drifted: Vec<UsageAudit> = all.into_iter().filter(UsageAudit::drifted).collect();
+    for d in &drifted {
+        tracing::error!(
+            environment = %d.environment_id,
+            committed_drift = d.recorded_committed - d.expected_committed,
+            reserved_drift = d.recorded_reserved - d.expected_reserved,
+            "messaging storage accounting drift"
+        );
+    }
+    Ok(drifted)
+}
+
+/// Repairs one environment's recorded usage under its row lock (an operator action,
+/// e.g. after restoring a backup). Returns the audit taken under the lock, before repair.
+pub async fn reconcile<C: ConnectionTrait>(
+    db: &C,
+    environment_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<Option<UsageAudit>> {
+    db::exec(
+        db,
+        "SELECT 1 FROM messaging_storage_usage WHERE environment_id = $1 FOR UPDATE",
+        vec![environment_id.into()],
+    )
+    .await?;
+    let Some(a) = audit(db, environment_id).await? else {
+        return Ok(None);
+    };
+    if a.drifted() {
+        db::exec(
+            db,
+            "UPDATE messaging_storage_usage SET committed_bytes = $2, reserved_bytes = $3, updated_at = $4 WHERE environment_id = $1",
+            vec![environment_id.into(), a.expected_committed.into(), a.expected_reserved.into(), now.into()],
+        )
+        .await?;
+        crate::metrics::inc("messaging_storage_accounting_repairs_total", &[]);
+    }
+    Ok(Some(a))
 }

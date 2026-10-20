@@ -1223,6 +1223,8 @@ pub async fn update_policy(
                     ],
                 )
                 .await?;
+                // A changed storage budget may make room for thumbnails deferred for it.
+                crate::attachments::derivatives::requeue_quota_deferred(txn, env, now).await?;
                 audit::record(
                     txn,
                     AuditEntry {

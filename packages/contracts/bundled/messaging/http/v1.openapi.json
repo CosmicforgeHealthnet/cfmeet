@@ -6366,8 +6366,10 @@
             "enum": [
               "PENDING",
               "READY",
-              "FAILED"
-            ]
+              "FAILED",
+              "QUOTA_DEFERRED"
+            ],
+            "description": "QUOTA_DEFERRED: the environment's storage budget has no room for the thumbnail. No object is stored or charged; the original attachment is unaffected; the derivative is retried later or when the attachment policy changes (errorCode STORAGE_BUDGET)."
           },
           "mediaType": {
             "type": [
@@ -6408,7 +6410,8 @@
               "integer",
               "null"
             ],
-            "minimum": 0
+            "minimum": 0,
+            "description": "The stored object's actual bytes (THUMBNAIL), charged to the environment's storage budget alongside the original."
           },
           "sha256": {
             "type": [
