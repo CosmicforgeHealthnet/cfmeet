@@ -1,8 +1,8 @@
 name: CF Meet production API cutover
 
 # No automatic production cutover. The VPS already has a staged Meeting Service.
-# Ordinary main pushes run read-only audits. A one-time explicit retry marker
-# initiates the guarded cutover. Manual dispatch still supports rollback.
+# Main pushes only run read-only production audits. Changes to routing now
+# require an explicit manual workflow_dispatch operation.
 on:
   push:
     branches: [main]
@@ -73,7 +73,7 @@ jobs:
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
-          OPERATION: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[cfmeet-v2-cutover-retry-20261020]') && 'cutover' || (github.event_name == 'push' && 'audit' || inputs.operation) }}
+          OPERATION: ${{ github.event_name == 'push' && 'audit' || inputs.operation }}
         run: |
           set -euo pipefail
           case "$OPERATION" in audit|cutover|rollback) ;; *) exit 1 ;; esac
