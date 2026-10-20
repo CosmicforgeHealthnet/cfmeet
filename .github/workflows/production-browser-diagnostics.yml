@@ -1,0 +1,38 @@
+name: CF Meet live browser diagnostics
+
+on:
+  push:
+    branches: [diagnostics/production-browser-crash-20261020]
+    paths:
+      - "apps/web/tests/live-production-smoke.mjs"
+      - ".github/workflows/production-browser-diagnostics.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfmeet-live-browser-diagnostic
+  cancel-in-progress: true
+
+jobs:
+  production-browser:
+    name: Read-only production browser and API diagnostics
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install pinned dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Inspect deployed site with desktop + mobile browsers
+        run: node tests/live-production-smoke.mjs
