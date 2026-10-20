@@ -14079,6 +14079,7 @@
       },
       "ConferenceSummary": {
         "type": "object",
+        "description": "Minimal conference info included in space responses.",
         "required": [
           "id",
           "status"
