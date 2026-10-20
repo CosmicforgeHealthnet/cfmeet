@@ -1824,7 +1824,7 @@ async fn managed_images_get_safe_thumbnails_and_e2ee_attachments_never_do() {
             "mediaType": "image/png"
         }),
     ).await;
-    assert_eq!(denied.reason(), "STORAGE_BUDGET", "{denied:?}");
+    assert_eq!(denied.reason(), "STORAGE_BUDGET", "{}", denied.text);
     // Running the worker again must not double-count the same thumbnail.
     lifecycle::run_once(&e.h.state).await.unwrap();
     assert_eq!(e.usage(&c).await.0, committed_before_delete);
