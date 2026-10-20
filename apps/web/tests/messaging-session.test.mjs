@@ -17,15 +17,16 @@ const defaults = {
 
 test("exchanges CF Meet login with the trusted Meeting Service, never Messaging directly", async () => {
   const sent = [];
+  const expected = valid();
   const mint = messagingTokenProvider({
     ...defaults,
     fetchImpl: async (url, init) => {
       sent.push({ url: String(url), init });
-      return { ok: true, json: async () => valid() };
+      return { ok: true, json: async () => expected };
     },
   });
   assert.deepEqual(await mint(), {
-    token: valid().token, tokenType: "CF-Client-Token", expiresAt: valid().expiresAt,
+    token: expected.token, tokenType: "CF-Client-Token", expiresAt: expected.expiresAt,
   });
   assert.equal(sent.length, 1);
   assert.equal(sent[0].url, "https://api.cfmeet.example/api/v2/messaging/client-tokens");
