@@ -498,13 +498,43 @@ async fn the_client_relay_forwards_only_allowlisted_operations_for_the_caller() 
         )
         .await;
     assert_eq!(s, StatusCode::CREATED, "{v}");
+    // Deleting one's own message is relayed as DELETE, without a body.
+    let msg = Uuid::new_v4();
+    let (s, v) = app
+        .delete(
+            relay(&format!("conversations/{conv}/messages/{msg}")),
+            auth(),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    // Moving one's own read cursor is relayed as PUT.
+    let (s, v) = app
+        .call(
+            Method::PUT,
+            &relay(&format!("conversations/{conv}/read-cursor")),
+            auth(),
+            Some(json!({ "sequence": 7 })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
     let principal: Uuid = *gw.principals.lock().unwrap().values().next().unwrap();
     let relayed: Vec<Call> = gw
         .calls()
         .into_iter()
         .filter(|c| c.peer == Peer::Messaging)
         .collect();
-    assert_eq!(relayed.len(), 3, "{relayed:?}");
+    assert_eq!(relayed.len(), 5, "{relayed:?}");
+    assert_eq!(relayed[4].method, Method::PUT);
+    assert_eq!(relayed[4].body, Some(json!({ "sequence": 7 })));
+    assert_eq!(relayed[3].method, Method::DELETE);
+    assert!(relayed[3].body.is_none(), "DELETE carries no body");
+    assert!(
+        relayed[3]
+            .path
+            .ends_with(&format!("/conversations/{conv}/messages/{msg}")),
+        "{}",
+        relayed[3].path
+    );
     for c in &relayed {
         assert_eq!(
             c.acting,
@@ -577,6 +607,19 @@ async fn the_client_relay_forwards_only_allowlisted_operations_for_the_caller() 
         .await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
     let (s, _) = app.get(relay("conversations"), Auth::None).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    // DELETE is allowlisted per route: a whole conversation cannot be deleted, and an
+    // anonymous DELETE is refused.
+    let (s, v) = app
+        .delete(relay(&format!("conversations/{conv}")), auth())
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
+    let (s, _) = app
+        .delete(
+            relay(&format!("conversations/{conv}/messages/{msg}")),
+            Auth::None,
+        )
+        .await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
     assert_eq!(gw.calls().len(), before, "nothing refused reached a peer");
 

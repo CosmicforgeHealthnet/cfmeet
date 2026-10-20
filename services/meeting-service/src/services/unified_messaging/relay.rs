@@ -561,10 +561,8 @@ mod tests {
                 Method::GET,
                 format!("v1/conversations/{}/messages", C.to_uppercase()),
             ),
-            (
-                Method::GET,
-                "v1/conversations/../messaging/policy".to_string(),
-            ),
+            (Method::GET, format!("v1/conversations/{C}/../policy")),
+            (Method::GET, "v1/conversations/./x".to_string()),
             (Method::GET, "v1/conversations/not-a-uuid".to_string()),
             (Method::GET, "internal/v1/anything".to_string()),
             (Method::GET, "v2/conversations".to_string()),
