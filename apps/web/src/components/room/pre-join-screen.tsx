@@ -8,14 +8,17 @@ import {
   useCallback,
   useMemo,
 } from "react";
-import { Mic, MicOff, Video, VideoOff, Volume2, VolumeX } from "lucide-react";
+import Image from "next/image";
+import Link from "next/link";
+import { Mic, MicOff, Video, VideoOff, Volume2, VolumeX, XCircle, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Spinner } from "@/components/ui/spinner";
 import { useMediaStream } from "@/hooks/useMediaStream";
 import { MicVisualizer } from "@/components/ui/mic-visualizer";
-import { useJoinMeeting, usePublicMeeting, useProfile } from "@/hooks";
+import { useProfile } from "@/hooks";
+import { useResolveSpace, useJoinConference } from "@/hooks/v2";
 import { storageStore, cookieStore } from "@/store";
 import type { JoinMeetingData } from "@/types/meeting";
 
@@ -27,6 +30,87 @@ interface MediaPreferences {
 interface PreJoinScreenProps {
   roomId: string;
   onJoin: (data: JoinMeetingData, mediaPrefs: MediaPreferences) => void;
+}
+
+function Logo() {
+  return (
+    <div className="flex items-center justify-center">
+      <Image
+        src="/light-mode-cf-meet.png"
+        alt="CF Meet Logo"
+        width={120}
+        height={30}
+        className="h-auto dark:hidden"
+        priority
+      />
+      <Image
+        src="/dark-mode-cfmeet.png"
+        alt="CF Meet Logo"
+        width={120}
+        height={30}
+        className="h-auto hidden dark:block"
+        priority
+      />
+    </div>
+  );
+}
+
+function MeetingNotFound({ roomId }: { roomId: string }) {
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-background">
+      <div className="flex flex-col items-center gap-6 w-full max-w-md px-6 text-center">
+        <Logo />
+
+        <div className="w-20 h-20 rounded-full bg-red-100 dark:bg-red-900/20 flex items-center justify-center">
+          <XCircle className="w-10 h-10 text-red-500" />
+        </div>
+
+        <div className="space-y-2">
+          <h1 className="text-2xl font-bold text-foreground">Meeting Not Found</h1>
+          <p className="text-muted-foreground">
+            The meeting <span className="font-medium text-foreground">{roomId}</span> doesn&apos;t exist or you don&apos;t have access to it.
+          </p>
+        </div>
+
+        <Link href="/dashboard" className="w-full max-w-xs">
+          <Button size="lg" className="w-full">
+            Back to Home
+          </Button>
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function MeetingEnded({ roomId, title }: { roomId: string; title?: string }) {
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-background">
+      <div className="flex flex-col items-center gap-6 w-full max-w-md px-6 text-center">
+        <Logo />
+
+        <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center">
+          <Clock className="w-10 h-10 text-muted-foreground" />
+        </div>
+
+        <div className="space-y-2">
+          <h1 className="text-2xl font-bold text-foreground">Meeting Has Ended</h1>
+          <p className="text-muted-foreground">
+            {title ? (
+              <>The meeting <span className="font-medium text-foreground">&quot;{title}&quot;</span> has ended.</>
+            ) : (
+              <>The meeting <span className="font-medium text-foreground">{roomId}</span> has ended.</>
+            )}
+          </p>
+        </div>
+
+        <Link href="/dashboard" className="w-full max-w-xs">
+          <Button size="lg" className="w-full">
+            Back to Home
+          </Button>
+        </Link>
+      </div>
+    </div>
+  );
 }
 
 export default function PreJoinScreen({ roomId, onJoin }: PreJoinScreenProps) {
@@ -60,23 +144,30 @@ export default function PreJoinScreen({ roomId, onJoin }: PreJoinScreenProps) {
   const { videoRef, stream, isCameraOn, isMicOn, toggleCamera, toggleMic } =
     useMediaStream({ video: true, audio: true });
 
-  // Get public meeting info
-  const { data: meetingInfo, isLoading: isLoadingMeeting } =
-    usePublicMeeting(roomId);
+  // Get meeting info via V2 resolve (works for V2 codes and legacy codes)
+  const { data: resolveData, isLoading: isLoadingMeeting, isError } =
+    useResolveSpace(roomId);
 
-  // Join meeting mutation
-  const joinMutation = useJoinMeeting();
+  // Join conference mutation (V2 API)
+  const joinMutation = useJoinConference();
 
   // Compute time until start from meeting data (re-computed on each tick)
   const timeUntilStart = useMemo(() => {
-    if (meetingInfo?.data?.status !== "scheduled" || !meetingInfo?.data?.start_time) {
+    const conference = resolveData?.conference;
+    // Only show countdown for scheduled conferences that haven't started
+    if (!conference?.scheduledStartAt || conference?.startedAt) {
       return null;
     }
-    const startTime = new Date(meetingInfo.data.start_time).getTime();
+    // Check if conference is in a "not yet started" state
+    const notStartedStatuses = ["CREATED", "PREPARING", "WAITING"];
+    if (!notStartedStatuses.includes(conference.status)) {
+      return null;
+    }
+    const startTime = new Date(conference.scheduledStartAt).getTime();
     const remaining = startTime - Date.now();
     return remaining > 0 ? remaining : 0;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meetingInfo?.data?.status, meetingInfo?.data?.start_time, tick]);
+  }, [resolveData?.conference?.status, resolveData?.conference?.scheduledStartAt, resolveData?.conference?.startedAt, tick]);
 
   // Auto-fill display name from profile data when it loads (only once)
   // This is a legitimate use case: syncing state from async external source
@@ -99,11 +190,16 @@ export default function PreJoinScreen({ roomId, onJoin }: PreJoinScreenProps) {
 
   // Countdown timer interval - only triggers tick updates
   useEffect(() => {
-    if (meetingInfo?.data?.status !== "scheduled" || !meetingInfo?.data?.start_time) {
+    const conference = resolveData?.conference;
+    if (!conference?.scheduledStartAt || conference?.startedAt) {
+      return;
+    }
+    const notStartedStatuses = ["CREATED", "PREPARING", "WAITING"];
+    if (!notStartedStatuses.includes(conference.status)) {
       return;
     }
 
-    const startTime = new Date(meetingInfo.data.start_time).getTime();
+    const startTime = new Date(conference.scheduledStartAt).getTime();
     if (Date.now() >= startTime) {
       return; // Meeting already started, no need for countdown
     }
@@ -113,7 +209,23 @@ export default function PreJoinScreen({ roomId, onJoin }: PreJoinScreenProps) {
     }, 1000);
 
     return () => clearInterval(intervalId);
-  }, [meetingInfo?.data?.status, meetingInfo?.data?.start_time]);
+  }, [resolveData?.conference?.status, resolveData?.conference?.scheduledStartAt, resolveData?.conference?.startedAt]);
+
+  // Helper to map V2 join response to the JoinMeetingData format expected by LiveRoom
+  const mapV2JoinToLegacy = useCallback((v2Response: Awaited<ReturnType<typeof joinMutation.mutateAsync>>): JoinMeetingData | null => {
+    // If no RTC credentials, user is in waiting room
+    if (!v2Response.rtc) {
+      return null;
+    }
+    return {
+      meeting_id: v2Response.conference.meetingSpaceId,
+      participant_id: v2Response.participant.id,
+      role: v2Response.participant.role.toLowerCase() as "host" | "participant" | "viewer",
+      join_token: v2Response.rtc.credential,
+      livekit_url: v2Response.rtc.url,
+      room_name: v2Response.conference.id,
+    };
+  }, []);
 
   // Poll to check if participant has been admitted to the meeting
   // This runs when a user is placed in the waiting room (isWaiting = true)
@@ -123,36 +235,36 @@ export default function PreJoinScreen({ roomId, onJoin }: PreJoinScreenProps) {
       clearInterval(pollIntervalRef.current);
     }
 
+    const conferenceId = resolveData?.conference?.id;
+    if (!conferenceId) return;
+
     pollIntervalRef.current = setInterval(async () => {
       try {
         // Attempt to join again to check status.
-        // If admitted, the backend will return a join_token.
+        // If admitted, the backend will return RTC credentials.
         const result = await joinMutation.mutateAsync({
-          meetingIdentifier: roomId,
+          id: conferenceId,
           data: {
-            // CRITICAL: We only send user_id if we have a valid authenticated profile.
-            // Guests join without a user_id.
-            // We DO NOT use storedUser.id here to avoid "User not found" errors from stale sessions.
-            user_id: profileData?.id,
-            display_name: displayName.trim(),
+            displayName: displayName.trim(),
           },
         });
 
-        // If we get a token, it means we've been admitted!
-        if (result.data.join_token) {
+        // If we get RTC credentials, it means we've been admitted!
+        const joinData = mapV2JoinToLegacy(result);
+        if (joinData) {
           if (pollIntervalRef.current) {
             clearInterval(pollIntervalRef.current);
             pollIntervalRef.current = null;
           }
           setIsWaiting(false);
           // Proceed to the main live room with media preferences
-          onJoin(result.data, { isCameraOn, isMicOn });
+          onJoin(joinData, { isCameraOn, isMicOn });
         }
       } catch {
         // Still in waiting room or temporary network error - continue polling
       }
     }, 3000); // Check every 3 seconds
-  }, [roomId, displayName, profileData, joinMutation, onJoin, isCameraOn, isMicOn]);
+  }, [resolveData?.conference?.id, displayName, joinMutation, onJoin, isCameraOn, isMicOn, mapV2JoinToLegacy]);
 
   const handleJoin = async () => {
     setError("");
@@ -162,47 +274,32 @@ export default function PreJoinScreen({ roomId, onJoin }: PreJoinScreenProps) {
       return;
     }
 
-    try {
-      // Construct join data
-      const data = {
-        // LOGIC CONFIRMATION:
-        // 1. If profileData.id exists, the user is authenticated -> Send user_id.
-        // 2. If profileData.id is missing, the user is a guest -> Send undefined for user_id.
-        // 3. We NEVER use storedUser.id (localStorage) for user_id to prevent stale session errors.
-        user_id: profileData?.id,
-        display_name: displayName.trim(),
-      };
+    const conferenceId = resolveData?.conference?.id;
+    if (!conferenceId) {
+      setError("No active conference found for this meeting");
+      return;
+    }
 
-      // Attempt to join the meeting
+    try {
+      // Attempt to join the conference via V2 API
       const result = await joinMutation.mutateAsync({
-        meetingIdentifier: roomId,
-        data,
+        id: conferenceId,
+        data: {
+          displayName: displayName.trim(),
+        },
       });
 
-      // Check if user is in waiting room (empty join_token means waiting)
-      if (!result.data.join_token) {
-        // GUEST AUTH: Even if waiting, save tokens if provided (for polling/chat while waiting)
-        if (result.data.access_token && result.data.refresh_token) {
-          cookieStore.setTokens(
-            result.data.access_token,
-            result.data.refresh_token,
-          );
-        }
+      // Map V2 response to legacy format
+      const joinData = mapV2JoinToLegacy(result);
 
+      // Check if user is in waiting room (no RTC credentials means waiting)
+      if (!joinData) {
         setIsWaiting(true);
         // Start polling for admission status
         startPolling();
       } else {
-        // GUEST AUTH: If backend returned guest tokens, save them!
-        if (result.data.access_token && result.data.refresh_token) {
-          cookieStore.setTokens(
-            result.data.access_token,
-            result.data.refresh_token,
-          );
-        }
-
         // Host or admitted immediately - proceed to room with media preferences
-        onJoin(result.data, { isCameraOn, isMicOn });
+        onJoin(joinData, { isCameraOn, isMicOn });
       }
     } catch (err) {
       console.error("Join error:", err);
@@ -235,39 +332,54 @@ export default function PreJoinScreen({ roomId, onJoin }: PreJoinScreenProps) {
 
   if (isLoadingMeeting) {
     return (
-      <div className="flex items-center justify-center h-screen bg-muted">
+      <div className="flex flex-col items-center justify-center min-h-screen bg-background gap-6">
+        <Logo />
         <Spinner label="Loading meeting info..." />
       </div>
     );
   }
 
+  // Meeting not found
+  if (isError || !resolveData?.meetingSpace) {
+    return <MeetingNotFound roomId={roomId} />;
+  }
+
+  // Conference ended or cancelled
+  const conferenceStatus = resolveData.conference?.status;
+  if (conferenceStatus === "ENDED" || conferenceStatus === "CANCELLED") {
+    return <MeetingEnded roomId={roomId} title={resolveData.meetingSpace.title} />;
+  }
+
   return (
-    <div className="flex items-center justify-center h-screen my-10">
-      <div className="flex flex-col items-center gap-8 w-full max-w-lg px-6">
+    <div className="flex items-center justify-center min-h-screen py-10 bg-background">
+      <div className="flex flex-col items-center gap-6 w-full max-w-lg px-6">
+        {/* Logo */}
+        <Logo />
+
         {/* Title */}
         <div className="text-center space-y-1">
           <h1 className="text-2xl font-bold text-foreground">Ready to join?</h1>
           <p className="text-sm text-muted-foreground">
-            {meetingInfo?.data?.title || "Meeting"} -{" "}
+            {resolveData.meetingSpace.title || "Meeting"} -{" "}
             <span className="font-medium text-primary">{roomId}</span>
           </p>
           <div className="flex items-center justify-center gap-2 mt-2">
-            {meetingInfo?.data?.is_private && (
+            {resolveData.meetingSpace.accessPolicy !== "PUBLIC" && (
               <span className="px-2 py-0.5 text-xs bg-amber-100 text-amber-700 rounded-full font-medium">
-                Private Only
+                {resolveData.meetingSpace.requiresPasscode ? "Passcode Required" : "Private"}
               </span>
             )}
-            {meetingInfo?.data?.status && (
+            {conferenceStatus && (
               <span
-                className={`px-2 py-0.5 text-xs rounded-full font-medium capitalize ${
-                  meetingInfo.data.status === "live"
+                className={`px-2 py-0.5 text-xs rounded-full font-medium ${
+                  conferenceStatus === "LIVE"
                     ? "bg-green-100 text-green-700"
-                    : meetingInfo.data.status === "scheduled"
+                    : conferenceStatus === "CREATED" || conferenceStatus === "PREPARING" || conferenceStatus === "WAITING"
                       ? "bg-blue-100 text-blue-700"
                       : "bg-muted text-foreground"
                 }`}
               >
-                {meetingInfo.data.status}
+                {conferenceStatus === "LIVE" ? "Live" : conferenceStatus === "CREATED" ? "Scheduled" : conferenceStatus}
               </span>
             )}
           </div>
@@ -414,19 +526,9 @@ export default function PreJoinScreen({ roomId, onJoin }: PreJoinScreenProps) {
                 size="lg"
                 className="w-full max-w-xs"
                 onClick={handleJoin}
-                disabled={
-                  joinMutation.isPending ||
-                  meetingInfo?.data?.status === "ended" ||
-                  meetingInfo?.data?.status === "cancelled"
-                }
+                disabled={joinMutation.isPending}
               >
-                {joinMutation.isPending
-                  ? "Joining..."
-                  : meetingInfo?.data?.status === "ended"
-                    ? "Meeting Ended"
-                    : meetingInfo?.data?.status === "cancelled"
-                      ? "Meeting Cancelled"
-                      : "Join Meeting"}
+                {joinMutation.isPending ? "Joining..." : "Join Meeting"}
               </Button>
             )}
           </>

@@ -1,6 +1,7 @@
 import { View, ActivityIndicator } from "react-native";
 import { cn } from "@/lib/utils/cn";
 import { Text } from "@/components/ui/text";
+import { Logo } from "@/components/ui/logo";
 
 interface LoadingProps {
   message?: string;
@@ -33,10 +34,11 @@ export function Loading({
 
 export function FullScreenLoading({ message }: { message?: string }) {
   return (
-    <View className="flex-1 items-center justify-center bg-background">
+    <View className="flex-1 items-center justify-center bg-background dark:bg-background-dark">
+      <Logo variant="large" className="mb-8" />
       <ActivityIndicator size="large" color="hsl(221.2 83.2% 53.3%)" />
       {message && (
-        <Text className="mt-3 text-muted-foreground">{message}</Text>
+        <Text className="mt-3 text-muted-foreground dark:text-muted-foreground-dark">{message}</Text>
       )}
     </View>
   );

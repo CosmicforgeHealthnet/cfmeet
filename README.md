@@ -1,6 +1,6 @@
 # CF Meet
 
-**CosmicForge Tech Limited — unified communications platform**
+**CosmicForge Tech Limited — unified communications platform** 
 
 CF Meet is evolving from a real-time meeting product into CosmicForge's unified communications platform: meetings and conferencing, realtime calling, messaging, Privacy Relay communications, telephony, Digital Communications Numbers, enterprise communications and developer communications APIs.
 

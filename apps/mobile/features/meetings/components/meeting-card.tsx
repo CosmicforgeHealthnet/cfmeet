@@ -2,11 +2,10 @@ import { View, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { Text } from "@/components/ui/text";
-import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/components/ui/toast";
 import { useColors } from "@/hooks/useColors";
-import type { Meeting, MeetingStatus } from "../types";
+import type { Meeting } from "../types";
 
 interface MeetingCardProps {
   meeting: Meeting;
@@ -14,13 +13,6 @@ interface MeetingCardProps {
   onEdit?: () => void;
   onDelete?: () => void;
 }
-
-const statusVariants: Record<MeetingStatus, "success" | "default" | "secondary" | "destructive"> = {
-  live: "success",
-  scheduled: "default",
-  ended: "secondary",
-  cancelled: "destructive",
-};
 
 export function MeetingCard({ meeting, onPress, onEdit, onDelete }: MeetingCardProps) {
   const { success } = useToast();
@@ -52,15 +44,10 @@ export function MeetingCard({ meeting, onPress, onEdit, onDelete }: MeetingCardP
 
   return (
     <Card className="mb-3 border border-border dark:border-border-dark">
-      <View className="flex-row items-start justify-between mb-2">
-        <View className="flex-1 mr-2">
-          <Text className="text-base font-bold text-foreground dark:text-foreground-dark" numberOfLines={1}>
-            {meeting.title}
-          </Text>
-        </View>
-        <Badge variant={statusVariants[meeting.status] || "secondary"}>
-          {meeting.status}
-        </Badge>
+      <View className="mb-2">
+        <Text className="text-base font-bold text-foreground dark:text-foreground-dark" numberOfLines={1}>
+          {meeting.title}
+        </Text>
       </View>
 
       <View className="flex-row flex-wrap items-center gap-3 mb-3">

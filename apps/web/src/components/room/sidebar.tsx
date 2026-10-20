@@ -1,54 +1,66 @@
 "use client";
 
 import { useState } from "react";
-import { Mic, MicOff, Video, Send, Check, X, Clock } from "lucide-react";
+import {
+  Mic,
+  MicOff,
+  Video,
+  Send,
+  Check,
+  X,
+  Clock,
+  Crown,
+  Shield,
+  Presentation,
+  Eye,
+} from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
-  useWaitingParticipants,
-  useAdmitParticipant,
-  useDenyParticipant,
-  useParticipants,
-  useChat,
-} from "@/hooks";
-import type {
-  WaitingParticipant,
-  Participant,
-  ChatMessage,
-} from "@/types/meeting";
+  useParticipantsV2,
+  useWaitingRoomV2,
+  useAdmitParticipants,
+  useDenyParticipants,
+  useMessages,
+  useSendMessage,
+} from "@/hooks/v2";
+import type { ParticipantResponse, MessageView, Role } from "@/types/v2";
 
 interface SidebarProps {
-  meetingId: string;
+  conferenceId?: string;
+  meetingId?: string; // V1 compatibility
   isHost: boolean;
   participantId: string;
   onClose: () => void;
 }
 
 export default function Sidebar({
+  conferenceId,
   meetingId,
   isHost,
   participantId,
   onClose,
 }: SidebarProps) {
+  // Use conferenceId for V2, fallback to meetingId for V1 compatibility
+  const roomId = conferenceId || meetingId || "";
   const [newMessage, setNewMessage] = useState("");
-  const {
-    messages,
-    isLoading: isChatLoading,
-    sendMessage,
-  } = useChat(meetingId, participantId);
+
+  // V2 Chat hooks
+  const { data: messagesData, isLoading: isChatLoading } = useMessages(roomId);
+  const sendMessage = useSendMessage(roomId);
+  const messages = messagesData?.messages || [];
 
   const handleSendMessage = () => {
     if (!newMessage.trim()) return;
-    sendMessage.mutate(newMessage);
+    sendMessage.mutate({ content: newMessage.trim() });
     setNewMessage("");
   };
 
-  // Fetch participants
-  const { data: participantsData } = useParticipants(meetingId);
-  const participants = participantsData?.data || [];
+  // V2 Participants hooks - returns ParticipantResponse[] directly
+  const { data: participants = [] } = useParticipantsV2(roomId);
 
-  // Fetch waiting room (only for host)
-  const { data: waitingData } = useWaitingParticipants(meetingId, isHost);
-  const waitingParticipants = waitingData?.data || [];
+  // V2 Waiting room (only for host) - returns WaitingRoomResponse with .participants
+  const { data: waitingData } = useWaitingRoomV2(roomId, isHost);
+  const waitingParticipants = waitingData?.participants || [];
 
   return (
     <div className="flex flex-col h-full px-6 py-6 bg-card rounded-3xl shadow-sm">
@@ -78,9 +90,9 @@ export default function Sidebar({
             ) : (
               participants.map((participant) => (
                 <ParticipantItem
-                  key={participant.participant_id}
+                  key={participant.id}
                   participant={participant}
-                  isCurrentUser={participant.participant_id === participantId}
+                  isCurrentUser={participant.id === participantId}
                 />
               ))
             )}
@@ -90,7 +102,7 @@ export default function Sidebar({
         {/* Waiting Room - Only visible to host */}
         {isHost && (
           <WaitingRoom
-            meetingId={meetingId}
+            roomId={roomId}
             waitingParticipants={waitingParticipants}
           />
         )}
@@ -114,26 +126,26 @@ export default function Sidebar({
               No messages yet
             </div>
           ) : (
-            messages.map((msg: ChatMessage, i: number) => (
-              <div key={i} className="flex flex-col gap-1">
+            messages.map((msg: MessageView) => (
+              <div key={msg.id} className="flex flex-col gap-1">
                 <div
                   className={`flex flex-col ${
-                    msg.participant_id === participantId
+                    msg.senderId === participantId
                       ? "items-end"
                       : "items-start"
                   }`}
                 >
                   <span className="text-[10px] text-muted-foreground font-bold px-1 mb-0.5">
-                    {msg.display_name || "User"}
+                    {msg.senderDisplayName || "User"}
                   </span>
                   <div
                     className={`p-2.5 rounded-2xl text-sm max-w-[90%] break-words shadow-sm ${
-                      msg.participant_id === participantId
+                      msg.senderId === participantId
                         ? "bg-primary/10 text-primary rounded-tr-none"
                         : "bg-card border border-border text-foreground rounded-tl-none"
                     }`}
                   >
-                    {msg.message}
+                    {msg.content}
                   </div>
                 </div>
               </div>
@@ -168,26 +180,24 @@ export default function Sidebar({
 }
 
 interface WaitingRoomProps {
-  meetingId: string;
-  waitingParticipants: WaitingParticipant[];
+  roomId: string;
+  waitingParticipants: ParticipantResponse[];
 }
 
-function WaitingRoom({ meetingId, waitingParticipants }: WaitingRoomProps) {
-  const admitMutation = useAdmitParticipant();
-  const denyMutation = useDenyParticipant();
+function WaitingRoom({ roomId, waitingParticipants }: WaitingRoomProps) {
+  const admitMutation = useAdmitParticipants(roomId);
+  const denyMutation = useDenyParticipants(roomId);
 
   const handleAdmit = (participantId: string) => {
-    admitMutation.mutate({ meetingId, participantId });
+    admitMutation.mutate({ participantIds: [participantId] });
   };
 
   const handleDeny = (participantId: string) => {
-    denyMutation.mutate({ meetingId, participantId });
+    denyMutation.mutate({ participantIds: [participantId] });
   };
 
   const handleAdmitAll = () => {
-    waitingParticipants.forEach((p) => {
-      admitMutation.mutate({ meetingId, participantId: p.participant_id });
-    });
+    admitMutation.mutate({ all: true });
   };
 
   if (waitingParticipants.length === 0) {
@@ -216,7 +226,7 @@ function WaitingRoom({ meetingId, waitingParticipants }: WaitingRoomProps) {
       <div className="space-y-2 py-2">
         {waitingParticipants.map((participant) => (
           <WaitingRoomItem
-            key={participant.participant_id}
+            key={participant.id}
             participant={participant}
             onAdmit={handleAdmit}
             onDeny={handleDeny}
@@ -230,7 +240,7 @@ function WaitingRoom({ meetingId, waitingParticipants }: WaitingRoomProps) {
 }
 
 interface WaitingRoomItemProps {
-  participant: WaitingParticipant;
+  participant: ParticipantResponse;
   onAdmit: (id: string) => void;
   onDeny: (id: string) => void;
   isAdmitting: boolean;
@@ -249,21 +259,21 @@ function WaitingRoomItem({
       <div className="flex items-center gap-2">
         <Avatar className="h-8 w-8">
           <AvatarImage
-            src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${participant.display_name}`}
+            src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${participant.displayName}`}
           />
-          <AvatarFallback>{participant.display_name[0]}</AvatarFallback>
+          <AvatarFallback>{participant.displayName[0]}</AvatarFallback>
         </Avatar>
         <span className="text-sm font-medium text-muted-foreground">
-          {participant.display_name.length > 4
-            ? `${participant.display_name.slice(0, 4)}...`
-            : participant.display_name}
+          {participant.displayName.length > 4
+            ? `${participant.displayName.slice(0, 4)}...`
+            : participant.displayName}
         </span>
       </div>
 
       <div className="flex gap-1.5 items-center">
         <button
           className="w-7 h-7 rounded-full flex items-center justify-center bg-primary hover:bg-primary/80 text-white transition disabled:opacity-50"
-          onClick={() => onAdmit(participant.participant_id)}
+          onClick={() => onAdmit(participant.id)}
           disabled={isAdmitting || isDenying}
           title="Admit"
         >
@@ -271,7 +281,7 @@ function WaitingRoomItem({
         </button>
         <button
           className="w-7 h-7 rounded-full flex items-center justify-center bg-muted hover:bg-red-100 text-muted-foreground hover:text-red-500 transition disabled:opacity-50"
-          onClick={() => onDeny(participant.participant_id)}
+          onClick={() => onDeny(participant.id)}
           disabled={isAdmitting || isDenying}
           title="Deny"
         >
@@ -282,44 +292,77 @@ function WaitingRoomItem({
   );
 }
 
+// Role badge component
+function RoleBadge({ role }: { role: Role }) {
+  const config: Record<Role, { icon: React.ReactNode; label: string; className: string }> = {
+    HOST: {
+      icon: <Crown className="w-3 h-3" />,
+      label: "Host",
+      className: "text-primary",
+    },
+    CO_HOST: {
+      icon: <Shield className="w-3 h-3" />,
+      label: "Co-Host",
+      className: "text-blue-500",
+    },
+    PRESENTER: {
+      icon: <Presentation className="w-3 h-3" />,
+      label: "Presenter",
+      className: "text-green-500",
+    },
+    PARTICIPANT: {
+      icon: null,
+      label: "",
+      className: "",
+    },
+    VIEWER: {
+      icon: <Eye className="w-3 h-3" />,
+      label: "Viewer",
+      className: "text-muted-foreground",
+    },
+  };
+
+  const { icon, label, className } = config[role] || config.PARTICIPANT;
+  if (!label) return null;
+
+  return (
+    <span className={`flex items-center gap-1 text-xs font-medium ${className}`}>
+      {icon}
+      {label}
+    </span>
+  );
+}
+
 interface ParticipantItemProps {
-  participant: Participant;
+  participant: ParticipantResponse;
   isCurrentUser: boolean;
 }
 
 function ParticipantItem({ participant, isCurrentUser }: ParticipantItemProps) {
-  const isHost = participant.role === "host";
-
   return (
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
         <Avatar className="h-8 w-8">
           <AvatarImage
-            src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${participant.display_name}`}
+            src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${participant.displayName}`}
           />
-          <AvatarFallback>{participant.display_name[0]}</AvatarFallback>
+          <AvatarFallback>{participant.displayName[0]}</AvatarFallback>
         </Avatar>
 
-        <span className="text-sm font-medium text-muted-foreground">
-          {participant.display_name.length > 5
-            ? `${participant.display_name.slice(0, 5)}...`
-            : participant.display_name}
-          {isCurrentUser && " (You)"}
-        </span>
+        <div className="flex flex-col">
+          <span className="text-sm font-medium text-foreground">
+            {participant.displayName.length > 8
+              ? `${participant.displayName.slice(0, 8)}...`
+              : participant.displayName}
+            {isCurrentUser && " (You)"}
+          </span>
+          <RoleBadge role={participant.role} />
+        </div>
       </div>
 
       <div className="flex gap-2 items-center">
-        {isHost && <span className="text-base text-primary ml-1">Host</span>}
-        {participant.is_muted ? (
-          <MicOff className="w-4 h-4 text-muted-foreground" />
-        ) : (
-          <Mic className="w-4 h-4 text-primary" />
-        )}
-        {participant.is_video_on ? (
-          <Video className="w-4 h-4 text-primary" />
-        ) : (
-          <Video className="w-4 h-4 text-muted-foreground" />
-        )}
+        <Mic className="w-4 h-4 text-primary" />
+        <Video className="w-4 h-4 text-primary" />
       </div>
     </div>
   );

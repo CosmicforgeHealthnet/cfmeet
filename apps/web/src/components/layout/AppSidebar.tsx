@@ -38,14 +38,38 @@ export default function AppSidebar() {
     >
       {/* Logo */}
       <div className="h-16 flex items-center pl-4 overflow-hidden">
-        <Image
-          src="/CFLogo.png"
-          alt="CF Meet Logo"
-          width={40}
-          height={40}
-          className="w-[40px] min-w-[40px] object-contain object-left"
-          priority
-        />
+        {expanded ? (
+          <>
+            {/* Light mode full logo */}
+            <Image
+              src="/light-mode-cf-meet.png"
+              alt="CF Meet Logo"
+              width={120}
+              height={32}
+              className="h-8 w-auto object-contain object-left dark:hidden"
+              priority
+            />
+            {/* Dark mode full logo */}
+            <Image
+              src="/dark-mode-cfmeet.png"
+              alt="CF Meet Logo"
+              width={120}
+              height={32}
+              className="h-8 w-auto object-contain object-left hidden dark:block"
+              priority
+            />
+          </>
+        ) : (
+          /* Collapsed: show only the icon logo */
+          <Image
+            src="/CFLogo.png"
+            alt="CF Meet Logo"
+            width={40}
+            height={40}
+            className="w-[40px] min-w-[40px] object-contain object-left"
+            priority
+          />
+        )}
       </div>
 
       {/* Toggle Button */}

@@ -2,18 +2,21 @@ import { View, Pressable } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Text } from "@/components/ui/text";
+import { Logo } from "@/components/ui/logo";
 import { useColors } from "@/hooks/useColors";
 
 interface AuthHeaderProps {
   title: string;
   subtitle: string;
   showBackButton?: boolean;
+  showLogo?: boolean;
 }
 
 export function AuthHeader({
   title,
   subtitle,
   showBackButton = true,
+  showLogo = true,
 }: AuthHeaderProps) {
   const router = useRouter();
   const colors = useColors();
@@ -31,6 +34,9 @@ export function AuthHeader({
       )}
 
       <View className="items-center">
+        {showLogo && (
+          <Logo variant="medium" className="mb-4" />
+        )}
         <Text className="text-xl font-bold text-foreground dark:text-foreground-dark tracking-tight">
           {title}
         </Text>

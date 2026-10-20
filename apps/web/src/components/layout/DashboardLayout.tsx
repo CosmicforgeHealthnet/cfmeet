@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useProfile } from "@/hooks";
 import { Spinner } from "@/components/ui/spinner";
@@ -14,13 +14,24 @@ export default function DashboardLayout({
 }) {
   const router = useRouter();
   const { data: user, isLoading, error } = useProfile();
+  const [mounted, setMounted] = useState(false);
+
+  // Ensure hydration completes before rendering dynamic content
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     // If not loading and no user (either error like 401 Guest, or just no session), redirect
-    if (!isLoading && (!user || error)) {
+    if (mounted && !isLoading && (!user || error)) {
       router.push("/login");
     }
-  }, [user, isLoading, error, router]);
+  }, [user, isLoading, error, router, mounted]);
+
+  // Show nothing during SSR to prevent hydration mismatch
+  if (!mounted) {
+    return null;
+  }
 
   if (isLoading) {
     return (

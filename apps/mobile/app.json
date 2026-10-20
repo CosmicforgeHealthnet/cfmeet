@@ -1,16 +1,28 @@
 {
   "expo": {
-    "name": "rtc-mobile",
-    "slug": "rtc-mobile",
+    "name": "CF Meet",
+    "slug": "cfmeet",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "scheme": "rtc-mobile",
+    "scheme": "cfmeet",
     "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff",
+      "dark": {
+        "image": "./assets/splash-icon.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#0F172A"
+      }
+    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.cosmicforge.cfmeet"
     },
     "android": {
+      "package": "com.cosmicforge.cfmeet",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -26,7 +38,19 @@
     "plugins": [
       "expo-router",
       "expo-status-bar",
-      "expo-splash-screen"
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#0F172A"
+          }
+        }
+      ]
     ],
     "extra": {
       "apiUrl": "http://10.209.6.52:8080/api/v1",

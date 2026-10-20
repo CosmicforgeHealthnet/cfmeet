@@ -56,12 +56,22 @@ export default function MobileSidebar() {
         <div className="h-[calc(100vh-2rem)] my-4 ml-4 bg-sidebar rounded-[40px] shadow-sm flex flex-col">
           {/* Top row: Logo + Close button */}
           <div className="h-16 flex items-center justify-between pl-5 pr-4">
+            {/* Light mode full logo */}
             <Image
-              src="/CFLogo.png"
+              src="/light-mode-cf-meet.png"
               alt="CF Meet Logo"
-              width={40}
-              height={40}
-              className="w-[40px] min-w-[40px] object-contain object-left"
+              width={120}
+              height={32}
+              className="h-8 w-auto object-contain object-left dark:hidden"
+              priority
+            />
+            {/* Dark mode full logo */}
+            <Image
+              src="/dark-mode-cfmeet.png"
+              alt="CF Meet Logo"
+              width={120}
+              height={32}
+              className="h-8 w-auto object-contain object-left hidden dark:block"
               priority
             />
             <button

@@ -289,6 +289,8 @@ pub struct SpaceView {
     pub space: meeting_spaces::Model,
     pub viewer_role: Option<Role>,
     pub full: bool,
+    /// The canonical conference for this space (live > upcoming > latest).
+    pub latest_conference: Option<conference_sessions::Model>,
 }
 
 pub struct MeetingSpaceService {
@@ -549,11 +551,51 @@ impl MeetingSpaceService {
         let full = viewer_role
             .map(|r| space_allows(r, SpacePermission::ViewMembers, &pctx))
             .unwrap_or(false);
+
+        // Fetch the canonical conference (live > upcoming > latest)
+        let latest_conference = self.canonical_conference(space.id).await?;
+
         Ok(SpaceView {
             space,
             viewer_role,
             full,
+            latest_conference,
         })
+    }
+
+    /// Canonical conference: the LIVE one, else the next upcoming unstarted one, else the latest.
+    async fn canonical_conference(
+        &self,
+        space_id: Uuid,
+    ) -> ApiResult<Option<conference_sessions::Model>> {
+        let all = conference_sessions::Entity::find()
+            .filter(conference_sessions::Column::MeetingSpaceId.eq(space_id))
+            .order_by_asc(conference_sessions::Column::ScheduledStartAt)
+            .all(&self.core.db)
+            .await?;
+
+        // Prefer LIVE conference
+        if let Some(live) = all
+            .iter()
+            .filter(|c| c.status == ConferenceStatus::Live)
+            .max_by_key(|c| (c.origin == RecordOrigin::V2, c.started_at))
+        {
+            return Ok(Some(live.clone()));
+        }
+
+        // Then prefer upcoming unstarted conference
+        let now = Utc::now();
+        if let Some(next) = all.iter().find(|c| {
+            matches!(
+                c.status,
+                ConferenceStatus::Created | ConferenceStatus::Preparing | ConferenceStatus::Waiting
+            ) && c.scheduled_end_at.map(|e| e > now).unwrap_or(true)
+        }) {
+            return Ok(Some(next.clone()));
+        }
+
+        // Otherwise return the latest
+        Ok(all.into_iter().max_by_key(|c| c.created_at))
     }
 
     /// Spaces the actor owns or is an active member of.

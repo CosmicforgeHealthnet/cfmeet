@@ -1,15 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { useMeetings, useDeleteMeeting } from "@/hooks";
-import type { Meeting, MeetingStatus } from "@/types/meeting";
-import type { ApiErrorResponse } from "@/types/auth";
-import type { AxiosError } from "axios";
+import { useSpaces, useArchiveSpace } from "@/hooks/v2";
+import type { MeetingSpaceResponse, SpaceStatus, AccessPolicy, ConferenceStatus } from "@/types/v2";
 import { Button } from "@/components/ui/button";
 import {
   Calendar,
-  Clock,
   Video,
   Lock,
   Globe,
@@ -17,56 +14,50 @@ import {
   ChevronLeft,
   ChevronRight,
   Pencil,
-  Trash2,
+  Archive,
   Copy,
   Check,
+  Users,
+  Shield,
 } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
-import {
-  formatShortDateForDisplay,
-  formatTimeForDisplay,
-} from "@/utils/timezone";
+import { formatShortDateForDisplay } from "@/utils/timezone";
 
-const STATUS_FILTERS: { label: string; value: MeetingStatus | "all" }[] = [
+const STATUS_FILTERS: { label: string; value: SpaceStatus | "all" }[] = [
   { label: "All", value: "all" },
-  { label: "Scheduled", value: "scheduled" },
-  { label: "Live", value: "live" },
-  { label: "Ended", value: "ended" },
-  { label: "Cancelled", value: "cancelled" },
+  { label: "Active", value: "ACTIVE" },
+  { label: "Archived", value: "ARCHIVED" },
 ];
 
-const STATUS_STYLES: Record<MeetingStatus, string> = {
-  scheduled: "bg-blue-50 text-blue-600",
-  live: "bg-green-50 text-green-600",
-  ended: "bg-muted text-muted-foreground",
-  cancelled: "bg-red-50 text-red-500",
+const MEETING_TYPE_LABELS: Record<string, string> = {
+  STANDARD: "Standard",
+  WEBINAR: "Webinar",
+  TOWN_HALL: "Town Hall",
+  LARGE_MEETING: "Large Meeting",
 };
 
-function getDuration(start: string, end: string) {
-  const ms = new Date(end).getTime() - new Date(start).getTime();
-  const mins = Math.round(ms / 60000);
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  const rem = mins % 60;
-  return rem > 0 ? `${hrs}h ${rem}m` : `${hrs}h`;
-}
+const ITEMS_PER_PAGE = 10;
 
 export default function MeetingsContent() {
   const router = useRouter();
-  const [statusFilter, setStatusFilter] = useState<MeetingStatus | "all">(
-    "all",
-  );
+  const [statusFilter, setStatusFilter] = useState<SpaceStatus | "all">("all");
   const [page, setPage] = useState(1);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [archivingId, setArchivingId] = useState<string | null>(null);
 
-  const { data, isLoading, isError } = useMeetings({
-    page,
-    limit: 10,
-    ...(statusFilter !== "all" && { status: statusFilter }),
-  });
+  const { data, isLoading, isError } = useSpaces();
 
-  const meetings = data?.data ?? [];
-  const meta = data?.meta;
+  // Filter and paginate client-side
+  const filteredSpaces = useMemo(() => {
+    const spaces = data?.items ?? [];
+    if (statusFilter === "all") return spaces;
+    return spaces.filter((s) => s.status === statusFilter);
+  }, [data?.items, statusFilter]);
+
+  const totalPages = Math.ceil(filteredSpaces.length / ITEMS_PER_PAGE);
+  const paginatedSpaces = useMemo(() => {
+    const start = (page - 1) * ITEMS_PER_PAGE;
+    return filteredSpaces.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredSpaces, page]);
 
   return (
     <div className="px-4 py-6 sm:px-6 sm:py-8 md:p-10 font-inter">
@@ -74,17 +65,16 @@ export default function MeetingsContent() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 sm:mb-8">
         <div>
           <h2 className="text-xl sm:text-2xl font-bold text-foreground">
-            Meetings
+            Meeting Spaces
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
-            View and manage your meetings
+            View and manage your meeting spaces
           </p>
         </div>
-        {meta && (
-          <span className="text-sm text-muted-foreground">
-            {meta.total} meeting{meta.total !== 1 ? "s" : ""} total
-          </span>
-        )}
+        <span className="text-sm text-muted-foreground">
+          {filteredSpaces.length} space{filteredSpaces.length !== 1 ? "s" : ""}{" "}
+          {statusFilter !== "all" ? `(${statusFilter.toLowerCase()})` : "total"}
+        </span>
       </div>
 
       {/* Status Filters */}
@@ -114,37 +104,43 @@ export default function MeetingsContent() {
         </div>
       ) : isError ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
-          <p className="text-red-500 font-medium">Failed to load meetings</p>
+          <p className="text-red-500 font-medium">Failed to load meeting spaces</p>
           <p className="text-sm text-muted-foreground mt-1">
             Please check your connection and try again.
           </p>
         </div>
-      ) : meetings.length === 0 ? (
+      ) : paginatedSpaces.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <Calendar className="w-12 h-12 text-muted-foreground mb-3" />
-          <p className="text-foreground font-medium">No meetings found</p>
+          <p className="text-foreground font-medium">No meeting spaces found</p>
           <p className="text-sm text-muted-foreground mt-1">
             {statusFilter !== "all"
-              ? `No ${statusFilter} meetings to show.`
-              : "You haven't scheduled any meetings yet."}
+              ? `No ${statusFilter.toLowerCase()} meeting spaces to show.`
+              : "You haven't created any meeting spaces yet."}
           </p>
+          <Button
+            className="mt-4"
+            onClick={() => router.push("/dashboard/schedule")}
+          >
+            Create Meeting Space
+          </Button>
         </div>
       ) : (
         <>
-          {/* Meeting List */}
+          {/* Space List */}
           <div className="space-y-3">
-            {meetings.map((meeting) => (
-              <MeetingCard
-                key={meeting.id}
-                meeting={meeting}
-                onEdit={() => router.push(`/dashboard/meetings/${meeting.id}/edit`)}
-                onDelete={() => setDeletingId(meeting.id)}
+            {paginatedSpaces.map((space) => (
+              <SpaceCard
+                key={space.id}
+                space={space}
+                onEdit={() => router.push(`/dashboard/meetings/${space.id}/edit`)}
+                onArchive={() => setArchivingId(space.id)}
               />
             ))}
           </div>
 
           {/* Pagination */}
-          {meta && meta.total_pages > 1 && (
+          {totalPages > 1 && (
             <div className="flex items-center justify-center gap-3 mt-8">
               <Button
                 variant="outline"
@@ -155,12 +151,12 @@ export default function MeetingsContent() {
                 <ChevronLeft className="w-4 h-4" />
               </Button>
               <span className="text-sm text-muted-foreground">
-                Page {meta.page} of {meta.total_pages}
+                Page {page} of {totalPages}
               </span>
               <Button
                 variant="outline"
                 size="sm"
-                disabled={page >= meta.total_pages}
+                disabled={page >= totalPages}
                 onClick={() => setPage((p) => p + 1)}
               >
                 <ChevronRight className="w-4 h-4" />
@@ -170,36 +166,103 @@ export default function MeetingsContent() {
         </>
       )}
 
-      {/* Delete Confirm Modal */}
-      {deletingId && (
-        <DeleteMeetingModal
-          meetingId={deletingId}
-          onClose={() => setDeletingId(null)}
+      {/* Archive Confirm Modal */}
+      {archivingId && (
+        <ArchiveSpaceModal
+          spaceId={archivingId}
+          onClose={() => setArchivingId(null)}
         />
       )}
     </div>
   );
 }
 
-// ─── Meeting Card ────────────────────────────────────────────────────────────
+// ─── Space Card ────────────────────────────────────────────────────────────
 
-function MeetingCard({
-  meeting,
+function getAccessPolicyIcon(policy: AccessPolicy) {
+  switch (policy) {
+    case "PUBLIC":
+    case "PUBLIC_PASSCODE":
+      return <Globe className="w-3.5 h-3.5" />;
+    case "MEMBERS_ONLY":
+    case "INVITATION_ONLY":
+      return <Lock className="w-3.5 h-3.5" />;
+    case "ORGANIZATION_ONLY":
+    case "DOMAIN_RESTRICTED":
+      return <Shield className="w-3.5 h-3.5" />;
+    default:
+      return <Users className="w-3.5 h-3.5" />;
+  }
+}
+
+function getAccessPolicyLabel(policy: AccessPolicy): string {
+  const labels: Record<string, string> = {
+    PUBLIC: "Public",
+    PUBLIC_PASSCODE: "Passcode Protected",
+    REGISTERED_USERS: "Registered Users",
+    ORGANIZATION_ONLY: "Organization Only",
+    DOMAIN_RESTRICTED: "Domain Restricted",
+    EXTERNAL_ONLY: "External Only",
+    MEMBERS_ONLY: "Members Only",
+    INVITATION_ONLY: "Invitation Only",
+    CUSTOM: "Custom",
+    HEALTHCARE_APPOINTMENT: "Healthcare",
+  };
+  return labels[policy] || policy;
+}
+
+function getConferenceStatusInfo(status: ConferenceStatus): { label: string; className: string } {
+  switch (status) {
+    case "LIVE":
+      return { label: "Live", className: "bg-green-500 text-white" };
+    case "WAITING":
+    case "PREPARING":
+      return { label: "Starting", className: "bg-yellow-500 text-white" };
+    case "CREATED":
+      return { label: "Scheduled", className: "bg-blue-500 text-white" };
+    case "ENDING":
+      return { label: "Ending", className: "bg-orange-500 text-white" };
+    case "ENDED":
+      return { label: "Ended", className: "bg-gray-500 text-white" };
+    case "CANCELLED":
+      return { label: "Cancelled", className: "bg-red-500 text-white" };
+    case "FAILED":
+      return { label: "Failed", className: "bg-red-600 text-white" };
+    default:
+      return { label: status, className: "bg-gray-400 text-white" };
+  }
+}
+
+function SpaceCard({
+  space,
   onEdit,
-  onDelete,
+  onArchive,
 }: {
-  meeting: Meeting;
+  space: MeetingSpaceResponse;
   onEdit: () => void;
-  onDelete: () => void;
+  onArchive: () => void;
 }) {
+  const router = useRouter();
   const [copied, setCopied] = useState(false);
-  const isScheduled = meeting.status === "scheduled";
+  const isActive = space.status === "ACTIVE";
+
+  const joinUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/${space.meetingCode}`
+      : "";
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(meeting.join_url);
+    navigator.clipboard.writeText(joinUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  const handleJoin = () => {
+    router.push(`/${space.meetingCode}`);
+  };
+
+  const conferenceStatus = space.latestConference?.status;
+  const statusInfo = conferenceStatus ? getConferenceStatusInfo(conferenceStatus) : null;
 
   return (
     <div className="bg-card border border-border rounded-xl p-4 sm:p-5 shadow-sm hover:shadow-md transition-shadow">
@@ -208,42 +271,41 @@ function MeetingCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1.5">
             <h4 className="font-semibold text-foreground text-sm sm:text-base truncate">
-              {meeting.title}
+              {space.title || "Untitled Meeting"}
             </h4>
-            <span
-              className={`px-2 py-0.5 rounded-full text-[11px] font-medium capitalize shrink-0 ${STATUS_STYLES[meeting.status]}`}
-            >
-              {meeting.status}
-            </span>
+            {statusInfo && (
+              <span className={`px-2 py-0.5 rounded text-xs font-medium shrink-0 ${statusInfo.className}`}>
+                {statusInfo.label}
+              </span>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground text-xs sm:text-sm">
             <span className="flex items-center gap-1">
-              <Calendar className="w-3.5 h-3.5" />
-              {formatShortDateForDisplay(meeting.start_time)}
-            </span>
-            <span className="flex items-center gap-1">
-              <Clock className="w-3.5 h-3.5" />
-              {formatTimeForDisplay(meeting.start_time)} –{" "}
-              {formatTimeForDisplay(meeting.end_time)}
-            </span>
-            <span className="flex items-center gap-1">
               <Video className="w-3.5 h-3.5" />
-              {getDuration(meeting.start_time, meeting.end_time)}
+              {MEETING_TYPE_LABELS[space.meetingType] || space.meetingType}
             </span>
             <span className="flex items-center gap-1">
-              {meeting.is_private ? (
-                <Lock className="w-3.5 h-3.5" />
-              ) : (
-                <Globe className="w-3.5 h-3.5" />
-              )}
-              {meeting.is_private ? "Private" : "Public"}
+              {getAccessPolicyIcon(space.accessPolicy)}
+              {getAccessPolicyLabel(space.accessPolicy)}
             </span>
+            {space.interactiveCapacity && (
+              <span className="flex items-center gap-1">
+                <Users className="w-3.5 h-3.5" />
+                Up to {space.interactiveCapacity} participants
+              </span>
+            )}
+            {space.createdAt && (
+              <span className="flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5" />
+                {formatShortDateForDisplay(space.createdAt)}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
             <span className="font-mono bg-muted px-2 py-0.5 rounded">
-              {meeting.meeting_identifier}
+              {space.meetingCode}
             </span>
             <button
               onClick={handleCopy}
@@ -261,14 +323,14 @@ function MeetingCard({
 
         {/* Right — Actions */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {isScheduled && (
+          {isActive && (
             <>
               <Button
                 variant="ghost"
                 size="sm"
                 className="gap-1.5 text-primary px-2 sm:px-3"
                 onClick={onEdit}
-                title="Edit meeting"
+                title="Edit meeting space"
               >
                 <Pencil className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 <span className="hidden sm:inline">Edit</span>
@@ -276,28 +338,24 @@ function MeetingCard({
               <Button
                 variant="ghost"
                 size="sm"
-                className="gap-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 px-2 sm:px-3"
-                onClick={onDelete}
-                title="Delete meeting"
+                className="gap-1.5 text-orange-500 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20 px-2 sm:px-3"
+                onClick={onArchive}
+                title="Archive meeting space"
               >
-                <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                <span className="hidden sm:inline">Delete</span>
+                <Archive className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <span className="hidden sm:inline">Archive</span>
               </Button>
             </>
           )}
-          {(meeting.status === "scheduled" || meeting.status === "live") && (
+          {isActive && (
             <Button
               size="sm"
               className="gap-1.5 px-2 sm:px-3"
-              onClick={() => window.open(meeting.join_url, "_blank")}
-              title={
-                meeting.status === "live" ? "Join meeting now" : "Join meeting"
-              }
+              onClick={handleJoin}
+              title="Join meeting"
             >
               <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span className="hidden sm:inline">
-                {meeting.status === "live" ? "Join Now" : "Join"}
-              </span>
+              <span className="hidden sm:inline">Join</span>
             </Button>
           )}
         </div>
@@ -306,42 +364,45 @@ function MeetingCard({
   );
 }
 
-// ─── Delete Confirm Modal ────────────────────────────────────────────────────
+// ─── Archive Confirm Modal ────────────────────────────────────────────────────
 
-function DeleteMeetingModal({
-  meetingId,
+function ArchiveSpaceModal({
+  spaceId,
   onClose,
 }: {
-  meetingId: string;
+  spaceId: string;
   onClose: () => void;
 }) {
-  const deleteMeeting = useDeleteMeeting();
+  const archiveSpace = useArchiveSpace();
   const [error, setError] = useState("");
 
-  const handleDelete = () => {
+  const handleArchive = () => {
     setError("");
-    deleteMeeting.mutate(meetingId, {
-      onSuccess: () => onClose(),
-      onError: (err: AxiosError<ApiErrorResponse>) => {
-        setError(
-          err.response?.data?.error?.message || "Failed to delete meeting",
-        );
-      },
-    });
+    archiveSpace.mutate(
+      { id: spaceId },
+      {
+        onSuccess: () => onClose(),
+        onError: (err) => {
+          const message =
+            err instanceof Error ? err.message : "Failed to archive meeting space";
+          setError(message);
+        },
+      }
+    );
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative bg-card rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 text-center">
-        <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-4">
-          <Trash2 className="w-5 h-5 text-red-500" />
+        <div className="w-12 h-12 rounded-full bg-orange-50 dark:bg-orange-900/20 flex items-center justify-center mx-auto mb-4">
+          <Archive className="w-5 h-5 text-orange-500" />
         </div>
         <h3 className="text-lg font-bold text-foreground mb-1">
-          Delete Meeting
+          Archive Meeting Space
         </h3>
         <p className="text-sm text-muted-foreground mb-6">
-          Are you sure? This action cannot be undone.
+          Archived spaces can be restored later. Any active conferences will be ended.
         </p>
 
         {error && (
@@ -353,12 +414,11 @@ function DeleteMeetingModal({
             Cancel
           </Button>
           <Button
-            variant="destructive"
-            className="flex-1"
-            loading={deleteMeeting.isPending}
-            onClick={handleDelete}
+            className="flex-1 bg-orange-500 hover:bg-orange-600 text-white"
+            loading={archiveSpace.isPending}
+            onClick={handleArchive}
           >
-            Delete
+            Archive
           </Button>
         </div>
       </div>
