@@ -246,6 +246,26 @@ pub struct MeetingSpaceResponse {
     pub archived_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<i32>,
+    /// The canonical conference for this space (live > upcoming > latest).
+    /// Useful for showing the current meeting status.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_conference: Option<ConferenceSummary>,
+}
+
+/// Minimal conference info included in space responses.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConferenceSummary {
+    pub id: Uuid,
+    pub status: ConferenceStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduled_start_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduled_end_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

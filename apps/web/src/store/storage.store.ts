@@ -3,6 +3,8 @@ import type { JoinMeetingData } from "@/types/meeting";
 
 const USER_KEY = "cosmic_user_info";
 const INSTANT_JOIN_KEY = "cosmic_instant_join";
+const PARTICIPANT_TOKEN_KEY = "cosmic_participant_token";
+const V2_JOIN_DATA_KEY = "cosmic_v2_join_data";
 
 export const storageStore = {
   setUser(user: UserInfo) {
@@ -43,6 +45,47 @@ export const storageStore = {
   clearInstantJoinData() {
     if (typeof window !== "undefined") {
       sessionStorage.removeItem(INSTANT_JOIN_KEY);
+    }
+  },
+
+  // V2 Participant token (for guest sessions in V2 API)
+  setParticipantToken(token: string) {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem(PARTICIPANT_TOKEN_KEY, token);
+    }
+  },
+
+  getParticipantToken(): string | null {
+    if (typeof window !== "undefined") {
+      return sessionStorage.getItem(PARTICIPANT_TOKEN_KEY);
+    }
+    return null;
+  },
+
+  clearParticipantToken() {
+    if (typeof window !== "undefined") {
+      sessionStorage.removeItem(PARTICIPANT_TOKEN_KEY);
+    }
+  },
+
+  // V2 Join data (temporary, used for navigating to room after joining via V2 API)
+  setV2JoinData(data: unknown) {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem(V2_JOIN_DATA_KEY, JSON.stringify(data));
+    }
+  },
+
+  getV2JoinData<T = unknown>(): T | null {
+    if (typeof window !== "undefined") {
+      const data = sessionStorage.getItem(V2_JOIN_DATA_KEY);
+      return data ? JSON.parse(data) : null;
+    }
+    return null;
+  },
+
+  clearV2JoinData() {
+    if (typeof window !== "undefined") {
+      sessionStorage.removeItem(V2_JOIN_DATA_KEY);
     }
   },
 };

@@ -3,7 +3,11 @@
 
 use crate::{
     domain::{RecordOrigin, SecurityProfile},
-    dto::v2::*,
+    dto::v2::{
+        BulkAdmissionResponse, ConferenceResponse, ConferenceSummary, InvitationResponse,
+        MeetingSpaceResponse, MemberResponse, ParticipantResponse, RecurrenceResponse,
+        ResourceView, SkippedParticipant,
+    },
     models::{
         conference_participants, conference_sessions, meeting_invitations, meeting_members,
         meeting_recurrence_rules,
@@ -61,6 +65,19 @@ pub fn space(view: &SpaceView) -> MeetingSpaceResponse {
         updated_at: full.then_some(s.updated_at),
         archived_at: full.then_some(s.archived_at).flatten(),
         version: full.then_some(s.version),
+        latest_conference: view.latest_conference.as_ref().map(conference_summary),
+    }
+}
+
+/// Project a conference session to a minimal summary for space responses.
+fn conference_summary(c: &conference_sessions::Model) -> ConferenceSummary {
+    ConferenceSummary {
+        id: c.id,
+        status: c.status,
+        scheduled_start_at: c.scheduled_start_at,
+        scheduled_end_at: c.scheduled_end_at,
+        started_at: c.started_at,
+        ended_at: c.ended_at,
     }
 }
 

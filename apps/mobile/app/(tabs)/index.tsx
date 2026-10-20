@@ -4,12 +4,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Text } from "@/components/ui/text";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
+import { Logo } from "@/components/ui/logo";
 import { JoinMeetingInput } from "@/features/meetings/components/join-meeting-input";
 import { useInstantMeeting, useMeetings } from "@/features/meetings/hooks/use-meetings";
 import { useAuthStore } from "@/store/auth.store";
 import { useColors } from "@/hooks/useColors";
+import { getErrorMessage } from "@/lib/utils/error";
 import type { Meeting } from "@/features/meetings/types";
 import * as Clipboard from "expo-clipboard";
 
@@ -27,13 +28,6 @@ function MeetingHistoryCard({ meeting }: { meeting: Meeting }) {
     success("Code copied!");
   };
 
-  const statusVariant = {
-    live: "success" as const,
-    scheduled: "default" as const,
-    ended: "secondary" as const,
-    cancelled: "destructive" as const,
-  };
-
   return (
     <Card className="mr-3 w-64 border border-border dark:border-border-dark">
       <View className="flex-row justify-between items-start">
@@ -47,12 +41,9 @@ function MeetingHistoryCard({ meeting }: { meeting: Meeting }) {
       <Text className="mt-2 text-sm text-muted-foreground dark:text-muted-foreground-dark">
         {formatDate(meeting.scheduled_at)}
       </Text>
-      <View className="mt-2 flex-row items-center justify-between">
-        <Badge variant={statusVariant[meeting.status]}>{meeting.status}</Badge>
-        <Text className="text-xs text-muted-foreground dark:text-muted-foreground-dark">
-          {meeting.meeting_identifier}
-        </Text>
-      </View>
+      <Text className="mt-1 text-xs text-muted-foreground dark:text-muted-foreground-dark">
+        {meeting.meeting_identifier}
+      </Text>
     </Card>
   );
 }
@@ -76,7 +67,7 @@ export default function HomeScreen() {
         });
       },
       onError: (error) => {
-        toast(error.message, "destructive");
+        toast(getErrorMessage(error, "Failed to create meeting"), "destructive");
       },
     });
   };
@@ -87,6 +78,9 @@ export default function HomeScreen() {
     <SafeAreaView edges={["top"]} className="flex-1 bg-background dark:bg-background-dark">
       <ScrollView className="flex-1" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
         <View className="px-6 py-4">
+          <View className="flex-row items-center justify-between mb-2">
+            <Logo variant="medium" />
+          </View>
           <Text className="text-2xl font-bold text-foreground dark:text-foreground-dark">
             Welcome, {user?.username ?? "User"}
           </Text>

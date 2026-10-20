@@ -43,7 +43,26 @@ export const publicApi = axios.create({
   timeout: 30000,
 });
 
-api.interceptors.request.use(
+const V2_BASE_URL = API_URL.replace("/api/v1", "/api/v2");
+
+export const apiV2 = axios.create({
+  baseURL: V2_BASE_URL,
+  headers: {
+    "Content-Type": "application/json",
+  },
+  timeout: 30000,
+});
+
+export const publicApiV2 = axios.create({
+  baseURL: V2_BASE_URL,
+  headers: {
+    "Content-Type": "application/json",
+  },
+  timeout: 30000,
+});
+
+const applyInterceptors = (instance: typeof api) => {
+instance.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
     const token = await tokenStorage.getAccessToken();
     if (token && config.headers) {
@@ -56,7 +75,7 @@ api.interceptors.request.use(
   }
 );
 
-api.interceptors.response.use(
+instance.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & {
@@ -78,7 +97,7 @@ api.interceptors.response.use(
             if (originalRequest.headers) {
               originalRequest.headers.Authorization = `Bearer ${token}`;
             }
-            return api(originalRequest);
+            return instance(originalRequest);
           })
           .catch((err) => {
             return Promise.reject(err);
@@ -108,7 +127,7 @@ api.interceptors.response.use(
           originalRequest.headers.Authorization = `Bearer ${access_token}`;
         }
 
-        return api(originalRequest);
+        return instance(originalRequest);
       } catch (refreshError) {
         processQueue(refreshError as Error, null);
         await clearAllStorage();
@@ -122,6 +141,10 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+};
+
+applyInterceptors(api);
+applyInterceptors(apiV2);
 
 export interface ApiError {
   message: string;

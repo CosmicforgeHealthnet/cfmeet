@@ -13,12 +13,22 @@ const Navbar = () => {
   return (
     <nav className="flex items-center justify-between px-4 sm:px-8 py-4 sm:py-6 bg-transparent relative">
       <div className="flex items-center gap-2">
+        {/* Light mode logo */}
         <Image
-          src="/CFMeet.png"
+          src="/light-mode-cf-meet.png"
           alt="CF Meet Logo"
           width={100}
           height={24}
-          className="w-[80px] sm:w-[100px] h-auto"
+          className="w-[80px] sm:w-[100px] h-auto dark:hidden"
+          priority
+        />
+        {/* Dark mode logo */}
+        <Image
+          src="/dark-mode-cfmeet.png"
+          alt="CF Meet Logo"
+          width={100}
+          height={24}
+          className="w-[80px] sm:w-[100px] h-auto hidden dark:block"
           priority
         />
       </div>

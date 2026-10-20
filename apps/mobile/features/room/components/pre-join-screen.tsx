@@ -1,18 +1,20 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { View, Pressable, Platform } from "react-native";
 import { Camera, CameraView } from "expo-camera";
+import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Screen } from "@/components/layout/screen";
 import { Text } from "@/components/ui/text";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
-import { Loading } from "@/components/shared/loading";
+import { Logo } from "@/components/ui/logo";
+import { FullScreenLoading } from "@/components/shared/loading";
 import { useToast } from "@/components/ui/toast";
-import { usePublicMeeting } from "@/features/meetings/hooks/use-meetings";
-import { useJoinMeeting } from "@/features/meetings/hooks/use-join-meeting";
+import { useResolve, useJoinConference } from "@/features/meetings/v2/hooks";
 import { useAuthStore } from "@/store/auth.store";
 import { useColors } from "@/hooks/useColors";
+import type { JoinConferenceResponse } from "@/features/meetings/v2/types";
 
 interface PreJoinScreenProps {
   meetingIdentifier: string;
@@ -24,12 +26,29 @@ export function PreJoinScreen({ meetingIdentifier }: PreJoinScreenProps) {
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [hasCameraPermission, setHasCameraPermission] = useState(false);
   const [isCheckingPermissions, setIsCheckingPermissions] = useState(true);
+  const [isWaiting, setIsWaiting] = useState(false);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { toast } = useToast();
   const { user, isAuthenticated } = useAuthStore();
-  const { data: meeting, isLoading, isError } = usePublicMeeting(meetingIdentifier);
-  const joinMeeting = useJoinMeeting();
+  const { data: resolveData, isLoading, isError } = useResolve(meetingIdentifier);
+  const joinConference = useJoinConference();
   const colors = useColors();
+
+  // Helper to map V2 join response to legacy format for LiveRoom
+  const mapV2JoinToLegacy = useCallback((v2Response: JoinConferenceResponse) => {
+    if (!v2Response.rtc) {
+      return null; // User is in waiting room
+    }
+    return {
+      meeting_id: v2Response.conference.meetingSpaceId,
+      participant_id: v2Response.participant.id,
+      role: v2Response.participant.role.toLowerCase(),
+      join_token: v2Response.rtc.credential,
+      livekit_url: v2Response.rtc.url,
+      room_name: v2Response.conference.id,
+    };
+  }, []);
 
   useEffect(() => {
     if (user?.username) {
@@ -52,23 +71,95 @@ export function PreJoinScreen({ meetingIdentifier }: PreJoinScreenProps) {
     checkPermissions();
   }, []);
 
+  const navigateToLiveRoom = useCallback(
+    (joinData: NonNullable<ReturnType<typeof mapV2JoinToLegacy>>) => {
+      router.replace({
+        pathname: "/(room)/[id]/live",
+        params: {
+          id: meetingIdentifier,
+          joinData: JSON.stringify(joinData),
+        },
+      });
+    },
+    [meetingIdentifier]
+  );
+
+  // Poll to check if participant has been admitted to the meeting.
+  // Re-joins via the V2 API; once the host admits us, the response
+  // includes RTC credentials and we proceed into the room.
+  const startPolling = useCallback(
+    (conferenceId: string, name: string) => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+
+      pollIntervalRef.current = setInterval(async () => {
+        try {
+          const response = await joinConference.mutateAsync({
+            conferenceId,
+            data: { displayName: name },
+            isGuest: !isAuthenticated,
+          });
+
+          const joinData = mapV2JoinToLegacy(response);
+          if (joinData) {
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
+            setIsWaiting(false);
+            navigateToLiveRoom(joinData);
+          }
+        } catch {
+          // Still in waiting room or temporary network error - keep polling
+        }
+      }, 3000);
+    },
+    [joinConference, isAuthenticated, mapV2JoinToLegacy, navigateToLiveRoom]
+  );
+
+  // Cleanup polling interval on unmount
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
+  }, []);
+
   const handleJoin = () => {
     if (!displayName.trim()) {
       toast("Please enter your display name", "destructive");
       return;
     }
 
-    joinMeeting.mutate(
+    const conferenceId = resolveData?.conference?.id;
+    if (!conferenceId) {
+      toast("No active conference found for this meeting", "destructive");
+      return;
+    }
+
+    const name = displayName.trim();
+
+    joinConference.mutate(
       {
-        identifier: meetingIdentifier,
+        conferenceId,
         data: {
-          display_name: displayName.trim(),
-          is_audio_enabled: isAudioEnabled,
-          is_video_enabled: isVideoEnabled,
+          displayName: name,
         },
         isGuest: !isAuthenticated,
       },
       {
+        onSuccess: (response) => {
+          const joinData = mapV2JoinToLegacy(response);
+          if (joinData) {
+            navigateToLiveRoom(joinData);
+          } else {
+            // User is in waiting room - poll until the host admits them
+            setIsWaiting(true);
+            startPolling(conferenceId, name);
+          }
+        },
         onError: (error) => {
           toast(error.message, "destructive");
         },
@@ -76,41 +167,84 @@ export function PreJoinScreen({ meetingIdentifier }: PreJoinScreenProps) {
     );
   };
 
+  const handleCancel = () => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    setIsWaiting(false);
+  };
+
   if (isLoading || isCheckingPermissions) {
-    return <Loading fullScreen message="Loading meeting..." />;
+    return <FullScreenLoading message="Loading meeting..." />;
   }
 
-  if (isError || !meeting) {
+  if (isError || !resolveData?.meetingSpace) {
     return (
-      <Screen className="items-center justify-center px-6">
-        <Ionicons name="alert-circle-outline" size={64} color={colors.primary} style={{ opacity: 0.5 }} />
-        <Text className="mt-4 text-xl font-bold text-foreground dark:text-foreground-dark">Meeting Not Found</Text>
-        <Text className="mt-2 text-center text-muted-foreground dark:text-muted-foreground-dark">
-          The meeting you're looking for doesn't exist or has ended.
-        </Text>
+      <Screen className="items-center justify-center px-6 gap-6">
+        <Logo variant="large" />
+
+        <View className="w-20 h-20 rounded-full bg-destructive/10 dark:bg-destructive-dark/10 items-center justify-center">
+          <Ionicons name="close-circle" size={40} color={colors.destructive} />
+        </View>
+
+        <View className="items-center gap-2">
+          <Text className="text-2xl font-bold text-foreground dark:text-foreground-dark">Meeting Not Found</Text>
+          <Text className="text-center text-muted-foreground dark:text-muted-foreground-dark">
+            The meeting <Text className="font-medium text-foreground dark:text-foreground-dark">{meetingIdentifier}</Text> doesn&apos;t exist or you don&apos;t have access to it.
+          </Text>
+        </View>
+
+        <Button onPress={() => router.replace("/(tabs)")} size="lg" className="w-full max-w-xs">
+          Back to Home
+        </Button>
       </Screen>
     );
   }
 
-  if (meeting.status === "ended") {
+  const conferenceStatus = resolveData.conference?.status;
+  if (conferenceStatus === "ENDED" || conferenceStatus === "CANCELLED") {
     return (
-      <Screen className="items-center justify-center px-6">
-        <Ionicons name="checkmark-circle-outline" size={64} color={colors.primary} style={{ opacity: 0.5 }} />
-        <Text className="mt-4 text-xl font-bold text-foreground dark:text-foreground-dark">Meeting Ended</Text>
-        <Text className="mt-2 text-center text-muted-foreground dark:text-muted-foreground-dark">
-          This meeting has already ended.
-        </Text>
+      <Screen className="items-center justify-center px-6 gap-6">
+        <Logo variant="large" />
+
+        <View className="w-20 h-20 rounded-full bg-muted dark:bg-muted-dark items-center justify-center">
+          <Ionicons name="time" size={40} color={colors.mutedForeground} />
+        </View>
+
+        <View className="items-center gap-2">
+          <Text className="text-2xl font-bold text-foreground dark:text-foreground-dark">Meeting Has Ended</Text>
+          <Text className="text-center text-muted-foreground dark:text-muted-foreground-dark">
+            {resolveData.meetingSpace.title ? (
+              <>The meeting <Text className="font-medium text-foreground dark:text-foreground-dark">&quot;{resolveData.meetingSpace.title}&quot;</Text> has ended.</>
+            ) : (
+              <>The meeting <Text className="font-medium text-foreground dark:text-foreground-dark">{meetingIdentifier}</Text> has ended.</>
+            )}
+          </Text>
+        </View>
+
+        <Button onPress={() => router.replace("/(tabs)")} size="lg" className="w-full max-w-xs">
+          Back to Home
+        </Button>
       </Screen>
     );
   }
+
+  const meetingSpace = resolveData.meetingSpace;
 
   return (
     <Screen edges={["top"]} className="px-6">
       <View className="flex-1">
-        <View className="mb-6 mt-4">
-          <Text className="text-2xl font-bold text-foreground dark:text-foreground-dark">{meeting.title}</Text>
-          <Text className="mt-1 text-muted-foreground dark:text-muted-foreground-dark">
-            Hosted by {meeting.host_username}
+        {/* Logo */}
+        <View className="items-center mt-4 mb-4">
+          <Logo variant="medium" />
+        </View>
+
+        {/* Meeting Info */}
+        <View className="mb-4">
+          <Text className="text-xl font-bold text-foreground dark:text-foreground-dark text-center">{meetingSpace.title || "Meeting"}</Text>
+          <Text className="mt-1 text-muted-foreground dark:text-muted-foreground-dark text-center">
+            Code: {meetingSpace.meetingCode}
           </Text>
         </View>
 
@@ -157,32 +291,50 @@ export function PreJoinScreen({ meetingIdentifier }: PreJoinScreenProps) {
           </Pressable>
         </View>
 
-        <Input
-          label="Your Name"
-          placeholder="Enter your display name"
-          value={displayName}
-          onChangeText={setDisplayName}
-          autoCapitalize="words"
-        />
+        {!isWaiting && (
+          <Input
+            label="Your Name"
+            placeholder="Enter your display name"
+            value={displayName}
+            onChangeText={setDisplayName}
+            autoCapitalize="words"
+          />
+        )}
 
-        {meeting.is_private && (
+        {meetingSpace.accessPolicy !== "PUBLIC" && (
           <View className="mt-4 rounded-lg bg-muted dark:bg-muted-dark p-3">
             <Text className="text-sm text-muted-foreground dark:text-muted-foreground-dark">
-              This is a private meeting. The host will need to admit you.
+              {meetingSpace.requiresPasscode
+                ? "This meeting requires a passcode."
+                : "This is a private meeting. The host may need to admit you."}
             </Text>
           </View>
         )}
       </View>
 
       <View className="pb-6">
-        <Button
-          onPress={handleJoin}
-          isLoading={joinMeeting.isPending}
-          size="lg"
-          className="w-full"
-        >
-          Join Meeting
-        </Button>
+        {isWaiting ? (
+          <View className="items-center gap-3">
+            <View className="flex-row items-center gap-2">
+              <View className="h-3 w-3 rounded-full bg-primary" />
+              <Text className="text-sm font-medium text-foreground dark:text-foreground-dark">
+                Waiting for the host to let you in...
+              </Text>
+            </View>
+            <Button onPress={handleCancel} variant="ghost" size="sm">
+              Cancel
+            </Button>
+          </View>
+        ) : (
+          <Button
+            onPress={handleJoin}
+            isLoading={joinConference.isPending}
+            size="lg"
+            className="w-full"
+          >
+            Join Meeting
+          </Button>
+        )}
       </View>
     </Screen>
   );
