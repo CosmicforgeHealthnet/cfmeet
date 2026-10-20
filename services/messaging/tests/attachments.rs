@@ -1790,6 +1790,29 @@ async fn managed_images_get_safe_thumbnails_and_e2ee_attachments_never_do() {
         .await;
     assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
     let _ = outsider_conv_member;
+    // READY thumbnail bytes are part of the *same* per-environment committed quota
+    // as original (including E2EE ciphertext) attachment bytes. INSPECTION has no
+    // stored object and contributes nothing. The database trigger must enforce this
+    // once, including when a worker retries or inspects the same derivative twice.
+    let expected_originals = e.h.scalar(&format!(
+        "SELECT COALESCE(sum(committed_bytes), 0) FROM messaging_attachments WHERE environment_id = '{}'",
+        c.context.scope.environment_id
+    )).await;
+    let expected_thumbnails = e.h.scalar(&format!(
+        "SELECT COALESCE(sum(bytes), 0) FROM messaging_attachment_derivatives WHERE environment_id = '{}' AND kind = 'THUMBNAIL' AND status = 'READY'",
+        c.context.scope.environment_id
+    )).await;
+    assert!(expected_thumbnails > 0, "two real thumbnails were rendered");
+    let committed_before_delete = e.usage(&c).await.0;
+    assert_eq!(
+        committed_before_delete,
+        expected_originals + expected_thumbnails,
+        "generated object bytes must count against the environment storage quota"
+    );
+    // Running the worker again must not double-count the same thumbnail.
+    lifecycle::run_once(&e.h.state).await.unwrap();
+    assert_eq!(e.usage(&c).await.0, committed_before_delete);
+
     // Deleting the attachment queues its thumbnail object for deletion too.
     let row = messaging::attachments::load(
         &e.h.state.db,
@@ -1804,6 +1827,12 @@ async fn managed_images_get_safe_thumbnails_and_e2ee_attachments_never_do() {
         lifecycle::delete_attachment(&e.h.state.db, &row, "TEST_DELETE", e.h.now())
             .await
             .unwrap()
+    );
+    let generated_bytes = d["size"].as_i64().expect("measured thumbnail bytes");
+    assert_eq!(
+        e.usage(&c).await.0,
+        committed_before_delete - row.committed_bytes - generated_bytes,
+        "both original and derivative quota usage must be released exactly once"
     );
     assert_eq!(
         e.h.scalar(&format!(
