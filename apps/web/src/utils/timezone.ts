@@ -19,6 +19,9 @@ export function getUserTimezone(): string {
  * If the string doesn't end with "Z" or contain a timezone offset, append "Z".
  */
 function ensureUtc(dateStr: string): string {
+  if (typeof dateStr !== "string") {
+    return "";
+  }
   if (dateStr.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(dateStr)) {
     return dateStr;
   }

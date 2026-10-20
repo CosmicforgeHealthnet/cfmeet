@@ -15,8 +15,13 @@ export const storageStore = {
 
   getUser(): UserInfo | null {
     if (typeof window !== "undefined") {
-      const savedUser = localStorage.getItem(USER_KEY);
-      return savedUser ? JSON.parse(savedUser) : null;
+      try {
+        const savedUser = localStorage.getItem(USER_KEY);
+        return savedUser ? JSON.parse(savedUser) : null;
+      } catch {
+        localStorage.removeItem(USER_KEY);
+        return null;
+      }
     }
     return null;
   },
@@ -36,8 +41,13 @@ export const storageStore = {
 
   getInstantJoinData(): JoinMeetingData | null {
     if (typeof window !== "undefined") {
-      const data = sessionStorage.getItem(INSTANT_JOIN_KEY);
-      return data ? JSON.parse(data) : null;
+      try {
+        const data = sessionStorage.getItem(INSTANT_JOIN_KEY);
+        return data ? JSON.parse(data) : null;
+      } catch {
+        sessionStorage.removeItem(INSTANT_JOIN_KEY);
+        return null;
+      }
     }
     return null;
   },
@@ -77,8 +87,13 @@ export const storageStore = {
 
   getV2JoinData<T = unknown>(): T | null {
     if (typeof window !== "undefined") {
-      const data = sessionStorage.getItem(V2_JOIN_DATA_KEY);
-      return data ? JSON.parse(data) : null;
+      try {
+        const data = sessionStorage.getItem(V2_JOIN_DATA_KEY);
+        return data ? JSON.parse(data) : null;
+      } catch {
+        sessionStorage.removeItem(V2_JOIN_DATA_KEY);
+        return null;
+      }
     }
     return null;
   },

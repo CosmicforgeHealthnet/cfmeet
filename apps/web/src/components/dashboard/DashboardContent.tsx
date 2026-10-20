@@ -252,7 +252,7 @@ function SpaceCard({ space }: { space: MeetingSpaceResponse }) {
 
       <div className="space-y-1">
         <p className="text-muted-foreground font-normal text-[11px] sm:text-[12px] leading-none">
-          {space.meetingType.replace("_", " ")}
+          {space.meetingType?.replace("_", " ")}
         </p>
         {space.createdAt && (
           <p className="text-muted-foreground font-normal text-[11px] sm:text-[12px] leading-none">
