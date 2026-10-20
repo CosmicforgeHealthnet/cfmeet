@@ -16,6 +16,7 @@ on:
       - "packages/contracts/**"
       - "packages/service-auth/**"
       - "scripts/contracts/**"
+      - "services/meeting-service/src/swagger/**"
       - ".github/workflows/contracts.yml"
   pull_request:
     paths:
@@ -74,6 +75,33 @@ jobs:
       - name: bundled OpenAPI documents are current and self-contained
         working-directory: .
         run: python3 scripts/contracts/bundle_openapi.py --check
+
+  # The bundles rendered the way a reader meets them: Swagger UI (the version and SRI the
+  # Meeting Service serves) in Chromium, the schema host blocked, the whole document
+  # resolved by Swagger UI's own resolver, every operation rendered; a negative control
+  # (an external $ref) must be reported.
+  swagger-render:
+    name: Swagger UI renders every bundle (Chromium, schema host blocked)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scripts/contracts/swagger-render
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scripts/contracts/swagger-render/package-lock.json
+
+      - name: install Playwright Chromium (pinned in package-lock)
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: render every bundled OpenAPI document
+        run: npm test
 
   service-auth:
     name: service-auth (${{ matrix.features.name }})
