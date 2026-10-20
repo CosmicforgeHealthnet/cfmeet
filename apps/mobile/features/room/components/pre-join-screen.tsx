@@ -40,11 +40,12 @@ export function PreJoinScreen({ meetingIdentifier }: PreJoinScreenProps) {
     if (!v2Response.rtc) {
       return null; // User is in waiting room
     }
+    const rtcCredential = v2Response.rtc.credential;
     return {
       meeting_id: v2Response.conference.meetingSpaceId,
       participant_id: v2Response.participant.id,
       role: v2Response.participant.role.toLowerCase(),
-      join_token: v2Response.rtc.credential,
+      join_token: rtcCredential,
       livekit_url: v2Response.rtc.url,
       room_name: v2Response.conference.id,
     };

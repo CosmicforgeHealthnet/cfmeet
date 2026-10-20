@@ -326,6 +326,7 @@ use utoipa::OpenApi;
             crate::dto::v2::CreateConferenceRequest,
             crate::dto::v2::RescheduleConferenceRequest,
             crate::dto::v2::ListConferencesQuery,
+            crate::dto::v2::ConferenceSummary,
             crate::dto::v2::ConferenceResponse,
             crate::dto::v2::ConferenceListResponse,
             crate::dto::v2::ProviderEnforcement,

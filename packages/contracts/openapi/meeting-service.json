@@ -14077,6 +14077,42 @@
           "FAILED"
         ]
       },
+      "ConferenceSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "status"
+        ],
+        "properties": {
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scheduledEndAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "scheduledStartAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "status": {
+            "$ref": "#/components/schemas/ConferenceStatus"
+          }
+        }
+      },
       "ConsentDecision": {
         "type": "string",
         "enum": [
@@ -16085,6 +16121,14 @@
           },
           "isLegacy": {
             "type": "boolean"
+          },
+          "latestConference": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ConferenceSummary"
+              }
+            ],
+            "nullable": true
           },
           "meetingCode": {
             "type": "string"
