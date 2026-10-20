@@ -22,6 +22,8 @@ export type CspOptions = {
   secure?: boolean;
   apiUrl?: string;
   extraConnectSrc?: string;
+  /** Enable only for an audited, route-scoped MLS WebAssembly runtime. */
+  allowMessagingWasm?: boolean;
 };
 
 /** Trusted Types policy names the app and Next.js are allowed to create. */
@@ -46,7 +48,8 @@ export function buildCsp(o: CspOptions): string {
     .filter((s): s is string => Boolean(s));
   const directives: Record<string, string[]> = {
     "default-src": ["'self'"],
-    "script-src": ["'self'", `'nonce-${o.nonce}'`, "'strict-dynamic'"].concat(o.dev ? ["'unsafe-eval'"] : []),
+    "script-src": ["'self'", `'nonce-${o.nonce}'`, "'strict-dynamic'"]
+      .concat(o.dev ? ["'unsafe-eval'"] : o.allowMessagingWasm ? ["'wasm-unsafe-eval'"] : []),
     "style-src": ["'self'", "'unsafe-inline'"],
     "img-src": ["'self'", "data:", "blob:", "https://i.pravatar.cc"].concat(api ? [api] : []),
     "font-src": ["'self'", "data:"],
