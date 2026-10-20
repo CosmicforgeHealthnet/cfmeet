@@ -168,6 +168,7 @@ export class MessagingEngine {
   private stopped = false;
   private pendingSends = new Map<string, MessageView[]>();
   private deviceChecks = new Map<string, number>();
+  private lastWaitingTopUp = 0;
   private missingSince = new Map<string, number>();
   /** Sends of one conversation leave in the order the user wrote them. */
   private sendQueues = new Map<string, Promise<void>>();
@@ -295,6 +296,7 @@ export class MessagingEngine {
       // Realtime is the fast path; a periodic catch-up also lets member devices add new
       // devices and commit pending removals of encrypted groups.
       for (const id of this.server.keys()) this.scheduleSync(id);
+      await this.topUpWhileWaiting();
       if (this.snapshot.phase === "ready" && this.snapshot.deviceId && !(await this.deviceIsActive(this.snapshot.deviceId))) {
         await this.onDeviceRevoked();
       }
@@ -343,6 +345,24 @@ export class MessagingEngine {
     }
   }
 
+  /**
+   * A device not yet in an encrypted group it belongs to depends on member devices
+   * claiming its KeyPackages; one claimed by an attempt that did not complete is spent.
+   * While waiting, publish one more per device-check period (the server caps the stock
+   * per device).
+   */
+  private async topUpWhileWaiting(): Promise<void> {
+    const c = this.crypto;
+    if (!c || this.snapshot.phase !== "ready" || Date.now() - this.lastWaitingTopUp < DEVICE_CHECK_MS) return;
+    for (const conv of this.server.values()) {
+      if (conv.securityProfile !== "PRIVATE_E2EE" || !conv.encryption.mlsGroupId) continue;
+      if (await c.call<boolean>("hasGroup", { groupId: b64u.dec(conv.encryption.mlsGroupId) })) continue;
+      this.lastWaitingTopUp = Date.now();
+      await this.topUpKeyPackages(1).catch(() => {});
+      return;
+    }
+  }
+
   private async topUpKeyPackages(count = 0): Promise<void> {
     if (!this.crypto || !this.snapshot.deviceId || count < 1) return;
     const kps = await this.crypto.call<Uint8Array[]>("keyPackages", { count });
@@ -358,8 +378,12 @@ export class MessagingEngine {
   }
 
   private async onDeviceRevoked(detail = "This browser's messaging device was revoked. Its local keys and history were erased."): Promise<void> {
+    if (this.stopped) return;
     this.detachTransport();
     await this.crypto?.call("wipe", { account: this.snapshot.identity!.principalId });
+    // A sign-out in progress erases everything itself: never reopen (a reopened worker
+    // would create a fresh wrapping key after the sign-out's wipe).
+    if (this.stopped) return;
     await this.reopenCrypto();
     this.set({ phase: "revoked", detail, deviceId: null, messages: {}, connection: "disconnected" });
     await this.refreshConversations();
@@ -367,6 +391,12 @@ export class MessagingEngine {
 
   /** Logout: the local device and its history are erased and the device revoked. */
   async signOut(): Promise<void> {
+    // Background work stops first: the revocation below must not be "detected" by a poll
+    // that would wipe and reopen the device store in parallel.
+    this.stopped = true;
+    for (const t of this.timers) clearInterval(t);
+    this.timers = [];
+    this.detachTransport();
     try {
       if (this.snapshot.deviceId) await identityApi.revokeDevice(this.snapshot.deviceId);
     } catch {
@@ -672,12 +702,17 @@ export class MessagingEngine {
     const inTree = new Set(await this.crypto.call<string[]>("members", { groupId: gid }));
     const members = await relay<{ members: { principalId: string; state?: string }[] }>("GET", `v1/conversations/${conv.conversationId}/members?limit=${PAGE}`);
     const missing: string[] = [];
+    const newDevices: ServerDevice[] = [];
     const activeInTree: string[] = [];
     for (const m of members.members ?? []) {
       if (m.state && m.state !== "ACTIVE") continue;
       const d = await relay<{ devices: ServerDevice[] }>("GET", `v1/messaging/principals/${m.principalId}/devices`).catch(() => ({ devices: [] as ServerDevice[] }));
       for (const x of d.devices) if (x.status === "ACTIVE" && inTree.has(x.deviceId)) activeInTree.push(x.deviceId);
-      if (d.devices.some((x) => x.status === "ACTIVE" && !inTree.has(x.deviceId))) missing.push(m.principalId);
+      const fresh = d.devices.filter((x) => x.status === "ACTIVE" && !inTree.has(x.deviceId));
+      if (fresh.length) {
+        missing.push(m.principalId);
+        newDevices.push(...fresh);
+      }
     }
     if (!missing.length) {
       this.missingSince.delete(conv.conversationId);
@@ -692,6 +727,17 @@ export class MessagingEngine {
       const seen = this.missingSince.get(conv.conversationId) ?? Date.now();
       this.missingSince.set(conv.conversationId, seen);
       if (Date.now() - seen < 10 * DEVICE_CHECK_MS) return;
+    }
+    // A claim consumes one KeyPackage of every device of the principal, so nothing is
+    // claimed until each new device's listed key verifies against the transparency log
+    // (a device the log does not yet include is retried on a later check without
+    // spending the newcomer's KeyPackages).
+    for (const d of newDevices) {
+      const ok = await this.verifyTransparency(d.deviceId, b64u.dec(d.signaturePublicKey)).then(
+        () => true,
+        () => false,
+      );
+      if (!ok) return;
     }
     await this.addDevicesOf(conv, missing, inTree).catch(() => {});
   }

@@ -183,15 +183,15 @@ impl Device {
         let MlsMessageBodyIn::Welcome(welcome) = message.extract() else {
             return Err(GroupError::Malformed);
         };
-        let group = StagedWelcome::new_from_welcome(
-            self.provider(),
-            &MlsGroupJoinConfig::default(),
-            welcome,
-            None,
-        )
-        .map_err(|_| GroupError::Refused)?
-        .into_group(self.provider())
-        .map_err(|_| GroupError::Refused)?;
+        // The same ratchet-tree policy as `create_group`: Welcomes this member sends later
+        // must carry the tree, or the devices it adds can never join.
+        let config = MlsGroupJoinConfig::builder()
+            .use_ratchet_tree_extension(true)
+            .build();
+        let group = StagedWelcome::new_from_welcome(self.provider(), &config, welcome, None)
+            .map_err(|_| GroupError::Refused)?
+            .into_group(self.provider())
+            .map_err(|_| GroupError::Refused)?;
         Ok(ClientGroup { group })
     }
 
