@@ -56,6 +56,38 @@ if mode == "cutover" and legacy != 1:
 PY
 }
 
+
+require_active_nginx_site() {
+  # Check the effective Nginx configuration, not just a file that happens to
+  # exist on disk; do not emit the full production config or credentials.
+  python3 - "$SITE" <<'PY'
+import pathlib, re, subprocess, sys
+target = pathlib.Path(sys.argv[1]).resolve(strict=True)
+proc = subprocess.run(["nginx", "-T"], capture_output=True, text=True)
+if proc.returncode:
+    sys.exit("nginx -T failed; refusing to assume the site is active.")
+configs = re.findall(r'(?m)^# configuration file ([^:\n]+):\s*$', proc.stdout)
+active = []
+for config in configs:
+    try:
+        if pathlib.Path(config).resolve(strict=True) == target:
+            active.append(config)
+    except OSError:
+        pass
+print(f"Active Nginx site included: {'YES' if active else 'NO'} (matches={len(active)})", flush=True)
+if not active:
+    sys.exit("The Nginx site edited during cutover is not loaded; find the active upstream.")
+PY
+}
+
+local_tls_status() {
+  # Bypass public DNS/CDN/proxies, preserving the API hostname and TLS SNI.
+  curl --noproxy '*' --resolve 'api.cfmeet.com:443:127.0.0.1' \
+    --silent --show-error --max-time 12 --output /dev/null \
+    --write-out '%{http_code}' --header 'Cache-Control: no-cache' \
+    'https://api.cfmeet.com/api/v2/meeting-spaces' || true
+}
+
 verify_backend() {
   log "Testing independent backend at $BACKEND"
   [[ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" == "true" ]] \
@@ -137,12 +169,15 @@ rollback_on_error() {
 }
 
 route_counts
+require_active_nginx_site
 case "$MODE" in
   audit)
     nginx -t
     verify_backend
-    public_code="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$PUBLIC/api/v2/meeting-spaces" || true)"
-    log "Public unauthenticated GET /api/v2/meeting-spaces returned HTTP $public_code"
+    local_code="$(local_tls_status)"
+    public_code="$(curl --noproxy '*' -sS --max-time 15 -o /dev/null -w '%{http_code}' -H 'Cache-Control: no-cache' "$PUBLIC/api/v2/meeting-spaces" || true)"
+    log "VPS-local TLS GET /api/v2/meeting-spaces returned HTTP $local_code (SNI api.cfmeet.com)"
+    log "External public DNS GET /api/v2/meeting-spaces returned HTTP $public_code"
     if [[ "$public_code" != "401" && "$public_code" != "403" ]]; then
       die "Public Meeting V2 is not healthy. Compare inventory above with active Nginx locations; do not cut over blindly."
     fi
