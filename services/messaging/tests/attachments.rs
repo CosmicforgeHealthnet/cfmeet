@@ -1809,6 +1809,22 @@ async fn managed_images_get_safe_thumbnails_and_e2ee_attachments_never_do() {
         expected_originals + expected_thumbnails,
         "generated object bytes must count against the environment storage quota"
     );
+    // An upload that would have fit if thumbnail bytes were ignored must now be
+    // refused at the same per-environment storage-budget boundary.
+    e.policy(&c, json!({ "storageBudgetBytes": committed_before_delete })).await;
+    let extra = real_png(1, 1, None);
+    let denied = e.intent(
+        &c,
+        &conv,
+        alice,
+        json!({
+            "kind": "IMAGE",
+            "size": extra.len(),
+            "sha256": sha256_hex(&extra),
+            "mediaType": "image/png"
+        }),
+    ).await;
+    assert_eq!(denied.reason(), "STORAGE_BUDGET", "{denied:?}");
     // Running the worker again must not double-count the same thumbnail.
     lifecycle::run_once(&e.h.state).await.unwrap();
     assert_eq!(e.usage(&c).await.0, committed_before_delete);
