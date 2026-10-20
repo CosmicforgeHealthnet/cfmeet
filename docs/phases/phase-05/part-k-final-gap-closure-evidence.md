@@ -233,15 +233,15 @@ matrix dispatched on the report commit is listed in the hand-off.
 |---|---|---|---|
 | Frontend | `8999ac6` | success | [39502019540](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39502019540) |
 | Web crypto artifact | `8999ac6` | success | [39502019577](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39502019577) |
-| Messaging | `8999ac6` | in progress at commit time | [39502019621](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39502019621) |
-| Unified Messaging integration journeys | `8999ac6` | in progress at commit time | [39502019568](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39502019568) |
-| Service boundaries | `8999ac6` | in progress at commit time | [39502019753](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39502019753) |
+| Messaging | `8999ac6` | success | [39502019621](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39502019621) |
+| Unified Messaging integration journeys | `8999ac6` | success | [39502019568](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39502019568) |
+| Service boundaries | `6c8f272` (the `8999ac6` run was superseded) | success | [39502886176](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39502886176) |
 | Unified Messaging integration journeys (incl. web client) | `bedbaa7` | success | [39500880409](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39500880409) |
 | Meeting service | `bedbaa7` | success | [39500880342](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39500880342) |
 | Dependency and image security | `bedbaa7` | success | [39500880515](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39500880515) |
 | Contracts and service auth | `bedbaa7` | success | [39500880488](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39500880488) |
 | Platform Access service | `bedbaa7` | success | [39500880377](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39500880377) |
-| Calling service | `bedbaa7` | in progress at commit time | [39500880479](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39500880479) |
+| Calling service | `bedbaa7` | success | [39500880479](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39500880479) |
 | Calling RTC certification | `bedbaa7` | success | [39500880376](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39500880376) |
 | Enterprise calling certification | `bedbaa7` | success | [39500880465](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39500880465) |
 | Communications end-to-end journeys | `bedbaa7` | success | [39500880443](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/39500880443) |
