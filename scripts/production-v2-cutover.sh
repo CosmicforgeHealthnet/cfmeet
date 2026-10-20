@@ -22,14 +22,37 @@ for cmd in curl python3 nginx systemctl docker; do
 done
 
 route_counts() {
-  python3 - "$SITE" <<'PY'
+  # Mixed upstreams can be intentional: Nginx can serve distinct locations from
+  # distinct services. The audit must show context, not block on a raw count.
+  python3 - "$SITE" "$MODE" <<'PY'
 import pathlib, re, sys
-t = pathlib.Path(sys.argv[1]).read_text()
-a = len(re.findall(r'proxy_pass\s+http://(?:127\.0\.0\.1|localhost):8080(?=[/;\s])', t))
-b = len(re.findall(r'proxy_pass\s+http://127\.0\.0\.1:18081(?=[/;\s])', t))
-print(f"Existing Nginx routes: legacy 8080={a}; new 18081={b}")
-if (not a and not b) or (a and b):
-    sys.exit("Unknown or mixed Nginx upstreams; requires manual review.")
+text = pathlib.Path(sys.argv[1]).read_text()
+mode = sys.argv[2]
+old = r'proxy_pass\s+http://(?:127\.0\.0\.1|localhost):8080(?=[/;\s])'
+new = r'proxy_pass\s+http://127\.0\.0\.1:18081(?=[/;\s])'
+legacy = len(re.findall(old, text))
+modern = len(re.findall(new, text))
+print(f"Existing Nginx proxy_pass directives: legacy_8080={legacy}, meeting_v2_18081={modern}", flush=True)
+print("Read-only site routing inventory (directive locations and anonymized upstream types):", flush=True)
+current_location = "[server/global context]"
+for line_number, raw_line in enumerate(text.splitlines(), 1):
+    line = raw_line.split("#", 1)[0]
+    location = re.search(r'^\s*location\s+(.+?)\s*\{', line)
+    if location:
+        # This is a diagnostic label, not a full Nginx precedence parser.
+        current_location = location.group(1).strip()[:100]
+        print(f"  line {line_number}: location {current_location}", flush=True)
+    proxy = re.search(r'\bproxy_pass\s+([^\s;]+)', line)
+    if proxy:
+        destination = proxy.group(1)
+        target = ("legacy:8080" if re.search(r'^http://(?:127\.0\.0\.1|localhost):8080(?:/|$)', destination)
+                  else "meeting-v2:18081" if re.search(r'^http://127\.0\.0\.1:18081(?:/|$)', destination)
+                  else "other/indirect (value redacted)")
+        print(f"  line {line_number}: proxy_pass -> {target}; most_recent_location={current_location}", flush=True)
+if not legacy and not modern:
+    sys.exit("Neither expected upstream appears; manual mapping is needed.")
+if mode == "cutover" and modern:
+    sys.exit("Cutover blocked: pre-existing Meeting V2 routes require targeted review; never bulk-rewrite mixed Nginx locations.")
 PY
 }
 
@@ -118,7 +141,12 @@ case "$MODE" in
   audit)
     nginx -t
     verify_backend
-    log "READ-ONLY audit complete. Live browser authentication and media flows remain to be verified."
+    public_code="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$PUBLIC/api/v2/meeting-spaces" || true)"
+    log "Public unauthenticated GET /api/v2/meeting-spaces returned HTTP $public_code"
+    if [[ "$public_code" != "401" && "$public_code" != "403" ]]; then
+      die "Public Meeting V2 is not healthy. Compare inventory above with active Nginx locations; do not cut over blindly."
+    fi
+    log "READ-ONLY V2 audit passed. Authenticated browser flows and real RTC are NOT certified."
     ;;
   cutover)
     verify_backend
