@@ -149,6 +149,51 @@ PY
   log "Backend V2 authentication boundary PASS ($status)."
 }
 
+report_live_swagger() {
+  # Read-only count of every document the PUBLIC Swagger selector actually lists.
+  # Each operation is an HTTP method on a path; these are DOCUMENTED operations
+  # and are NOT evidence that another service's protected ingress is deployed.
+  python3 - "$PUBLIC" <<'PY'
+import json, sys, urllib.request
+from urllib.parse import urlsplit
+base = sys.argv[1].rstrip("/")
+verbs = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
+def fetch(path):
+    if not path.startswith("/api-docs/") or not path.endswith(".json"):
+        raise ValueError("Refused non-document path in Swagger config")
+    req = urllib.request.Request(base + path, headers={"Cache-Control": "no-cache", "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=15) as response:
+        return json.load(response)
+cfg = fetch("/api-docs/swagger-config.json")
+docs = cfg.get("urls", [])
+if not isinstance(docs, list) or not docs:
+    sys.exit("Swagger selector has no documents")
+total = 0
+paths_total = 0
+errors = 0
+for item in docs:
+    name = str(item.get("name", "unnamed"))
+    path = item.get("url", "")
+    try:
+        doc = fetch(path)
+        paths = doc.get("paths", {})
+        if not isinstance(paths, dict):
+            raise ValueError("OpenAPI paths is not an object")
+        operations = sum(sum(1 for verb in definition if verb.lower() in verbs)
+                         for definition in paths.values() if isinstance(definition, dict))
+        total += operations
+        paths_total += len(paths)
+        print(f"LIVE_SWAGGER_DOC name={json.dumps(name)} paths={len(paths)} operations={operations} version={doc.get('info', {}).get('version', 'unknown')}", flush=True)
+    except Exception as exc:
+        errors += 1
+        print(f"LIVE_SWAGGER_DOC_ERROR name={json.dumps(name)} kind={type(exc).__name__}", flush=True)
+print(f"LIVE_SWAGGER_TOTAL documents={len(docs)} fetched={len(docs)-errors} paths_across_documents={paths_total} http_operations={total} fetch_errors={errors}", flush=True)
+if errors:
+    sys.exit("Some publicly listed Swagger documents could not be counted")
+PY
+}
+
+
 verify_public() {
   # nginx -t and systemctl reload nginx returning 0 does not prove that the
   # new workers already serve every connection. Observe both local TLS and
@@ -201,6 +246,7 @@ case "$MODE" in
   audit)
     nginx -t
     verify_backend
+    report_live_swagger
     local_code="$(local_tls_status)"
     public_code="$(curl --noproxy '*' -sS --max-time 15 -o /dev/null -w '%{http_code}' -H 'Cache-Control: no-cache' "$PUBLIC/api/v2/meeting-spaces" || true)"
     log "VPS-local TLS GET /api/v2/meeting-spaces returned HTTP $local_code (SNI api.cfmeet.com)"
