@@ -29,7 +29,20 @@ DECLARE
     old_bytes BIGINT := 0;
     new_bytes BIGINT := 0;
     adjustment BIGINT := 0;
+    target_environment UUID;
 BEGIN
+    -- OLD is undefined for INSERT and NEW is undefined for DELETE. Select the
+    -- owning environment in separate branches, never in one SQL CASE expression.
+    IF TG_OP = 'INSERT' THEN
+        target_environment := NEW.environment_id;
+    ELSIF TG_OP = 'DELETE' THEN
+        target_environment := OLD.environment_id;
+    ELSE
+        target_environment := NEW.environment_id;
+        IF OLD.environment_id IS DISTINCT FROM NEW.environment_id THEN
+            RAISE EXCEPTION 'messaging: a derivative cannot change environment' USING ERRCODE = 'P0001';
+        END IF;
+    END IF;
     IF TG_OP <> 'INSERT' THEN
         IF OLD.kind = 'THUMBNAIL' AND OLD.status = 'READY' THEN
             old_bytes := OLD.bytes;
@@ -41,18 +54,11 @@ BEGIN
         END IF;
     END IF;
 
-    IF TG_OP = 'UPDATE' AND OLD.environment_id IS DISTINCT FROM NEW.environment_id THEN
-        RAISE EXCEPTION 'messaging: a derivative cannot change environment' USING ERRCODE = 'P0001';
-    END IF;
-
     adjustment := new_bytes - old_bytes;
     IF adjustment <> 0 THEN
         UPDATE messaging_storage_usage
         SET committed_bytes = committed_bytes + adjustment, updated_at = now()
-        WHERE environment_id = CASE
-            WHEN TG_OP = 'DELETE' THEN OLD.environment_id
-            ELSE NEW.environment_id
-        END;
+        WHERE environment_id = target_environment;
         IF NOT FOUND THEN
             RAISE EXCEPTION 'messaging: derivative storage usage row missing' USING ERRCODE = 'P0001';
         END IF;
