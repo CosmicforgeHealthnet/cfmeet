@@ -46,6 +46,11 @@ jobs:
       - name: Messaging realtime transport tests
         run: node --experimental-strip-types --test tests/messaging-realtime.test.mjs
 
+      # A CF Meet browser session may mint a short-lived, device-bound token only
+      # through Meeting Service's verified-login bridge, never an internal credential.
+      - name: Messaging client session bridge tests
+        run: node --experimental-strip-types --test tests/messaging-session.test.mjs
+
       # The CSP builder (nonce scripts, Trusted Types, no plugins / framing) and a static
       # guard: no DOM XSS sink (innerHTML, dangerouslySetInnerHTML, eval, ...) in src/.
       - name: CSP builder and XSS-sink guard
