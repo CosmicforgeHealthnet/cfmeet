@@ -1795,11 +1795,11 @@ async fn managed_images_get_safe_thumbnails_and_e2ee_attachments_never_do() {
     // stored object and contributes nothing. The database trigger must enforce this
     // once, including when a worker retries or inspects the same derivative twice.
     let expected_originals = e.h.scalar(&format!(
-        "SELECT COALESCE(sum(committed_bytes), 0) FROM messaging_attachments WHERE environment_id = '{}'",
+        "SELECT COALESCE(sum(committed_bytes), 0)::bigint FROM messaging_attachments WHERE environment_id = '{}'",
         c.context.scope.environment_id
     )).await;
     let expected_thumbnails = e.h.scalar(&format!(
-        "SELECT COALESCE(sum(bytes), 0) FROM messaging_attachment_derivatives WHERE environment_id = '{}' AND kind = 'THUMBNAIL' AND status = 'READY'",
+        "SELECT COALESCE(sum(bytes), 0)::bigint FROM messaging_attachment_derivatives WHERE environment_id = '{}' AND kind = 'THUMBNAIL' AND status = 'READY'",
         c.context.scope.environment_id
     )).await;
     assert!(expected_thumbnails > 0, "two real thumbnails were rendered");
@@ -1811,19 +1811,22 @@ async fn managed_images_get_safe_thumbnails_and_e2ee_attachments_never_do() {
     );
     // An upload that would have fit if thumbnail bytes were ignored must now be
     // refused at the same per-environment storage-budget boundary.
-    e.policy(&c, json!({ "storageBudgetBytes": committed_before_delete })).await;
+    e.policy(&c, json!({ "storageBudgetBytes": committed_before_delete }))
+        .await;
     let extra = real_png(1, 1, None);
-    let denied = e.intent(
-        &c,
-        &conv,
-        alice,
-        json!({
-            "kind": "IMAGE",
-            "size": extra.len(),
-            "sha256": sha256_hex(&extra),
-            "mediaType": "image/png"
-        }),
-    ).await;
+    let denied = e
+        .intent(
+            &c,
+            &conv,
+            alice,
+            json!({
+                "kind": "IMAGE",
+                "size": extra.len(),
+                "sha256": sha256_hex(&extra),
+                "mediaType": "image/png"
+            }),
+        )
+        .await;
     assert_eq!(denied.reason(), "STORAGE_BUDGET", "{}", denied.text);
     // Running the worker again must not double-count the same thumbnail.
     lifecycle::run_once(&e.h.state).await.unwrap();
