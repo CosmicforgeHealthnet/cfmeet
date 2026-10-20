@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# CF Meet: gated cutover of public API to the already-running Meeting Service.
+# Modes: audit (read-only), cutover, rollback. No migrations or restarts.
+set -Eeuo pipefail
+
+MODE="audit"
+if (( $# > 0 )); then MODE="$1"; fi
+SITE="/etc/nginx/sites-available/api.cfmeet.com"
+BACKUP_DIR="/var/backups/cfmeet-v2-cutover"
+BACKUP_POINTER="$BACKUP_DIR/last-pre-cutover.conf"
+BACKEND="http://127.0.0.1:18081"
+PUBLIC="https://api.cfmeet.com"
+CONTAINER="cfmeet-production-backend"
+
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+log() { printf '[cfmeet-v2] %s\n' "$*"; }
+[[ "$MODE" =~ ^(audit|cutover|rollback)$ ]] || die "Usage: $0 audit|cutover|rollback"
+[[ "$(id -u)" -eq 0 ]] || die "Run on the VPS as root."
+[[ -f "$SITE" ]] || die "Nginx site missing: $SITE"
+for cmd in curl python3 nginx systemctl docker; do
+  command -v "$cmd" >/dev/null 2>&1 || die "Missing prerequisite: $cmd"
+done
+
+route_counts() {
+  python3 - "$SITE" <<'PY'
+import pathlib, re, sys
+t = pathlib.Path(sys.argv[1]).read_text()
+a = len(re.findall(r'proxy_pass\s+http://(?:127\.0\.0\.1|localhost):8080(?=[/;\s])', t))
+b = len(re.findall(r'proxy_pass\s+http://127\.0\.0\.1:18081(?=[/;\s])', t))
+print(f"Existing Nginx routes: legacy 8080={a}; new 18081={b}")
+if (not a and not b) or (a and b):
+    sys.exit("Unknown or mixed Nginx upstreams; requires manual review.")
+PY
+}
+
+verify_backend() {
+  log "Testing independent backend at $BACKEND"
+  [[ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" == "true" ]] \
+    || die "New backend container is not running."
+  curl -fsS --max-time 8 "$BACKEND/health" >/dev/null || die "New backend health check failed."
+  local tmp status
+  tmp="$(mktemp)"
+  if ! curl -fsS --max-time 12 "$BACKEND/api-docs/openapi.json" -o "$tmp"; then
+    rm -f "$tmp"
+    die "New backend OpenAPI unavailable."
+  fi
+  if ! python3 - "$tmp" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f: doc = json.load(f)
+paths = doc.get("paths", {})
+needed = [("get", "/api/v2/meeting-spaces"), ("post", "/api/v2/meeting-spaces"),
+          ("post", "/api/v2/instant-meetings")]
+for method, path in needed:
+    if method not in paths.get(path, {}):
+        sys.exit(f"Missing backend operation: {method.upper()} {path}")
+if not any(p.startswith("/api/v1/") for p in paths):
+    sys.exit("Legacy V1 routes missing.")
+def check(obj):
+    if isinstance(obj, dict):
+        if "$ref" in obj:
+            ref = obj["$ref"]
+            if not ref.startswith("#/"): raise ValueError(f"Unsupported schema ref: {ref}")
+            ptr = doc
+            for part in ref[2:].split("/"):
+                part = part.replace("~1", "/").replace("~0", "~")
+                try: ptr = ptr[int(part)] if isinstance(ptr, list) else ptr[part]
+                except (KeyError, IndexError, ValueError, TypeError):
+                    raise ValueError(f"Unresolved schema ref: {ref}")
+        for value in obj.values(): check(value)
+    elif isinstance(obj, list):
+        for value in obj: check(value)
+check(doc)
+print(f"OpenAPI verified: {len(paths)} paths, required V1/V2 operations, all local refs.")
+PY
+  then
+    rm -f "$tmp"
+    die "Backend OpenAPI contract failed."
+  fi
+  rm -f "$tmp"
+  status="$(curl -sS --max-time 8 -o /dev/null -w '%{http_code}' "$BACKEND/api/v2/meeting-spaces")"
+  [[ "$status" == "401" || "$status" == "403" ]] \
+    || die "Unauthenticated new V2 endpoint returned $status (expected 401/403)."
+  log "Backend V2 authentication boundary PASS ($status)."
+}
+
+verify_public() {
+  curl -fsS --max-time 15 "$PUBLIC/health" >/dev/null || die "Public API health failed."
+  local status
+  status="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$PUBLIC/api/v2/meeting-spaces")"
+  [[ "$status" == "401" || "$status" == "403" ]] \
+    || die "Public V2 endpoint returned $status, expected 401/403."
+  curl -fsS --max-time 15 "$PUBLIC/api-docs/openapi.json" -o /dev/null \
+    || die "Public OpenAPI unavailable."
+  log "Public health, V2 auth and OpenAPI PASS."
+}
+
+restore_config() {
+  local saved="$1"
+  [[ -f "$saved" ]] || die "No rollback file: $saved"
+  cp -a "$saved" "$SITE"
+  nginx -t || die "Restored config failed Nginx validation: intervene immediately."
+  systemctl reload nginx || die "Nginx failed to reload restored config."
+  log "Restored prior Nginx config."
+}
+
+rollback_on_error() {
+  local rc=$?
+  trap - EXIT
+  if (( rc != 0 )); then
+    log "Cutover failed; restoring previous config from $BACKUP"
+    restore_config "$BACKUP"
+  fi
+  exit "$rc"
+}
+
+route_counts
+case "$MODE" in
+  audit)
+    nginx -t
+    verify_backend
+    log "READ-ONLY audit complete. Live browser authentication and media flows remain to be verified."
+    ;;
+  cutover)
+    verify_backend
+    [[ ! -e "$BACKUP_POINTER" ]] || die "Previous cutover backup exists; review before repeating."
+    mkdir -p "$BACKUP_DIR"
+    chmod 700 "$BACKUP_DIR"
+    BACKUP="$BACKUP_DIR/api.cfmeet.com.$(date -u +%Y%m%dT%H%M%SZ).conf"
+    cp -a "$SITE" "$BACKUP"
+    trap rollback_on_error EXIT
+    python3 - "$SITE" <<'PY'
+import pathlib, re, sys
+p = pathlib.Path(sys.argv[1])
+current = p.read_text()
+old = r'(proxy_pass\s+)http://(?:localhost|127\.0\.0\.1):8080(?=[/;\s])'
+modified, count = re.subn(old, r'\1http://127.0.0.1:18081', current)
+if count < 1 or re.search(r'proxy_pass\s+http://127\.0\.0\.1:18081', current):
+    sys.exit("No unambiguous legacy-only routes to switch.")
+p.write_text(modified)
+print(f"Updated {count} Nginx upstream directives.")
+PY
+    nginx -t
+    systemctl reload nginx
+    verify_public
+    ln -s "$BACKUP" "$BACKUP_POINTER"
+    trap - EXIT
+    log "CUTOVER PASS. Backup: $BACKUP"
+    log "REQUIRED NEXT: authenticated browser E2E (login, meeting create, schedule, join, LiveKit) and monitoring."
+    ;;
+  rollback)
+    [[ -f "$BACKUP_POINTER" ]] || die "No pre-cutover backup."
+    restore_config "$BACKUP_POINTER"
+    rm -f "$BACKUP_POINTER"
+    curl -fsS --max-time 12 "$PUBLIC/health" >/dev/null || die "Old public health failed."
+    log "ROLLBACK PASS. Verify legacy meeting functionality."
+    ;;
+esac
