@@ -125,7 +125,18 @@ def check(obj):
     elif isinstance(obj, list):
         for value in obj: check(value)
 check(doc)
+# Count methods, not only unique URLs. Each URL can have multiple HTTP methods.
+methods = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
+operations = [(path, method) for path, definition in paths.items()
+              for method in definition if method.lower() in methods]
+v1 = [(path, method) for path, method in operations if path.startswith("/api/v1/")]
+v2 = [(path, method) for path, method in operations if path.startswith("/api/v2/")]
+other = [(path, method) for path, method in operations
+         if not path.startswith("/api/v1/") and not path.startswith("/api/v2/")]
 print(f"OpenAPI verified: {len(paths)} paths, required V1/V2 operations, all local refs.")
+print(f"PRODUCTION_API_TOTAL unique_paths={len(paths)} http_operations={len(operations)} "
+      f"v1_operations={len(v1)} v2_operations={len(v2)} "
+      f"other_operations={len(other)} version={doc.get('info', {}).get('version', 'unknown')}", flush=True)
 PY
   then
     rm -f "$tmp"
