@@ -1,0 +1,24 @@
+[package]
+name = "cf-messaging-crypto-web-harness"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.91"
+publish = false
+description = "Browser runtime harness of the CF Meet Messaging client crypto core: thin wasm-bindgen bindings over cf-messaging-crypto (feature `web`), driven in Chromium by tests/browser-runtime.test.mjs. Test infrastructure, not a shipped SDK."
+
+# Stand-alone workspace (like the crypto core it wraps).
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+cf-messaging-crypto = { path = "..", features = ["web"] }
+# Pinned to the version in the crypto core's lockfile (and the wasm-bindgen CLI CI installs).
+wasm-bindgen = "=0.2.129"
+uuid = "1"
+
+[profile.release]
+opt-level = "s"
+debug = false

@@ -125,6 +125,69 @@ jobs:
           cargo check --locked --features client --target aarch64-apple-ios
           cargo check --locked --features web --target wasm32-unknown-unknown
 
+  # The REAL client crypto core (Rust -> wasm32, wasm-bindgen) executed in Chromium: one
+  # device per Web Worker, the page relaying bytes as the untrusted Delivery Service, under
+  # a strict CSP with Trusted Types. Registration (checked by Messaging's own validator),
+  # group / Welcome, encrypt / decrypt, tamper / replay / KeyPackage-substitution refusal,
+  # epoch change, offline delivery, attachments, history transfer, device removal, no
+  # browser persistence. Browser-runtime evidence only: not physical Android / iOS devices
+  # and not the shipped web app.
+  crypto-browser:
+    name: client crypto runtime in Chromium (wasm32)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/messaging-crypto/web-harness
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/messaging-crypto/web-harness -> target
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/messaging-crypto/web-harness/package-lock.json
+
+      - name: fmt / clippy (wasm32)
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo clippy --locked --release --target wasm32-unknown-unknown -- -D warnings
+
+      - name: dependency licence review
+        working-directory: .
+        run: python3 scripts/messaging/check_licenses.py packages/messaging-crypto/web-harness
+
+      # The CLI must match the wasm-bindgen crate version in Cargo.lock.
+      - name: install wasm-bindgen-cli (locked version)
+        run: |
+          set -euo pipefail
+          v=$(awk '/^name = "wasm-bindgen"$/{getline; print}' Cargo.lock | cut -d'"' -f2)
+          cargo install wasm-bindgen-cli --version "$v" --locked
+
+      - name: build the crypto core for the browser
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --target wasm32-unknown-unknown
+          wasm-bindgen --target web --no-typescript --out-dir www/pkg \
+            target/wasm32-unknown-unknown/release/cf_messaging_crypto_web_harness.wasm
+
+      - name: install Playwright Chromium (pinned in package-lock)
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: client crypto journey in Chromium
+        run: npm test
+
   lint:
     name: service fmt / check / clippy / boundaries
     runs-on: ubuntu-latest
