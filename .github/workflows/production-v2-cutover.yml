@@ -3,6 +3,11 @@ name: CF Meet production API cutover
 # No automatic production cutover. The VPS already has a staged Meeting Service.
 # Audit / cutover / rollback run only when manually selected on the default branch.
 on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/production-v2-cutover.sh"
+      - ".github/workflows/production-v2-cutover.yml"
   pull_request:
     paths:
       - "scripts/production-v2-cutover.sh"
@@ -42,7 +47,7 @@ jobs:
 
   execute:
     name: VPS production API operation
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     needs: validate
     runs-on: ubuntu-latest
     environment: production
@@ -67,7 +72,7 @@ jobs:
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
-          OPERATION: ${{ inputs.operation }}
+          OPERATION: ${{ github.event_name == 'push' && 'audit' || inputs.operation }}
         run: |
           set -euo pipefail
           case "$OPERATION" in audit|cutover|rollback) ;; *) exit 1 ;; esac
