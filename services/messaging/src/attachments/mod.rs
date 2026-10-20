@@ -30,6 +30,7 @@ pub mod content;
 pub mod derivatives;
 pub mod http;
 pub mod lifecycle;
+pub mod media_inspect;
 pub mod processing;
 pub mod quota;
 pub mod scanner;

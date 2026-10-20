@@ -6077,12 +6077,14 @@
         "size",
         "sha256",
         "errorCode",
+        "metadata",
         "completedAt"
       ],
       "properties": {
         "kind": {
           "enum": [
-            "THUMBNAIL"
+            "THUMBNAIL",
+            "INSPECTION"
           ]
         },
         "status": {
@@ -6153,9 +6155,20 @@
             "null"
           ],
           "format": "date-time"
+        },
+        "metadata": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/MediaInspection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "INSPECTION only: the measured facts (null for THUMBNAIL and until READY)."
         }
       },
-      "description": "A server-made derivative of a MANAGED image (a re-encoded PNG thumbnail without the original's metadata). Never produced for PRIVATE_E2EE attachments, whose thumbnails the sending client encrypts itself."
+      "description": "A server-made derivative of a MANAGED attachment: a re-encoded PNG thumbnail of an image without the original's metadata (THUMBNAIL), or the measured container, duration and dimensions of an image, voice note or video (INSPECTION, no object). Never produced for PRIVATE_E2EE attachments, whose thumbnails the sending client encrypts itself."
     },
     "ThumbnailGrant": {
       "type": "object",
@@ -6223,6 +6236,80 @@
         }
       },
       "description": "A short-lived read of a MANAGED image's thumbnail, authorized exactly like a download grant of the original."
+    },
+    "MediaInspection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "container",
+        "durationMs",
+        "width",
+        "height",
+        "hasVideo",
+        "hasAudio",
+        "declaredDurationMs",
+        "durationMatchesDeclared"
+      ],
+      "properties": {
+        "container": {
+          "enum": [
+            "MP4",
+            "MATROSKA",
+            "WEBM",
+            "OGG_OPUS",
+            "OGG_VORBIS",
+            "WAV",
+            "MP3",
+            "AAC_ADTS",
+            "AMR",
+            "PNG",
+            "JPEG"
+          ]
+        },
+        "durationMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Measured from the bytes (null: the container records none)."
+        },
+        "width": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "height": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "hasVideo": {
+          "type": "boolean"
+        },
+        "hasAudio": {
+          "type": "boolean"
+        },
+        "declaredDurationMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "What the uploader declared (Attachment.media.durationMs)."
+        },
+        "durationMatchesDeclared": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Declared vs measured within max(1 s, 5 %); null when either is absent."
+        }
+      },
+      "description": "What the server measured in a READY MANAGED attachment's bytes (never inferred for PRIVATE_E2EE ciphertext)."
     }
   }
 }

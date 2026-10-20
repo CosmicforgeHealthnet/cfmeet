@@ -1633,7 +1633,9 @@ async fn managed_images_get_safe_thumbnails_and_e2ee_attachments_never_do() {
     let report = lifecycle::run_once(&e.h.state).await.unwrap();
     assert_eq!(
         (report.derivatives_ready, report.derivatives_failed),
-        (2, 2),
+        // Thumbnails: 2 made, 2 refused. Inspections: the 3 decodable headers (the bomb's
+        // header is read, never its pixels), the corrupt file refused.
+        (5, 3),
         "{report:?}"
     );
     let e2ee = e2ee_id.as_str().unwrap();
@@ -1668,7 +1670,26 @@ async fn managed_images_get_safe_thumbnails_and_e2ee_attachments_never_do() {
         "messaging/common/v1.schema.json#/$defs/Attachment",
         &meta.json,
     );
-    let d = &meta.json["derivatives"][0];
+    let of = |kind: &str| {
+        meta.json["derivatives"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["kind"] == kind)
+            .cloned()
+            .unwrap_or_else(|| panic!("no {kind}: {}", meta.text))
+    };
+    let inspected = of("INSPECTION");
+    assert_eq!(inspected["status"], "READY", "{inspected}");
+    assert_eq!(inspected["metadata"]["container"], "PNG");
+    assert_eq!(
+        (
+            inspected["metadata"]["width"].as_i64(),
+            inspected["metadata"]["height"].as_i64()
+        ),
+        (Some(1200), Some(800))
+    );
+    let d = &of("THUMBNAIL");
     assert_eq!(
         (d["kind"].as_str(), d["status"].as_str()),
         (Some("THUMBNAIL"), Some("READY")),
@@ -1715,12 +1736,32 @@ async fn managed_images_get_safe_thumbnails_and_e2ee_attachments_never_do() {
     let failed: Vec<String> = ids[2..].iter().map(|i| format!("'{i}'")).collect();
     assert_eq!(
         e.h.scalar(&format!(
-            "SELECT count(*) FROM messaging_attachment_derivatives WHERE attachment_id IN ({}) AND status = 'FAILED' AND object_key IS NULL \
-               AND error_code IN ('TOO_MANY_PIXELS', 'UNDECODABLE')",
+            "SELECT count(*) FROM messaging_attachment_derivatives WHERE attachment_id IN ({}) AND kind = 'THUMBNAIL' AND status = 'FAILED' \
+               AND object_key IS NULL AND error_code IN ('TOO_MANY_PIXELS', 'UNDECODABLE')",
             failed.join(",")
         ))
         .await,
         2
+    );
+    // Inspection reads the bomb's header (9000 x 9000, never its pixels) and refuses the
+    // corrupt file.
+    assert_eq!(
+        e.h.scalar(&format!(
+            "SELECT count(*) FROM messaging_attachment_derivatives WHERE attachment_id = '{}' AND kind = 'INSPECTION' AND status = 'READY' \
+               AND (metadata->>'width')::int = 9000 AND (metadata->>'height')::int = 9000",
+            ids[2]
+        ))
+        .await,
+        1
+    );
+    assert_eq!(
+        e.h.scalar(&format!(
+            "SELECT count(*) FROM messaging_attachment_derivatives WHERE attachment_id = '{}' AND kind = 'INSPECTION' AND status = 'FAILED' \
+               AND metadata IS NULL AND error_code = 'UNDECODABLE'",
+            ids[3]
+        ))
+        .await,
+        1
     );
     let r =
         e.h.post(
@@ -1777,4 +1818,163 @@ async fn managed_images_get_safe_thumbnails_and_e2ee_attachments_never_do() {
         "the thumbnail object is gone"
     );
     println!("EVIDENCE derivatives thumbnails=2 refused=2 e2ee_processed=0");
+}
+
+fn test_wav(ms_len: u32) -> Vec<u8> {
+    let data = vec![0u8; (32 * ms_len) as usize];
+    let mut v = b"RIFF".to_vec();
+    v.extend_from_slice(&((36 + data.len()) as u32).to_le_bytes());
+    v.extend_from_slice(b"WAVEfmt ");
+    v.extend_from_slice(&16u32.to_le_bytes());
+    v.extend_from_slice(&[1, 0, 1, 0]);
+    v.extend_from_slice(&16_000u32.to_le_bytes());
+    v.extend_from_slice(&32_000u32.to_le_bytes());
+    v.extend_from_slice(&[2, 0, 16, 0]);
+    v.extend_from_slice(b"data");
+    v.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    v.extend_from_slice(&data);
+    v
+}
+
+fn test_mp4(seconds: u32) -> Vec<u8> {
+    let bx = |kind: &[u8; 4], body: &[u8]| {
+        let mut v = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+        v.extend_from_slice(kind);
+        v.extend_from_slice(body);
+        v
+    };
+    let mut mvhd = vec![0u8; 100];
+    mvhd[12..16].copy_from_slice(&600u32.to_be_bytes());
+    mvhd[16..20].copy_from_slice(&(600 * seconds).to_be_bytes());
+    let mut tkhd = vec![0u8; 84];
+    tkhd[76..80].copy_from_slice(&(1280u32 << 16).to_be_bytes());
+    tkhd[80..84].copy_from_slice(&(720u32 << 16).to_be_bytes());
+    let mut hdlr = vec![0u8; 24];
+    hdlr[8..12].copy_from_slice(b"vide");
+    let trak = bx(
+        b"trak",
+        &[bx(b"tkhd", &tkhd), bx(b"mdia", &bx(b"hdlr", &hdlr))].concat(),
+    );
+    [
+        bx(b"ftyp", b"isom\0\0\x02\0isomiso2mp41"),
+        bx(b"moov", &[bx(b"mvhd", &mvhd), trak].concat()),
+        bx(b"mdat", &[9u8; 4096]),
+    ]
+    .concat()
+}
+
+#[tokio::test]
+async fn managed_voice_notes_and_videos_are_measured_not_trusted() {
+    let Some(e) = env().await else { return };
+    let c = e.h.customer(ALL_SCOPES);
+    e.policy(&c, json!({})).await;
+    let (conv, people) = e.managed_group(&c, 2).await;
+    let alice = people[0];
+    let mut ids = Vec::new();
+    for (kind, media, name, bytes, declared) in [
+        (
+            "VOICE_NOTE",
+            "audio/wav",
+            "memo.wav",
+            test_wav(4_000),
+            4_100,
+        ),
+        ("VIDEO", "video/mp4", "clip.mp4", test_mp4(12), 60_000),
+    ] {
+        let r = e
+            .intent(
+                &c,
+                &conv,
+                alice,
+                json!({ "kind": kind, "size": bytes.len(), "sha256": sha256_hex(&bytes),
+                "mediaType": media, "fileName": name, "durationMs": declared }),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        assert_eq!(
+            r.json["media"]["durationVerified"], false,
+            "the declaration alone is never 'verified'"
+        );
+        e.store
+            .upload_signed(&write_of(&r.json["upload"]), e.h.now(), bytes.clone())
+            .unwrap();
+        let f = e.finalize(&c, &conv, alice, &r.json["attachmentId"]).await;
+        assert_eq!(f.json["state"], "READY", "{}", f.text);
+        ids.push(r.json["attachmentId"].as_str().unwrap().to_string());
+    }
+    let report = lifecycle::run_once(&e.h.state).await.unwrap();
+    assert_eq!(
+        (report.derivatives_ready, report.derivatives_failed),
+        (2, 0),
+        "{report:?}"
+    );
+    let id = cid(&conv);
+    let mut found = Vec::new();
+    for aid in &ids {
+        let m =
+            e.h.get(
+                &c,
+                Some(alice),
+                &format!("/v1/conversations/{id}/attachments/{aid}"),
+            )
+            .await;
+        assert_eq!(m.status, StatusCode::OK, "{}", m.text);
+        conforms("messaging/common/v1.schema.json#/$defs/Attachment", &m.json);
+        found.push(
+            m.json["derivatives"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|d| d["kind"] == "INSPECTION")
+                .cloned()
+                .unwrap(),
+        );
+    }
+    let voice = found[0].clone();
+    assert_eq!(voice["status"], "READY", "{voice}");
+    assert_eq!(voice["metadata"]["container"], "WAV");
+    assert_eq!(voice["metadata"]["durationMs"], 4_000);
+    assert_eq!(
+        voice["metadata"]["durationMatchesDeclared"], true,
+        "4.1 s declared, 4.0 s measured"
+    );
+    let video = found[1].clone();
+    assert_eq!(video["metadata"]["container"], "MP4");
+    assert_eq!(video["metadata"]["durationMs"], 12_000);
+    assert_eq!(
+        (
+            video["metadata"]["width"].as_i64(),
+            video["metadata"]["height"].as_i64()
+        ),
+        (Some(1280), Some(720))
+    );
+    assert_eq!(video["metadata"]["declaredDurationMs"], 60_000);
+    assert_eq!(
+        video["metadata"]["durationMatchesDeclared"], false,
+        "a false declaration is exposed, not believed"
+    );
+    // Inspection holds no object; deleting the attachment clears its metadata.
+    let row = messaging::attachments::load(
+        &e.h.state.db,
+        Uuid::parse_str(&id).unwrap(),
+        Uuid::parse_str(&ids[1]).unwrap(),
+        false,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        lifecycle::delete_attachment(&e.h.state.db, &row, "TEST_DELETE", e.h.now())
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        e.h.scalar(&format!(
+            "SELECT count(*) FROM messaging_attachment_derivatives WHERE attachment_id = '{}' AND (metadata IS NOT NULL OR status <> 'DELETED')",
+            ids[1]
+        ))
+        .await,
+        0
+    );
+    println!("EVIDENCE inspection wav_ms=4000 mp4_ms=12000 declared_mismatch_flagged=1");
 }

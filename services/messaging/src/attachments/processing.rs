@@ -9,9 +9,11 @@
 //!   thumbnail, a waveform) are created by the sending client, encrypted like any
 //!   attachment and referenced from the MLS-protected descriptor ([`E2eeDerivative`]
 //!   documents that contract).
-//! * Registered processors: [`Derivative::Thumbnail`] for MANAGED PNG / JPEG images
-//!   ([`super::derivatives`], `MESSAGING_MEDIA_PROCESSING`). No transcoding, waveform,
-//!   preview or text-extraction processor exists: nothing claims those derivatives.
+//! * Registered processors: [`Derivative::Thumbnail`] for MANAGED PNG / JPEG images and
+//!   [`Derivative::Inspection`] (measured duration / dimensions) for MANAGED images, voice
+//!   notes and videos ([`super::derivatives`], `MESSAGING_MEDIA_PROCESSING`). No
+//!   transcoding, waveform, preview or text-extraction processor exists: nothing claims
+//!   those derivatives.
 
 use uuid::Uuid;
 
@@ -21,6 +23,8 @@ use crate::domain::SecurityProfile;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Derivative {
     Thumbnail,
+    /// Measured container / duration / dimensions (metadata only, no object).
+    Inspection,
     Transcode,
     Waveform,
     Preview,
@@ -73,5 +77,5 @@ pub fn eligible(
 
 /// Processors registered in this deployment.
 pub fn registered() -> &'static [Derivative] {
-    &[Derivative::Thumbnail]
+    &[Derivative::Thumbnail, Derivative::Inspection]
 }

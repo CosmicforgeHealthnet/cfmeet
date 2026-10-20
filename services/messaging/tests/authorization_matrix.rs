@@ -440,7 +440,8 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
     let report = messaging::attachments::lifecycle::run_once(&h.state)
         .await
         .unwrap();
-    assert_eq!(report.derivatives_ready, 1, "{report:?}");
+    // The finalized image's thumbnail and inspection.
+    assert_eq!(report.derivatives_ready, 2, "{report:?}");
 
     // SMS bridge (TELEPHONE_ENDPOINT party) and a bridged message.
     let party = h.principal_of_kind(&a, "TELEPHONE_ENDPOINT");

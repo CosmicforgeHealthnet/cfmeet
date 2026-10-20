@@ -1,5 +1,7 @@
 //! Server-side derivatives of MANAGED attachments (§80): a THUMBNAIL of every READY
-//! MANAGED PNG / JPEG image.
+//! MANAGED PNG / JPEG image, and an INSPECTION (measured container, duration and
+//! dimensions, [`super::media_inspect`]) of every READY MANAGED image, voice note and
+//! video of an inspectable type.
 //!
 //! * Only [`super::processing::eligible`] attachments (MANAGED and READY — scanned where
 //!   policy requires it) are processed; the database refuses a derivative of anything
@@ -123,6 +125,7 @@ struct Due {
     id: Uuid,
     attachment_id: Uuid,
     environment_id: Uuid,
+    kind: String,
     attempts: i32,
 }
 
@@ -150,13 +153,30 @@ pub async fn process_due(state: &AppState, batch: i64) -> Result<DerivativeRepor
         ],
     )
     .await?;
+    report.enqueued += db::exec(
+        &state.db,
+        "INSERT INTO messaging_attachment_derivatives (id, attachment_id, environment_id, security_profile, kind, status, \
+           next_attempt_at, created_at) \
+         SELECT gen_random_uuid(), a.id, a.environment_id, 'MANAGED', 'INSPECTION', 'PENDING', $1, $1 \
+           FROM messaging_attachments a \
+          WHERE a.state = 'READY' AND a.security_profile = 'MANAGED' AND a.kind IN ('IMAGE', 'VOICE_NOTE', 'VIDEO') \
+            AND a.media_type = ANY($2) \
+            AND NOT EXISTS (SELECT 1 FROM messaging_attachment_derivatives d WHERE d.attachment_id = a.id AND d.kind = 'INSPECTION') \
+          LIMIT $3 ON CONFLICT DO NOTHING",
+        vec![
+            now.into(),
+            INSPECTABLE.iter().map(|s| s.to_string()).collect::<Vec<_>>().into(),
+            batch.into(),
+        ],
+    )
+    .await?;
     let token = Uuid::new_v4();
     let due: Vec<Due> = db::all(
         &state.db,
         "WITH due AS (SELECT id FROM messaging_attachment_derivatives WHERE status = 'PENDING' AND next_attempt_at <= $1 \
              AND (lease_expires_at IS NULL OR lease_expires_at <= $1) ORDER BY next_attempt_at LIMIT $2 FOR UPDATE SKIP LOCKED) \
          UPDATE messaging_attachment_derivatives d SET lease_token = $3, lease_expires_at = $4 FROM due WHERE d.id = due.id \
-         RETURNING d.id, d.attachment_id, d.environment_id, d.attempts",
+         RETURNING d.id, d.attachment_id, d.environment_id, d.kind, d.attempts",
         vec![
             now.into(),
             batch.into(),
@@ -166,6 +186,35 @@ pub async fn process_due(state: &AppState, batch: i64) -> Result<DerivativeRepor
     )
     .await?;
     for d in due {
+        if d.kind == "INSPECTION" {
+            match inspect_one(state, d.attachment_id).await {
+                Ok(metadata) => {
+                    let updated = db::exec(
+                        &state.db,
+                        "UPDATE messaging_attachment_derivatives SET status = 'READY', metadata = $3, error_code = NULL, \
+                           attempts = attempts + 1, lease_token = NULL, lease_expires_at = NULL, completed_at = $4 \
+                         WHERE id = $1 AND lease_token = $2 AND status = 'PENDING'",
+                        vec![d.id.into(), token.into(), metadata.into(), state.now().into()],
+                    )
+                    .await?;
+                    if updated == 1 {
+                        report.ready += 1;
+                        crate::metrics::inc(
+                            "messaging_attachment_derivatives_total",
+                            &[("outcome", "ready")],
+                        );
+                    }
+                }
+                Err(RenderError::Transient(code)) => {
+                    retry_or_fail(state, &d, token, code, code, &mut report).await?;
+                }
+                Err(RenderError::Final(code)) => {
+                    fail(state, &d, token, code).await?;
+                    report.failed += 1;
+                }
+            }
+            continue;
+        }
         match render_one(state, d.attachment_id).await {
             Ok(t) => {
                 let key = thumbnail_key(d.environment_id, d.attachment_id);
@@ -271,6 +320,84 @@ async fn render_one(
     }
 }
 
+/// Media types inspected server-side (MANAGED only).
+pub const INSPECTABLE: &[&str] = &[
+    "image/png",
+    "image/jpeg",
+    "video/mp4",
+    "video/quicktime",
+    "video/webm",
+    "audio/mp4",
+    "audio/webm",
+    "audio/ogg",
+    "audio/wav",
+    "audio/mpeg",
+    "audio/aac",
+    "audio/amr",
+];
+/// Largest object read for inspection (larger: `SOURCE_TOO_LARGE`, never a guess).
+pub const MAX_INSPECT_BYTES: usize = 64 * 1024 * 1024;
+
+/// Reads a READY MANAGED attachment and measures it ([`super::media_inspect`]). The
+/// result compares the measured duration with the client's declaration.
+async fn inspect_one(
+    state: &AppState,
+    attachment_id: Uuid,
+) -> std::result::Result<Value, RenderError> {
+    let row: Option<AttachmentRow> = db::one(
+        &state.db,
+        &format!("SELECT {ATTACHMENT_COLUMNS} FROM messaging_attachments WHERE id = $1"),
+        vec![attachment_id.into()],
+    )
+    .await
+    .map_err(|_| RenderError::Transient("DATABASE_UNAVAILABLE"))?;
+    let row = row.ok_or(RenderError::Final("ATTACHMENT_GONE"))?;
+    let req = processing::eligible(&row, processing::Derivative::Inspection)
+        .map_err(|_| RenderError::Final("NOT_ELIGIBLE"))?;
+    let bytes = match state.storage.get(&req.object_key, MAX_INSPECT_BYTES).await {
+        Ok(Some(b)) => b,
+        Ok(None) => return Err(RenderError::Final("OBJECT_MISSING")),
+        Err(cf_object_storage::StorageError::Integrity) => {
+            return Err(RenderError::Final("SOURCE_TOO_LARGE"))
+        }
+        Err(_) => return Err(RenderError::Transient("STORAGE_UNAVAILABLE")),
+    };
+    if hex::encode(Sha256::digest(&bytes)) != row.declared_sha256.to_ascii_lowercase() {
+        return Err(RenderError::Final("INTEGRITY_MISMATCH"));
+    }
+    let media_type = req.media_type.clone();
+    let job =
+        tokio::task::spawn_blocking(move || super::media_inspect::inspect(&bytes, &media_type));
+    let facts = match tokio::time::timeout(DECODE_TIMEOUT, job).await {
+        Ok(Ok(Ok(f))) => f,
+        Ok(Ok(Err(code))) => return Err(RenderError::Final(code)),
+        Ok(Err(_)) => return Err(RenderError::Final("DECODER_PANICKED")),
+        Err(_) => return Err(RenderError::Final("DECODE_TIMEOUT")),
+    };
+    let declared = row
+        .media_metadata
+        .as_ref()
+        .and_then(|m| m.get("durationMs"))
+        .and_then(Value::as_i64);
+    let matches = match (declared, facts.duration_ms) {
+        (Some(d), Some(m)) => Some(super::media_inspect::duration_matches(d, m)),
+        _ => None,
+    };
+    if matches == Some(false) {
+        crate::metrics::inc("messaging_attachment_duration_mismatch_total", &[]);
+    }
+    Ok(json!({
+        "container": facts.container,
+        "durationMs": facts.duration_ms,
+        "width": facts.width,
+        "height": facts.height,
+        "hasVideo": facts.has_video,
+        "hasAudio": facts.has_audio,
+        "declaredDurationMs": declared,
+        "durationMatchesDeclared": matches,
+    }))
+}
+
 async fn fail(state: &AppState, d: &Due, token: Uuid, code: &str) -> Result<()> {
     db::exec(
         &state.db,
@@ -328,13 +455,14 @@ struct DerivativeRow {
     bytes: Option<i64>,
     sha256: Option<String>,
     error_code: Option<String>,
+    metadata: Option<Value>,
     completed_at: Option<DateTime<Utc>>,
 }
 
 async fn rows(state: &AppState, attachment_id: Uuid) -> Result<Vec<DerivativeRow>> {
     Ok(db::all(
         &state.db,
-        "SELECT kind, status, object_key, media_type, width, height, source_width, source_height, bytes, sha256, error_code, completed_at \
+        "SELECT kind, status, object_key, media_type, width, height, source_width, source_height, bytes, sha256, error_code, metadata, completed_at \
            FROM messaging_attachment_derivatives WHERE attachment_id = $1 AND status <> 'DELETED' ORDER BY kind",
         vec![attachment_id.into()],
     )
@@ -359,6 +487,7 @@ pub async fn views(state: &AppState, attachment_id: Uuid) -> Result<Value> {
                     "size": d.bytes,
                     "sha256": d.sha256,
                     "errorCode": d.error_code,
+                    "metadata": d.metadata,
                     "completedAt": d.completed_at.map(rfc3339),
                 })
             })
@@ -428,18 +557,22 @@ pub async fn delete_for_attachment<C: sea_orm::ConnectionTrait>(
     #[derive(FromQueryResult)]
     struct Old {
         previous: String,
+        kind: String,
     }
     let ended: Vec<Old> = db::all(
         db,
         "WITH old AS (SELECT id, status FROM messaging_attachment_derivatives WHERE attachment_id = $1 AND status <> 'DELETED' FOR UPDATE) \
-         UPDATE messaging_attachment_derivatives d SET status = 'DELETED', object_key = NULL, completed_at = $2 \
-           FROM old WHERE d.id = old.id RETURNING old.status AS previous",
+         UPDATE messaging_attachment_derivatives d SET status = 'DELETED', object_key = NULL, metadata = NULL, completed_at = $2 \
+           FROM old WHERE d.id = old.id RETURNING old.status AS previous, d.kind",
         vec![row.id.into(), now.into()],
     )
     .await?;
     // Only a produced thumbnail has an object to delete (an in-flight render notices the
     // deletion and removes its own output: `process_due`).
-    if ended.iter().any(|o| o.previous == "READY") {
+    if ended
+        .iter()
+        .any(|o| o.previous == "READY" && o.kind == "THUMBNAIL")
+    {
         super::lifecycle::enqueue_deletion(
             db,
             &thumbnail_key(row.environment_id, row.id),

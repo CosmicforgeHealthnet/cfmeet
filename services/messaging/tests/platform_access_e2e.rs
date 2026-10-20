@@ -1320,8 +1320,11 @@ async fn external_developer_journey_with_attachments_search_and_webhooks() {
                 None,
             )
             .await;
-        if meta["derivatives"][0]["status"] == "READY" {
-            thumb = Some(meta["derivatives"][0].clone());
+        let t = meta["derivatives"]
+            .as_array()
+            .and_then(|a| a.iter().find(|d| d["kind"] == "THUMBNAIL").cloned());
+        if t.as_ref().is_some_and(|t| t["status"] == "READY") {
+            thumb = t;
             break;
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
