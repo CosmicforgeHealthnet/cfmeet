@@ -1,0 +1,40 @@
+# Security scans, 2026-10-20 (commit 8999ac6 tree)
+
+## RustSec (cargo-audit 0.22.2, advisory DB fetched 2026-10-20; ignores as in .github/workflows/dependency-security.yml)
+packages/contracts/validator: 0 vulnerabilities
+packages/messaging-crypto: 0 vulnerabilities
+packages/messaging-crypto/wasm: 0 vulnerabilities
+packages/messaging-crypto/web-harness: 0 vulnerabilities
+packages/object-storage: 0 vulnerabilities
+packages/service-auth: 0 vulnerabilities
+packages/webhooks: 0 vulnerabilities
+services/calling: 0 vulnerabilities
+services/meeting-service: 0 vulnerabilities
+services/messaging: 0 vulnerabilities
+services/numbering: 0 vulnerabilities
+services/platform-access: 0 vulnerabilities
+services/privacy-relay: 0 vulnerabilities
+services/sms-gateway: 0 vulnerabilities
+services/telephony: 0 vulnerabilities
+
+RUSTSEC-2026-0381 guard: webpki-roots: every 0.26 copy is the reviewed shim over a patched webpki-roots 1
+
+## npm audit
+apps/web: all: critical=0 high=5 moderate=0 low=0; production: total=0
+apps/mobile: all: critical=0 high=23 moderate=15 low=0; production: total=38
+packages/messaging-crypto/web-harness: all: critical=0 high=0 moderate=0 low=0; production: total=0
+scripts/contracts/swagger-render: all: critical=0 high=0 moderate=0 low=0; production: total=0
+apps/web remaining (dev only): eslint-config-next -> @next/eslint-plugin-next -> fast-glob -> micromatch -> braces (high; build-time lint tooling, not shipped)
+apps/mobile: pre-existing, not changed in this work (Expo toolchain); see the final evidence report
+
+## Licences (scripts/messaging/check_licenses.py)
+OK: 156 packages in packages/messaging-crypto --all-features have allowed licences
+OK: 157 packages in packages/messaging-crypto/wasm  have allowed licences
+OK: 157 packages in packages/messaging-crypto/web-harness  have allowed licences
+OK: 406 packages in services/messaging --workspace --all-features have allowed licences
+
+## SBOM
+SBOM: 884 components from 15 lockfile(s) (CycloneDX 1.5)
+
+## Secret scan
+secret scan: clean

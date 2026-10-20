@@ -68,10 +68,11 @@ dedicated Worker (one device of one account)            Messaging realtime gatew
 | Event | What happens |
 |---|---|
 | Device set-up | keys generated in the worker; nothing stored until the server accepted the registration (`adopt`) |
+| New device of a member | added by one member device (the active in-tree device with the smallest id; others after a grace period) only after the new device's listed key verifies against the transparency log, so failed attempts never consume its KeyPackages; every member's Welcomes carry the ratchet tree, whichever member adds (Part K final evidence §C); a device still waiting tops up its KeyPackages |
 | Every state change | the whole device state is exported, sealed and written together with the affected records in ONE IndexedDB transaction (no torn state) |
 | Encrypt | state persisted before the ciphertext leaves the worker (a crash cannot re-use a ratchet generation) |
 | Browser refresh / crash | the worker re-opens the sealed state; unpersisted work is redone from the Delivery Service |
-| Logout (`engine.signOut`) | the device is revoked and every key and record of the account in this browser is erased; the Meeting Service also revokes all Messaging client sessions at logout |
+| Logout (`engine.signOut`) | background work (polling, realtime) stops first; then the device is revoked and every key and record of the account in this browser is erased; the Meeting Service also revokes all Messaging client sessions at logout |
 | Device removal / revocation detected | local keys and history erased; the browser must set up a new device |
 
 ## 5. What this does NOT protect (accepted residual risk)

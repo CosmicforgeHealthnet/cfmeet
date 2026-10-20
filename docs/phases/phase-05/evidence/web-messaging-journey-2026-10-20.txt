@@ -1,0 +1,22 @@
+# Web Messaging client in Chromium across real services (local run, commit 8999ac6 working tree)
+# Test: services/meeting-service/tests/unified_messaging_e2e.rs::web_messaging_client_in_chromium_across_real_services
+# Real processes: Meeting Service (test router on :18080), Platform Access, Messaging binary, PostgreSQL 16, Redis 7, MinIO; the production build of apps/web (Next.js 16.4.2) in Chromium.
+# Repetitions after the fixes in 9c3dbf8 / 8999ac6: 6 of 6 and 3 of 3 passed (before 9c3dbf8: 4 of 6 failed at step 10).
+
+STEP device registration {"devices":2,"pageCspWithoutWasmEval":true}
+STEP encrypted conversation created {}
+STEP encrypted send / receive {"messages":2}
+STEP xss payloads inert {"payloads":4}
+STEP reload from encrypted storage {"values":9,"plaintextHits":0,"wrappingKeyExtractable":false}
+STEP offline delivery in order {"messages":3}
+STEP reconnect {}
+STEP encrypted attachment {"bytes":5060}
+STEP managed conversation labelled {}
+STEP second device + history transfer {"comparisonCode":"#### ####"}
+STEP device removal erased local state {"remainingValues":1}
+STEP csp + trusted types {}
+STEP tampered crypto module refused {}
+STEP expired session {}
+STEP logout erased the device {"remainingValues":0}
+EVIDENCE web-messaging-server e2ee_messages=16 plaintext_hits=0 e2ee_attachments=1 revoked_devices=2
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 26.65s
