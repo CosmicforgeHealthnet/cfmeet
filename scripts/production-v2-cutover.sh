@@ -51,8 +51,8 @@ for line_number, raw_line in enumerate(text.splitlines(), 1):
         print(f"  line {line_number}: proxy_pass -> {target}; most_recent_location={current_location}", flush=True)
 if not legacy and not modern:
     sys.exit("Neither expected upstream appears; manual mapping is needed.")
-if mode == "cutover" and modern:
-    sys.exit("Cutover blocked: pre-existing Meeting V2 routes require targeted review; never bulk-rewrite mixed Nginx locations.")
+if mode == "cutover" and legacy != 1:
+    sys.exit("Cutover requires exactly one legacy upstream in this verified site; refuse ambiguous changes.")
 PY
 }
 
@@ -159,13 +159,40 @@ case "$MODE" in
     python3 - "$SITE" <<'PY'
 import pathlib, re, sys
 p = pathlib.Path(sys.argv[1])
-current = p.read_text()
-old = r'(proxy_pass\s+)http://(?:localhost|127\.0\.0\.1):8080(?=[/;\s])'
-modified, count = re.subn(old, r'\1http://127.0.0.1:18081', current)
-if count < 1 or re.search(r'proxy_pass\s+http://127\.0\.0\.1:18081', current):
-    sys.exit("No unambiguous legacy-only routes to switch.")
-p.write_text(modified)
-print(f"Updated {count} Nginx upstream directives.")
+lines = p.read_text().splitlines(keepends=True)
+# Only the exact catch-all location / may be modified.
+# Existing /swagger-ui/ and /api-docs/ proxies to port 18081 stay intact.
+roots = [i for i, line in enumerate(lines)
+         if re.match(r'^\s*location\s+/\s*\{\s*(?:#.*)?$', line)]
+if len(roots) != 1:
+    sys.exit(f"Expected one simple location / block, found {len(roots)}; no config changes.")
+root = roots[0]
+depth = 0
+proxy_indices = []
+for i in range(root, len(lines)):
+    code = lines[i].split("#", 1)[0]
+    if i == root:
+        depth = code.count("{") - code.count("}")
+        if depth != 1:
+            sys.exit("Ambiguous catch-all block, no config changes.")
+        continue
+    if depth == 1 and re.search(r'^\s*proxy_pass\s+', code):
+        proxy_indices.append(i)
+    depth += code.count("{") - code.count("}")
+    if depth == 0:
+        break
+    if depth < 0:
+        sys.exit("Invalid block depth, no config changes.")
+if depth != 0 or len(proxy_indices) != 1:
+    sys.exit(f"Expected one proxy_pass directly inside location /; found {len(proxy_indices)}.")
+target = proxy_indices[0]
+pattern = r'(proxy_pass\s+)http://(?:localhost|127\.0\.0\.1):8080(?=[/;\s])'
+updated, count = re.subn(pattern, r'\1http://127.0.0.1:18081', lines[target], count=1)
+if count != 1:
+    sys.exit("Catch-all upstream is not legacy port 8080; no config changes.")
+lines[target] = updated
+p.write_text("".join(lines))
+print(f"Changed ONLY location / proxy_pass on line {target + 1}; all other Nginx routes unchanged.")
 PY
     nginx -t
     systemctl reload nginx
