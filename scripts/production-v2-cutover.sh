@@ -139,14 +139,30 @@ PY
 }
 
 verify_public() {
-  curl -fsS --max-time 15 "$PUBLIC/health" >/dev/null || die "Public API health failed."
-  local status
-  status="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$PUBLIC/api/v2/meeting-spaces")"
-  [[ "$status" == "401" || "$status" == "403" ]] \
-    || die "Public V2 endpoint returned $status, expected 401/403."
-  curl -fsS --max-time 15 "$PUBLIC/api-docs/openapi.json" -o /dev/null \
-    || die "Public OpenAPI unavailable."
-  log "Public health, V2 auth and OpenAPI PASS."
+  # nginx -t and systemctl reload nginx returning 0 does not prove that the
+  # new workers already serve every connection. Observe both local TLS and
+  # public DNS with bounded retries before declaring failure/rolling back.
+  local local_code public_code attempt
+  for attempt in 1 2 3 4 5 6 7 8; do
+    sleep 2
+    local_code="$(local_tls_status)"
+    public_code="$(curl --noproxy '*' -sS --max-time 12 -o /dev/null -w '%{http_code}' -H 'Cache-Control: no-cache' "$PUBLIC/api/v2/meeting-spaces" || true)"
+    log "Post-reload probe $attempt/8: local TLS=$local_code; public DNS=$public_code"
+    if [[ ( "$local_code" == "401" || "$local_code" == "403" ) &&
+          ( "$public_code" == "401" || "$public_code" == "403" ) ]]; then
+      curl --noproxy '*' -fsS --max-time 12 "$PUBLIC/health" >/dev/null \
+        || die "Public health failed after V2 routing switched."
+      curl --noproxy '*' -fsS --max-time 12 "$PUBLIC/api-docs/openapi.json" -o /dev/null \
+        || die "Public OpenAPI unavailable after V2 routing switched."
+      local v1_code
+      v1_code="$(curl --noproxy '*' -sS --max-time 12 -o /dev/null -w '%{http_code}' "$PUBLIC/api/v1/meetings" || true)"
+      [[ "$v1_code" == "200" || "$v1_code" == "401" || "$v1_code" == "403" ]] \
+        || die "V1 meetings compatibility smoke failed ($v1_code)."
+      log "Public V1 compatibility, V2 authorization boundary, health and OpenAPI PASS."
+      return 0
+    fi
+  done
+  die "Public V2 not healthy after bounded Nginx reload retries; automatic rollback required."
 }
 
 restore_config() {
