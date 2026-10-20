@@ -20,6 +20,18 @@ test("production policy: nonce scripts only, Trusted Types, no plugins / framing
   assert.ok(!csp.includes("'unsafe-eval'"));
 });
 
+test("MLS WebAssembly permission is opt-in and never enables JavaScript eval", () => {
+  const nonce = "AAAAAAAAAAAAAAAAAAAAAAAA";
+  const secure = buildCsp({ nonce, dev: false, allowMessagingWasm: true });
+  const scripts = directive(secure, "script-src");
+  assert.ok(scripts.includes("'wasm-unsafe-eval'"), scripts);
+  assert.ok(!scripts.includes("'unsafe-eval'"), scripts);
+  assert.ok(!scripts.includes("'unsafe-inline'"), scripts);
+  assert.ok(secure.includes("require-trusted-types-for 'script'"));
+  const ordinary = buildCsp({ nonce, dev: false });
+  assert.ok(!ordinary.includes("'wasm-unsafe-eval'"), ordinary);
+});
+
 test("development adds only what next dev needs; plain HTTP is not upgraded", () => {
   const csp = buildCsp({ nonce: "BBBBBBBBBBBBBBBBBBBBBBBB", dev: true });
   assert.ok(directive(csp, "script-src").includes("'unsafe-eval'"));
