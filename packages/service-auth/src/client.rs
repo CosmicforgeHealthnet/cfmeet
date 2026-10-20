@@ -31,6 +31,11 @@ pub const INTERNAL_PATH_PREFIX: &str = "/internal/v1/";
 /// Maximum accepted response body.
 pub const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
+/// The only request headers a caller may forward on an internal call
+/// ([`InternalServiceClient::exchange_json_query_with_headers`]): never an authorization,
+/// identity or routing header.
+pub const FORWARDABLE_REQUEST_HEADERS: &[&str] = &["idempotency-key"];
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ClientConfigError {
     #[error("base URL for {service} is invalid")]
@@ -117,6 +122,8 @@ pub enum InternalCallError {
     Signing(SignError),
     #[error("request body could not be encoded")]
     Encoding,
+    #[error("a forwarded request header is not allowed or not valid")]
+    InvalidHeader,
     #[error("internal call to {target} timed out")]
     Timeout { target: ServiceId },
     #[error("internal call to {target} could not connect")]
@@ -314,6 +321,43 @@ impl InternalServiceClient {
         self.send_raw(request, method, path, &[], bytes).await
     }
 
+    /// [`exchange_json_query`](Self::exchange_json_query) that also forwards request
+    /// headers from [`FORWARDABLE_REQUEST_HEADERS`] (e.g. an end user's `Idempotency-Key`
+    /// relayed by a first-party backend). Any other header name, or a value that is not
+    /// short visible ASCII, is refused before anything is sent.
+    pub async fn exchange_json_query_with_headers<B: Serialize>(
+        &self,
+        request: &OutboundServiceRequest,
+        method: Method,
+        path: &str,
+        query: &[(&str, &str)],
+        headers: &[(&str, &str)],
+        body: Option<&B>,
+    ) -> Result<InternalResponse, InternalCallError> {
+        let mut extra = HeaderMap::new();
+        for (name, value) in headers {
+            let lower = name.to_ascii_lowercase();
+            let allowed = FORWARDABLE_REQUEST_HEADERS.contains(&lower.as_str());
+            let printable = !value.is_empty()
+                && value.len() <= 128
+                && value.bytes().all(|b| (0x21..=0x7e).contains(&b));
+            if !allowed || !printable {
+                return Err(InternalCallError::InvalidHeader);
+            }
+            let name = http::header::HeaderName::from_bytes(lower.as_bytes())
+                .map_err(|_| InternalCallError::InvalidHeader)?;
+            let value =
+                http::HeaderValue::from_str(value).map_err(|_| InternalCallError::InvalidHeader)?;
+            extra.insert(name, value);
+        }
+        let bytes = match body {
+            Some(body) => Some(serde_json::to_vec(body).map_err(|_| InternalCallError::Encoding)?),
+            None => None,
+        };
+        self.send_raw_with(request, method, path, query, extra, bytes)
+            .await
+    }
+
     /// [`exchange_json`](Self::exchange_json) with a query string (same rules as
     /// [`get_query`](Self::get_query)).
     pub async fn exchange_json_query<B: Serialize>(
@@ -360,6 +404,19 @@ impl InternalServiceClient {
         query: &[(&str, &str)],
         body: Option<Vec<u8>>,
     ) -> Result<InternalResponse, InternalCallError> {
+        self.send_raw_with(request, method, path, query, HeaderMap::new(), body)
+            .await
+    }
+
+    async fn send_raw_with(
+        &self,
+        request: &OutboundServiceRequest,
+        method: Method,
+        path: &str,
+        query: &[(&str, &str)],
+        extra: HeaderMap,
+        body: Option<Vec<u8>>,
+    ) -> Result<InternalResponse, InternalCallError> {
         let target = request.audience().clone();
         let base = self
             .targets
@@ -383,7 +440,8 @@ impl InternalServiceClient {
             .sign(request)
             .map_err(InternalCallError::Signing)?;
 
-        let mut header_map = HeaderMap::new();
+        // Forwarded headers first: the service-authentication headers always win.
+        let mut header_map = extra;
         signed.apply_to(&mut header_map);
         let mut builder = self.http.request(method, url).headers(header_map);
         if let Some(body) = body {

@@ -450,6 +450,32 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(crate::handlers::v2::unified_messaging::revoke_all_sessions),
         )
         .route(
+            "/messaging/me",
+            get(crate::handlers::v2::unified_messaging::me),
+        )
+        .route(
+            "/messaging/directory",
+            get(crate::handlers::v2::unified_messaging::directory),
+        )
+        .route(
+            "/messaging/directory/resolve",
+            post(crate::handlers::v2::unified_messaging::resolve),
+        )
+        .route(
+            "/messaging/principals/names",
+            post(crate::handlers::v2::unified_messaging::principal_names),
+        )
+        .route(
+            "/messaging/relay/*path",
+            get(crate::handlers::v2::unified_messaging::relay_get)
+                .post(crate::handlers::v2::unified_messaging::relay_post)
+                .put(crate::handlers::v2::unified_messaging::relay_put)
+                .delete(crate::handlers::v2::unified_messaging::relay_delete)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::handlers::v2::unified_messaging::RELAY_MAX_BODY_BYTES,
+                )),
+        )
+        .route(
             "/admin/chat-migration",
             get(crate::handlers::v2::unified_messaging::migration_status),
         )

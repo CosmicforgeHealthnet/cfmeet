@@ -168,6 +168,14 @@ impl Device {
         })
     }
 
+    /// The device's state of a group it created or joined earlier, read back from its
+    /// own storage (after [`Device::import_state`]). `None`: the device has no such group.
+    pub fn load_group(&self, group_id: &[u8]) -> Result<Option<ClientGroup>, GroupError> {
+        MlsGroup::load(self.provider().storage(), &GroupId::from_slice(group_id))
+            .map(|g| g.map(|group| ClientGroup { group }))
+            .map_err(|_| GroupError::Malformed)
+    }
+
     /// Joins a group from a Welcome addressed to one of this device's KeyPackages.
     pub fn join(&self, welcome: &[u8]) -> Result<ClientGroup, GroupError> {
         let message =

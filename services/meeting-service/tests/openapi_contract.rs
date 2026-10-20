@@ -99,6 +99,14 @@ fn every_v2_route_is_documented() {
         ("post", "/api/v2/messaging/devices/{deviceId}/revoke"),
         ("post", "/api/v2/messaging/client-tokens"),
         ("post", "/api/v2/messaging/client-sessions/revoke-all"),
+        ("get", "/api/v2/messaging/me"),
+        ("get", "/api/v2/messaging/directory"),
+        ("post", "/api/v2/messaging/directory/resolve"),
+        ("post", "/api/v2/messaging/principals/names"),
+        ("get", "/api/v2/messaging/relay/{path}"),
+        ("post", "/api/v2/messaging/relay/{path}"),
+        ("put", "/api/v2/messaging/relay/{path}"),
+        ("delete", "/api/v2/messaging/relay/{path}"),
         ("get", "/api/v2/admin/chat-migration"),
         ("post", "/api/v2/admin/chat-migration/transitions"),
         ("post", "/api/v2/admin/chat-migration/parity-runs"),
@@ -379,7 +387,10 @@ fn public_error_codes_are_published() {
 fn normalize(path: &str) -> String {
     path.split('/')
         .map(|seg| {
-            if seg.starts_with(':') || (seg.starts_with('{') && seg.ends_with('}')) {
+            if seg.starts_with(':')
+                || seg.starts_with('*')
+                || (seg.starts_with('{') && seg.ends_with('}'))
+            {
                 "{}"
             } else {
                 seg

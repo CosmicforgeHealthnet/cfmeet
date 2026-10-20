@@ -20,6 +20,7 @@ pub mod gateway;
 pub mod identity;
 pub mod migration;
 pub mod mirror;
+pub mod relay;
 pub mod scoped;
 pub mod store;
 

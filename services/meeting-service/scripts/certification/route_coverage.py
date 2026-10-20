@@ -25,7 +25,7 @@ SERVICE = os.path.abspath(os.path.join(HERE, "..", ".."))
 
 def normalize(path: str) -> str:
     return "/".join(
-        "{}" if seg.startswith(":") or (seg.startswith("{") and seg.endswith("}")) else seg
+        "{}" if seg.startswith((":", "*")) or (seg.startswith("{") and seg.endswith("}")) else seg
         for seg in path.split("/")
     )
 
