@@ -28,6 +28,7 @@ on:
       - "scripts/sbom/**"
       - "packages/**"
       - "scripts/secret-scan/**"
+      - "scripts/security/**"
       - ".github/workflows/dependency-security.yml"
   pull_request:
     paths:
@@ -42,6 +43,7 @@ on:
       - "scripts/sbom/**"
       - "packages/**"
       - "scripts/secret-scan/**"
+      - "scripts/security/**"
       - ".github/workflows/dependency-security.yml"
   schedule:
     # Weekly, so new advisories against unchanged lockfiles are noticed.
@@ -74,6 +76,9 @@ jobs:
           - services/sms-gateway
           - services/numbering
           - services/meeting-service
+          # Part K final gap closure: the browser crypto core and its Chromium harness.
+          - packages/messaging-crypto/wasm
+          - packages/messaging-crypto/web-harness
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -94,18 +99,32 @@ jobs:
       # libcrux-kem is in no build graph (any target, all features); the ignore is lifted
       # when hpke-rs releases a fixed pin (ADR 0045).
       - name: libcrux-kem is never compiled into the Messaging crypto core
-        if: matrix.lockfile == 'packages/messaging-crypto' || matrix.lockfile == 'services/messaging' || matrix.lockfile == 'services/meeting-service'
+        if: startsWith(matrix.lockfile, 'packages/messaging-crypto') || matrix.lockfile == 'services/messaging' || matrix.lockfile == 'services/meeting-service'
         working-directory: ${{ matrix.lockfile }}
         run: |
           set -euo pipefail
           out="$(cargo tree --locked -e all --all-features --target all -i libcrux-kem 2>&1 || true)"
           echo "$out" | grep -q "nothing to print" \
             || { echo "$out"; echo "::error::libcrux-kem is linked; the advisory ignore no longer holds"; exit 1; }
+      # RUSTSEC-2026-0381 (webpki-roots < 1.0.10 trusts distrusted emSign intermediates):
+      # fixed by webpki-roots 1.0.10, which every lockfile now carries. sqlx 0.8 (via
+      # sea-orm 1.1; no 0.8 release drops it) still depends on webpki-roots 0.26, whose
+      # last release 0.26.11 is a shim with no certificate data that re-exports
+      # TLS_SERVER_ROOTS from webpki-roots 1 — so the compiled root store is the fixed
+      # one, while cargo-audit matches the shim's version number. The step below proves,
+      # from Cargo.lock, that every 0.26 copy is exactly that shim (pinned checksum) over a
+      # webpki-roots >= 1.0.10, and that no vulnerable 1.x remains; otherwise the job
+      # fails. The ignore is lifted with the sea-orm 2 / sqlx 0.9 upgrade.
+      - name: webpki-roots 0.26 is only the re-export shim over a fixed webpki-roots 1
+        run: |
+          set -euo pipefail
+          (cd scripts/security && python3 -m unittest -q test_check_webpki_roots_shim)
+          python3 scripts/security/check_webpki_roots_shim.py "${{ matrix.lockfile }}/Cargo.lock"
       - name: cargo audit
         working-directory: ${{ matrix.lockfile }}
         run: >-
-          cargo audit --ignore RUSTSEC-2023-0071
-          ${{ (matrix.lockfile == 'packages/messaging-crypto' || matrix.lockfile == 'services/messaging' || matrix.lockfile == 'services/meeting-service') && '--ignore RUSTSEC-2026-0330 --ignore RUSTSEC-2026-0331' || '' }}
+          cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0381
+          ${{ (startsWith(matrix.lockfile, 'packages/messaging-crypto') || matrix.lockfile == 'services/messaging' || matrix.lockfile == 'services/meeting-service') && '--ignore RUSTSEC-2026-0330 --ignore RUSTSEC-2026-0331' || '' }}
 
   sbom:
     # Part V K §158: a CycloneDX software bill of materials of every tracked Cargo.lock
