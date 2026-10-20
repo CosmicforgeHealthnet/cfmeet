@@ -367,6 +367,17 @@ jobs:
         env:
           DISASTER_RECOVERY_CERT_REQUIRED: "1"
         run: cargo test --locked --test disaster_recovery -- --nocapture
+      # Part V remediation M11 on real processes: Platform Access + the Messaging binary +
+      # MinIO + clamd. EXTERNAL tenant, scoped credential, realtime, MANAGED attachment
+      # (upload, finalize, scan, grant, server thumbnail), search, E2EE search refused,
+      # content-free webhook relay, member / device revocation, cross-tenant isolation.
+      - name: External developer journey (real Platform Access, Messaging binary, MinIO, clamd)
+        env:
+          PLATFORM_ACCESS_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access
+          PLATFORM_ACCESS_MIGRATION_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access-migration
+          MESSAGING_E2E_REQUIRED: "1"
+        run: cargo test --locked --test platform_access_e2e -- --nocapture external_developer_journey
+
       - name: cargo test (whole workspace, incl. the Platform Access certification)
         env:
           PLATFORM_ACCESS_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access

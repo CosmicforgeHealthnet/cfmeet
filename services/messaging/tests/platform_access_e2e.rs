@@ -962,3 +962,582 @@ async fn a_to_d_foundation_certification_across_real_services() {
     let _ = std::fs::remove_dir_all(&world.dir);
     assert_eq!(lifecycle, ["LOCKED", "ACTIVE", "LOCKED"]);
 }
+
+/// A recording stand-in for Calling's platform-event ingress (`POST
+/// /internal/v1/platform/events`): what Messaging relays toward customer webhooks. The
+/// real Calling path (allow-list projection, signature, delivery) is certified by
+/// `cross_service_e2e`; here it shows WHAT leaves Messaging.
+async fn webhook_ingress() -> (String, Arc<std::sync::Mutex<Vec<Value>>>) {
+    use axum::{extract::State, routing::post, Json, Router};
+    let seen: Arc<std::sync::Mutex<Vec<Value>>> = Arc::default();
+    let app = Router::new()
+        .route(
+            "/internal/v1/platform/events",
+            post(
+                |State(s): State<Arc<std::sync::Mutex<Vec<Value>>>>, Json(v): Json<Value>| async move {
+                    s.lock().unwrap().push(v);
+                    axum::http::StatusCode::ACCEPTED
+                },
+            ),
+        )
+        .with_state(seen.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (url, seen)
+}
+
+/// Part V remediation M11 — the complete EXTERNAL developer journey on real processes:
+/// Platform Access (tenant, application, environment, scoped credential, principals),
+/// the Messaging binary with real S3-compatible storage (MinIO) and, where provided, the
+/// real clamd scanner. Realtime delivery, a MANAGED attachment (upload, finalize,
+/// metadata, download grant, server thumbnail), MANAGED search, E2EE search refused
+/// (client-local only), relayed lifecycle events without content, member and device
+/// revocation, and cross-tenant isolation of every new surface.
+#[tokio::test]
+async fn external_developer_journey_with_attachments_search_and_webhooks() {
+    let Some(admin) = common::admin_url() else {
+        return;
+    };
+    let Ok(endpoint) = std::env::var("OBJECT_STORAGE_TEST_ENDPOINT") else {
+        let _ = skip("OBJECT_STORAGE_TEST_ENDPOINT is not set (real S3-compatible storage)");
+        return;
+    };
+    let Some(mut world) = setup(&admin).await else {
+        return;
+    };
+    let var = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
+    let bucket = format!(
+        "{}-e2e",
+        var("OBJECT_STORAGE_TEST_BUCKET", "cfmeet-object-storage-test")
+    );
+    let (access, secret) = (
+        var("OBJECT_STORAGE_TEST_ACCESS_KEY", "testing"),
+        var("OBJECT_STORAGE_TEST_SECRET_KEY", "testing"),
+    );
+    let sse = Some(var("OBJECT_STORAGE_TEST_SSE", "AES256")).filter(|s| !s.is_empty());
+    cf_object_storage::S3ObjectStore::new(cf_object_storage::S3Config {
+        endpoint: endpoint.clone(),
+        public_endpoint: None,
+        region: "us-east-1".into(),
+        bucket: bucket.clone(),
+        access_key: access.clone(),
+        secret_key: secret.clone(),
+        path_style: true,
+        server_side_encryption: sse.clone(),
+    })
+    .unwrap()
+    .ensure_bucket()
+    .await
+    .unwrap();
+    let (ingress_url, relayed) = webhook_ingress().await;
+    // MANAGED text is sealed at rest under a key ring (a fresh test-only key).
+    let keyring = world.dir.join("managed-keyring");
+    {
+        use base64::Engine as _;
+        let key: [u8; 32] = rand::random();
+        std::fs::write(
+            &keyring,
+            format!(
+                "e2e-1 {}\n",
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key)
+            ),
+        )
+        .unwrap();
+    }
+    let clamd = std::env::var("MESSAGING_TEST_CLAMAV_ADDRESS").ok();
+    for (k, v) in [
+        ("MESSAGING_ATTACHMENTS_S3_ENDPOINT", Some(endpoint)),
+        ("MESSAGING_ATTACHMENTS_S3_BUCKET", Some(bucket)),
+        ("MESSAGING_ATTACHMENTS_S3_ACCESS_KEY_ID", Some(access)),
+        ("MESSAGING_ATTACHMENTS_S3_SECRET_ACCESS_KEY", Some(secret)),
+        ("MESSAGING_ATTACHMENTS_S3_PATH_STYLE", Some("true".into())),
+        ("MESSAGING_ATTACHMENTS_S3_SERVER_SIDE_ENCRYPTION", sse),
+        ("MESSAGING_CLAMAV_ADDRESS", clamd.clone()),
+        ("CF_CALLING_BASE_URL", Some(ingress_url)),
+        ("MESSAGING_WORKER_INTERVAL_MS", Some("200".into())),
+        (
+            "MESSAGING_MANAGED_KEYRING_FILE",
+            Some(keyring.display().to_string()),
+        ),
+    ] {
+        if let Some(v) = v {
+            world.messaging_env.push((k.into(), v));
+        }
+    }
+    let db = TestDb::empty().await.unwrap();
+    messaging_migration::Migrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    let (_messaging, url) = world.start_messaging(&db.url).await;
+    let m = Client {
+        http: &world.http,
+        base: url.clone(),
+    };
+    use reqwest::Method as M;
+    let scopes = [
+        "messages.send",
+        "messages.read",
+        "conversations.create",
+        "conversations.manage",
+        "attachments.write",
+        "attachments.read",
+    ];
+    // 1-3. Synthetic EXTERNAL tenant, application, SANDBOX environment, scoped credential
+    // (held by the customer's backend only).
+    let (env_a, sa_a) = world.tenant(&scopes).await;
+    let (token, _) = world.credential(sa_a, &scopes).await;
+    // 4. Principals with trusted devices.
+    let alice = world.principal(env_a).await;
+    let bob = world.principal(env_a).await;
+    let alice_device = m.device(&token, alice).await;
+    let bob_device = m.device(&token, bob).await;
+    // Policy: MANAGED groups with attachments; scanning required when a scanner runs.
+    let (s, p) = m
+        .call(M::GET, &token, None, "/v1/messaging/policy", None, None)
+        .await;
+    assert_eq!(s, 200, "{p}");
+    let (s, p) = m
+        .call(
+            M::PUT,
+            &token,
+            None,
+            "/v1/messaging/policy",
+            Some(json!({ "expectedVersion": p["version"], "policy": {
+                "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
+                "attachments": { "enabled": true, "managedScanRequired": clamd.is_some() } } })),
+            None,
+        )
+        .await;
+    assert_eq!(s, 200, "{p}");
+    // 5. A permitted MANAGED conversation.
+    let (s, conv) = m
+        .call(
+            M::POST,
+            &token,
+            Some(alice),
+            "/v1/conversations",
+            Some(json!({ "contextClass": "GROUP", "securityProfile": "MANAGED" })),
+            Some("ext-journey-group-1"),
+        )
+        .await;
+    assert_eq!(s, 201, "{conv}");
+    let id = conv["conversationId"].as_str().unwrap().to_string();
+    let (s, r) = m
+        .call(
+            M::POST,
+            &token,
+            Some(alice),
+            &format!("/v1/conversations/{id}/members"),
+            Some(json!({ "principalId": bob })),
+            None,
+        )
+        .await;
+    assert_eq!(s, 201, "{r}");
+    // 6-7. Short-lived client token for Bob's device -> single-use ticket -> WebSocket.
+    let (s, ct) = m
+        .call(
+            M::POST,
+            &token,
+            Some(bob),
+            "/v1/messaging/client-tokens",
+            Some(json!({ "deviceId": bob_device.device_id() })),
+            None,
+        )
+        .await;
+    assert_eq!(s, 201, "{ct}");
+    let tk: Value = world
+        .http
+        .post(format!("{url}/v1/realtime/tickets"))
+        .header(
+            "authorization",
+            format!("CF-Client-Token {}", ct["token"].as_str().unwrap()),
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let addr: std::net::SocketAddr = url.trim_start_matches("http://").parse().unwrap();
+    let mut ws = common::realtime::open_ws(addr, tk["ticket"].as_str().unwrap(), None)
+        .await
+        .expect("bob's WebSocket");
+    assert_eq!(ws.subscribe(&conv, None).await["type"], "subscribed");
+    // 8-9. Send and receive.
+    let note = "quarterly launch plan, see the attached chart";
+    let (s, sent) = m
+        .call(
+            M::POST,
+            &token,
+            Some(alice),
+            &format!("/v1/conversations/{id}/messages"),
+            Some(json!({ "clientMessageId": Uuid::new_v4(), "text": note })),
+            None,
+        )
+        .await;
+    assert_eq!(s, 201, "{sent}");
+    let mut delivered = false;
+    for _ in 0..10 {
+        let f = ws.next_of("event").await;
+        if f["event"]["type"] == "message.created" {
+            delivered = true;
+            break;
+        }
+    }
+    assert!(delivered, "bob received the message over the WebSocket");
+    let (s, list) = m
+        .call(
+            M::GET,
+            &token,
+            Some(bob),
+            &format!("/v1/conversations/{id}/messages"),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(s, 200, "{list}");
+    assert!(list.to_string().contains(note));
+    // 10-11. An allowed attachment: upload to the real store with the signed grant, finalize.
+    let png = {
+        let img = image::RgbImage::from_fn(900, 600, |x, y| {
+            image::Rgb([(x % 256) as u8, (y % 256) as u8, 77])
+        });
+        let mut b = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut std::io::Cursor::new(&mut b), image::ImageFormat::Png)
+            .unwrap();
+        b
+    };
+    let sha = {
+        use sha2::Digest as _;
+        hex::encode(sha2::Sha256::digest(&png))
+    };
+    let (s, intent) = m
+        .call(
+            M::POST,
+            &token,
+            Some(alice),
+            &format!("/v1/conversations/{id}/attachments"),
+            Some(json!({ "kind": "IMAGE", "size": png.len(), "sha256": sha, "mediaType": "image/png", "fileName": "launch-chart.png" })),
+            None,
+        )
+        .await;
+    assert_eq!(s, 201, "{intent}");
+    let aid = intent["attachmentId"].as_str().unwrap().to_string();
+    let upload = &intent["upload"];
+    let mut put = world.http.put(upload["url"].as_str().unwrap());
+    for h in upload["headers"].as_array().unwrap() {
+        put = put.header(h["name"].as_str().unwrap(), h["value"].as_str().unwrap());
+    }
+    let r = put.body(png.clone()).send().await.unwrap();
+    assert!(r.status().is_success(), "{}", r.status());
+    let (s, fin) = m
+        .call(
+            M::POST,
+            &token,
+            Some(alice),
+            &format!("/v1/conversations/{id}/attachments/{aid}/finalize"),
+            Some(json!({})),
+            None,
+        )
+        .await;
+    assert_eq!(s, 200, "{fin}");
+    assert_eq!(fin["state"], "READY", "{fin}");
+    let scan = fin["scan"]["status"].as_str().unwrap().to_string();
+    assert_eq!(
+        scan,
+        if clamd.is_some() {
+            "CLEAN"
+        } else {
+            "NOT_REQUIRED"
+        },
+        "{fin}"
+    );
+    let (s, r) = m
+        .call(
+            M::POST,
+            &token,
+            Some(alice),
+            &format!("/v1/conversations/{id}/messages"),
+            Some(json!({ "clientMessageId": Uuid::new_v4(), "text": "chart attached", "attachmentIds": [aid] })),
+            None,
+        )
+        .await;
+    assert_eq!(s, 201, "{r}");
+    // 12-13. Bob reads the protected metadata and downloads through a grant.
+    let (s, meta) = m
+        .call(
+            M::GET,
+            &token,
+            Some(bob),
+            &format!("/v1/conversations/{id}/attachments/{aid}"),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(
+        (s, meta["fileName"].as_str()),
+        (200, Some("launch-chart.png")),
+        "{meta}"
+    );
+    let (s, grant) = m
+        .call(
+            M::POST,
+            &token,
+            Some(bob),
+            &format!("/v1/conversations/{id}/attachments/{aid}/download-grants"),
+            Some(json!({})),
+            None,
+        )
+        .await;
+    assert_eq!(s, 200, "{grant}");
+    let got = world
+        .http
+        .get(grant["url"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap();
+    assert!(got.status().is_success());
+    assert_eq!(
+        got.headers()
+            .get("content-disposition")
+            .map(|v| v.to_str().unwrap().starts_with("attachment")),
+        Some(true),
+        "always a download, never rendered inline"
+    );
+    assert_eq!(got.bytes().await.unwrap().as_ref(), png.as_slice());
+    // The server thumbnail (the binary's own lifecycle worker), through its own grant.
+    let mut thumb = None;
+    for _ in 0..90 {
+        let (_, meta) = m
+            .call(
+                M::GET,
+                &token,
+                Some(bob),
+                &format!("/v1/conversations/{id}/attachments/{aid}"),
+                None,
+                None,
+            )
+            .await;
+        if meta["derivatives"][0]["status"] == "READY" {
+            thumb = Some(meta["derivatives"][0].clone());
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    let thumb = thumb.expect("thumbnail produced by the running service");
+    assert_eq!(
+        (thumb["width"].as_i64(), thumb["height"].as_i64()),
+        (Some(320), Some(213))
+    );
+    let (s, tg) = m
+        .call(
+            M::POST,
+            &token,
+            Some(bob),
+            &format!("/v1/conversations/{id}/attachments/{aid}/thumbnail-grants"),
+            Some(json!({})),
+            None,
+        )
+        .await;
+    assert_eq!(s, 200, "{tg}");
+    let tbytes = world
+        .http
+        .get(tg["url"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    assert_eq!(image::load_from_memory(&tbytes).unwrap().width(), 320);
+    // 14. MANAGED search within the authorized scope.
+    let (s, hits) = m
+        .call(
+            M::GET,
+            &token,
+            Some(bob),
+            &format!("/v1/conversations/{id}/search?q=quarterly"),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(s, 200, "{hits}");
+    assert_eq!(hits["results"].as_array().unwrap().len(), 1, "{hits}");
+    let (s, across) = m
+        .call(
+            M::GET,
+            &token,
+            Some(bob),
+            "/v1/messaging/search?q=quarterly",
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(
+        (s, across["results"].as_array().map(|a| a.len())),
+        (200, Some(1)),
+        "{across}"
+    );
+    // 15. PRIVATE_E2EE search stays on the devices: the server refuses the query.
+    let (s, direct) = m
+        .call(
+            M::POST,
+            &token,
+            Some(alice),
+            "/v1/conversations",
+            Some(json!({ "contextClass": "DIRECT", "counterpartPrincipalId": bob })),
+            Some("ext-journey-direct-1"),
+        )
+        .await;
+    assert_eq!(
+        (s, direct["securityProfile"].as_str()),
+        (201, Some("PRIVATE_E2EE")),
+        "{direct}"
+    );
+    let (s, r) = m
+        .call(
+            M::GET,
+            &token,
+            Some(bob),
+            &format!(
+                "/v1/conversations/{}/search?q=quarterly",
+                direct["conversationId"].as_str().unwrap()
+            ),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(
+        (s, r["error"]["code"].as_str()),
+        (409, Some("LOCAL_SEARCH_ONLY")),
+        "{r}"
+    );
+    // 16. Lifecycle events reach the platform webhook ingress: ids and states, never
+    // content (no message text, file name or bytes of any profile).
+    let mut envelopes = Vec::new();
+    for _ in 0..60 {
+        envelopes = relayed.lock().unwrap().clone();
+        if envelopes.iter().any(|e| e.to_string().contains(&id)) && envelopes.len() >= 3 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert!(
+        envelopes.iter().any(|e| e.to_string().contains(&id)),
+        "relayed: {envelopes:?}"
+    );
+    for e in &envelopes {
+        let t = e.to_string();
+        for leak in [note, "chart attached", "launch-chart.png"] {
+            assert!(!t.contains(leak), "content relayed: {t}");
+        }
+    }
+    // 17-18. Revocation: Bob is removed; his next request is refused at once, his
+    // subscription is revoked, and his grants are no longer issued.
+    let (s, r) = m
+        .call(
+            M::DELETE,
+            &token,
+            Some(alice),
+            &format!("/v1/conversations/{id}/members/{bob}"),
+            None,
+            None,
+        )
+        .await;
+    assert!(s == 200 || s == 204, "{s} {r}");
+    let revoked = ws.next_of("subscription.revoked").await;
+    assert_eq!(revoked["reason"], "MEMBERSHIP_ENDED");
+    for (method, path) in [
+        (M::GET, format!("/v1/conversations/{id}/messages")),
+        (M::GET, format!("/v1/conversations/{id}/attachments/{aid}")),
+        (
+            M::POST,
+            format!("/v1/conversations/{id}/attachments/{aid}/download-grants"),
+        ),
+        (
+            M::POST,
+            format!("/v1/conversations/{id}/attachments/{aid}/thumbnail-grants"),
+        ),
+        (M::GET, format!("/v1/conversations/{id}/search?q=quarterly")),
+    ] {
+        let body = (method == M::POST).then(|| json!({}));
+        let (s, r) = m
+            .call(method.clone(), &token, Some(bob), &path, body, None)
+            .await;
+        assert!(s == 403 || s == 404, "{method} {path}: {s} {r}");
+        assert!(
+            !r.to_string().contains(note) && !r.to_string().contains("launch-chart"),
+            "{r}"
+        );
+    }
+    let (_, across) = m
+        .call(
+            M::GET,
+            &token,
+            Some(bob),
+            "/v1/messaging/search?q=quarterly",
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(
+        across["results"].as_array().map(|a| a.len()),
+        Some(0),
+        "{across}"
+    );
+    // Device revocation: Alice's device gets no new client token.
+    let (s, r) = m
+        .call(
+            M::POST,
+            &token,
+            Some(alice),
+            &format!("/v1/messaging/devices/{}/revoke", alice_device.device_id()),
+            Some(json!({ "reason": "LOST_OR_STOLEN" })),
+            None,
+        )
+        .await;
+    assert!((200..300).contains(&s), "{s} {r}");
+    let (s, r) = m
+        .call(
+            M::POST,
+            &token,
+            Some(alice),
+            "/v1/messaging/client-tokens",
+            Some(json!({ "deviceId": alice_device.device_id() })),
+            None,
+        )
+        .await;
+    assert!(s == 403 || s == 409, "{s} {r}");
+    // 19-20. Another tenant reaches none of it.
+    let (_, sa_b) = world.tenant(&scopes).await;
+    let (token_b, _) = world.credential(sa_b, &scopes).await;
+    for (method, path) in [
+        (M::GET, format!("/v1/conversations/{id}")),
+        (M::GET, format!("/v1/conversations/{id}/attachments/{aid}")),
+        (
+            M::POST,
+            format!("/v1/conversations/{id}/attachments/{aid}/download-grants"),
+        ),
+        (
+            M::POST,
+            format!("/v1/conversations/{id}/attachments/{aid}/thumbnail-grants"),
+        ),
+        (M::GET, format!("/v1/conversations/{id}/search?q=quarterly")),
+    ] {
+        let body = (method == M::POST).then(|| json!({}));
+        let (s, r) = m
+            .call(method.clone(), &token_b, Some(alice), &path, body, None)
+            .await;
+        assert!(
+            s == 403 || s == 404,
+            "cross-tenant {method} {path}: {s} {r}"
+        );
+    }
+    println!(
+        "EVIDENCE external_journey real_platform_access=1 real_messaging_binary=1 real_s3=1 scanner={} relayed_events={} thumbnail=READY",
+        if clamd.is_some() { "clamd" } else { "not-required-by-policy" },
+        envelopes.len()
+    );
+}
