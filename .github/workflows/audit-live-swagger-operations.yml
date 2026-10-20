@@ -1,0 +1,54 @@
+name: Live CF Meet Swagger count
+on:
+  push:
+    branches: [audit/live-swagger-operations-20261020]
+permissions:
+  contents: read
+jobs:
+  count:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 8
+    steps:
+      - name: Configure VPS SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+      - name: Count running Swagger documents read-only
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes "$VPS_USER@$VPS_HOST" 'python3 -' <<'PY'
+          import json, urllib.request
+          base = 'http://127.0.0.1:18081'
+          methods = {'get','post','put','patch','delete','head','options','trace'}
+          def fetch(path):
+              if not path.startswith('/api-docs/'): raise ValueError('Unexpected path')
+              with urllib.request.urlopen(base+path, timeout=12) as r:
+                  return json.loads(r.read())
+          config = fetch('/api-docs/swagger-config.json')
+          docs = config['urls']
+          print('SWAGGER_DOCUMENTS', len(docs), flush=True)
+          total_ops = total_paths = 0
+          for item in docs:
+              try:
+                  d = fetch(item['url'])
+                  paths = d.get('paths', {})
+                  ops = sum(k in methods for obj in paths.values() for k in obj)
+                  total_ops += ops
+                  total_paths += len(paths)
+                  print('SWAGGER_SERVICE', json.dumps({'name':item['name'],'paths':len(paths),'operations':ops,'version':d.get('info',{}).get('version')}), flush=True)
+              except Exception as e:
+                  print('SWAGGER_SERVICE_ERROR', item['name'], type(e).__name__, str(e)[:200], flush=True)
+                  raise
+          print('SWAGGER_TOTAL', json.dumps({'documents':len(docs),'paths':total_paths,'operations':total_ops}), flush=True)
+          PY
