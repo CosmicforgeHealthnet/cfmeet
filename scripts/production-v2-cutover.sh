@@ -150,49 +150,61 @@ PY
 }
 
 report_live_swagger() {
-  # Read-only count of every document the PUBLIC Swagger selector actually lists.
-  # Each operation is an HTTP method on a path; these are DOCUMENTED operations
-  # and are NOT evidence that another service's protected ingress is deployed.
+  # Read-only census of the DOCUMENTS served by public Swagger, not a check
+  # that the peer APIs are publicly callable. Older deployments may not expose
+  # the Swagger UI selector config; probe the explicit known document paths.
   python3 - "$PUBLIC" <<'PY'
 import json, sys, urllib.request
-from urllib.parse import urlsplit
+from urllib.error import HTTPError, URLError
 base = sys.argv[1].rstrip("/")
 verbs = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
+fallback_docs = [
+  ("Meetings", "/api-docs/openapi.json"),
+  ("Calling", "/api-docs/calling.json"),
+  ("Platform Access (internal)", "/api-docs/platform-access.json"),
+  ("Numbering / DCNs", "/api-docs/numbering.json"),
+  ("Privacy Relay", "/api-docs/privacy-relay.json"),
+  ("Privacy Relay (internal)", "/api-docs/privacy-relay-internal.json"),
+  ("Telephony (internal)", "/api-docs/telephony.json"),
+  ("SMS Gateway", "/api-docs/sms-gateway.json"),
+  ("Messaging", "/api-docs/messaging.json"),
+]
 def fetch(path):
     if not path.startswith("/api-docs/") or not path.endswith(".json"):
-        raise ValueError("Refused non-document path in Swagger config")
+        raise ValueError("Refused non-document path")
     req = urllib.request.Request(base + path, headers={"Cache-Control": "no-cache", "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=15) as response:
+    with urllib.request.urlopen(req, timeout=12) as response:
         return json.load(response)
-cfg = fetch("/api-docs/swagger-config.json")
-docs = cfg.get("urls", [])
-if not isinstance(docs, list) or not docs:
-    sys.exit("Swagger selector has no documents")
+try:
+    config = fetch("/api-docs/swagger-config.json")
+    docs = [(str(item["name"]), str(item["url"])) for item in config.get("urls", [])]
+    print(f"LIVE_SWAGGER_CONFIG found=yes entries={len(docs)}", flush=True)
+    if not docs: docs = fallback_docs
+except Exception as ex:
+    docs = fallback_docs
+    print(f"LIVE_SWAGGER_CONFIG found=no reason={type(ex).__name__}; probing_known_paths={len(docs)}", flush=True)
 total = 0
 paths_total = 0
-errors = 0
-for item in docs:
-    name = str(item.get("name", "unnamed"))
-    path = item.get("url", "")
+fetched = 0
+for name, path in docs:
     try:
         doc = fetch(path)
         paths = doc.get("paths", {})
-        if not isinstance(paths, dict):
-            raise ValueError("OpenAPI paths is not an object")
-        operations = sum(sum(1 for verb in definition if verb.lower() in verbs)
-                         for definition in paths.values() if isinstance(definition, dict))
-        total += operations
+        if not isinstance(paths, dict): raise ValueError("OpenAPI paths is not an object")
+        count = sum(sum(1 for verb in definition if verb.lower() in verbs)
+                    for definition in paths.values() if isinstance(definition, dict))
+        total += count
         paths_total += len(paths)
-        print(f"LIVE_SWAGGER_DOC name={json.dumps(name)} paths={len(paths)} operations={operations} version={doc.get('info', {}).get('version', 'unknown')}", flush=True)
-    except Exception as exc:
-        errors += 1
-        print(f"LIVE_SWAGGER_DOC_ERROR name={json.dumps(name)} kind={type(exc).__name__}", flush=True)
-print(f"LIVE_SWAGGER_TOTAL documents={len(docs)} fetched={len(docs)-errors} paths_across_documents={paths_total} http_operations={total} fetch_errors={errors}", flush=True)
-if errors:
-    sys.exit("Some publicly listed Swagger documents could not be counted")
+        fetched += 1
+        print(f"LIVE_SWAGGER_DOC name={json.dumps(name)} paths={len(paths)} operations={count} version={doc.get('info', {}).get('version', 'unknown')}", flush=True)
+    except HTTPError as ex:
+        print(f"LIVE_SWAGGER_DOC_UNAVAILABLE name={json.dumps(name)} http_status={ex.code}", flush=True)
+    except Exception as ex:
+        print(f"LIVE_SWAGGER_DOC_UNAVAILABLE name={json.dumps(name)} reason={type(ex).__name__}", flush=True)
+print(f"LIVE_SWAGGER_TOTAL documents_checked={len(docs)} fetched={fetched} unique_paths_within_documents={paths_total} documented_http_operations={total} unavailable_documents={len(docs)-fetched}", flush=True)
+print("LIVE_SWAGGER_NOTE Entries shown in bundled specs do not prove peer service public deployment or API reachability.", flush=True)
 PY
 }
-
 
 verify_public() {
   # nginx -t and systemctl reload nginx returning 0 does not prove that the
