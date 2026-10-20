@@ -11892,7 +11892,8 @@
         "tags": [
           "Messaging (v2)"
         ],
-        "summary": "Revoke one of the caller's devices.",
+        "summary": "Revoke one of the caller's devices (optional `reason`: USER_REQUESTED by default,",
+        "description": "LOST_OR_STOLEN, COMPROMISED or REPLACED).",
         "operationId": "v2_messaging_revoke_device",
         "parameters": [
           {
@@ -11906,6 +11907,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Revoked (Messaging contract)",

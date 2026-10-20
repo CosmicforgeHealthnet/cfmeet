@@ -247,9 +247,9 @@ async fn the_identity_bridge_acts_only_for_verified_cf_meet_accounts() {
             c.path
         );
     }
-    assert!(relayed
-        .iter()
-        .any(|c| c.path.ends_with("/revoke") && c.body.is_none()));
+    // Messaging requires a revocation reason: USER_REQUESTED unless the user names one.
+    assert!(relayed.iter().any(|c| c.path.ends_with("/revoke")
+        && c.body.as_ref() == Some(&json!({ "reason": "USER_REQUESTED" }))));
     // A guest (no account) and an anonymous caller are refused before any peer call.
     let (_, cid, guests) = collab::meeting(&app, collab::public(), 1).await;
     let _ = cid;

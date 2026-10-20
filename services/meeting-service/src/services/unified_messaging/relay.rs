@@ -239,7 +239,7 @@ pub static ROUTES: &[RelayRoute] = &[
     r(
         Method::GET,
         &[Lit("messaging"), Lit("history-transfers")],
-        &["status"],
+        &["deviceId"],
         false,
     ),
     r(

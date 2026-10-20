@@ -1,0 +1,71 @@
+name: Web crypto artifact
+
+# The browser crypto core shipped with apps/web (public/messaging-crypto/) is committed
+# because the web app is built without a Rust toolchain. This workflow is its provenance:
+# it rebuilds the module from packages/messaging-crypto/wasm with the pinned toolchain and
+# fails unless the committed worker, glue, module, manifest and generated constant are
+# byte-identical (scripts/messaging/build-web-crypto.sh --check). It also lints the
+# bindings for wasm32 and reviews their dependency licences. Nothing here deploys.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "packages/messaging-crypto/**"
+      - "apps/web/messaging-crypto/**"
+      - "apps/web/public/messaging-crypto/**"
+      - "apps/web/scripts/package-messaging-crypto.mjs"
+      - "apps/web/src/lib/messaging/crypto-artifact.ts"
+      - "scripts/messaging/build-web-crypto.sh"
+      - ".github/workflows/web-crypto-artifact.yml"
+  pull_request:
+    paths:
+      - "packages/messaging-crypto/**"
+      - "apps/web/messaging-crypto/**"
+      - "apps/web/public/messaging-crypto/**"
+      - "apps/web/scripts/package-messaging-crypto.mjs"
+      - "apps/web/src/lib/messaging/crypto-artifact.ts"
+      - "scripts/messaging/build-web-crypto.sh"
+      - ".github/workflows/web-crypto-artifact.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: web-crypto-artifact-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  reproducible:
+    name: rebuild and verify the committed browser crypto artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The exact toolchain the artifact was built with (a different rustc changes bytes).
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.0"
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: fmt / clippy (wasm32)
+        working-directory: packages/messaging-crypto/wasm
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo clippy --locked --release --target wasm32-unknown-unknown -- -D warnings
+
+      - name: dependency licence review
+        run: python3 scripts/messaging/check_licenses.py packages/messaging-crypto/wasm
+
+      - name: install wasm-bindgen-cli (locked version)
+        run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
+
+      - name: rebuild from source and compare byte for byte
+        run: scripts/messaging/build-web-crypto.sh --check

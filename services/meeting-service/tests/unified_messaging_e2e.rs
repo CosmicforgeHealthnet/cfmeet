@@ -139,6 +139,8 @@ struct World {
     messaging_env: Vec<(String, String)>,
     messaging: Option<tokio::process::Child>,
     messaging_url: String,
+    /// A fixed Messaging port (the browser journey's build baked the URL in).
+    messaging_port: Option<u16>,
     messaging_db: DatabaseConnection,
     scope: CommunicationScope,
     /// CF Meet's own backend API credential (policy administration only).
@@ -181,7 +183,7 @@ impl World {
 
     async fn start_messaging(&mut self) {
         for _ in 0..5 {
-            let port = free_port();
+            let port = self.messaging_port.unwrap_or_else(free_port);
             let mut c = tokio::process::Command::new(&self.messaging_bin);
             c.env_clear()
                 .current_dir(&self.dir)
@@ -298,6 +300,14 @@ impl World {
 }
 
 async fn setup() -> Option<World> {
+    setup_with(vec![], None).await
+}
+
+/// [`setup`] with extra Messaging environment and an optional fixed Messaging port.
+async fn setup_with(
+    extra_env: Vec<(String, String)>,
+    messaging_port: Option<u16>,
+) -> Option<World> {
     let admin = std::env::var("TEST_DATABASE_URL")
         .ok()
         .filter(|s| !s.is_empty())?;
@@ -420,7 +430,10 @@ async fn setup() -> Option<World> {
             p("messaging-ct.pem"),
         ),
         ("MESSAGING_MANAGED_KEYRING_FILE".into(), p("managed.ring")),
-    ];
+    ]
+    .into_iter()
+    .chain(extra_env)
+    .collect::<Vec<(String, String)>>();
     let messaging_db = Database::connect(&messaging_db_url).await.unwrap();
     let mut world = World {
         dir,
@@ -433,6 +446,7 @@ async fn setup() -> Option<World> {
         messaging_env,
         messaging: None,
         messaging_url: String::new(),
+        messaging_port,
         messaging_db,
         scope: CommunicationScope {
             tenant_id: Uuid::nil(),
@@ -1424,5 +1438,217 @@ async fn breakout_and_private_chat_migrate_to_unified_messaging_across_real_serv
     assert_eq!(
         world.m_scalar(&format!("SELECT count(*) FROM messaging_conversations WHERE id IN ('{conv_a}', '{conv_b}') AND lifecycle_state = 'CLOSED'")).await,
         2
+    );
+}
+
+/// Part K Milestone B — the SHIPPED CF Meet web Messaging client in Chromium against the
+/// real Meeting Service router (identity bridge + client relay, CORS as in production),
+/// the real Platform Access and Messaging binaries, PostgreSQL and S3-compatible storage.
+/// The journey itself is `apps/web/tests/messaging-e2e.browser.mjs`; this test starts the
+/// services on the ports the web build was made for, seeds two colleagues (and a third
+/// person outside their organization), runs the journey, and then checks Messaging's own
+/// database: the conversation exists, its messages are MLS ciphertext, and the phrase the
+/// browsers exchanged appears nowhere on the server.
+///
+/// Requires `WEB_MESSAGING_E2E_APP` (apps/web, built with NEXT_PUBLIC_API_URL
+/// http://127.0.0.1:18080/api/v1, NEXT_PUBLIC_MESSAGING_URL http://127.0.0.1:18090 and
+/// NEXT_PUBLIC_MESSAGING_STORAGE_URL = the S3 endpoint) and the S3 test variables.
+#[tokio::test]
+async fn web_messaging_client_in_chromium_across_real_services() {
+    let Ok(app_dir) = std::env::var("WEB_MESSAGING_E2E_APP") else {
+        assert!(
+            std::env::var("WEB_MESSAGING_E2E_REQUIRED").as_deref() != Ok("1"),
+            "WEB_MESSAGING_E2E_REQUIRED=1 but WEB_MESSAGING_E2E_APP is not set"
+        );
+        eprintln!("SKIPPED: web messaging journey (WEB_MESSAGING_E2E_APP not set)");
+        return;
+    };
+    let var = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
+    let s3 = var("OBJECT_STORAGE_TEST_ENDPOINT", "http://127.0.0.1:9000");
+    let bucket = var("WEB_MESSAGING_E2E_BUCKET", "cfmeet-web-e2e");
+    let web_origin = "http://127.0.0.1:3100";
+    let extra = vec![
+        (
+            "MESSAGING_REALTIME_ALLOWED_ORIGINS".to_string(),
+            web_origin.to_string(),
+        ),
+        ("MESSAGING_ATTACHMENTS_S3_ENDPOINT".into(), s3.clone()),
+        (
+            "MESSAGING_ATTACHMENTS_S3_PUBLIC_ENDPOINT".into(),
+            s3.clone(),
+        ),
+        (
+            "MESSAGING_ATTACHMENTS_S3_REGION".into(),
+            var("OBJECT_STORAGE_TEST_REGION", "us-east-1"),
+        ),
+        ("MESSAGING_ATTACHMENTS_S3_BUCKET".into(), bucket),
+        (
+            "MESSAGING_ATTACHMENTS_S3_ACCESS_KEY_ID".into(),
+            var("OBJECT_STORAGE_TEST_ACCESS_KEY", "cfmeet-ci"),
+        ),
+        (
+            "MESSAGING_ATTACHMENTS_S3_SECRET_ACCESS_KEY".into(),
+            var(
+                "OBJECT_STORAGE_TEST_SECRET_KEY",
+                "cfmeet-ci-only-not-a-secret",
+            ),
+        ),
+        ("MESSAGING_ATTACHMENTS_S3_PATH_STYLE".into(), "true".into()),
+        (
+            "MESSAGING_ATTACHMENTS_S3_SERVER_SIDE_ENCRYPTION".into(),
+            var("OBJECT_STORAGE_TEST_SSE", ""),
+        ),
+    ];
+    let Some(mut world) = setup_with(extra, Some(18090)).await else {
+        return;
+    };
+    // CF Meet's policy for this journey: both profiles allowed, E2EE by default for
+    // direct and group conversations; attachments on (scanning is certified elsewhere
+    // with a real clamd and is not part of this browser journey).
+    let (s, current) = world
+        .customer(reqwest::Method::GET, "/v1/messaging/policy", None)
+        .await;
+    assert_eq!(s, 200, "{current}");
+    let both =
+        json!({ "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "PRIVATE_E2EE" });
+    let (s, v) = world
+        .customer(
+            reqwest::Method::PUT,
+            "/v1/messaging/policy",
+            Some(json!({ "expectedVersion": current["version"], "policy": {
+                "contexts": { "DIRECT": both, "GROUP": both,
+                    "MEETING": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
+                "attachments": { "enabled": true, "managedScanRequired": false } } })),
+        )
+        .await;
+    assert_eq!(s, 200, "{v}");
+    world.stop_messaging().await;
+    world.start_messaging().await;
+
+    let app = meeting_app(&world).await;
+    let alice = app.user("alice").await;
+    let bob = app.user("bob").await;
+    let mallory = app.user("mallory").await;
+    let (org, other) = (Uuid::new_v4(), Uuid::new_v4());
+    for (id, slug) in [(org, "web-e2e"), (other, "web-e2e-other")] {
+        app.db
+            .conn
+            .execute_unprepared(&format!(
+                "INSERT INTO organizations (id, name, slug, status, created_at, updated_at, profile_policy) \
+                 VALUES ('{id}', '{slug}', '{slug}-{}', 'ACTIVE', now(), now(), '{{}}')",
+                &Uuid::new_v4().simple().to_string()[..6]
+            ))
+            .await
+            .unwrap();
+    }
+    for (o, u) in [(org, alice.id), (org, bob.id), (other, mallory.id)] {
+        app.db
+            .conn
+            .execute_unprepared(&format!(
+                "INSERT INTO organization_memberships (id, organization_id, user_id, role, status, created_at, updated_at) \
+                 VALUES ('{}', '{o}', '{u}', 'MEMBER', 'ACTIVE', now(), now())",
+                Uuid::new_v4()
+            ))
+            .await
+            .unwrap();
+    }
+    let name = |id: Uuid| {
+        let conn = app.db.conn.clone();
+        async move {
+            conn.query_one(Statement::from_sql_and_values(
+                sea_orm::DbBackend::Postgres,
+                "SELECT username FROM users WHERE id = $1",
+                vec![id.into()],
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get_by_index::<String>(0)
+            .unwrap()
+        }
+    };
+    let users = json!({
+        "alice": { "token": alice.token, "id": alice.id, "email": alice.email, "name": name(alice.id).await },
+        "bob": { "token": bob.token, "id": bob.id, "email": bob.email, "name": name(bob.id).await },
+        "mallory": { "token": mallory.token, "id": mallory.id, "email": mallory.email, "name": name(mallory.id).await },
+    });
+    // The Meeting Service as the browser meets it: the real router behind the production
+    // CORS policy, on the port the web build targets.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:18080")
+        .await
+        .unwrap();
+    let router = app
+        .router
+        .clone()
+        .layer(backend::routes::cors_layer(&[web_origin.to_string()]));
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let um = um(&app);
+    let worker = tokio::spawn(async move {
+        loop {
+            let _ = um.sync_once().await;
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    });
+
+    let secret = format!("cfmeet-e2e-{}", Uuid::new_v4().simple());
+    let evidence = world.dir.join("web-messaging-evidence.json");
+    let status = tokio::process::Command::new("node")
+        .arg("--test")
+        .arg("--test-reporter=spec")
+        .arg("tests/messaging-e2e.browser.mjs")
+        .current_dir(&app_dir)
+        .env("E2E_WEB_PORT", "3100")
+        .env("E2E_USERS", users.to_string())
+        .env("E2E_SECRET", &secret)
+        .env("E2E_EVIDENCE", &evidence)
+        .status()
+        .await
+        .unwrap();
+    worker.abort();
+    if let Ok(e) = std::fs::read_to_string(&evidence) {
+        println!("EVIDENCE web-messaging {e}");
+    }
+    assert!(status.success(), "the browser journey failed");
+
+    // Server-side evidence, from Messaging's OWN database (Meeting never reads it).
+    let e2ee_messages = world
+        .m_scalar(
+            "SELECT count(*) FROM messaging_messages m JOIN messaging_conversations c ON c.id = m.conversation_id \
+             WHERE c.security_profile = 'PRIVATE_E2EE' AND m.mls_ciphertext IS NOT NULL",
+        )
+        .await;
+    assert!(
+        e2ee_messages >= 10,
+        "encrypted messages were stored as ciphertext: {e2ee_messages}"
+    );
+    let leaks = world
+        .m_scalar(&format!(
+            "SELECT count(*) FROM messaging_messages WHERE position(convert_to('{secret}', 'UTF8') in coalesce(mls_ciphertext, ''::bytea)) > 0 \
+                OR position(convert_to('{secret}', 'UTF8') in coalesce(managed_sealed, ''::bytea)) > 0"
+        ))
+        .await;
+    assert_eq!(
+        leaks, 0,
+        "the exchanged phrase never reached the server in the clear"
+    );
+    let e2ee_attachments = world
+        .m_scalar(
+            "SELECT count(*) FROM messaging_attachments WHERE security_profile = 'PRIVATE_E2EE' AND state = 'READY' \
+               AND media_type = 'application/octet-stream' AND safe_file_name IS NULL AND crypto_format IS NOT NULL",
+        )
+        .await;
+    assert!(
+        e2ee_attachments >= 1,
+        "the attachment is stored as nameless ciphertext"
+    );
+    let devices = world
+        .m_scalar("SELECT count(*) FROM messaging_devices WHERE status = 'REVOKED'")
+        .await;
+    assert!(
+        devices >= 2,
+        "the removed device and the signed-out browser's device are revoked server-side"
+    );
+    println!(
+        "EVIDENCE web-messaging-server e2ee_messages={e2ee_messages} plaintext_hits={leaks} e2ee_attachments={e2ee_attachments} revoked_devices={devices}"
     );
 }

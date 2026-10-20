@@ -43,6 +43,35 @@ pub enum BridgeOperation {
     RevokeAllSessions,
 }
 
+/// Reasons a user may give for revoking one of their own devices (Messaging's list minus
+/// ADMINISTRATIVE, which is an operator action). Default: USER_REQUESTED.
+pub const USER_REVOCATION_REASONS: &[&str] = &[
+    "USER_REQUESTED",
+    "LOST_OR_STOLEN",
+    "COMPROMISED",
+    "REPLACED",
+];
+
+fn revocation_reason(body: Option<&Value>) -> ApiResult<&'static str> {
+    match body.and_then(|b| b.get("reason")) {
+        None => Ok("USER_REQUESTED"),
+        Some(Value::String(r)) => USER_REVOCATION_REASONS
+            .iter()
+            .copied()
+            .find(|x| x == r)
+            .ok_or_else(|| {
+                ApiError::domain(
+                    ErrorCode::ValidationError,
+                    "reason must be one of USER_REQUESTED, LOST_OR_STOLEN, COMPROMISED, REPLACED",
+                )
+            }),
+        Some(_) => Err(ApiError::domain(
+            ErrorCode::ValidationError,
+            "reason must be a string",
+        )),
+    }
+}
+
 impl BridgeOperation {
     fn messaging_path(&self) -> String {
         let base = "/internal/v1/delegated/v1/messaging";
@@ -177,7 +206,11 @@ impl UnifiedMessaging {
             kind: PrincipalKind::NativeCfUser,
         };
         let body = match (op, body) {
-            (BridgeOperation::RevokeAllSessions | BridgeOperation::RevokeDevice(_), _) => None,
+            (BridgeOperation::RevokeAllSessions, _) => None,
+            // Messaging requires the reason; a client may name one, nothing else is relayed.
+            (BridgeOperation::RevokeDevice(_), b) => Some(json!({
+                "reason": revocation_reason(b.as_ref())?,
+            })),
             (_, Some(b)) => Some(b),
             (_, None) => Some(json!({})),
         };

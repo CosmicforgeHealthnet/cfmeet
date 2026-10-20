@@ -28,6 +28,12 @@ export default async function RootLayout({
   const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Parsed before any framework chunk loads: the restricted Trusted Types default
+            policy (public/security/trusted-types-default.js). */}
+        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+        <script src="/security/trusted-types-default.js" nonce={nonce} />
+      </head>
       <body className={`${inter.variable} font-sans antialiased`}>
         <ThemeProvider nonce={nonce}>
           <QueryProvider>{children}</QueryProvider>

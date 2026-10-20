@@ -1,9 +1,7 @@
-use axum::http::{header, Method}; // Add this line
 use axum::Router;
 use backend::config::logging;
 use dotenvy::dotenv;
 use sea_orm::{ConnectOptions, Database};
-use tower_http::cors::CorsLayer;
 
 use backend::{
     config::{AppConfig, EmailConfig, LiveKitConfig, RedisConfig},
@@ -181,39 +179,11 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Configure CORS - allow frontend(s) to access API
-    let allowed_origins: Vec<axum::http::HeaderValue> = app_config
-        .frontend_urls
-        .iter()
-        .filter_map(|url| url.parse().ok())
-        .collect();
-
     tracing::info!(
         "🔒 CORS configured for origins: {:?}",
         app_config.frontend_urls
     );
-
-    let cors = CorsLayer::new()
-        .allow_origin(allowed_origins)
-        .allow_methods([
-            Method::GET,
-            Method::POST,
-            Method::PUT,
-            Method::DELETE,
-            Method::OPTIONS,
-            Method::PATCH,
-        ])
-        // Specify the exact headers your frontend will send
-        .allow_headers([
-            header::AUTHORIZATION,
-            header::CONTENT_TYPE,
-            header::ACCEPT,
-            header::ORIGIN,
-            header::HeaderName::from_static("x-participant-token"),
-            header::HeaderName::from_static("x-request-id"),
-            header::HeaderName::from_static("x-client-kind"),
-        ])
-        .expose_headers([header::HeaderName::from_static("x-request-id")])
-        .allow_credentials(true);
+    let cors = backend::routes::cors_layer(&app_config.frontend_urls);
 
     // Start server
     let addr = app_config.server_addr();

@@ -132,10 +132,12 @@ pub async fn publish_key_packages(
     .await
 }
 
-/// Revoke one of the caller's devices.
+/// Revoke one of the caller's devices (optional `reason`: USER_REQUESTED by default,
+/// LOST_OR_STOLEN, COMPROMISED or REPLACED).
 #[utoipa::path(
     post, path = "/api/v2/messaging/devices/{deviceId}/revoke", tag = "Messaging (v2)", operation_id = "v2_messaging_revoke_device",
     params(("deviceId" = Uuid, Path, description = "Device id")),
+    request_body = Object,
     responses((status = 200, description = "Revoked (Messaging contract)", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope)),
     security(("bearer_auth" = []))
 )]
@@ -143,8 +145,17 @@ pub async fn revoke_device(
     State(state): State<AppState>,
     actor: ActorContext,
     V2Path(device): V2Path<Uuid>,
+    body: Bytes,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
-    relay(&state, &actor, BridgeOperation::RevokeDevice(device), None).await
+    let body =
+        if body.is_empty() {
+            None
+        } else {
+            Some(serde_json::from_slice::<Value>(&body).map_err(|_| {
+                ApiError::domain(ErrorCode::ValidationError, "The body must be JSON")
+            })?)
+        };
+    relay(&state, &actor, BridgeOperation::RevokeDevice(device), body).await
 }
 
 /// Issue a short-lived, device-bound Messaging client token (for the realtime gateway).

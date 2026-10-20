@@ -1,0 +1,28 @@
+[package]
+name = "cf-messaging-crypto-wasm"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.91"
+publish = false
+description = "The CF Meet Messaging client crypto core for browsers: wasm-bindgen bindings over cf-messaging-crypto (feature `web`) shipped with apps/web (one device per dedicated Web Worker). Thin by design: argument conversion and fail-closed checks, no protocol logic."
+
+# Stand-alone workspace (like the crypto core it wraps).
+[workspace]
+
+[lib]
+# cdylib: the shipped module; rlib: re-exported by the Chromium test harness.
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[dependencies]
+cf-messaging-crypto = { path = "..", features = ["web"] }
+# Pinned to the version in the crypto core's lockfile (and the wasm-bindgen CLI CI installs).
+wasm-bindgen = "=0.2.129"
+uuid = "1"
+zeroize = "1"
+
+[profile.release]
+opt-level = "s"
+debug = false
+codegen-units = 1
+lto = true

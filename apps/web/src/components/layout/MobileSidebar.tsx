@@ -4,7 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 import { useRouter, usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Home, Video, Calendar, Code2, Settings, Menu, X } from "lucide-react";
+import { Home, Video, Calendar, MessageSquare, Code2, Settings, Menu, X } from "lucide-react";
 import ProfileMenu from "./ProfileMenu";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 
@@ -12,6 +12,7 @@ const menu = [
   { label: "Dashboard", icon: Home, href: "/dashboard" },
   { label: "Meetings", icon: Video, href: "/dashboard/meetings" },
   { label: "Schedule", icon: Calendar, href: "/dashboard/schedule" },
+  { label: "Messages", icon: MessageSquare, href: "/dashboard/messages" },
   { label: "Developers", icon: Code2, href: "/dashboard/developers" },
   { label: "Settings", icon: Settings, href: "/dashboard/settings" },
 ];
