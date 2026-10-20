@@ -19,6 +19,12 @@ export function proxy(request: NextRequest) {
       request.headers.get("x-forwarded-proto") === "https",
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
     extraConnectSrc: process.env.CSP_EXTRA_CONNECT_SRC,
+    // A WebAssembly exception is permitted only for the audited messaging UI
+    // and only when explicitly enabled. All other pages retain no-eval CSP.
+    allowMessagingWasm:
+      process.env.CFMEET_WEB_MESSAGING_WASM === "enabled" &&
+      (request.nextUrl.pathname === "/dashboard/messages" ||
+        request.nextUrl.pathname.startsWith("/dashboard/messages/")),
   });
   const headers = new Headers(request.headers);
   headers.set("x-nonce", nonce);
