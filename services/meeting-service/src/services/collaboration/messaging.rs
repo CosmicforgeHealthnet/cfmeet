@@ -149,6 +149,18 @@ impl Cursor {
 /// Storage adapter (replaceable by Phase 5 Unified Messaging).
 #[async_trait]
 pub trait MessageStore: Send + Sync {
+    /// Work a store must do BEFORE the send transaction takes its row locks (the
+    /// conference and the sender): e.g. resolving the scope's conversation and its
+    /// membership, whose rows reference those locked rows. Default: nothing.
+    async fn prepare(
+        &self,
+        _conference_id: Uuid,
+        _breakout_room_id: Option<Uuid>,
+        _sender_participant_id: Uuid,
+        _recipient_participant_id: Option<Uuid>,
+    ) -> ApiResult<()> {
+        Ok(())
+    }
     async fn insert(&self, txn: &DatabaseTransaction, m: NewMessage) -> ApiResult<StoredMessage>;
     /// One page, newest first, strictly older than `before`. `reader` scopes private
     /// conversations to (reader, peer).
@@ -405,6 +417,11 @@ pub fn check_send_policy(
 pub struct MeetingMessagingService {
     core: Core,
     store: Arc<dyn MessageStore>,
+    /// Part V H: Unified Messaging (main-room chat authority once cut over).
+    unified: Option<(
+        Arc<crate::services::unified_messaging::UnifiedMessaging>,
+        Arc<dyn MessageStore>,
+    )>,
 }
 
 impl MeetingMessagingService {
@@ -413,7 +430,47 @@ impl MeetingMessagingService {
     }
 
     pub fn with_store(core: Core, store: Arc<dyn MessageStore>) -> Self {
-        Self { core, store }
+        Self {
+            core,
+            store,
+            unified: None,
+        }
+    }
+
+    /// Routes main-room chat through Unified Messaging while it is authoritative.
+    pub fn with_unified(
+        mut self,
+        unified: Option<Arc<crate::services::unified_messaging::UnifiedMessaging>>,
+    ) -> Self {
+        self.unified = unified.map(|um| {
+            let store: Arc<dyn MessageStore> = Arc::new(
+                crate::services::unified_messaging::store::UnifiedMessageStore::new(um.clone()),
+            );
+            (um, store)
+        });
+        self
+    }
+
+    /// The store of meeting chat now, every scope (legacy until the operator cuts over).
+    async fn main_store(&self) -> ApiResult<Arc<dyn MessageStore>> {
+        if let Some((um, store)) = &self.unified {
+            if um.state().await?.messaging_authoritative() {
+                return Ok(store.clone());
+            }
+        }
+        Ok(self.store.clone())
+    }
+
+    /// A legacy write that lost a race with the cutover is refused by the database
+    /// (`CHAT_MIGRATED`); the client retries and lands on Messaging.
+    fn cutover_race(e: ApiError) -> ApiError {
+        if e.to_string().contains("CHAT_MIGRATED") {
+            return ApiError::domain(
+                ErrorCode::ChatUnavailable,
+                "Chat is switching over; please retry",
+            );
+        }
+        e
     }
 
     async fn active_breakout(
@@ -513,6 +570,16 @@ impl MeetingMessagingService {
             .check(RateAction::Chat, &me.id.to_string())
             .await?;
 
+        // Every chat scope follows the migration (main room, breakout rooms, private).
+        let store = self.main_store().await?;
+        store
+            .prepare(
+                conference_id,
+                req.breakout_id,
+                me.id,
+                recipient.as_ref().map(|p| p.id),
+            )
+            .await?;
         let txn = self.core.db.begin().await?;
         let conference = lock_conference(&txn, conference_id).await?;
         // Re-read sender, policy and context under the conference lock: a restriction
@@ -583,8 +650,7 @@ impl MeetingMessagingService {
                 ));
             }
         }
-        let stored = self
-            .store
+        let stored = store
             .insert(
                 &txn,
                 NewMessage {
@@ -600,7 +666,8 @@ impl MeetingMessagingService {
                     body,
                 },
             )
-            .await?;
+            .await
+            .map_err(Self::cutover_race)?;
         emit_to(
             &txn,
             OutboxRecord {
@@ -629,7 +696,9 @@ impl MeetingMessagingService {
             )
             .await?;
         }
-        txn.commit().await?;
+        txn.commit()
+            .await
+            .map_err(|e| Self::cutover_race(e.into()))?;
         inc(&CM.chat_sends);
         Ok(view(&stored, &sender.display_name))
     }
@@ -693,8 +762,8 @@ impl MeetingMessagingService {
                 None => None,
             };
         let limit = limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE);
-        let rows = self
-            .store
+        let store = self.main_store().await?;
+        let rows = store
             .page(
                 &self.core.db,
                 conference_id,
@@ -762,11 +831,20 @@ impl MeetingMessagingService {
         let c = Collab::load(&self.core, ctx, conference_id).await?;
         let txn = self.core.db.begin().await?;
         let conference = lock_conference(&txn, conference_id).await?;
-        let m = self
-            .store
-            .find(&txn, conference_id, message_id)
-            .await?
-            .ok_or_else(|| ApiError::domain(ErrorCode::MessageNotFound, "Message not found"))?;
+        // Migrated messages (any scope) live in Messaging; older unmigrated rows here.
+        let main = self.main_store().await?;
+        let (m, store) = match main.find(&txn, conference_id, message_id).await? {
+            Some(m) if !Arc::ptr_eq(&main, &self.store) => (m, main),
+            _ => (
+                self.store
+                    .find(&txn, conference_id, message_id)
+                    .await?
+                    .ok_or_else(|| {
+                        ApiError::domain(ErrorCode::MessageNotFound, "Message not found")
+                    })?,
+                self.store.clone(),
+            ),
+        };
         let own = c.participant.as_ref().map(|p| p.id) == Some(m.sender_participant_id);
         if m.recipient_participant_id.is_some() {
             let party = c.participant.as_ref().map(|p| p.id);
@@ -796,8 +874,7 @@ impl MeetingMessagingService {
                 ));
             }
         }
-        let changed = self
-            .store
+        let changed = store
             .soft_delete(&txn, conference_id, message_id, &c.audit.reference())
             .await?;
         if changed {

@@ -30,6 +30,7 @@ pub mod error;
 pub mod events;
 pub mod incidents;
 pub mod internal;
+pub mod messaging_authority;
 pub mod metrics;
 pub mod middleware;
 pub mod models;

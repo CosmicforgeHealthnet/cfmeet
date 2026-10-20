@@ -8,6 +8,7 @@ mod redis;
 
 pub use app::AppConfig;
 pub use email::EmailConfig;
+pub(crate) use features::{env_bool, env_num};
 pub use features::{FeatureFlags, MeetingV2Config};
 pub use livekit::LiveKitConfig;
 pub use redis::RedisConfig;

@@ -17,8 +17,9 @@ use chrono::Utc;
 )]
 pub async fn get_app_info() -> impl IntoResponse {
     let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "dev".to_string());
-    let frontend_url = std::env::var("APP_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
-    
+    let frontend_url =
+        std::env::var("APP_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+
     let info = json!({
         "name": "CosmicForge RTC",
         "version": env!("CARGO_PKG_VERSION"),

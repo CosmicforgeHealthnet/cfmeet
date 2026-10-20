@@ -1,7 +1,7 @@
 # CF Meet — root developer commands.
 # Each target delegates to the app/service's own toolchain. services/meeting-service/,
 # services/calling/, services/platform-access/, services/numbering/, services/privacy-relay/,
-# services/telephony/, services/sms-gateway/ and apps/web/ remain independently buildable
+# services/telephony/, services/sms-gateway/, services/messaging/ and apps/web/ remain independently buildable
 # and deployable.
 # Shared code lives in packages/ (contracts, service-auth); no service depends on another.
 
@@ -12,6 +12,8 @@ NUMBERING       := services/numbering
 PRIVACY_RELAY   := services/privacy-relay
 TELEPHONY       := services/telephony
 SMS_GATEWAY     := services/sms-gateway
+MESSAGING       := services/messaging
+MESSAGING_CRYPTO := packages/messaging-crypto
 WEB             := apps/web
 SERVICE_AUTH    := packages/service-auth
 CONTRACTS       := packages/contracts
@@ -34,6 +36,7 @@ PLATFORM_ACCESS_TEST_ENV = PLATFORM_ACCESS_BIN=$(call bin_dir,$(PLATFORM_ACCESS)
         telephony telephony-migrate telephony-test telephony-lint telephony-build telephony-sip-cert \
         telephony-integration communications-e2e database-isolation \
         sms-gateway sms-gateway-migrate sms-gateway-test sms-gateway-lint sms-gateway-build \
+        messaging messaging-migrate messaging-test messaging-lint messaging-build messaging-crypto-test \
         service-auth-test service-auth-lint contracts-validate contracts-test contracts-lint \
         service-boundaries secret-scan
 
@@ -149,6 +152,27 @@ sms-gateway-lint: ## fmt + clippy for the SMS Gateway
 
 sms-gateway-build: ## Build the SMS Gateway
 	cd $(SMS_GATEWAY) && cargo build --workspace
+
+messaging-migrate: ## Apply Messaging database migrations (services/messaging/.env)
+	cd $(MESSAGING) && cargo run -p messaging-migration -- up
+
+messaging: ## Run the Messaging service (Platform Access required)
+	cd $(MESSAGING) && cargo run --bin messaging
+
+messaging-test: platform-access-bins ## Run Messaging tests (requires TEST_DATABASE_URL; the e2e runs the real Platform Access)
+	cd $(MESSAGING) && $(PLATFORM_ACCESS_TEST_ENV) cargo test --workspace --no-fail-fast
+
+messaging-lint: ## fmt + clippy for Messaging and its crypto core
+	cd $(MESSAGING) && cargo fmt --all -- --check
+	cd $(MESSAGING) && cargo clippy --workspace --all-targets -- -D warnings
+	cd $(MESSAGING_CRYPTO) && cargo fmt --all -- --check
+	cd $(MESSAGING_CRYPTO) && cargo clippy --all-targets --all-features -- -D warnings
+
+messaging-build: ## Build Messaging
+	cd $(MESSAGING) && cargo build --workspace
+
+messaging-crypto-test: ## Test the Messaging crypto core (real OpenMLS objects)
+	cd $(MESSAGING_CRYPTO) && cargo test --all-features
 
 telephony-migrate: ## Apply Telephony database migrations (services/telephony/.env)
 	cd $(TELEPHONY) && cargo run -p telephony-migration -- up

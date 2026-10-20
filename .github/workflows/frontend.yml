@@ -4,7 +4,7 @@ name: Frontend
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
     paths:
       - "apps/web/**"
       - ".github/workflows/frontend.yml"
@@ -42,6 +42,20 @@ jobs:
       - name: npm ci
         run: npm ci
 
+      # Device-side Messaging transport: ticket, replay, duplicate, auth boundary.
+      - name: Messaging realtime transport tests
+        run: node --experimental-strip-types --test tests/messaging-realtime.test.mjs
+
+      # A CF Meet browser session may mint a short-lived, device-bound token only
+      # through Meeting Service's verified-login bridge, never an internal credential.
+      - name: Messaging client session bridge tests
+        run: node --experimental-strip-types --test tests/messaging-session.test.mjs
+
+      # The CSP builder (nonce scripts, Trusted Types, no plugins / framing) and a static
+      # guard: no DOM XSS sink (innerHTML, dangerouslySetInnerHTML, eval, ...) in src/.
+      - name: CSP builder and XSS-sink guard
+        run: node --experimental-strip-types --test tests/csp.test.mjs
+
       # Pre-existing ESLint errors were imported from rtc_frontend unchanged.
       # Reported but non-blocking until they are fixed in a dedicated change.
       - name: lint
@@ -56,5 +70,11 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: http://localhost:8080/api/v1
 
-      # No test script is defined in apps/web/package.json; add a step here
-      # when one exists.
+      # The BUILT app in real Chromium: every page carries a fresh-nonce CSP with Trusted
+      # Types and the security headers and hydrates with no violation; injected inline
+      # script, untyped DOM sinks, eval and framing are refused.
+      - name: Install Chromium (Playwright, pinned in package-lock)
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser security — CSP, Trusted Types, XSS sinks, framing (Chromium)
+        run: node --test tests/browser-security.test.mjs

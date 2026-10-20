@@ -48,6 +48,7 @@ error_codes! {
     RateLimited = "RATE_LIMITED" => TOO_MANY_REQUESTS, "Too many requests.";
     InternalAuthenticationFailed = "INTERNAL_AUTHENTICATION_FAILED" => UNAUTHORIZED, "Internal service authentication failed.";
     InternalPermissionDenied = "INTERNAL_PERMISSION_DENIED" => FORBIDDEN, "The caller is not permitted to perform this operation.";
+    DelegatedContextRequired = "DELEGATED_CONTEXT_REQUIRED" => FORBIDDEN, "The operation requires a signed delegated platform context.";
     CallbackRejected = "CALLBACK_REJECTED" => UNAUTHORIZED, "The provider callback was not authenticated.";
     IdempotencyKeyRequired = "IDEMPOTENCY_KEY_REQUIRED" => BAD_REQUEST, "An Idempotency-Key header is required.";
     IdempotencyKeyReused = "IDEMPOTENCY_KEY_REUSED" => UNPROCESSABLE_ENTITY, "The idempotency key was used for a different request.";

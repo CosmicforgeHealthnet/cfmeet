@@ -61,6 +61,9 @@ pub mod names {
     /// Receive SMS message events (`sms.*` webhooks; the SMS Gateway's reads use the same
     /// Platform Access scope, Part IV N / O).
     pub const SMS_READ: &str = "sms.read";
+    /// Receive Messaging conversation and message events (`conversation.*`, `message.*`
+    /// webhooks; Messaging's reads use the same Platform Access scope, Part V I).
+    pub const MESSAGES_READ: &str = "messages.read";
 
     /// Every scope Calling enforces. Each must be registered by Platform Access (the
     /// scope registry is Platform Access's; Calling only checks granted names).
@@ -89,6 +92,7 @@ pub mod names {
         WEBHOOKS_MANAGE,
         USAGE_READ,
         SMS_READ,
+        MESSAGES_READ,
     ];
 }
 

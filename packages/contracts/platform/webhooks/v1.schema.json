@@ -76,7 +76,15 @@
         "sms.delivered",
         "sms.failed",
         "sms.unknown",
-        "sms.blocked"
+        "sms.blocked",
+        "conversation.created",
+        "conversation.updated",
+        "conversation.member_added",
+        "conversation.member_removed",
+        "message.created",
+        "message.deleted",
+        "message.moderated",
+        "message.expired"
       ]
     },
     "CreateWebhookRequest": {
@@ -468,7 +476,19 @@
               "targetKind",
               "targetRef",
               "failureCode",
-              "blockedReason"
+              "blockedReason",
+              "conversationId",
+              "conversationKind",
+              "securityProfile",
+              "lifecycleState",
+              "previousState",
+              "conversationVersion",
+              "sequence",
+              "messageKind",
+              "senderPrincipalId",
+              "securityProvenance",
+              "role",
+              "channel"
             ]
           },
           "additionalProperties": {

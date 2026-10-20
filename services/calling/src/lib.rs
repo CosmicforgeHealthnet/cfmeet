@@ -37,6 +37,7 @@ pub mod models;
 pub mod numbering;
 pub mod platform;
 pub mod privacy_relay;
+pub mod public_docs;
 pub mod retention;
 pub mod routes;
 pub mod routing;

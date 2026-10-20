@@ -5,7 +5,7 @@
   "description": "Shared vocabulary for cross-service CF Meet contracts. Definitions only: the root schema places no constraints; contracts reference the $defs below.",
   "$defs": {
     "ServiceId": {
-      "description": "Stable, product-independent identity of a deployable CF Meet backend service, e.g. cfmeet.calling, cfmeet.privacy-relay, cfmeet.telephony, cfmeet.platform-access, cfmeet.numbering, cfmeet.sms-gateway. Never a wildcard.",
+      "description": "Stable, product-independent identity of a deployable CF Meet backend service, e.g. cfmeet.calling, cfmeet.privacy-relay, cfmeet.telephony, cfmeet.platform-access, cfmeet.numbering, cfmeet.sms-gateway, cfmeet.messaging. Never a wildcard.",
       "type": "string",
       "maxLength": 64,
       "pattern": "^cfmeet\\.[a-z][a-z0-9]*(-[a-z0-9]+)*$"
@@ -111,7 +111,13 @@
         "number-sms-route.resolve",
         "number-usage.report",
         "number-risk.report",
-        "number-relay.lease"
+        "number-relay.lease",
+        "platform-principal.ensure",
+        "messaging-application.delegate",
+        "messaging-meeting.sync",
+        "messaging-context-authority.apply",
+        "messaging-sms-bridge.deliver",
+        "sms-bridge.submit"
       ]
     }
   }

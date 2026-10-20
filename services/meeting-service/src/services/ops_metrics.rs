@@ -77,6 +77,21 @@ counters!(
     shadow_reads,
     shadow_mismatches,
     shadow_failures,
+    // Part V H: Unified Messaging integration (bounded, label-free).
+    unified_messaging_calls_ok,
+    unified_messaging_calls_refused,
+    unified_messaging_calls_unavailable,
+    unified_messaging_principals_ensured,
+    unified_messaging_conversations_linked,
+    unified_messaging_members_synced,
+    unified_messaging_messages_sent,
+    unified_messaging_messages_mirrored,
+    unified_messaging_mirror_failures,
+    unified_messaging_parity_mismatches,
+    unified_messaging_rollback_copies,
+    unified_messaging_revocations_done,
+    unified_messaging_revocations_failed,
+    unified_messaging_cutover_transitions,
 );
 
 pub static OPS_METRICS: OpsMetrics = OpsMetrics::new();
@@ -87,4 +102,14 @@ pub fn inc(counter: &AtomicU64) {
 
 pub fn add(counter: &AtomicU64, n: u64) {
     counter.fetch_add(n, Ordering::Relaxed);
+}
+
+/// Outcome of one Unified Messaging call (the peer name is deliberately not a label).
+pub fn unified_messaging_call(_peer: &'static str, outcome: &'static str) {
+    let m = &OPS_METRICS;
+    inc(match outcome {
+        "ok" => &m.unified_messaging_calls_ok,
+        "refused" => &m.unified_messaging_calls_refused,
+        _ => &m.unified_messaging_calls_unavailable,
+    });
 }

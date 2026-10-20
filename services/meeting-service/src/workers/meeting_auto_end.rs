@@ -24,13 +24,13 @@ use sea_orm::{
 use tokio::sync::watch;
 use tokio::time::{sleep, Duration};
 
-use crate::utils::now_utc;
 use crate::models::{
     chat_messages::{self, Entity as ChatMessages},
     meetings::{self, Entity as Meetings, MeetingStatus},
     participants::{self, Entity as Participants},
     session_logs::{self, EventType},
 };
+use crate::utils::now_utc;
 
 // ============================================================================
 // CONFIGURATION

@@ -134,7 +134,11 @@ async fn migrations_apply_roll_back_and_reapply_on_an_empty_database() {
     sms_gateway_migration::Migrator::up(&db.conn, None)
         .await
         .unwrap();
-    assert_eq!(count(&db).await, 10, "ten sms_ tables");
+    assert_eq!(
+        count(&db).await,
+        12,
+        "twelve sms_ tables (incl. the Part V H bridge)"
+    );
     assert!(
         sms_gateway_migration::Migrator::get_pending_migrations(&db.conn)
             .await
@@ -148,7 +152,7 @@ async fn migrations_apply_roll_back_and_reapply_on_an_empty_database() {
     sms_gateway_migration::Migrator::up(&db.conn, None)
         .await
         .unwrap();
-    assert_eq!(count(&db).await, 10, "re-applies cleanly");
+    assert_eq!(count(&db).await, 12, "re-applies cleanly");
 }
 
 #[tokio::test]

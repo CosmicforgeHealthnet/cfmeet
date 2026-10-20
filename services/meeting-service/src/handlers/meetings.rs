@@ -15,9 +15,9 @@ use validator::Validate;
 
 use crate::{
     dto::{
-        ApiKeyClaims, ApiResponse, CreateMeetingRequest,
-        EndMeetingResponse, JoinMeetingRequest, JoinMeetingResponse, ListMeetingsQuery,
-        MeetingResponse, PaginatedResponse, PaginationMeta, UpdateMeetingRequest,
+        ApiKeyClaims, ApiResponse, CreateMeetingRequest, EndMeetingResponse, JoinMeetingRequest,
+        JoinMeetingResponse, ListMeetingsQuery, MeetingResponse, PaginatedResponse, PaginationMeta,
+        UpdateMeetingRequest,
     },
     error::{ApiError, ApiResult},
     models::{
@@ -31,7 +31,10 @@ use crate::{
         auth::Claims,
     },
     state::AppState,
-    utils::{format_duration, format_role, format_status, format_utc, format_utc_opt, generate_meeting_identifier, local_to_utc, now_utc},
+    utils::{
+        format_duration, format_role, format_status, format_utc, format_utc_opt,
+        generate_meeting_identifier, local_to_utc, now_utc,
+    },
 };
 
 /// Create an instant public meeting
@@ -71,7 +74,9 @@ pub async fn create_instant_meeting(
     // Generate meeting identifier
     let meeting_identifier = generate_meeting_identifier();
     let meeting_id = Uuid::new_v4();
-    let title = payload.title.unwrap_or_else(|| "Instant Meeting".to_string());
+    let title = payload
+        .title
+        .unwrap_or_else(|| "Instant Meeting".to_string());
 
     // Create meeting with status = ongoing (starts immediately)
     let meeting = meetings::ActiveModel {
@@ -510,7 +515,9 @@ pub async fn update_meeting(
 
     // Convert local times to UTC if timezone is provided
     let start_time_utc = match (payload.start_time, &payload.timezone) {
-        (Some(st), Some(tz)) => Some(local_to_utc(st, tz).map_err(|e| ApiError::ValidationError(e))?),
+        (Some(st), Some(tz)) => {
+            Some(local_to_utc(st, tz).map_err(|e| ApiError::ValidationError(e))?)
+        }
         (Some(_), None) => {
             return Err(ApiError::ValidationError(
                 "timezone is required when updating start_time".to_string(),
@@ -520,7 +527,9 @@ pub async fn update_meeting(
     };
 
     let end_time_utc = match (payload.end_time, &payload.timezone) {
-        (Some(et), Some(tz)) => Some(local_to_utc(et, tz).map_err(|e| ApiError::ValidationError(e))?),
+        (Some(et), Some(tz)) => {
+            Some(local_to_utc(et, tz).map_err(|e| ApiError::ValidationError(e))?)
+        }
         (Some(_), None) => {
             return Err(ApiError::ValidationError(
                 "timezone is required when updating end_time".to_string(),
@@ -766,12 +775,10 @@ async fn join_meeting_internal(
     // Prevent joining if meeting status is still "Scheduled" and current time is before start time
     if meeting.status == MeetingStatus::Scheduled && now < start_time {
         let minutes_until_start = (start_time - now).num_minutes();
-        return Err(ApiError::Conflict(
-            format!(
-                "Meeting hasn't started yet. Please try again in {}.",
-                format_duration(minutes_until_start)
-            )
-        ));
+        return Err(ApiError::Conflict(format!(
+            "Meeting hasn't started yet. Please try again in {}.",
+            format_duration(minutes_until_start)
+        )));
     }
 
     // Check if meeting has passed its scheduled end time
@@ -872,8 +879,12 @@ async fn join_meeting_internal(
 
                 // Helper to generate guest tokens if needed
                 let (access_token, refresh_token) = if existing.user_id.is_none() {
-                    let acc = state.jwt_service.generate_access_token(existing.id, "guest")?;
-                    let reference = state.jwt_service.generate_refresh_token(existing.id, "guest")?;
+                    let acc = state
+                        .jwt_service
+                        .generate_access_token(existing.id, "guest")?;
+                    let reference = state
+                        .jwt_service
+                        .generate_refresh_token(existing.id, "guest")?;
                     (Some(acc), Some(reference))
                 } else {
                     (None, None)
@@ -935,11 +946,15 @@ async fn join_meeting_internal(
         // But if we want them to sustain a session, we should probably give them a token.
         // However, `auth_middleware` checks for "guest" role against `Participants`.
         // If they are in `Participants` table, they are valid.
-        
+
         // Let's issue tokens for guests in waiting room too, so they can poll cleanly.
         let (access_token, refresh_token) = if user_id.is_none() {
-            let acc = state.jwt_service.generate_access_token(participant_id, "guest")?;
-            let reference = state.jwt_service.generate_refresh_token(participant_id, "guest")?;
+            let acc = state
+                .jwt_service
+                .generate_access_token(participant_id, "guest")?;
+            let reference = state
+                .jwt_service
+                .generate_refresh_token(participant_id, "guest")?;
             (Some(acc), Some(reference))
         } else {
             (None, None)
@@ -1009,8 +1024,12 @@ async fn join_meeting_internal(
 
     // Generate guest tokens if needed
     let (access_token, refresh_token) = if user_id.is_none() {
-        let acc = state.jwt_service.generate_access_token(participant_id, "guest")?;
-        let reference = state.jwt_service.generate_refresh_token(participant_id, "guest")?;
+        let acc = state
+            .jwt_service
+            .generate_access_token(participant_id, "guest")?;
+        let reference = state
+            .jwt_service
+            .generate_refresh_token(participant_id, "guest")?;
         (Some(acc), Some(reference))
     } else {
         (None, None)

@@ -7,7 +7,7 @@ name: Mobile
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
     paths:
       - "apps/mobile/**"
       - ".github/workflows/mobile.yml"
@@ -57,6 +57,12 @@ jobs:
           cache: npm
           cache-dependency-path: apps/mobile/package-lock.json
 
+      # Reject mismatched React/React DOM peer versions and stale npm lock root
+      # before running the real clean install.
+      - name: Verify React peer and lockfile alignment
+        run: |
+          node -e 'const p=require("./package.json");const l=require("./package-lock.json");const deps=l.packages?.[""]?.dependencies||{};if(!p.dependencies.react||p.dependencies.react!==p.dependencies["react-dom"]||deps.react!==p.dependencies.react||deps["react-dom"]!==p.dependencies["react-dom"]){console.error("Mobile React, react-dom, and package-lock.json must agree");process.exit(1)}'
+
       - name: Install dependencies
         run: npm ci
 
@@ -103,7 +109,7 @@ jobs:
     name: EAS Build (Production)
     needs: lint
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.profile == 'production'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.profile == 'production' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
 
@@ -136,7 +142,7 @@ jobs:
     name: Submit to App Stores
     needs: build-production
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.profile == 'production'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.profile == 'production' && github.ref == 'refs/heads/main'
     environment: production
     steps:
       - uses: actions/checkout@v4

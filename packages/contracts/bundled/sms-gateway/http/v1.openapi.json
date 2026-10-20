@@ -1,0 +1,1283 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet SMS Gateway API",
+    "version": "1.2.0",
+    "description": "HTTP surface of services/sms-gateway: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/sms (credential verified by Platform Access on every request; scopes sms.read/ sms.send; 503 when Platform Access is unreachable — fail closed); provider callbacks under /provider-callbacks/v1/sms (adapter signature). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 32 KiB."
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "security": [],
+        "description": "Liveness.",
+        "responses": {
+          "200": {
+            "description": "Alive.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "operationId": "ready",
+        "security": [],
+        "description": "Readiness: database, migrations, provider configured, outbox / unknown-transport backlog (counts only).",
+        "responses": {
+          "200": {
+            "description": "Ready.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not ready.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "openapi",
+        "security": [],
+        "description": "This document (the served contract).",
+        "responses": {
+          "200": {
+            "description": "The OpenAPI document.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sms/messages/{messageId}": {
+      "get": {
+        "operationId": "getMessage",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "One message of the credential's environment (scope sms.read). Another environment's message is NOT_FOUND. Content is returned to its owner only; the remote party is masked.",
+        "parameters": [
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/sms-gateway.common.v1.Message"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sms/messages": {
+      "get": {
+        "operationId": "listMessages",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Messages of the environment, newest first (scope sms.read), optionally of one number (`numberResourceId`) or direction.",
+        "parameters": [
+          {
+            "name": "numberResourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/sms-gateway.common.v1.Direction"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/sms-gateway.common.v1.MessagePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "sendMessage",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Sends ONE message (scope sms.send, Idempotency-Key required). Validation, segmentation (CONTENT_TOO_LONG above 10 segments), the safety controls (SMS_BLOCKED with a reason, recorded; 429 RATE_LIMITED for rate windows, not recorded), Numbering's single-use SMS_SENDER grant (an arbitrary sender id is impossible; refusal = SMS_BLOCKED SENDER_NOT_AUTHORIZED; Numbering unreachable = 503 NUMBERING_UNAVAILABLE, nothing recorded), then a durable AUTHORIZED transport submitted by the dispatcher. 202 with the message; the same key replays it (200).",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/sms-gateway.common.v1.SendMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted (AUTHORIZED; submission is asynchronous).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/sms-gateway.common.v1.Message"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Replayed (same Idempotency-Key and request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/sms-gateway.common.v1.Message"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sms/threads": {
+      "get": {
+        "operationId": "listThreads",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Transport threads of the environment, most recent first (scope sms.read).",
+        "parameters": [
+          {
+            "name": "numberResourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/sms-gateway.common.v1.ThreadPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sms/threads/{threadId}/messages": {
+      "get": {
+        "operationId": "listThreadMessages",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "The messages of one thread, newest first (scope sms.read).",
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/sms-gateway.common.v1.MessagePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/provider-callbacks/v1/sms/{providerId}/inbound": {
+      "post": {
+        "operationId": "providerInboundCallback",
+        "security": [
+          {
+            "providerSignature": []
+          }
+        ],
+        "description": "A provider's inbound message. Authenticated by the adapter (signature over the raw body, timestamp window) BEFORE parsing; de-duplicated by the provider event id. The destination is resolved by Numbering (sms-destination-resolutions): ROUTED → stored sealed for the owning environment (sms.received); not routable → QUARANTINED (never delivered to a customer). 503 while Numbering is unreachable (the provider retries; nothing is stored).",
+        "parameters": [
+          {
+            "name": "providerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/sms-gateway.common.v1.CallbackAck"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sms/opt-outs": {
+      "post": {
+        "operationId": "createOptOut",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Blocks a recipient for one number or the whole environment (scope sms.send). Idempotent.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/sms-gateway.common.v1.OptOutRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Blocked (already or newly).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/sms-gateway.common.v1.OptOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/provider-callbacks/v1/sms/{providerId}/delivery-receipts": {
+      "post": {
+        "operationId": "providerDeliveryReceiptCallback",
+        "security": [
+          {
+            "providerSignature": []
+          }
+        ],
+        "description": "A provider's delivery receipt. Authenticated before parsing, de-duplicated by event id; applied by the state machine (SUBMITTED / UNKNOWN → DELIVERED / FAILED; a receipt after a final state is STALE; an unknown reference UNMATCHED). Confirms the cost.",
+        "parameters": [
+          {
+            "name": "providerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/sms-gateway.common.v1.CallbackAck"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "customerCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A CF Meet API credential, verified by Platform Access (never by the SMS Gateway)."
+      },
+      "providerSignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Provider-Signature",
+        "description": "The provider adapter's HMAC-SHA256 signature over the raw body with X-Provider-Timestamp (300 s window) and X-Provider-Event-Id."
+      },
+      "cfServiceAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Service-Authorization",
+        "description": "Bearer <service token> (cfmeet.platform.internal-http)."
+      }
+    },
+    "schemas": {
+      "HealthStatus": {
+        "description": "Liveness.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "service"
+        ],
+        "properties": {
+          "status": {
+            "const": "ok"
+          },
+          "service": {
+            "const": "sms-gateway"
+          }
+        }
+      },
+      "Readiness": {
+        "description": "Readiness (counts only).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "service",
+          "database",
+          "migrations",
+          "provider",
+          "outboxPending",
+          "outboxDeadLetter",
+          "transportsUnknown"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "ready",
+              "not_ready"
+            ]
+          },
+          "service": {
+            "const": "sms-gateway"
+          },
+          "database": {
+            "enum": [
+              "ok",
+              "unavailable"
+            ]
+          },
+          "migrations": {
+            "enum": [
+              "current",
+              "pending",
+              "unknown"
+            ]
+          },
+          "provider": {
+            "enum": [
+              "configured",
+              "none"
+            ]
+          },
+          "outboxPending": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "outboxDeadLetter": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "transportsUnknown": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        }
+      },
+      "platform.common.v1.RequestId": {
+        "description": "Server-generated identifier of one request / one service hop.",
+        "type": "string",
+        "pattern": "^req_[0-9a-f]{32}$"
+      },
+      "platform.common.v1.Uuid": {
+        "description": "Lower-case hyphenated UUID.",
+        "type": "string",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      },
+      "sms-gateway.common.v1.CallbackAck": {
+        "description": "Provider callback acknowledgement (the provider stops retrying).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "disposition"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACCEPTED",
+              "DUPLICATE"
+            ]
+          },
+          "disposition": {
+            "type": "string",
+            "enum": [
+              "APPLIED",
+              "STALE",
+              "UNMATCHED",
+              "QUARANTINED",
+              "REFUSED"
+            ]
+          }
+        }
+      },
+      "sms-gateway.common.v1.Cost": {
+        "description": "Estimated / provider-confirmed cost in minor units.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "estimatedMinor",
+          "confirmedMinor",
+          "currency"
+        ],
+        "properties": {
+          "estimatedMinor": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confirmedMinor": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          }
+        }
+      },
+      "sms-gateway.common.v1.Direction": {
+        "type": "string",
+        "enum": [
+          "OUTBOUND",
+          "INBOUND"
+        ]
+      },
+      "sms-gateway.common.v1.Encoding": {
+        "description": "GSM-7 (160 / 153 septets per segment; extension characters count two) or UCS-2 (70 / 67 UTF-16 units).",
+        "type": "string",
+        "enum": [
+          "GSM7",
+          "UCS2"
+        ]
+      },
+      "sms-gateway.common.v1.Error": {
+        "description": "The SMS Gateway error envelope.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "description": "One error.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message",
+              "requestId"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "VALIDATION_ERROR",
+                  "AUTHENTICATION_FAILED",
+                  "INSUFFICIENT_SCOPE",
+                  "NOT_FOUND",
+                  "METHOD_NOT_ALLOWED",
+                  "PAYLOAD_TOO_LARGE",
+                  "RATE_LIMITED",
+                  "INTERNAL_AUTHENTICATION_FAILED",
+                  "INTERNAL_PERMISSION_DENIED",
+                  "CALLBACK_REJECTED",
+                  "IDEMPOTENCY_KEY_REQUIRED",
+                  "IDEMPOTENCY_KEY_REUSED",
+                  "CONTENT_TOO_LONG",
+                  "SMS_BLOCKED",
+                  "CONFLICT",
+                  "NUMBERING_UNAVAILABLE",
+                  "PROVIDER_UNAVAILABLE",
+                  "SERVICE_UNAVAILABLE",
+                  "INTERNAL_ERROR"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "requestId": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/platform.common.v1.RequestId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+              },
+              "messageId": {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              }
+            }
+          }
+        }
+      },
+      "sms-gateway.common.v1.Message": {
+        "description": "One message (inbound or outbound). `content` is the plaintext for the owning environment only (null once purged by retention); the remote party is masked; no provider identifier.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "messageId",
+          "direction",
+          "status",
+          "numberResourceId",
+          "threadId",
+          "remote",
+          "content",
+          "contentPurged",
+          "encoding",
+          "segmentCount",
+          "characterCount",
+          "principalId",
+          "routing",
+          "failureCode",
+          "blockedReason",
+          "cost",
+          "createdAt",
+          "expiresAt",
+          "submittedAt",
+          "deliveredAt",
+          "receivedAt",
+          "failedAt"
+        ],
+        "properties": {
+          "messageId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/sms-gateway.common.v1.Direction"
+          },
+          "status": {
+            "$ref": "#/components/schemas/sms-gateway.common.v1.Status"
+          },
+          "numberResourceId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "threadId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "remote": {
+            "$ref": "#/components/schemas/sms-gateway.common.v1.RemoteParty"
+          },
+          "content": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 1600
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "contentPurged": {
+            "type": "boolean"
+          },
+          "encoding": {
+            "$ref": "#/components/schemas/sms-gateway.common.v1.Encoding"
+          },
+          "segmentCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "characterCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1600
+          },
+          "principalId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "routing": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/sms-gateway.common.v1.Routing"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failureCode": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "blockedReason": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cost": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/sms-gateway.common.v1.Cost"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "submittedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deliveredAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "receivedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "sms-gateway.common.v1.MessagePage": {
+        "description": "A page of messages, newest first.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "messages",
+          "nextCursor"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/sms-gateway.common.v1.Message"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "sms-gateway.common.v1.OptOut": {
+        "description": "A recipient block (masked).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "remote",
+          "numberResourceId",
+          "reason",
+          "createdAt"
+        ],
+        "properties": {
+          "remote": {
+            "$ref": "#/components/schemas/sms-gateway.common.v1.RemoteParty"
+          },
+          "numberResourceId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "STOP_KEYWORD",
+              "CUSTOMER_REQUEST",
+              "ABUSE"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "sms-gateway.common.v1.OptOutRequest": {
+        "description": "POST /v1/sms/opt-outs (scope sms.send): the customer blocks a recipient for one number (or every number of the environment).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "to"
+        ],
+        "properties": {
+          "to": {
+            "type": "string",
+            "pattern": "^\\+[1-9][0-9]{6,14}$"
+          },
+          "numberResourceId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          }
+        }
+      },
+      "sms-gateway.common.v1.RemoteParty": {
+        "description": "The remote party (masked only).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "masked"
+        ],
+        "properties": {
+          "masked": {
+            "type": "string",
+            "pattern": "^\\+\\*{3}[0-9]{0,4}$",
+            "description": "The remote party, masked: `+***` and the last four digits. The full number is never returned."
+          }
+        }
+      },
+      "sms-gateway.common.v1.Routing": {
+        "description": "Numbering's SMS routing target of an inbound message (opaque CF Meet reference).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "targetKind",
+          "targetRef"
+        ],
+        "properties": {
+          "targetKind": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{1,39}$"
+          },
+          "targetRef": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          }
+        }
+      },
+      "sms-gateway.common.v1.SendMessageRequest": {
+        "description": "POST /v1/sms/messages (scope sms.send, Idempotency-Key required): send ONE message from a Number Resource the environment actively owns (Numbering issues and the gateway consumes a single-use SMS_SENDER grant — an arbitrary sender id is impossible). The recipient is either `to` (E.164) or the remote party of `threadId`.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "from",
+          "text"
+        ],
+        "properties": {
+          "from": {
+            "description": "The sender.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "numberResourceId"
+            ],
+            "properties": {
+              "numberResourceId": {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              }
+            }
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^\\+[1-9][0-9]{6,14}$"
+          },
+          "threadId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1600
+          },
+          "principalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid",
+            "description": "The principal the message is sent for (required for personal / professional numbers; must be ACTIVE in the environment)."
+          },
+          "validitySeconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 86400
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "to"
+            ],
+            "not": {
+              "required": [
+                "threadId"
+              ]
+            }
+          },
+          {
+            "required": [
+              "threadId"
+            ],
+            "not": {
+              "required": [
+                "to"
+              ]
+            }
+          }
+        ]
+      },
+      "sms-gateway.common.v1.Status": {
+        "description": "Transport status. UNKNOWN: the provider may hold the message; it is never resubmitted, only provider evidence resolves it.",
+        "type": "string",
+        "enum": [
+          "REQUESTED",
+          "AUTHORIZED",
+          "SUBMITTING",
+          "SUBMITTED",
+          "DELIVERED",
+          "RECEIVED",
+          "FAILED",
+          "UNKNOWN",
+          "EXPIRED"
+        ]
+      },
+      "sms-gateway.common.v1.Thread": {
+        "description": "A transport thread: the messages between one Number Resource and one remote party. A transport index, not a conversation.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "threadId",
+          "numberResourceId",
+          "remote",
+          "messageCount",
+          "lastMessageAt",
+          "createdAt"
+        ],
+        "properties": {
+          "threadId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "numberResourceId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "remote": {
+            "$ref": "#/components/schemas/sms-gateway.common.v1.RemoteParty"
+          },
+          "messageCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lastMessageAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "sms-gateway.common.v1.ThreadPage": {
+        "description": "A page of threads, most recent first.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "threads",
+          "nextCursor"
+        ],
+        "properties": {
+          "threads": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/sms-gateway.common.v1.Thread"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "SMS Gateway error envelope.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/sms-gateway.common.v1.Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

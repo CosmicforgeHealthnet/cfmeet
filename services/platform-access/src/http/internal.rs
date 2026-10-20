@@ -11,6 +11,7 @@
 //! | `GET /internal/v1/scopes` | `platform-identity.read` | — |
 //! | `POST /internal/v1/principals/resolve` | `platform-principal.resolve` | signed delegated context |
 //! | `POST /internal/v1/principals/telephone-endpoints` | `platform-principal.register` | signed delegated context |
+//! | `POST /internal/v1/principals/ensure` | `platform-principal.ensure` | signed delegated context of a FIRST_PARTY tenant (NATIVE_CF_USER / TEMPORARY_EXTERNAL_PARTICIPANT / BOT_OR_SERVICE only) |
 //! | `POST /internal/v1/principals/{id}/tombstone` | `platform-principal.register` | — (a named operator's retention decision, audited) |
 //!
 //! A tenant / application / environment identifier in a request BODY is never
@@ -67,6 +68,7 @@ pub fn routes() -> Router<AppState> {
             "/principals/telephone-endpoints",
             post(ensure_telephone_endpoint),
         )
+        .route("/principals/ensure", post(ensure_principal))
         .route(
             "/principals/:principal_id/tombstone",
             post(tombstone_principal),
@@ -698,6 +700,66 @@ async fn ensure_telephone_endpoint(
         }
         Err(_) => Err(AccessError::Refused(ErrorCode::ValidationError)),
     }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EnsurePrincipalRequest {
+    kind: String,
+    external_reference: String,
+}
+
+/// Part V H §104: the first-party login authority (the Meeting Service) maps an account
+/// it authenticated itself to its communication principal — idempotently, inside its
+/// signed delegated scope, which must be a FULL-authority FIRST_PARTY tenant. Only the
+/// native-account and meeting-participant categories; a SUSPENDED / DEACTIVATED /
+/// tombstoned principal is returned as refused (never reactivated).
+async fn ensure_principal(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    Json(body): Json<EnsurePrincipalRequest>,
+) -> AccessResult<impl IntoResponse> {
+    use crate::domain::{EnvironmentId, PrincipalStatus, TenantClassification};
+    use crate::identity::principals::NewPrincipal;
+    caller.require_permission(InternalPermission::PlatformPrincipalEnsure)?;
+    let scope = trusted_scope(&state, &caller).await?;
+    if scope.tenant.classification != TenantClassification::FirstParty {
+        return Err(AccessError::Refused(ErrorCode::PolicyViolation));
+    }
+    if scope.authority_mode().1.is_some() {
+        return Err(AccessError::Refused(ErrorCode::InvalidState));
+    }
+    let kind = match body.kind.as_str() {
+        "NATIVE_CF_USER" => PrincipalKind::NativeCfUser,
+        "TEMPORARY_EXTERNAL_PARTICIPANT" => PrincipalKind::TemporaryExternalParticipant,
+        // Part V remediation (meeting breakout / private chat): the first-party
+        // application's own non-human participant, e.g. the owner of conversations no
+        // person may own. Nobody authenticates as it through Platform Access.
+        "BOT_OR_SERVICE" => PrincipalKind::BotOrService,
+        _ => return Err(AccessError::Refused(ErrorCode::ValidationError)),
+    };
+    let (principal, created) = state
+        .platform
+        .register_principal(
+            EnvironmentId::from_uuid(scope.environment.id),
+            NewPrincipal::External {
+                kind,
+                external_reference: body.external_reference,
+            },
+        )
+        .await
+        .map_err(AccessError::service)?;
+    if principal.status != PrincipalStatus::Active || principal.tombstoned_at.is_some() {
+        return Err(AccessError::Refused(ErrorCode::InvalidState));
+    }
+    crate::metrics::inc(
+        "platform_access_principals_ensured_total",
+        &[("created", if created { "true" } else { "false" })],
+    );
+    Ok(Json(json!({
+        "principal": principal_snapshot(&state, principal.id.as_uuid()).await?,
+        "created": created,
+    })))
 }
 
 #[derive(Deserialize)]

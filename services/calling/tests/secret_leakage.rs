@@ -73,7 +73,11 @@ async fn structured_logs_never_contain_credentials_or_authorization_headers() {
         .issue(c.sa(EnvironmentKind::Production), &[names::PRINCIPALS_READ])
         .await;
     let token = issued.secret.expose_once().to_string();
-    let wrong = format!("{}0000", &token[..token.len() - 4]);
+    // Change the last secret character to a DIFFERENT hex digit (replacing the tail with a
+    // fixed "0000" was the same token whenever the random secret already ended so).
+    let last = if token.ends_with('0') { '1' } else { '0' };
+    let wrong = format!("{}{last}", &token[..token.len() - 1]);
+    assert_ne!(wrong, token);
 
     assert_eq!(h.whoami(&token).await.status, StatusCode::OK);
     assert_eq!(h.whoami(&wrong).await.status, StatusCode::UNAUTHORIZED);
@@ -135,7 +139,10 @@ async fn error_bodies_never_echo_presented_credentials() {
     let c = h.consumer("acme", TenantClassification::External).await;
     let issued = h.issue(c.sa(EnvironmentKind::Production), &[]).await;
     let token = issued.secret.expose_once().to_string();
-    let wrong = format!("{}ffff", &token[..token.len() - 4]);
+    // A DIFFERENT last secret digit (a fixed "ffff" tail equals the token 1 in 65536 times).
+    let last = if token.ends_with('f') { 'e' } else { 'f' };
+    let wrong = format!("{}{last}", &token[..token.len() - 1]);
+    assert_ne!(wrong, token);
     for presented in [&token, &wrong] {
         for (method, path) in [
             (Method::GET, "/test/calls-write"),
@@ -190,7 +197,11 @@ async fn debug_output_of_secret_bearing_types_is_redacted() {
         assert!(rendered.contains("[REDACTED]"));
     }
     // Authentication errors and contexts carry no secret either.
-    let wrong = format!("{}0000", &token[..token.len() - 4]);
+    // Change the last secret character to a DIFFERENT hex digit (replacing the tail with a
+    // fixed "0000" was the same token whenever the random secret already ended so).
+    let last = if token.ends_with('0') { '1' } else { '0' };
+    let wrong = format!("{}{last}", &token[..token.len() - 1]);
+    assert_ne!(wrong, token);
     let err = h.authenticate(&wrong).await.unwrap_err();
     assert!(!format!("{err:?}").contains(secret_part(&wrong)));
     let ctx = h.ctx(&token).await;

@@ -105,6 +105,8 @@ const TARGETS: &[(&str, &str)] = &[
     ("CF_NUMBERING_BASE_URL", services::NUMBERING),
     // Calling hosts the platform's customer webhook delivery (platform-event.publish).
     ("CF_CALLING_BASE_URL", services::CALLING),
+    // Messaging receives inbound SMS of bridged parties (messaging-sms-bridge.deliver).
+    ("CF_MESSAGING_BASE_URL", services::MESSAGING),
 ];
 
 #[derive(Debug, Clone)]

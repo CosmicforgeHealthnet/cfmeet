@@ -100,7 +100,13 @@ impl EmailService {
         let template = notification_email(username, subject, message);
 
         self.queue
-            .enqueue(to_email, Some(username), subject, &template.html, &template.text)
+            .enqueue(
+                to_email,
+                Some(username),
+                subject,
+                &template.html,
+                &template.text,
+            )
             .await
     }
 }

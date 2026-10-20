@@ -98,7 +98,7 @@ pub async fn update_current_user(
     // Check if username is being changed and if it's already taken
     if let Some(ref new_username) = payload.username {
         let trimmed_username = new_username.trim();
-        
+
         // Only check if username is actually different
         if trimmed_username != user.username {
             let existing_user = Users::find()
@@ -107,9 +107,7 @@ pub async fn update_current_user(
                 .await?;
 
             if existing_user.is_some() {
-                return Err(ApiError::Conflict(
-                    "Username is already taken".to_string(),
-                ));
+                return Err(ApiError::Conflict("Username is already taken".to_string()));
             }
         }
     }
@@ -137,7 +135,10 @@ pub async fn update_current_user(
         status: format!("{:?}", updated_user.status)
             .to_lowercase()
             .replace('_', "_"),
-        created_at: updated_user.created_at.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+        created_at: updated_user
+            .created_at
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string(),
     };
 
     Ok(Json(response))

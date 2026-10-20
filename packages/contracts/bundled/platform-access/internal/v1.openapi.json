@@ -1,0 +1,3805 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet Platform Access internal API",
+    "version": "1.2.0",
+    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration)."
+  },
+  "components": {
+    "securitySchemes": {
+      "cfServiceAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Service-Authorization",
+        "description": "Bearer <service token> (cfmeet.platform.internal-http). Permissions come only from Platform Access's trust bundle."
+      }
+    },
+    "parameters": {
+      "CfRequestId": {
+        "name": "X-CF-Request-Id",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/platform.common.v1.RequestId"
+        }
+      },
+      "CfCorrelationId": {
+        "name": "X-CF-Correlation-Id",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/platform.common.v1.CorrelationId"
+        }
+      },
+      "CfOperator": {
+        "name": "X-CF-Operator",
+        "in": "header",
+        "required": true,
+        "description": "The audited human operator (opaque id).",
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+        }
+      }
+    },
+    "schemas": {
+      "HealthStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "service"
+        ],
+        "properties": {
+          "status": {
+            "const": "ok"
+          },
+          "service": {
+            "const": "platform-access"
+          }
+        }
+      },
+      "Readiness": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "service",
+          "database",
+          "migrations",
+          "verifierKeyVersion"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "ready",
+              "not_ready"
+            ]
+          },
+          "service": {
+            "const": "platform-access"
+          },
+          "database": {
+            "enum": [
+              "ok",
+              "unavailable"
+            ]
+          },
+          "migrations": {
+            "enum": [
+              "current",
+              "pending",
+              "unknown"
+            ]
+          },
+          "verifierKeyVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "platform-access.identity.v1.ApplicationScopeSnapshot": {
+        "description": "A scope an application may grant to its credentials.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenantId",
+          "applicationId",
+          "scope",
+          "allowedEnvironmentKinds",
+          "grantBasis",
+          "grantedAt"
+        ],
+        "properties": {
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "applicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.ScopeName"
+          },
+          "allowedEnvironmentKinds": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.EnvironmentKind"
+                },
+                "minItems": 1,
+                "uniqueItems": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "grantBasis": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.GrantBasis"
+          },
+          "grantedAt": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          }
+        }
+      },
+      "platform-access.identity.v1.ApplicationSnapshot": {
+        "description": "An application (project) of a tenant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "slug",
+          "displayName",
+          "status",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "slug": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Slug"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "status": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.ApplicationStatus"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Revision"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          }
+        }
+      },
+      "platform-access.identity.v1.ApplicationStatus": {
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "SUSPENDED"
+        ]
+      },
+      "platform-access.identity.v1.AuthFailureReason": {
+        "description": "Why a presented credential does not authenticate. For the consumer's logs and metrics only: every rejection is shown to the customer as the same normalized authentication failure.",
+        "type": "string",
+        "enum": [
+          "malformed_credential",
+          "unknown_credential",
+          "secret_mismatch",
+          "environment_tag_mismatch",
+          "unsupported_verifier",
+          "credential_revoked",
+          "credential_not_yet_valid",
+          "credential_expired",
+          "credential_superseded",
+          "service_account_inactive",
+          "corrupt_authority_chain"
+        ]
+      },
+      "platform-access.identity.v1.AuthenticateRequest": {
+        "description": "POST /internal/v1/credentials/authenticate (permission platform-credential.authenticate). The presented bearer value; never logged, never stored.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "credential"
+        ],
+        "properties": {
+          "credential": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        }
+      },
+      "platform-access.identity.v1.AuthenticateResponse": {
+        "description": "Outcome of a credential authentication.",
+        "oneOf": [
+          {
+            "description": "The credential authenticates.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "outcome",
+              "authority"
+            ],
+            "properties": {
+              "outcome": {
+                "const": "AUTHENTICATED"
+              },
+              "authority": {
+                "$ref": "#/components/schemas/platform-access.identity.v1.AuthorityChain"
+              }
+            }
+          },
+          {
+            "description": "The credential does not authenticate.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "outcome",
+              "reason"
+            ],
+            "properties": {
+              "outcome": {
+                "const": "REJECTED"
+              },
+              "reason": {
+                "$ref": "#/components/schemas/platform-access.identity.v1.AuthFailureReason"
+              },
+              "publicId": {
+                "$ref": "#/components/schemas/platform-access.identity.v1.PublicId"
+              },
+              "throttle": {
+                "$ref": "#/components/schemas/platform-access.identity.v1.Throttle"
+              }
+            }
+          }
+        ]
+      },
+      "platform-access.identity.v1.AuthorityChain": {
+        "description": "The trusted authority of an authenticated credential: every link, the effective scopes (sorted) and the authorized-principal restriction. The tenant of a request is ALWAYS taken from here, never from a request.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "authorityMode",
+          "suspendedLink",
+          "tenant",
+          "application",
+          "environment",
+          "serviceAccount",
+          "credential",
+          "effectiveState",
+          "scopes",
+          "principalRestriction"
+        ],
+        "properties": {
+          "authorityMode": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.AuthorityMode"
+          },
+          "suspendedLink": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform-access.identity.v1.SuspendedLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tenant": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.TenantSnapshot"
+          },
+          "application": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.ApplicationSnapshot"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.EnvironmentSnapshot"
+          },
+          "serviceAccount": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.ServiceAccountSnapshot"
+          },
+          "credential": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.CredentialSnapshot"
+          },
+          "effectiveState": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.CredentialEffectiveState"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/platform-access.identity.v1.ScopeName"
+            },
+            "uniqueItems": true
+          },
+          "principalRestriction": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "uniqueItems": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-access.identity.v1.AuthorityMode": {
+        "description": "FULL: every link ACTIVE, the scopes decide. SAFETY_ONLY: the tenant, application or environment is SUSPENDED — the consumer allows only its safety operations (e.g. end a live call).",
+        "type": "string",
+        "enum": [
+          "FULL",
+          "SAFETY_ONLY"
+        ]
+      },
+      "platform-access.identity.v1.ChangeOperation": {
+        "type": "string",
+        "enum": [
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ]
+      },
+      "platform-access.identity.v1.ChangePage": {
+        "description": "A page of the identity change feed. Persist nextAfter only after applying the page.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "changes",
+          "nextAfter",
+          "hasMore"
+        ],
+        "properties": {
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/platform-access.identity.v1.IdentityChange"
+            },
+            "maxItems": 500
+          },
+          "nextAfter": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        }
+      },
+      "platform-access.identity.v1.ChangesRequest": {
+        "description": "POST /internal/v1/identity/changes: the page after the cursor (permission platform-identity.read).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "after": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        }
+      },
+      "platform-access.identity.v1.CredentialEffectiveState": {
+        "description": "Derived from the persisted lifecycle fields at evaluation time. Only ACTIVE and ROTATION_OVERLAP authenticate.",
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "ROTATION_OVERLAP",
+          "NOT_YET_VALID",
+          "EXPIRED",
+          "SUPERSEDED",
+          "REVOKED"
+        ]
+      },
+      "platform-access.identity.v1.CredentialScopeSnapshot": {
+        "description": "A scope granted to a credential.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "credentialId",
+          "tenantId",
+          "applicationId",
+          "scope",
+          "grantedAt"
+        ],
+        "properties": {
+          "credentialId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "applicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.ScopeName"
+          },
+          "grantedAt": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          }
+        }
+      },
+      "platform-access.identity.v1.CredentialSnapshot": {
+        "description": "An API credential WITHOUT any secret or verifier material (lastFour is for masked display only).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "publicId",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "serviceAccountId",
+          "label",
+          "lastFour",
+          "status",
+          "notBefore",
+          "expiresAt",
+          "revokedAt",
+          "rotatedFromCredentialId",
+          "supersededByCredentialId",
+          "supersededAt",
+          "supersessionValidUntil",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "publicId": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.PublicId"
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "applicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "environmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "serviceAccountId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "label": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastFour": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{4}$"
+          },
+          "status": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.CredentialStatus"
+          },
+          "notBefore": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          },
+          "revokedAt": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rotatedFromCredentialId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "supersededByCredentialId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "supersededAt": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "supersessionValidUntil": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Revision"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          }
+        }
+      },
+      "platform-access.identity.v1.CredentialStatus": {
+        "description": "REVOKED is terminal.",
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "REVOKED"
+        ]
+      },
+      "platform-access.identity.v1.CredentialStatusResult": {
+        "description": "GET /internal/v1/credentials/{credentialId}: status, expiry and revocation of a credential of the delegated scope.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "credential",
+          "effectiveState",
+          "authenticates",
+          "scopes",
+          "principalRestriction"
+        ],
+        "properties": {
+          "credential": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.CredentialSnapshot"
+          },
+          "effectiveState": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.CredentialEffectiveState"
+          },
+          "authenticates": {
+            "type": "boolean"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/platform-access.identity.v1.ScopeName"
+            }
+          },
+          "principalRestriction": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-access.identity.v1.EnsurePrincipalRequest": {
+        "description": "POST /internal/v1/principals/ensure (Part V H §104): the first-party login authority maps an account it authenticated itself to its communication principal in its signed FIRST_PARTY delegated scope. Idempotent per (environment, kind, externalReference). The reference is the login authority's opaque account id (or, for BOT_OR_SERVICE, the opaque id of the application's own non-human participant such as a meeting chat's system owner), never an email or telephone number.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "externalReference"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "NATIVE_CF_USER",
+              "TEMPORARY_EXTERNAL_PARTICIPANT",
+              "BOT_OR_SERVICE"
+            ]
+          },
+          "externalReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        }
+      },
+      "platform-access.identity.v1.EnsurePrincipalResult": {
+        "description": "The ensured ACTIVE principal and whether this call created it.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "principal",
+          "created"
+        ],
+        "properties": {
+          "principal": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.PrincipalSnapshot"
+          },
+          "created": {
+            "type": "boolean"
+          }
+        }
+      },
+      "platform-access.identity.v1.EntityKind": {
+        "description": "Kind of identity entity a change describes.",
+        "type": "string",
+        "enum": [
+          "TENANT",
+          "APPLICATION",
+          "ENVIRONMENT",
+          "SERVICE_ACCOUNT",
+          "APPLICATION_SCOPE",
+          "CREDENTIAL",
+          "CREDENTIAL_SCOPE",
+          "PRINCIPAL"
+        ]
+      },
+      "platform-access.identity.v1.EnvironmentKind": {
+        "type": "string",
+        "enum": [
+          "SANDBOX",
+          "TEST",
+          "PRODUCTION"
+        ]
+      },
+      "platform-access.identity.v1.EnvironmentSnapshot": {
+        "description": "An application environment. Live telecom effects are possible only in PRODUCTION and only when allowed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "applicationId",
+          "kind",
+          "status",
+          "liveTelecomAllowed",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "applicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.EnvironmentKind"
+          },
+          "status": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.EnvironmentStatus"
+          },
+          "liveTelecomAllowed": {
+            "type": "boolean"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Revision"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          }
+        }
+      },
+      "platform-access.identity.v1.EnvironmentStatus": {
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "SUSPENDED"
+        ]
+      },
+      "platform-access.identity.v1.Error": {
+        "description": "The error envelope (never echoes a presented credential, a verifier or row content).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "description": "",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message",
+              "requestId"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/platform-access.identity.v1.ErrorCode"
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "requestId": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^req_[0-9a-f]{32}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "platform-access.identity.v1.ErrorCode": {
+        "description": "Stable error codes of the Platform Access envelope.",
+        "type": "string",
+        "enum": [
+          "VALIDATION_ERROR",
+          "NOT_FOUND",
+          "METHOD_NOT_ALLOWED",
+          "PAYLOAD_TOO_LARGE",
+          "INTERNAL_AUTHENTICATION_FAILED",
+          "INTERNAL_PERMISSION_DENIED",
+          "DELEGATED_CONTEXT_REQUIRED",
+          "DELEGATED_CONTEXT_INVALID",
+          "OPERATOR_REQUIRED",
+          "CONFLICT",
+          "POLICY_VIOLATION",
+          "INVALID_STATE",
+          "SERVICE_UNAVAILABLE",
+          "INTERNAL_ERROR"
+        ]
+      },
+      "platform-access.identity.v1.EvaluateRequest": {
+        "description": "POST /internal/v1/authorization/evaluate: may the credential of the delegated scope perform an operation needing requiredScopes (optionally for principalId), NOW?",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "credentialId",
+          "requiredScopes"
+        ],
+        "properties": {
+          "credentialId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "requiredScopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "maxItems": 32
+          },
+          "principalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          }
+        }
+      },
+      "platform-access.identity.v1.EvaluateResponse": {
+        "description": "Authorization decision.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "allowed",
+          "missingScopes",
+          "effectiveState"
+        ],
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "Absent when allowed.",
+            "type": "string",
+            "enum": [
+              "CREDENTIAL_NOT_AUTHENTICATING",
+              "SCOPE_SUSPENDED",
+              "MISSING_SCOPES",
+              "PRINCIPAL_NOT_AUTHORIZED"
+            ]
+          },
+          "missingScopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "effectiveState": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.CredentialEffectiveState"
+          }
+        }
+      },
+      "platform-access.identity.v1.GrantBasis": {
+        "description": "How an application scope was granted.",
+        "type": "string",
+        "enum": [
+          "STANDARD",
+          "PRIVILEGED_OPERATOR"
+        ]
+      },
+      "platform-access.identity.v1.IdentityChange": {
+        "description": "One committed identity change. Sequences are monotonic in commit order; applying a snapshot is idempotent (revision-guarded). Snapshots never carry verifier material.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sequence",
+          "entityKind",
+          "operation",
+          "entityKey",
+          "revision",
+          "occurredAt",
+          "snapshot"
+        ],
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "entityKind": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.EntityKind"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.ChangeOperation"
+          },
+          "entityKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "revision": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform-access.identity.v1.Revision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "occurredAt": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          },
+          "snapshot": {
+            "type": "object"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "entityKind": {
+                  "const": "TENANT"
+                }
+              },
+              "required": [
+                "entityKind"
+              ]
+            },
+            "then": {
+              "properties": {
+                "snapshot": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.TenantSnapshot"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "entityKind": {
+                  "const": "APPLICATION"
+                }
+              },
+              "required": [
+                "entityKind"
+              ]
+            },
+            "then": {
+              "properties": {
+                "snapshot": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.ApplicationSnapshot"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "entityKind": {
+                  "const": "ENVIRONMENT"
+                }
+              },
+              "required": [
+                "entityKind"
+              ]
+            },
+            "then": {
+              "properties": {
+                "snapshot": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.EnvironmentSnapshot"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "entityKind": {
+                  "const": "SERVICE_ACCOUNT"
+                }
+              },
+              "required": [
+                "entityKind"
+              ]
+            },
+            "then": {
+              "properties": {
+                "snapshot": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.ServiceAccountSnapshot"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "entityKind": {
+                  "const": "APPLICATION_SCOPE"
+                }
+              },
+              "required": [
+                "entityKind"
+              ]
+            },
+            "then": {
+              "properties": {
+                "snapshot": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.ApplicationScopeSnapshot"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "entityKind": {
+                  "const": "CREDENTIAL"
+                }
+              },
+              "required": [
+                "entityKind"
+              ]
+            },
+            "then": {
+              "properties": {
+                "snapshot": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.CredentialSnapshot"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "entityKind": {
+                  "const": "CREDENTIAL_SCOPE"
+                }
+              },
+              "required": [
+                "entityKind"
+              ]
+            },
+            "then": {
+              "properties": {
+                "snapshot": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.CredentialScopeSnapshot"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "entityKind": {
+                  "const": "PRINCIPAL"
+                }
+              },
+              "required": [
+                "entityKind"
+              ]
+            },
+            "then": {
+              "properties": {
+                "snapshot": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.PrincipalSnapshot"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "platform-access.identity.v1.ImportReceipt": {
+        "description": "GET /internal/v1/identity/imports/{bundleDigest}: Platform Access's receipt of an operator-imported Part III identity bundle (digests and counts only).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "sourceService",
+          "bundleDigest",
+          "verifierDigest",
+          "counts",
+          "importedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "sourceService": {
+            "type": "string",
+            "pattern": "^cfmeet\\.[a-z][a-z0-9-]*$"
+          },
+          "bundleDigest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "verifierDigest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "counts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "importedAt": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          },
+          "alreadyImported": {
+            "type": "boolean"
+          }
+        }
+      },
+      "platform-access.identity.v1.PrincipalReference": {
+        "description": "A principal reference: either principalId, or kind + externalReference.",
+        "oneOf": [
+          {
+            "description": "By CF Meet principal id.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "principalId"
+            ],
+            "properties": {
+              "principalId": {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              }
+            }
+          },
+          {
+            "description": "By consumer-defined opaque reference.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "externalReference"
+            ],
+            "properties": {
+              "kind": {
+                "$ref": "#/components/schemas/platform.common.v1.PrincipalKind"
+              },
+              "externalReference": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            }
+          }
+        ]
+      },
+      "platform-access.identity.v1.PrincipalResult": {
+        "description": "A principal.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "principal"
+        ],
+        "properties": {
+          "principal": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.PrincipalSnapshot"
+          }
+        }
+      },
+      "platform-access.identity.v1.PrincipalSnapshot": {
+        "description": "A communication principal: an opaque reference only — never a phone number or contact value (TELEPHONE_ENDPOINT principals carry a ContactReference id).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "kind",
+          "externalReference",
+          "linkedServiceAccountId",
+          "status",
+          "tombstonedAt",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "applicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "environmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/platform.common.v1.PrincipalKind"
+          },
+          "externalReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "linkedServiceAccountId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.PrincipalStatus"
+          },
+          "tombstonedAt": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Revision"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          }
+        }
+      },
+      "platform-access.identity.v1.PrincipalStatus": {
+        "description": "DEACTIVATED is terminal.",
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "SUSPENDED",
+          "DEACTIVATED"
+        ]
+      },
+      "platform-access.identity.v1.PublicId": {
+        "description": "Non-secret lookup id of a credential (24 lower-case hex).",
+        "type": "string",
+        "pattern": "^[0-9a-f]{24}$"
+      },
+      "platform-access.identity.v1.Resolution": {
+        "description": "One resolution, in request order.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "outcome"
+        ],
+        "properties": {
+          "outcome": {
+            "description": "",
+            "type": "string",
+            "enum": [
+              "RESOLVED",
+              "NOT_FOUND",
+              "INACTIVE",
+              "INVALID_REFERENCE"
+            ]
+          },
+          "principal": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.PrincipalSnapshot"
+          }
+        }
+      },
+      "platform-access.identity.v1.ResolveRequest": {
+        "description": "POST /internal/v1/principals/resolve: resolve references inside the delegated scope only.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "references"
+        ],
+        "properties": {
+          "references": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/platform-access.identity.v1.PrincipalReference"
+            },
+            "minItems": 1,
+            "maxItems": 50
+          }
+        }
+      },
+      "platform-access.identity.v1.ResolveResponse": {
+        "description": "Resolutions in request order.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "results"
+        ],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/platform-access.identity.v1.Resolution"
+            }
+          }
+        }
+      },
+      "platform-access.identity.v1.Revision": {
+        "description": "Entity revision: 1 at insert, +1 on every effective update. Consumers apply a snapshot only when its revision is newer than the one they hold.",
+        "type": "integer",
+        "minimum": 1
+      },
+      "platform-access.identity.v1.ScopeDefinition": {
+        "description": "A registered scope.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "description",
+          "trust"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.ScopeName"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "trust": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.ScopeTrust"
+          }
+        }
+      },
+      "platform-access.identity.v1.ScopeName": {
+        "description": "A scope registered by Platform Access (GET /internal/v1/scopes), e.g. calls.read, numbers.search, numbers.admin, sms.send.",
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+        "maxLength": 100
+      },
+      "platform-access.identity.v1.ScopeRegistry": {
+        "description": "GET /internal/v1/scopes: the server-authoritative scope registry.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scopes"
+        ],
+        "properties": {
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/platform-access.identity.v1.ScopeDefinition"
+            },
+            "minItems": 1
+          }
+        }
+      },
+      "platform-access.identity.v1.ScopeTrust": {
+        "description": "STANDARD: grantable to any tenant. FIRST_PARTY_ONLY: FIRST_PARTY tenants only. PRIVILEGED_OPERATOR: an explicit audited operator grant to a FIRST_PARTY application (numbers.admin); never an ordinary grant.",
+        "type": "string",
+        "enum": [
+          "STANDARD",
+          "FIRST_PARTY_ONLY",
+          "PRIVILEGED_OPERATOR"
+        ]
+      },
+      "platform-access.identity.v1.ServiceAccountSnapshot": {
+        "description": "A machine identity of an environment.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "name",
+          "description",
+          "status",
+          "revokedAt",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "applicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "environmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "description": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.ServiceAccountStatus"
+          },
+          "revokedAt": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Revision"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          }
+        }
+      },
+      "platform-access.identity.v1.ServiceAccountStatus": {
+        "description": "REVOKED is terminal.",
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "SUSPENDED",
+          "REVOKED"
+        ]
+      },
+      "platform-access.identity.v1.Slug": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9-]{1,62}$"
+      },
+      "platform-access.identity.v1.SuspendedLink": {
+        "description": "The suspended link behind a SAFETY_ONLY authority.",
+        "type": "string",
+        "enum": [
+          "TENANT",
+          "APPLICATION",
+          "ENVIRONMENT"
+        ]
+      },
+      "platform-access.identity.v1.TelephoneEndpointRequest": {
+        "description": "POST /internal/v1/principals/telephone-endpoints: the TELEPHONE_ENDPOINT principal of a protected public party — referenced by its opaque ContactReference, never a number. Idempotent.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contactReference"
+        ],
+        "properties": {
+          "contactReference": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          }
+        }
+      },
+      "platform-access.identity.v1.TenantClassification": {
+        "description": "FIRST_PARTY (CosmicForge-operated) or EXTERNAL; decided by Platform Access only, never by a request.",
+        "type": "string",
+        "enum": [
+          "FIRST_PARTY",
+          "EXTERNAL"
+        ]
+      },
+      "platform-access.identity.v1.TenantSnapshot": {
+        "description": "A tenant (platform customer).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "slug",
+          "displayName",
+          "classification",
+          "status",
+          "billingCurrency",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "slug": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Slug"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "classification": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.TenantClassification"
+          },
+          "status": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.TenantStatus"
+          },
+          "billingCurrency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Revision"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.Timestamp"
+          }
+        }
+      },
+      "platform-access.identity.v1.TenantStatus": {
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "SUSPENDED"
+        ]
+      },
+      "platform-access.identity.v1.Throttle": {
+        "description": "Failed-authentication throttling: the consumer answers 429 with Retry-After instead of 401; thresholdCrossed is true exactly once per window (one deduplicated guessing incident). A correct secret is never throttled.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "retryAfterSeconds",
+          "thresholdCrossed"
+        ],
+        "properties": {
+          "retryAfterSeconds": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "thresholdCrossed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "platform-access.identity.v1.Timestamp": {
+        "description": "RFC 3339 UTC timestamp.",
+        "type": "string",
+        "format": "date-time"
+      },
+      "platform-access.identity.v1.TombstoneRequest": {
+        "description": "POST /internal/v1/principals/{principalId}/tombstone: the human operator who decided the tombstone (audited as the actor).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operator"
+        ],
+        "properties": {
+          "operator": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+          }
+        }
+      },
+      "platform-access.identity.v1.TombstoneResult": {
+        "description": "The tombstoned principal: DEACTIVATED for ever, non-identifying reference.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "alreadyTombstoned",
+          "principal"
+        ],
+        "properties": {
+          "alreadyTombstoned": {
+            "type": "boolean"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.PrincipalSnapshot"
+          }
+        }
+      },
+      "platform-access.identity.v1.TrustedContext": {
+        "description": "GET /internal/v1/identity/context: the caller's signed delegated scope re-validated against the authority (a forged or stale tenant / application claim is DELEGATED_CONTEXT_INVALID).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "authorityMode",
+          "suspendedLink",
+          "tenant",
+          "application",
+          "environment",
+          "serviceAccount"
+        ],
+        "properties": {
+          "authorityMode": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.AuthorityMode"
+          },
+          "suspendedLink": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform-access.identity.v1.SuspendedLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tenant": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.TenantSnapshot"
+          },
+          "application": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.ApplicationSnapshot"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.EnvironmentSnapshot"
+          },
+          "serviceAccount": {
+            "$ref": "#/components/schemas/platform-access.identity.v1.ServiceAccountSnapshot"
+          }
+        }
+      },
+      "platform.common.v1.CorrelationId": {
+        "description": "Server-generated identifier that stays stable across every hop of one causal operation.",
+        "type": "string",
+        "pattern": "^corr_[0-9a-f]{32}$"
+      },
+      "platform.common.v1.PrincipalKind": {
+        "description": "Category of communication principal (Part B section 10).",
+        "type": "string",
+        "enum": [
+          "NATIVE_CF_USER",
+          "EXTERNAL_APPLICATION_PRINCIPAL",
+          "ENTERPRISE_MEMBER",
+          "SERVICE_ACCOUNT",
+          "TELEPHONE_ENDPOINT",
+          "TEMPORARY_EXTERNAL_PARTICIPANT",
+          "BOT_OR_SERVICE"
+        ]
+      },
+      "platform.common.v1.RequestId": {
+        "description": "Server-generated identifier of one request / one service hop.",
+        "type": "string",
+        "pattern": "^req_[0-9a-f]{32}$"
+      },
+      "platform.common.v1.Uuid": {
+        "description": "Lower-case hyphenated UUID.",
+        "type": "string",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Platform Access error envelope.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/platform-access.identity.v1.Error"
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "cfServiceAuth": []
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "security": [],
+        "description": "Liveness.",
+        "responses": {
+          "200": {
+            "description": "Alive.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "operationId": "ready",
+        "security": [],
+        "description": "Readiness: database reachable and no migration pending (counts and versions only).",
+        "responses": {
+          "200": {
+            "description": "Ready.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not ready.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/credentials/authenticate": {
+      "post": {
+        "operationId": "authenticateCredential",
+        "description": "Validate a presented customer credential and return its trusted authority chain (or the rejection reason and any throttle). The presented value is never logged or stored. Permission: `platform-credential.authenticate`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.AuthenticateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-access.identity.v1.AuthenticateRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/credentials/{credentialId}": {
+      "get": {
+        "operationId": "getCredentialStatus",
+        "description": "Status, expiry and revocation of a credential of the delegated scope (no secret, no verifier). Permission: `platform-identity.read`. Requires the delegated platform context signed into the caller's service token (cfmeet.platform.delegated-platform-context); its tenant / application are re-validated here and never trusted on their own.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.CredentialStatusResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/authorization/evaluate": {
+      "post": {
+        "operationId": "evaluateAuthorization",
+        "description": "Re-evaluate NOW whether the credential of the delegated scope may perform an operation needing the given scopes (optionally for a principal). Permission: `platform-identity.read`. Requires the delegated platform context signed into the caller's service token (cfmeet.platform.delegated-platform-context); its tenant / application are re-validated here and never trusted on their own.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.EvaluateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-access.identity.v1.EvaluateRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/identity/context": {
+      "get": {
+        "operationId": "getTrustedContext",
+        "description": "The trusted context of the caller's delegated scope: tenant, application, environment, service account and authority mode. Permission: `platform-identity.read`. Requires the delegated platform context signed into the caller's service token (cfmeet.platform.delegated-platform-context); its tenant / application are re-validated here and never trusted on their own.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.TrustedContext"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/identity/changes": {
+      "post": {
+        "operationId": "readIdentityChanges",
+        "description": "A page of the identity change feed after the cursor (consumer projections). POST because internal requests carry no query strings. Permission: `platform-identity.read`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.ChangePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-access.identity.v1.ChangesRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/identity/imports/{bundleDigest}": {
+      "get": {
+        "operationId": "getImportReceipt",
+        "description": "Receipt of an operator-imported identity bundle (hand-off verification by the previous authority). Permission: `platform-identity.read`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "bundleDigest",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.ImportReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/scopes": {
+      "get": {
+        "operationId": "getScopeRegistry",
+        "description": "The server-authoritative scope registry (Calling, Numbering and SMS scopes; trust levels). Permission: `platform-identity.read`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.ScopeRegistry"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/principals/resolve": {
+      "post": {
+        "operationId": "resolvePrincipals",
+        "description": "Resolve principal references inside the delegated scope only. Permission: `platform-principal.resolve`. Requires the delegated platform context signed into the caller's service token (cfmeet.platform.delegated-platform-context); its tenant / application are re-validated here and never trusted on their own.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.ResolveResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-access.identity.v1.ResolveRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/principals/telephone-endpoints": {
+      "post": {
+        "operationId": "ensureTelephoneEndpoint",
+        "description": "Get or create the TELEPHONE_ENDPOINT principal of a protected public party (by ContactReference, never a number). Idempotent. Permission: `platform-principal.register`. Requires the delegated platform context signed into the caller's service token (cfmeet.platform.delegated-platform-context); its tenant / application are re-validated here and never trusted on their own.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.PrincipalResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-access.identity.v1.TelephoneEndpointRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/principals/ensure": {
+      "post": {
+        "operationId": "ensurePrincipal",
+        "description": "Part V H §104: get or create the NATIVE_CF_USER / TEMPORARY_EXTERNAL_PARTICIPANT principal of an account the first-party login authority (Meeting Service) authenticated itself. Idempotent. Permission: `platform-principal.ensure`. Requires the delegated platform context signed into the caller's service token; it must be a FIRST_PARTY tenant at FULL authority (EXTERNAL → POLICY_VIOLATION, suspended chain or principal → INVALID_STATE).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-access.identity.v1.EnsurePrincipalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.EnsurePrincipalResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/principals/{principalId}/tombstone": {
+      "post": {
+        "operationId": "tombstonePrincipal",
+        "description": "Tombstone a principal for good (audited with the named human operator). Idempotent. Permission: `platform-principal.register`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "principalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.TombstoneResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-access.identity.v1.TombstoneRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/tenants": {
+      "post": {
+        "operationId": "createTenant",
+        "description": "Create a tenant. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/tenants/{tenantId}": {
+      "get": {
+        "operationId": "getTenant",
+        "description": "Read a tenant. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/tenants/{tenantId}/status": {
+      "post": {
+        "operationId": "setTenantStatus",
+        "description": "Suspend / reactivate a tenant. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/tenants/{tenantId}/applications": {
+      "post": {
+        "operationId": "createApplication",
+        "description": "Create an application. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/applications/{applicationId}": {
+      "get": {
+        "operationId": "getApplication",
+        "description": "Read an application. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/applications/{applicationId}/status": {
+      "post": {
+        "operationId": "setApplicationStatus",
+        "description": "Suspend / reactivate an application. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/applications/{applicationId}/environments": {
+      "post": {
+        "operationId": "createEnvironment",
+        "description": "Create an environment. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/applications/{applicationId}/scopes": {
+      "post": {
+        "operationId": "grantApplicationScope",
+        "description": "Allow a scope for an application (privileged scopes need `privileged: true` and a FIRST_PARTY tenant). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listApplicationScopes",
+        "description": "List the application's allowed scopes. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/applications/{applicationId}/scopes/{scope}": {
+      "delete": {
+        "operationId": "revokeApplicationScope",
+        "description": "Withdraw a scope from the application and its credentials. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/environments/{environmentId}/status": {
+      "post": {
+        "operationId": "setEnvironmentStatus",
+        "description": "Suspend / reactivate an environment. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/environments/{environmentId}/live-telecom": {
+      "post": {
+        "operationId": "setLiveTelecom",
+        "description": "Allow / forbid live telecom (PRODUCTION only). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/environments/{environmentId}/service-accounts": {
+      "post": {
+        "operationId": "createServiceAccount",
+        "description": "Create a service account. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/environments/{environmentId}/principals": {
+      "post": {
+        "operationId": "registerPrincipal",
+        "description": "Register a principal (opaque reference). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listPrincipals",
+        "description": "List principals. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/service-accounts/{serviceAccountId}/status": {
+      "post": {
+        "operationId": "setServiceAccountStatus",
+        "description": "Suspend / reactivate / revoke a service account. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/service-accounts/{serviceAccountId}/credentials": {
+      "post": {
+        "operationId": "issueCredential",
+        "description": "Issue a credential; the raw credential is in the response exactly once. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listCredentials",
+        "description": "List credentials (masked). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/credentials/{credentialId}": {
+      "get": {
+        "operationId": "getCredential",
+        "description": "Read a credential (masked). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/credentials/{credentialId}/rotate": {
+      "post": {
+        "operationId": "rotateCredential",
+        "description": "Rotate; the successor's raw credential is in the response exactly once. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/credentials/{credentialId}/revoke": {
+      "post": {
+        "operationId": "revokeCredential",
+        "description": "Revoke immediately (idempotent). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/credentials/{credentialId}/principal-restriction": {
+      "put": {
+        "operationId": "restrictCredentialPrincipals",
+        "description": "Restrict a credential to act only for given principals. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/principals/{principalId}/status": {
+      "post": {
+        "operationId": "setPrincipalStatus",
+        "description": "Suspend / reactivate / deactivate a principal. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "principalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/principals/{principalId}/tombstone": {
+      "post": {
+        "operationId": "operatorTombstonePrincipal",
+        "description": "Tombstone a principal. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "principalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

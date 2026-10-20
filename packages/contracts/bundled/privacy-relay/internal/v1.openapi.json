@@ -1,0 +1,4031 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet Privacy Relay internal API",
+    "version": "1.4.0",
+    "description": "Internal HTTP surface of services/privacy-relay: GET /health (public) and the service-authenticated /internal/v1 API used by the authenticated platform ingress (Calling) and by Calling's protected-call authorization. Every /internal/v1 path — including unknown ones — requires a valid service token; customer credentials are refused. Scope comes only from the signed delegated platform context; bodies refuse unknown members (tenantId, applicationId, environmentId, status, version, authorization results). Commands carry {idempotencyKey, request}."
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "description": "Liveness and database reachability. Public; reveals no configuration.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Healthy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unreachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts": {
+      "post": {
+        "operationId": "createContext",
+        "description": "Create a communication context. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "#/components/schemas/privacy-relay.common.v1.IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "#/components/schemas/privacy-relay.context.v1.CreateContextRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.context.v1.ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/query": {
+      "post": {
+        "operationId": "listContexts",
+        "description": "List contexts (keyset). Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.read and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
+                  },
+                  "cursor": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "status": {
+                    "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationContextStatus"
+                  },
+                  "externalContextReference": {
+                    "$ref": "#/components/schemas/privacy-relay.common.v1.ExternalContextReference"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.context.v1.ContextList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/{context_id}": {
+      "get": {
+        "operationId": "getContext",
+        "description": "Get a context. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.read and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.context.v1.CommunicationContext"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/{context_id}/evidence": {
+      "get": {
+        "operationId": "getContextEvidence",
+        "description": "Privacy-safe evidence. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.read and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.context.v1.ContextEvidence"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/{context_id}/update": {
+      "post": {
+        "operationId": "updateContext",
+        "description": "Typed versioned update. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "#/components/schemas/privacy-relay.common.v1.IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "#/components/schemas/privacy-relay.context.v1.UpdateContextRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.context.v1.ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/{context_id}/suspend": {
+      "post": {
+        "operationId": "suspendContext",
+        "description": "Suspend. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "#/components/schemas/privacy-relay.common.v1.IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "#/components/schemas/privacy-relay.context.v1.LifecycleCommandRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.context.v1.ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/{context_id}/resume": {
+      "post": {
+        "operationId": "resumeContext",
+        "description": "Resume. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "#/components/schemas/privacy-relay.common.v1.IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "#/components/schemas/privacy-relay.context.v1.LifecycleCommandRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.context.v1.ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/{context_id}/complete": {
+      "post": {
+        "operationId": "completeContext",
+        "description": "Complete. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "#/components/schemas/privacy-relay.common.v1.IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "#/components/schemas/privacy-relay.context.v1.LifecycleCommandRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.context.v1.ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/{context_id}/revoke": {
+      "post": {
+        "operationId": "revokeContext",
+        "description": "Revoke. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication-context.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication-context.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "#/components/schemas/privacy-relay.common.v1.IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "#/components/schemas/privacy-relay.context.v1.LifecycleCommandRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.context.v1.ContextMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contexts/{context_id}/sessions": {
+      "post": {
+        "operationId": "createRelaySession",
+        "description": "Create a relay session. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-session.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-session.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "#/components/schemas/privacy-relay.common.v1.IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "#/components/schemas/privacy-relay.session.v1.CreateSessionRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.session.v1.SessionMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/query": {
+      "post": {
+        "operationId": "listRelaySessions",
+        "description": "List sessions (keyset). Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.read and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-session.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-session.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
+                  },
+                  "cursor": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "status": {
+                    "$ref": "#/components/schemas/privacy-relay.common.v1.PrivacyRelaySessionStatus"
+                  },
+                  "contextId": {
+                    "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.session.v1.SessionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/{session_id}": {
+      "get": {
+        "operationId": "getRelaySession",
+        "description": "Get a session. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.read and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-session.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-session.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.session.v1.PrivacyRelaySession"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/{session_id}/suspend": {
+      "post": {
+        "operationId": "suspendRelaySession",
+        "description": "Suspend a session. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-session.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-session.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "#/components/schemas/privacy-relay.common.v1.IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "#/components/schemas/privacy-relay.context.v1.LifecycleCommandRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.session.v1.SessionMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/{session_id}/resume": {
+      "post": {
+        "operationId": "resumeRelaySession",
+        "description": "Resume a session. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-session.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-session.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "#/components/schemas/privacy-relay.common.v1.IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "#/components/schemas/privacy-relay.context.v1.LifecycleCommandRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.session.v1.SessionMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/{session_id}/revoke": {
+      "post": {
+        "operationId": "revokeRelaySession",
+        "description": "Revoke a session. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.write and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-session.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-session.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "idempotencyKey",
+                  "request"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "$ref": "#/components/schemas/privacy-relay.common.v1.IdempotencyKey"
+                  },
+                  "request": {
+                    "$ref": "#/components/schemas/privacy-relay.context.v1.LifecycleCommandRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.session.v1.SessionMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/communication/authorize": {
+      "post": {
+        "operationId": "authorizeCommunication",
+        "description": "Decide (and record) whether source may communicate with every target, on channel, over route, under the relay session NOW: evaluates the current context AND the current session (their intersection) at server time. Every decision is recorded. Used by Calling before every protected call creation and transfer introduction; Calling fails closed without an answer. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication.authorize and a signed delegated platform context (the only scope).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "communication.authorize"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "communication.authorize",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/privacy-relay.authorization.v1.AuthorizationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.authorization.v1.AuthorizationDecisionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contacts/{contact_reference}/resolution-grants": {
+      "post": {
+        "operationId": "grantContactResolution",
+        "description": "Calling only: issue a short-lived Contact Resolution Grant for one authorized public-network call leg. Reveals no contact value. Every attempt is audited.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "protected-contact.grant-for-execution"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "protected-contact.grant-for-execution",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "contact_reference",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.ContactReference"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/privacy-relay.contact-resolution.v1.ResolutionGrantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.contact-resolution.v1.ResolutionGrantResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/contacts/{contact_reference}/resolve-for-execution": {
+      "post": {
+        "operationId": "resolveContactForExecution",
+        "description": "Telephony only: exchange a valid, unexpired, unconsumed grant (same scope, contact, call, leg; unchanged authority; enabled and effectively VERIFIED contact) for the canonical E.164 value of that one execution. The response is never logged or persisted; every attempt is audited without the number.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "protected-contact.resolve-for-execution"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "protected-contact.resolve-for-execution",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "contact_reference",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.ContactReference"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/privacy-relay.contact-resolution.v1.ResolveForExecutionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.contact-resolution.v1.ExecutionResolutionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/{session_id}/relay-number-assignment": {
+      "post": {
+        "operationId": "assignRelayNumber",
+        "description": "Lend a temporary relay number to the session (deterministic, SKIP LOCKED selection; idempotent per session). 201 new, 200 the existing assignment (Idempotent-Replayed: true).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-number.assign"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-number.assign",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/privacy-relay.relay-number.v1.AssignRelayNumberRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "New assignment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.relay-number.v1.RelayNumberAssignmentResult"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "The existing assignment of this session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.relay-number.v1.RelayNumberAssignmentResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "get": {
+        "operationId": "getRelayNumberAssignment",
+        "description": "The session's assignment in any status (RELAY_ASSIGNMENT_NOT_FOUND when it never had one).",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-number.assign"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-number.assign",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The assignment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.relay-number.v1.RelayNumberAssignmentResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sessions/{session_id}/relay-number-assignment/release": {
+      "post": {
+        "operationId": "releaseRelayNumberAssignment",
+        "description": "Restrictive (never gated by a kill switch) and idempotent: routing authority ends now, the number enters cooldown.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-number.assign"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-number.assign",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The ended assignment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.relay-number.v1.RelayNumberAssignmentResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/relay-routing/resolve-inbound": {
+      "post": {
+        "operationId": "resolveInboundRelayMapping",
+        "description": "Telephony only, no delegated context: canonicalize the called relay number, require exactly one ACTIVE assignment (more is an incident, never a choice), matching correlation metadata, an event not older than the assignment, and CALLBACK_RELAY authority of the bound session and context now. Every attempt is recorded (relay_inbound_resolutions) without any number.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "relay-number.resolve-inbound"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "relay-number.resolve-inbound",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/privacy-relay.relay-routing.v1.ResolveInboundRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The current safe mapping.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.relay-routing.v1.InboundResolutionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/relay-routing/protect-inbound-caller": {
+      "post": {
+        "operationId": "protectInboundCaller",
+        "description": "Telephony only, no delegated context: the presented caller number goes straight into the Contact Vault in the scope of a recent RESOLVED inbound resolution; the answer is its ContactReference (201 new, 200 an existing contact of that scope) and whom it may reach now.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "protected-contact.protect-inbound"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "protected-contact.protect-inbound",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/privacy-relay.relay-routing.v1.ProtectInboundCallerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "A new protected contact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.relay-routing.v1.InboundCallerResult"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "An existing protected contact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.relay-routing.v1.InboundCallerResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/relay-routing/protect-dcn-caller": {
+      "post": {
+        "operationId": "protectDcnCaller",
+        "description": "Part IV L — Telephony only, no delegated context: the caller of an inbound call to a Digital Communications Number goes straight into the Contact Vault in the scope proven by Numbering's signed INBOUND_VOICE grant (verified against Privacy Relay's dedicated routing-grant trust bundle, NUMBER_GRANT_TRUST_BUNDLE_FILE; kind INBOUND_VOICE, issuer Numbering, audience Calling). 201 new / 200 existing contact. An invalid grant is 409 RELAY_MAPPING_NOT_ACTIVE; no configured trust 503.",
+        "security": [
+          {
+            "cfServiceAuth": [
+              "protected-contact.protect-inbound"
+            ]
+          }
+        ],
+        "x-cfmeet-required-permission": "protected-contact.protect-inbound",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/privacy-relay.relay-routing.v1.ProtectDcnCallerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "A new protected contact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.relay-routing.v1.DcnCallerResult"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "An existing protected contact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/privacy-relay.relay-routing.v1.DcnCallerResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cfServiceAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Service-Authorization",
+        "description": "Bearer <service token> (contract cfmeet.platform.internal-http). Permissions come only from Privacy Relay's trust bundle."
+      }
+    },
+    "parameters": {
+      "CfRequestId": {
+        "name": "X-CF-Request-Id",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/platform.common.v1.RequestId"
+        }
+      },
+      "CfCorrelationId": {
+        "name": "X-CF-Correlation-Id",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/platform.common.v1.CorrelationId"
+        }
+      }
+    },
+    "schemas": {
+      "HealthStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "service"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "ok",
+              "unavailable"
+            ]
+          },
+          "service": {
+            "const": "privacy-relay"
+          }
+        }
+      },
+      "platform.common.v1.CorrelationId": {
+        "description": "Server-generated identifier that stays stable across every hop of one causal operation.",
+        "type": "string",
+        "pattern": "^corr_[0-9a-f]{32}$"
+      },
+      "platform.common.v1.RequestId": {
+        "description": "Server-generated identifier of one request / one service hop.",
+        "type": "string",
+        "pattern": "^req_[0-9a-f]{32}$"
+      },
+      "platform.common.v1.Uuid": {
+        "description": "Lower-case hyphenated UUID.",
+        "type": "string",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      },
+      "privacy-relay.authorization.v1.AuthorizationDecisionResult": {
+        "description": "A recorded decision evaluated against the CURRENT context AND session (their intersection) at server time. validUntil is present exactly when AUTHORIZED. No contact values, no provider ids. An AUTHORIZED public-network decision (PUBLIC_RELAY / CALLBACK_RELAY) about protected contacts carries contactFacts: their routing country and read-time verification — never a number.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decisionId",
+          "decision",
+          "reason",
+          "contextId",
+          "contextVersion",
+          "relaySessionId",
+          "relaySessionVersion",
+          "strategy",
+          "policyVersion",
+          "channel",
+          "route",
+          "purpose",
+          "decidedAt"
+        ],
+        "properties": {
+          "decisionId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.AuthorizationDecision"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.AuthorizationReason"
+          },
+          "contextId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "contextVersion": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+          },
+          "relaySessionId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "relaySessionVersion": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+          },
+          "strategy": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.RelayStrategy"
+          },
+          "policyVersion": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,31}$"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationChannel"
+          },
+          "route": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationRoute"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.AuthorizationPurpose"
+          },
+          "validUntil": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "decidedAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "contactFacts": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 65,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "contactReference",
+                "country",
+                "verification"
+              ],
+              "properties": {
+                "contactReference": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.ContactReference"
+                },
+                "country": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[A-Z]{2}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "verification": {
+                  "const": "VERIFIED"
+                }
+              }
+            }
+          }
+        },
+        "if": {
+          "properties": {
+            "decision": {
+              "const": "AUTHORIZED"
+            }
+          }
+        },
+        "then": {
+          "required": [
+            "validUntil"
+          ],
+          "properties": {
+            "reason": {
+              "const": "AUTHORIZED"
+            }
+          }
+        },
+        "else": {
+          "not": {
+            "required": [
+              "validUntil"
+            ]
+          },
+          "properties": {
+            "reason": {
+              "not": {
+                "const": "AUTHORIZED"
+              }
+            }
+          }
+        }
+      },
+      "privacy-relay.authorization.v1.AuthorizationRequest": {
+        "description": "Internal communication authorization request (Calling -> Privacy Relay, service-authenticated). Tenant / application / environment come only from the signed delegated context; there is no client-asserted result.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "relaySessionId",
+          "source",
+          "targets",
+          "channel"
+        ],
+        "properties": {
+          "relaySessionId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "source": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.SubjectReference"
+          },
+          "targets": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.SubjectReference"
+            }
+          },
+          "channel": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationChannel"
+          },
+          "route": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationRoute"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.AuthorizationPurpose"
+          }
+        }
+      },
+      "privacy-relay.common.v1.AuditEventType": {
+        "description": "Immutable Privacy Relay evidence event types.",
+        "type": "string",
+        "enum": [
+          "CONTEXT_CREATED",
+          "CONTEXT_UPDATED",
+          "CONTEXT_PARTICIPANTS_CHANGED",
+          "CONTEXT_SUSPENDED",
+          "CONTEXT_RESUMED",
+          "CONTEXT_REVOKED",
+          "CONTEXT_COMPLETED",
+          "CONTEXT_EXPIRED",
+          "RELAY_SESSION_CREATED",
+          "RELAY_SESSION_UPDATED",
+          "RELAY_SESSION_SUSPENDED",
+          "RELAY_SESSION_RESUMED",
+          "RELAY_SESSION_REVOKED",
+          "RELAY_SESSION_COMPLETED",
+          "RELAY_SESSION_EXPIRED",
+          "ENFORCEMENT_REQUESTED",
+          "ENFORCEMENT_APPLIED",
+          "ENFORCEMENT_FAILED",
+          "RELAY_NUMBER_ASSIGNED",
+          "RELAY_NUMBER_RELEASED",
+          "RELAY_NUMBER_COOLDOWN_STARTED"
+        ]
+      },
+      "privacy-relay.common.v1.AuthorizationDecision": {
+        "description": "Outcome of a communication authorization.",
+        "type": "string",
+        "enum": [
+          "AUTHORIZED",
+          "DENIED"
+        ]
+      },
+      "privacy-relay.common.v1.AuthorizationPurpose": {
+        "description": "Safe intent metadata of an authorization request.",
+        "type": "string",
+        "enum": [
+          "CALL_CREATE",
+          "CALL_TRANSFER",
+          "CHECK"
+        ]
+      },
+      "privacy-relay.common.v1.AuthorizationReason": {
+        "description": "Normalized platform reason of a decision (no consumer-specific reasons).",
+        "type": "string",
+        "enum": [
+          "AUTHORIZED",
+          "FEATURE_DISABLED",
+          "CONTEXT_NOT_ACTIVE",
+          "CONTEXT_NOT_STARTED",
+          "CONTEXT_EXPIRED",
+          "CONTEXT_REVOKED",
+          "CONTEXT_SUSPENDED",
+          "SESSION_NOT_ACTIVE",
+          "SESSION_NOT_STARTED",
+          "SESSION_EXPIRED",
+          "PARTICIPANT_NOT_AUTHORIZED",
+          "DIRECTION_NOT_ALLOWED",
+          "CHANNEL_NOT_ALLOWED",
+          "STRATEGY_NOT_ALLOWED",
+          "GRACE_POLICY_DENIED",
+          "CAPABILITY_UNAVAILABLE",
+          "CONTACT_NOT_VERIFIED",
+          "CONTACT_VERIFICATION_EXPIRED",
+          "CONTACT_BLOCKED"
+        ]
+      },
+      "privacy-relay.common.v1.CommunicationChannel": {
+        "description": "Communication channel. VOICE is executed; MESSAGING may be declared for the future and is never executed by sections 26-30 (no chat, SMS or provider messaging).",
+        "type": "string",
+        "enum": [
+          "VOICE",
+          "MESSAGING"
+        ]
+      },
+      "privacy-relay.common.v1.CommunicationContextStatus": {
+        "description": "Lifecycle of a Communication Context. REVOKED and EXPIRED are terminal; COMPLETED never returns to ACTIVE or SUSPENDED.",
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "SUSPENDED",
+          "REVOKED",
+          "COMPLETED",
+          "EXPIRED"
+        ]
+      },
+      "privacy-relay.common.v1.CommunicationRoute": {
+        "description": "Route an authorization asks for. Only APPLICATION is executable today.",
+        "type": "string",
+        "enum": [
+          "APPLICATION",
+          "PUBLIC_RELAY",
+          "CALLBACK_RELAY"
+        ]
+      },
+      "privacy-relay.common.v1.ContactReference": {
+        "description": "Opaque, server-generated ContactReference (UUID) of a protected contact, scoped to one tenant / application / environment. It never encodes a number, country, provider or user; knowing it grants nothing.",
+        "$ref": "#/components/schemas/platform.common.v1.Uuid"
+      },
+      "privacy-relay.common.v1.ContextPolicy": {
+        "description": "The typed, bounded context policy (never an arbitrary document). Defaults are fail-safe.",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "terminateActiveCallsOnRevoke": {
+            "type": "boolean",
+            "default": true,
+            "description": "On revoke, actively terminate protected calls (new authority is denied regardless)."
+          },
+          "terminateActiveCallsOnParticipantRemoval": {
+            "type": "boolean",
+            "default": true,
+            "description": "On participant removal, terminate protected calls involving the removed participant; when false they may continue but no new protected call or transfer involving that participant is authorized."
+          },
+          "terminateActiveCallsOnSuspend": {
+            "type": "boolean",
+            "default": false,
+            "description": "On suspend, terminate protected calls (new authority is denied regardless)."
+          },
+          "graceAllowsNewCalls": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether new calls may be authorized during the completion grace period."
+          }
+        }
+      },
+      "privacy-relay.common.v1.DirectionPolicy": {
+        "description": "BIDIRECTIONAL: any two active participants, both directions. EXPLICIT: only directed edges authorize; A -> B never implies B -> A.",
+        "type": "string",
+        "enum": [
+          "BIDIRECTIONAL",
+          "EXPLICIT"
+        ]
+      },
+      "privacy-relay.common.v1.DirectionRequest": {
+        "description": "A directed edge between two subjects; channel restricts it to one channel (absent: every allowed channel).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.SubjectReference"
+          },
+          "to": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.SubjectReference"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationChannel"
+          }
+        }
+      },
+      "privacy-relay.common.v1.Enforcement": {
+        "description": "Active-call enforcement of a mutation (event ids of the durable enforcement jobs it created).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "enforcementEventIds"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.EnforcementState"
+          },
+          "enforcementEventIds": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        }
+      },
+      "privacy-relay.common.v1.EnforcementReason": {
+        "description": "Why active protected calls are enforced against.",
+        "type": "string",
+        "enum": [
+          "CONTEXT_REVOKED",
+          "CONTEXT_SUSPENDED",
+          "CONTEXT_COMPLETED",
+          "CONTEXT_EXPIRED",
+          "PARTICIPANT_REMOVED",
+          "SESSION_REVOKED",
+          "SESSION_SUSPENDED",
+          "SESSION_EXPIRED"
+        ]
+      },
+      "privacy-relay.common.v1.EnforcementState": {
+        "description": "Active-call enforcement state of a mutation: NOT_REQUIRED, PENDING (durably queued; Calling has not confirmed) or APPLIED (Calling confirmed). Never claimed before Calling confirms.",
+        "type": "string",
+        "enum": [
+          "NOT_REQUIRED",
+          "PENDING",
+          "APPLIED"
+        ]
+      },
+      "privacy-relay.common.v1.ErrorCode": {
+        "description": "Stable error codes of the Privacy Relay API. AUTHENTICATION_FAILED, INSUFFICIENT_SCOPE and RATE_LIMITED come from the authenticated platform ingress; INTERNAL_* only from internal routes (never relayed to customers).",
+        "type": "string",
+        "enum": [
+          "AUTHENTICATION_FAILED",
+          "INSUFFICIENT_SCOPE",
+          "RATE_LIMITED",
+          "VALIDATION_ERROR",
+          "NOT_FOUND",
+          "METHOD_NOT_ALLOWED",
+          "CONTEXT_NOT_FOUND",
+          "SESSION_NOT_FOUND",
+          "CONTEXT_VERSION_CONFLICT",
+          "SESSION_VERSION_CONFLICT",
+          "CONTEXT_REFERENCE_CONFLICT",
+          "CONTEXT_NOT_ACTIVE",
+          "CONTEXT_EXPIRED",
+          "CONTEXT_REVOKED",
+          "CONTEXT_SUSPENDED",
+          "SESSION_NOT_ACTIVE",
+          "PARTICIPANT_NOT_AUTHORIZED",
+          "DIRECTION_NOT_ALLOWED",
+          "CHANNEL_NOT_ALLOWED",
+          "STRATEGY_NOT_ALLOWED",
+          "VALIDITY_NOT_CONTAINED",
+          "IDEMPOTENCY_CONFLICT",
+          "PRIVACY_RELAY_DISABLED",
+          "SERVICE_UNAVAILABLE",
+          "INTERNAL_ERROR",
+          "INTERNAL_AUTHENTICATION_FAILED",
+          "INTERNAL_PERMISSION_DENIED",
+          "CONTACT_NOT_FOUND",
+          "CONTACT_VERSION_CONFLICT",
+          "CONTACT_INVALID",
+          "CONTACT_ALREADY_EXISTS",
+          "CONTACT_DISABLED",
+          "CONTACT_BLOCKED",
+          "CONTACT_NOT_VERIFIED",
+          "CONTACT_VERIFICATION_EXPIRED",
+          "CONTACT_DELEGATION_INVALID",
+          "CONTACT_SCOPE_DENIED",
+          "CONTACT_RESOLUTION_DENIED",
+          "CONTACT_RESOLUTION_GRANT_EXPIRED",
+          "CONTACT_VAULT_DISABLED",
+          "RELAY_NUMBER_UNAVAILABLE",
+          "RELAY_ASSIGNMENT_NOT_FOUND",
+          "RELAY_MAPPING_NOT_ACTIVE",
+          "RELAY_MAPPING_AMBIGUOUS",
+          "RELAY_NUMBER_POOL_DISABLED"
+        ]
+      },
+      "privacy-relay.common.v1.ErrorEnvelope": {
+        "description": "Error response body: stable code, fixed safe message, server request id. Never database errors, foreign-resource existence, tokens or contact data.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message",
+              "requestId"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/privacy-relay.common.v1.ErrorCode"
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "requestId": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^req_[0-9a-f]{32}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "privacy-relay.common.v1.ExternalContextReference": {
+        "description": "Consumer-defined, opaque, bounded reference of the business relationship (CF Meet never parses it). It can never be contact data: no telephone number, e-mail address or tel / sip / mailto URI.",
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+        "not": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9.:-]*[0-9][0-9.:-]*[0-9][0-9.:-]*[0-9][0-9.:-]*[0-9][0-9.:-]*[0-9][0-9.:-]*[0-9][0-9.:-]*[0-9][0-9.:-]*$"
+            },
+            {
+              "pattern": "^([Tt][Ee][Ll]|[Ss][Ii][Pp][Ss]?|[Mm][Aa][Ii][Ll][Tt][Oo]|[Cc][Aa][Ll][Ll][Tt][Oo]|[Ww][Aa]|[Ss][Mm][Ss]):"
+            }
+          ]
+        }
+      },
+      "privacy-relay.common.v1.IdempotencyKey": {
+        "description": "Client-chosen key: 1-255 printable ASCII characters without spaces.",
+        "type": "string",
+        "pattern": "^[!-~]{1,255}$"
+      },
+      "privacy-relay.common.v1.ParticipantSubjectKind": {
+        "description": "Kind of an authorization subject.",
+        "type": "string",
+        "enum": [
+          "PRINCIPAL",
+          "CONTACT_REFERENCE"
+        ]
+      },
+      "privacy-relay.common.v1.PrivacyRelaySessionStatus": {
+        "description": "Lifecycle of a Privacy Relay Session (same graph as contexts); a session never outlives its context's authority.",
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "SUSPENDED",
+          "REVOKED",
+          "COMPLETED",
+          "EXPIRED"
+        ]
+      },
+      "privacy-relay.common.v1.RelayAssignmentEndReason": {
+        "description": "Why routing authority ended.",
+        "type": "string",
+        "enum": [
+          "RELEASED",
+          "SESSION_REVOKED",
+          "SESSION_COMPLETED",
+          "SESSION_EXPIRED",
+          "ASSIGNMENT_EXPIRED",
+          "NUMBER_DISABLED"
+        ]
+      },
+      "privacy-relay.common.v1.RelayAssignmentStatus": {
+        "description": "ACTIVE carries routing authority; COOLDOWN quarantines the number after authority ended; RELEASED / REVOKED / EXPIRED are terminal (never reactivated).",
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "COOLDOWN",
+          "RELEASED",
+          "REVOKED",
+          "EXPIRED"
+        ]
+      },
+      "privacy-relay.common.v1.RelayNumberCapability": {
+        "description": "Provisioned capability of a temporary relay number (voice only; nothing implies SMS, MMS or messaging).",
+        "type": "string",
+        "enum": [
+          "VOICE_INBOUND",
+          "VOICE_OUTBOUND"
+        ]
+      },
+      "privacy-relay.common.v1.RelayStrategy": {
+        "description": "Relay strategy: policy, not proof that a route exists. Every strategy permits the application route; the public-network and callback strategies only become executable when relay-number and telephony infrastructure exists.",
+        "type": "string",
+        "enum": [
+          "APP_ONLY",
+          "APP_PREFERRED",
+          "PUBLIC_RELAY_ALLOWED",
+          "CALLBACK_RELAY_ALLOWED"
+        ]
+      },
+      "privacy-relay.common.v1.SnapshotScope": {
+        "description": "Whether a relay session follows its context (INHERITED) or was explicitly narrowed (NARROWED).",
+        "type": "string",
+        "enum": [
+          "INHERITED",
+          "NARROWED"
+        ]
+      },
+      "privacy-relay.common.v1.SubjectReference": {
+        "description": "Exactly one opaque subject reference: a CF Meet principal id or an opaque ContactReference id. A ContactReference is never a telephone number, e-mail address or SIP URI, and Privacy Relay never resolves it (Contact Vault is a later section).",
+        "type": "object",
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "principalId"
+            ],
+            "properties": {
+              "principalId": {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              }
+            },
+            "not": {
+              "required": [
+                "contactReferenceId"
+              ]
+            }
+          },
+          {
+            "required": [
+              "contactReferenceId"
+            ],
+            "properties": {
+              "contactReferenceId": {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              }
+            },
+            "not": {
+              "required": [
+                "principalId"
+              ]
+            }
+          }
+        ],
+        "properties": {
+          "principalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "contactReferenceId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          }
+        }
+      },
+      "privacy-relay.common.v1.Timestamp": {
+        "description": "RFC 3339 timestamp (UTC).",
+        "type": "string",
+        "format": "date-time"
+      },
+      "privacy-relay.common.v1.Version": {
+        "description": "Monotonic version (starts at 1, +1 per accepted authority change).",
+        "type": "integer",
+        "minimum": 1
+      },
+      "privacy-relay.contact-resolution.v1.ExecutionResolution": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contactReference",
+          "e164",
+          "country",
+          "callId",
+          "callLegId",
+          "grantId",
+          "expiresAt"
+        ],
+        "properties": {
+          "contactReference": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.ContactReference"
+          },
+          "e164": {
+            "description": "The canonical E.164 number. Present ONLY in the Telephony execution-resolution response; never logged, persisted outside the vault, evented or returned anywhere else.",
+            "type": "string",
+            "pattern": "^\\+[1-9][0-9]{1,14}$"
+          },
+          "country": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z]{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "callId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "callLegId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "grantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "callerIdentity": {
+            "description": "The caller identity the leg presents: the relay number lent to the grant's relay session (its active, outbound-capable relay identity binding), selected by Privacy Relay — never by a client. Absent when the session has none; Telephony then refuses to originate. Present ONLY in this Telephony response.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "assignmentId",
+              "e164"
+            ],
+            "properties": {
+              "assignmentId": {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              "e164": {
+                "type": "string",
+                "pattern": "^\\+[1-9][0-9]{1,14}$"
+              }
+            }
+          }
+        }
+      },
+      "privacy-relay.contact-resolution.v1.ExecutionResolutionResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resolution"
+        ],
+        "properties": {
+          "resolution": {
+            "$ref": "#/components/schemas/privacy-relay.contact-resolution.v1.ExecutionResolution"
+          }
+        }
+      },
+      "privacy-relay.contact-resolution.v1.ResolutionGrant": {
+        "description": "A Contact Resolution Grant (at most 120 s, never past the decision validity; a re-request for the same leg revokes the previous one). It carries no contact value.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "grantId",
+          "grantSecret",
+          "contactReference",
+          "contextId",
+          "relaySessionId",
+          "decisionId",
+          "callId",
+          "callLegId",
+          "purpose",
+          "issuedAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "grantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "grantSecret": {
+            "description": "Random grant secret (base64url); only its SHA-256 is stored. Handed from Calling to Telephony for one execution.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          },
+          "contactReference": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.ContactReference"
+          },
+          "contextId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "relaySessionId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "decisionId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "callId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "callLegId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "purpose": {
+            "const": "PUBLIC_NETWORK_CALL_LEG"
+          },
+          "issuedAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          }
+        }
+      },
+      "privacy-relay.contact-resolution.v1.ResolutionGrantRequest": {
+        "description": "Calling (protected-contact.grant-for-execution): a grant for ONE call leg. The decision must be a current AUTHORIZED public-network relay decision of this session involving the contact, made for Calling, at the current context / session versions; the contact must be enabled and effectively VERIFIED.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "relaySessionId",
+          "decisionId",
+          "callId",
+          "callLegId",
+          "purpose"
+        ],
+        "properties": {
+          "relaySessionId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "decisionId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "callId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "callLegId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "purpose": {
+            "const": "PUBLIC_NETWORK_CALL_LEG"
+          }
+        }
+      },
+      "privacy-relay.contact-resolution.v1.ResolutionGrantResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "grant"
+        ],
+        "properties": {
+          "grant": {
+            "$ref": "#/components/schemas/privacy-relay.contact-resolution.v1.ResolutionGrant"
+          }
+        }
+      },
+      "privacy-relay.contact-resolution.v1.ResolveForExecutionRequest": {
+        "description": "Telephony only (protected-contact.resolve-for-execution).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "grantId",
+          "grantSecret",
+          "callId",
+          "callLegId",
+          "executionAttemptId"
+        ],
+        "properties": {
+          "grantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "grantSecret": {
+            "description": "Random grant secret (base64url); only its SHA-256 is stored. Handed from Calling to Telephony for one execution.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          },
+          "callId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "callLegId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "executionAttemptId": {
+            "description": "Idempotency identity of the execution attempt: only the same service with the same attempt may retry a consumed grant.",
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          }
+        }
+      },
+      "privacy-relay.context.v1.CommunicationContext": {
+        "description": "Safe representation of a Communication Context. Never a telephone number, provider id, carrier, Contact Vault material, service token or customer credential.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contextId",
+          "externalContextReference",
+          "version",
+          "status",
+          "effectiveStatus",
+          "directionPolicy",
+          "participants",
+          "allowedChannels",
+          "directions",
+          "allowedRelayStrategies",
+          "startsAt",
+          "expiresAt",
+          "policyVersion",
+          "policy",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "contextId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "externalContextReference": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.ExternalContextReference"
+          },
+          "version": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+          },
+          "status": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationContextStatus"
+          },
+          "effectiveStatus": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationContextStatus",
+            "description": "Status at read time: EXPIRED once the final validity has passed, even before the expiry worker materializes it."
+          },
+          "directionPolicy": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.DirectionPolicy"
+          },
+          "participants": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "participantId",
+                "subjectKind",
+                "addedInVersion",
+                "addedAt"
+              ],
+              "properties": {
+                "participantId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "subjectKind": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.ParticipantSubjectKind"
+                },
+                "principalId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "contactReferenceId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "addedInVersion": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+                },
+                "addedAt": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+                }
+              }
+            },
+            "description": "Active participants (history: evidence)."
+          },
+          "allowedChannels": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationChannel"
+            }
+          },
+          "directions": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "directionId",
+                "fromParticipantId",
+                "toParticipantId",
+                "addedInVersion"
+              ],
+              "properties": {
+                "directionId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "fromParticipantId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "toParticipantId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "channel": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationChannel"
+                },
+                "addedInVersion": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+                }
+              }
+            }
+          },
+          "allowedRelayStrategies": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.RelayStrategy"
+            }
+          },
+          "startsAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "graceExpiresAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "policyVersion": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,31}$"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.ContextPolicy"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "suspendedAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "completedAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "revokedAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "expiredAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          }
+        }
+      },
+      "privacy-relay.context.v1.ContextEvidence": {
+        "description": "Privacy-safe support evidence: lifecycle, versions, participant and direction history, sessions, recent decisions, audit events and enforcement status. No contact values.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "context",
+          "participantHistory",
+          "directionHistory",
+          "sessions",
+          "decisions",
+          "auditEvents",
+          "enforcement"
+        ],
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/privacy-relay.context.v1.CommunicationContext"
+          },
+          "participantHistory": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "participantId",
+                "subjectKind",
+                "addedInVersion",
+                "addedAt"
+              ],
+              "properties": {
+                "participantId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "subjectKind": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.ParticipantSubjectKind"
+                },
+                "principalId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "contactReferenceId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "addedInVersion": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+                },
+                "addedAt": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+                },
+                "removedInVersion": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+                },
+                "removedAt": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+                }
+              }
+            }
+          },
+          "directionHistory": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "directionId",
+                "fromParticipantId",
+                "toParticipantId",
+                "addedInVersion"
+              ],
+              "properties": {
+                "directionId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "fromParticipantId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "toParticipantId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "channel": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationChannel"
+                },
+                "addedInVersion": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+                },
+                "removedInVersion": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+                }
+              }
+            }
+          },
+          "sessions": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.session.v1.PrivacyRelaySession"
+            }
+          },
+          "decisions": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "decisionId",
+                "relaySessionId",
+                "contextVersion",
+                "relaySessionVersion",
+                "channel",
+                "route",
+                "purpose",
+                "decision",
+                "reason",
+                "strategy",
+                "decidedAt"
+              ],
+              "properties": {
+                "decisionId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "relaySessionId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "contextVersion": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+                },
+                "relaySessionVersion": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+                },
+                "channel": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationChannel"
+                },
+                "route": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationRoute"
+                },
+                "purpose": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.AuthorizationPurpose"
+                },
+                "decision": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.AuthorizationDecision"
+                },
+                "reason": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.AuthorizationReason"
+                },
+                "strategy": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.RelayStrategy"
+                },
+                "decidedAt": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+                }
+              }
+            }
+          },
+          "auditEvents": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sequence",
+                "eventType",
+                "contextVersion",
+                "actorKind",
+                "data",
+                "occurredAt"
+              ],
+              "properties": {
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "eventType": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.AuditEventType"
+                },
+                "contextVersion": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+                },
+                "relaySessionId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "relaySessionVersion": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+                },
+                "actorKind": {
+                  "enum": [
+                    "APPLICATION",
+                    "SYSTEM"
+                  ]
+                },
+                "data": {
+                  "$ref": "#/components/schemas/privacy-relay.events.v1.EventData"
+                },
+                "occurredAt": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+                }
+              }
+            }
+          },
+          "enforcement": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "enforcementEventId",
+                "reason",
+                "status",
+                "contextVersion",
+                "terminateActiveCalls",
+                "affectedPrincipalCount",
+                "attemptCount",
+                "createdAt"
+              ],
+              "properties": {
+                "enforcementEventId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "reason": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.EnforcementReason"
+                },
+                "status": {
+                  "enum": [
+                    "PENDING",
+                    "APPLIED"
+                  ]
+                },
+                "contextVersion": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+                },
+                "relaySessionId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "terminateActiveCalls": {
+                  "type": "boolean"
+                },
+                "affectedPrincipalCount": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "attemptCount": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "lastErrorCategory": {
+                  "enum": [
+                    "TIMEOUT",
+                    "UNAVAILABLE",
+                    "REJECTED",
+                    "INVALID_RESPONSE",
+                    "NOT_CONFIGURED"
+                  ]
+                },
+                "createdAt": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+                },
+                "completedAt": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+                }
+              }
+            }
+          }
+        }
+      },
+      "privacy-relay.context.v1.ContextList": {
+        "description": "Keyset-paginated contexts (newest first).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.context.v1.CommunicationContext"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 512,
+                "pattern": "^[0-9a-f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "privacy-relay.context.v1.ContextMutationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "context",
+          "enforcement"
+        ],
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/privacy-relay.context.v1.CommunicationContext"
+          },
+          "enforcement": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Enforcement"
+          }
+        }
+      },
+      "privacy-relay.context.v1.CreateContextRequest": {
+        "description": "Create a Communication Context (Idempotency-Key required). Scope comes only from the authenticated credential; status, version, authorization results, telephone numbers, providers and relay numbers are not inputs.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "externalContextReference",
+          "participants",
+          "allowedChannels",
+          "directionPolicy",
+          "expiresAt"
+        ],
+        "properties": {
+          "externalContextReference": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.ExternalContextReference"
+          },
+          "participants": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.SubjectReference"
+            }
+          },
+          "allowedChannels": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationChannel"
+            }
+          },
+          "directionPolicy": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.DirectionPolicy"
+          },
+          "directions": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.DirectionRequest"
+            },
+            "description": "Required (non-empty) with EXPLICIT; refused with BIDIRECTIONAL."
+          },
+          "startsAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "graceExpiresAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.ContextPolicy"
+          },
+          "allowedRelayStrategies": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.RelayStrategy"
+            },
+            "description": "Default [APP_ONLY]."
+          }
+        }
+      },
+      "privacy-relay.context.v1.LifecycleCommandRequest": {
+        "description": "Body of an explicit lifecycle command (suspend, resume, complete, revoke). Idempotency-Key required.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+          }
+        }
+      },
+      "privacy-relay.context.v1.UpdateContextRequest": {
+        "description": "Typed, versioned configuration update (never a status patch or arbitrary merge patch). Absent members are unchanged; participants and directions replace the whole set (participant reassignment keeps the same context). At least one change is required.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion"
+        ],
+        "minProperties": 2,
+        "properties": {
+          "expectedVersion": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+          },
+          "participants": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.SubjectReference"
+            }
+          },
+          "allowedChannels": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationChannel"
+            }
+          },
+          "directionPolicy": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.DirectionPolicy"
+          },
+          "directions": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.DirectionRequest"
+            }
+          },
+          "startsAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "graceExpiresAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.ContextPolicy"
+          },
+          "allowedRelayStrategies": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.RelayStrategy"
+            }
+          }
+        }
+      },
+      "privacy-relay.events.v1.EventData": {
+        "description": "Bounded safe evidence: snake_case keys never naming secrets or contact data; ids, versions, counts, statuses.",
+        "type": "object",
+        "maxProperties": 32,
+        "propertyNames": {
+          "pattern": "^[a-z][a-z0-9_]{0,62}$",
+          "not": {
+            "pattern": "(password|secret|token|credential|api_?key|phone|msisdn|e164|telephone|sip_?uri|contact_plaintext|provider|carrier)"
+          }
+        }
+      },
+      "privacy-relay.relay-number.v1.AssignRelayNumberRequest": {
+        "description": "Calling (relay-number.assign): lend a temporary relay number to a Privacy Relay Session. Idempotent per session: a replay with the same criteria answers the same assignment (200), different criteria are IDEMPOTENCY_CONFLICT; a session holds at most one relay identity ever. Requires PRIVACY_RELAY_ENABLED and RELAY_NUMBER_POOL_ENABLED, an ACTIVE context and session, a public / callback relay strategy and only enabled, effectively VERIFIED protected contacts.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "country",
+          "capabilities"
+        ],
+        "properties": {
+          "country": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "region": {
+            "type": "string",
+            "pattern": "^[A-Z0-9][A-Z0-9_-]{0,63}$"
+          },
+          "capabilities": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.RelayNumberCapability"
+            }
+          }
+        }
+      },
+      "privacy-relay.relay-number.v1.RelayNumberAssignment": {
+        "description": "A temporary relay-number assignment. It never carries the relay number, its provider binding or the inventory id.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assignmentId",
+          "relaySessionId",
+          "contextId",
+          "status",
+          "assignmentGeneration",
+          "country",
+          "capabilities",
+          "assignedAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "assignmentId": {
+            "description": "The session's relayIdentityBindingRef.",
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "relaySessionId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "contextId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.RelayAssignmentStatus"
+          },
+          "assignmentGeneration": {
+            "description": "Generation of the relay number at assignment (monotonic per number; delayed events of an older generation are stale).",
+            "type": "integer",
+            "minimum": 1
+          },
+          "country": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "region": {
+            "type": "string",
+            "pattern": "^[A-Z0-9][A-Z0-9_-]{0,63}$"
+          },
+          "capabilities": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.RelayNumberCapability"
+            }
+          },
+          "assignedAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "expiresAt": {
+            "description": "Never after the session's final authority (narrowed with it).",
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "endReason": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.RelayAssignmentEndReason"
+          },
+          "releasedAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "cooldownUntil": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          }
+        }
+      },
+      "privacy-relay.relay-number.v1.RelayNumberAssignmentResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assignment"
+        ],
+        "properties": {
+          "assignment": {
+            "$ref": "#/components/schemas/privacy-relay.relay-number.v1.RelayNumberAssignment"
+          }
+        }
+      },
+      "privacy-relay.relay-routing.v1.DcnCallerResult": {
+        "description": "The protected DCN caller: its ContactReference in the grant's scope (201 new, 200 existing).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "inboundCaller"
+        ],
+        "properties": {
+          "inboundCaller": {
+            "description": "The protected caller of a DCN call.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "contactReference",
+              "created",
+              "numberResourceId"
+            ],
+            "properties": {
+              "contactReference": {
+                "$ref": "#/components/schemas/privacy-relay.common.v1.ContactReference"
+              },
+              "created": {
+                "type": "boolean"
+              },
+              "numberResourceId": {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              }
+            }
+          }
+        }
+      },
+      "privacy-relay.relay-routing.v1.InboundCaller": {
+        "description": "The inbound caller as a ContactReference (no number).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contactReference",
+          "created",
+          "contextId",
+          "relaySessionId",
+          "allowedTargets"
+        ],
+        "properties": {
+          "contactReference": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.ContactReference"
+          },
+          "created": {
+            "type": "boolean"
+          },
+          "contextId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "relaySessionId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "allowedTargets": {
+            "description": "Whom this caller may reach now (empty for an unknown caller).",
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "principalId"
+                  ],
+                  "properties": {
+                    "principalId": {
+                      "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "contactReferenceId"
+                  ],
+                  "properties": {
+                    "contactReferenceId": {
+                      "$ref": "#/components/schemas/privacy-relay.common.v1.ContactReference"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "privacy-relay.relay-routing.v1.InboundCallerResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "inboundCaller"
+        ],
+        "properties": {
+          "inboundCaller": {
+            "$ref": "#/components/schemas/privacy-relay.relay-routing.v1.InboundCaller"
+          }
+        }
+      },
+      "privacy-relay.relay-routing.v1.InboundResolution": {
+        "description": "The CURRENT safe relay mapping: the owner scope, references, versions and the validity boundary only — never a relay number, destination number or provider identifier. Anything else (unknown, cooldown, released, revoked, expired, stale / mismatched event) is the generic RELAY_MAPPING_NOT_ACTIVE; ambiguity is RELAY_MAPPING_AMBIGUOUS (fail closed, incident).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decisionId",
+          "outcome",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "contextId",
+          "contextVersion",
+          "relaySessionId",
+          "relaySessionVersion",
+          "assignmentId",
+          "assignmentGeneration",
+          "strategy",
+          "channel",
+          "route",
+          "inboundSources",
+          "validUntil"
+        ],
+        "properties": {
+          "decisionId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "outcome": {
+            "const": "RESOLVED"
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "applicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "environmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "contextId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "contextVersion": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+          },
+          "relaySessionId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "relaySessionVersion": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+          },
+          "assignmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "assignmentGeneration": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "strategy": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.RelayStrategy"
+          },
+          "channel": {
+            "const": "VOICE"
+          },
+          "route": {
+            "const": "CALLBACK_RELAY"
+          },
+          "inboundSources": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.relay-routing.v1.InboundSource"
+            }
+          },
+          "validUntil": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          }
+        }
+      },
+      "privacy-relay.relay-routing.v1.InboundResolutionResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resolution"
+        ],
+        "properties": {
+          "resolution": {
+            "$ref": "#/components/schemas/privacy-relay.relay-routing.v1.InboundResolution"
+          }
+        }
+      },
+      "privacy-relay.relay-routing.v1.InboundSource": {
+        "description": "A protected contact of the session that may call in, and whom it may reach (CALLBACK_RELAY, VOICE, evaluated now).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contactReferenceId",
+          "allowedTargets"
+        ],
+        "properties": {
+          "contactReferenceId": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.ContactReference"
+          },
+          "allowedTargets": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "principalId"
+                  ],
+                  "properties": {
+                    "principalId": {
+                      "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "contactReferenceId"
+                  ],
+                  "properties": {
+                    "contactReferenceId": {
+                      "$ref": "#/components/schemas/privacy-relay.common.v1.ContactReference"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "privacy-relay.relay-routing.v1.ProtectDcnCallerRequest": {
+        "description": "Part IV L — Telephony only (protected-contact.protect-inbound), WITHOUT a delegated context: protect the caller of an inbound call to a Digital Communications Number in the scope proven by Numbering's signed INBOUND_VOICE grant (issuer Numbering, audience Calling, verified with Privacy Relay's dedicated routing-grant trust — never its service-auth trust). Telephony asserts no scope.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "numberGrant",
+          "telephoneNumber"
+        ],
+        "properties": {
+          "numberGrant": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 4096,
+            "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
+          },
+          "telephoneNumber": {
+            "description": "The caller's presented number, handed directly to the Contact Vault. Never stored outside the vault, never logged.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          }
+        }
+      },
+      "privacy-relay.relay-routing.v1.ProtectInboundCallerRequest": {
+        "description": "Telephony only (protected-contact.protect-inbound), WITHOUT a delegated context.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "inboundResolutionId",
+          "telephoneNumber"
+        ],
+        "properties": {
+          "inboundResolutionId": {
+            "description": "A RESOLVED inbound resolution of the same Telephony service, at most 120 s old, whose assignment is still ACTIVE.",
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "telephoneNumber": {
+            "description": "The caller's presented number, handed directly to the Contact Vault (canonicalized, fingerprinted, deduplicated or encrypted in the mapping's scope). Never stored outside the vault, never logged.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          }
+        }
+      },
+      "privacy-relay.relay-routing.v1.ResolveInboundRequest": {
+        "description": "Telephony only (relay-number.resolve-inbound), WITHOUT a delegated context: the relay mapping is the scope.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "calledRelayIdentity",
+          "providerObservedAt"
+        ],
+        "properties": {
+          "calledRelayIdentity": {
+            "description": "The CALLED relay number: CF Meet's own platform-owned public relay identity (international form). Accepted ONLY here; never logged, evented or returned.",
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 32,
+            "pattern": "^\\+[0-9 ()./-]{2,31}$"
+          },
+          "providerEventReference": {
+            "description": "Opaque provider event reference (never a number, address or URI).",
+            "$ref": "#/components/schemas/privacy-relay.common.v1.ExternalContextReference"
+          },
+          "providerObservedAt": {
+            "description": "When the provider observed the inbound event (at most 15 minutes old, at most 2 minutes ahead).",
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "providerStartedAt": {
+            "description": "When the call originated, where the provider reports it trustworthily; an origin before the current assignment is refused.",
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "assignmentGeneration": {
+            "description": "Assignment correlation where the provider path carries it (must match).",
+            "type": "integer",
+            "minimum": 1
+          },
+          "assignmentId": {
+            "description": "Assignment correlation where the provider path carries it (must match).",
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          }
+        }
+      },
+      "privacy-relay.session.v1.CreateSessionRequest": {
+        "description": "Create a Privacy Relay Session of a context (Idempotency-Key required). Everything except relayStrategy is optional and can only NARROW the context (participants, channels, directions, validity, a strategy among the context's allowed strategies). A relay identity or telephone number is never an input.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "relayStrategy"
+        ],
+        "properties": {
+          "relayStrategy": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.RelayStrategy"
+          },
+          "participants": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.SubjectReference"
+            }
+          },
+          "allowedChannels": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationChannel"
+            }
+          },
+          "directionPolicy": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.DirectionPolicy"
+          },
+          "directions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 256,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.DirectionRequest"
+            }
+          },
+          "startsAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "graceExpiresAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          }
+        }
+      },
+      "privacy-relay.session.v1.PrivacyRelaySession": {
+        "description": "Safe representation of a Privacy Relay Session (NOT a call; one session may authorize many call attempts). relayIdentityBindingRef is opaque and server-owned (never a number, carrier or provider resource).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "relaySessionId",
+          "contextId",
+          "version",
+          "sourceContextVersion",
+          "status",
+          "effectiveStatus",
+          "strategy",
+          "executableRoutes",
+          "directionPolicy",
+          "participantScope",
+          "channelScope",
+          "directionScope",
+          "participants",
+          "allowedChannels",
+          "directions",
+          "startsAt",
+          "expiresAt",
+          "policyVersion",
+          "policy",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "relaySessionId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "contextId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "version": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+          },
+          "sourceContextVersion": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+          },
+          "status": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.PrivacyRelaySessionStatus"
+          },
+          "effectiveStatus": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.PrivacyRelaySessionStatus"
+          },
+          "strategy": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.RelayStrategy"
+          },
+          "executableRoutes": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationRoute"
+            },
+            "description": "Routes the strategy permits that CF Meet can execute today."
+          },
+          "directionPolicy": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.DirectionPolicy"
+          },
+          "participantScope": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.SnapshotScope"
+          },
+          "channelScope": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.SnapshotScope"
+          },
+          "directionScope": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.SnapshotScope"
+          },
+          "participants": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "participantId",
+                "subjectKind",
+                "sourceContextVersion"
+              ],
+              "properties": {
+                "participantId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "subjectKind": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.ParticipantSubjectKind"
+                },
+                "principalId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "contactReferenceId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "sourceContextVersion": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.Version"
+                }
+              }
+            }
+          },
+          "allowedChannels": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationChannel"
+            }
+          },
+          "directions": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "fromParticipantId",
+                "toParticipantId"
+              ],
+              "properties": {
+                "fromParticipantId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "toParticipantId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "channel": {
+                  "$ref": "#/components/schemas/privacy-relay.common.v1.CommunicationChannel"
+                }
+              }
+            }
+          },
+          "startsAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "graceExpiresAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "policyVersion": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,31}$"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.ContextPolicy"
+          },
+          "relayIdentityBindingRef": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "suspendedAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "completedAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "revokedAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          },
+          "expiredAt": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Timestamp"
+          }
+        }
+      },
+      "privacy-relay.session.v1.SessionList": {
+        "description": "Keyset-paginated sessions (newest first).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/privacy-relay.session.v1.PrivacyRelaySession"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 512,
+                "pattern": "^[0-9a-f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "privacy-relay.session.v1.SessionMutationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "session",
+          "enforcement"
+        ],
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/privacy-relay.session.v1.PrivacyRelaySession"
+          },
+          "enforcement": {
+            "$ref": "#/components/schemas/privacy-relay.common.v1.Enforcement"
+          }
+        }
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Platform error envelope.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/privacy-relay.common.v1.ErrorEnvelope"
+            }
+          }
+        }
+      }
+    }
+  }
+}

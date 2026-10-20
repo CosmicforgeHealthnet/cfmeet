@@ -62,34 +62,35 @@ impl OtpService {
     }
 
     fn attempts_key(&self, email: &str, otp_type: OtpType) -> String {
-        format!("{}:attempts:{}", otp_type.key_prefix(), email.to_lowercase())
+        format!(
+            "{}:attempts:{}",
+            otp_type.key_prefix(),
+            email.to_lowercase()
+        )
     }
 
     fn send_rate_key(&self, email: &str, otp_type: OtpType) -> String {
-        format!("{}:send_rate:{}", otp_type.key_prefix(), email.to_lowercase())
+        format!(
+            "{}:send_rate:{}",
+            otp_type.key_prefix(),
+            email.to_lowercase()
+        )
     }
 
     /// Store an OTP code
-    pub async fn store_code(
-        &self,
-        email: &str,
-        code: &str,
-        otp_type: OtpType,
-    ) -> ApiResult<()> {
+    pub async fn store_code(&self, email: &str, code: &str, otp_type: OtpType) -> ApiResult<()> {
         let key = self.otp_key(email, otp_type);
         self.redis.set(&key, code, Some(otp_type.ttl_secs())).await
     }
 
     /// Verify an OTP code
-    pub async fn verify_code(
-        &self,
-        email: &str,
-        code: &str,
-        otp_type: OtpType,
-    ) -> ApiResult<bool> {
+    pub async fn verify_code(&self, email: &str, code: &str, otp_type: OtpType) -> ApiResult<bool> {
         // Check rate limiting
         let attempts_key = self.attempts_key(email, otp_type);
-        let attempts = self.redis.incr_with_ttl(&attempts_key, RATE_LIMIT_TTL_SECS).await?;
+        let attempts = self
+            .redis
+            .incr_with_ttl(&attempts_key, RATE_LIMIT_TTL_SECS)
+            .await?;
 
         if attempts > MAX_OTP_ATTEMPTS {
             return Err(ApiError::TooManyRequests(

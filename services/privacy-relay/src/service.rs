@@ -33,6 +33,8 @@ pub struct RelayService {
     pub(crate) feature: FeatureFlag,
     pub(crate) runtime: RuntimeEnvironment,
     pub(crate) enforcer: Arc<dyn CallingEnforcer>,
+    /// Part V H §103: context authority pushes to Messaging.
+    pub(crate) messaging: Arc<dyn crate::messaging_authority::MessagingAuthorityPusher>,
     pub(crate) worker_id: String,
     /// CONTACT_VAULT_ENABLED (shared with the Contact Vault): public-network relay
     /// authority over protected contacts requires it.
@@ -72,6 +74,7 @@ impl RelayService {
             feature,
             runtime,
             enforcer,
+            messaging: Arc::new(crate::messaging_authority::UnconfiguredMessagingAuthority),
             worker_id: format!("privacy-relay-{}", Uuid::new_v4().simple()),
             contact_feature: FeatureFlag::new(false),
             relay_numbers: Default::default(),
@@ -80,6 +83,15 @@ impl RelayService {
             number_authority: None,
             numbering_cutover: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
+    }
+
+    /// Delivers context authority to Messaging (otherwise jobs stay PENDING).
+    pub fn with_messaging_authority(
+        mut self,
+        pusher: Arc<dyn crate::messaging_authority::MessagingAuthorityPusher>,
+    ) -> Self {
+        self.messaging = pusher;
+        self
     }
 
     /// Installs the relay-number authority (Part IV Part P).

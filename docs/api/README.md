@@ -72,3 +72,37 @@ Narrative guides for meetings, participants, chat, LiveKit, OAuth, email queue a
 The current API still contains several account/admin/developer endpoints inherited from the original RTC backend. Their presence does not make this service the universal CF Meet backend. Future platform domains receive their own service boundaries as their phases begin.
 
 Shared/exported contract strategy is described in [`packages/contracts`](../../packages/contracts/README.md).
+
+
+## Part III communications (`services/calling`)
+
+The Calling service publishes the **public Part III developer documentation** directly from
+the authoritative contract files in `packages/contracts`. The Swagger page intentionally
+contains only customer/client-facing Calling and Privacy Relay APIs. Service-to-service
+Privacy Relay operations, Telephony execution APIs, provider callbacks and operator
+interfaces remain internal and are not listed in public Swagger.
+
+| Endpoint | Content |
+|---|---|
+| `GET /swagger-ui/` | Part III Swagger UI with a Calling / Privacy Relay selector |
+| `GET /api-docs/calling/openapi.json` | Public-only Calling OpenAPI (83 paths, 127 operations including `/health`) |
+| `GET /api-docs/privacy-relay/openapi.json` | Public Privacy Relay OpenAPI (19 paths, 22 operations) |
+
+That is **149 documented public Part III operations** including the Calling health check
+(**148 product/customer operations** when health is excluded).
+
+The source contracts remain:
+
+- `packages/contracts/calling/http/v1.openapi.json` — the full Calling contract,
+  including internal routes used for conformance testing. The runtime public document
+  removes every `/internal/*` path and internal-only security schemes before serving it.
+- `packages/contracts/privacy-relay/http/v1.openapi.json` — the public Privacy Relay
+  contract.
+- `packages/contracts/privacy-relay/internal/v1.openapi.json` and
+  `packages/contracts/telephony/internal/v1.openapi.json` — internal contracts only;
+  deliberately **not** exposed in public Swagger.
+
+The OpenAPI documents use a relative `/` server so Swagger "Try it out" targets the same
+public API host that served the documentation. Deployment/gateway routing must therefore
+send the documented public paths to their owning service while keeping internal paths
+cluster-only.

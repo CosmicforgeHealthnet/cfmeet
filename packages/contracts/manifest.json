@@ -16,14 +16,14 @@
     },
     {
       "id": "cfmeet.calling.http-api",
-      "version": "1.10.0",
+      "version": "1.11.0",
       "kind": "openapi",
       "path": "calling/http/v1.openapi.json",
       "owner": "calling",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface exposed by the Calling service: health, the call API (list, get, available actions), application call creation and control (accept, decline, cancel, end, hold, resume, transfer, session removal, media credentials), the endpoint registry, signaling-credential minting, the endpoint's signaling operations (WebSocket channel, offer recovery, accept / decline, media credentials), the media connection gateway (admission before every media connection) and the media provider callback; the platform credential, signaling credential, media credential and provider signature schemes; the error envelope. No generic state mutation. Protected calls (privacyRelaySessionId, PRIVACY_RELAY_V1, fail closed: PRIVACY_AUTHORIZATION_UNAVAILABLE) and the internal Privacy Relay enforcement route (POST /internal/v1/privacy-relay/enforcement). The public Privacy Relay API served by this ingress is specified by cfmeet.privacy-relay.http-api. Part E: protected public-network contact targets on POST /v1/calls (APP_TO_PSTN; PUBLIC_ROUTE_DENIED / PUBLIC_ROUTE_UNAVAILABLE / TELECOM_SPEND_LIMIT_EXCEEDED) the callback relay (callbackRequested on POST /v1/calls) and the internal Telephony event receiver (POST /internal/v1/telephony/events). Part F: the enterprise calling API under /v1/enterprise/** (policies, departments, extensions, ring groups, queues, IVR, business hours, forwarding, voicemail, recording policies, audit; enterprise.* scopes, expectedVersion, VERSION_CONFLICT / ENTERPRISE_POLICY_DENIED) and enterprise call targets. 1.9.0 DCN inbound offers (POST /internal/v1/telephony/dcn-inbound-calls) and presentedNumberResourceId (Part IV L); 1.10.0 the SMS Gateway as a platform-event producer (sms.* webhooks, Part IV N)."
+      "description": "HTTP surface exposed by the Calling service: health, the call API (list, get, available actions), application call creation and control (accept, decline, cancel, end, hold, resume, transfer, session removal, media credentials), the endpoint registry, signaling-credential minting, the endpoint's signaling operations (WebSocket channel, offer recovery, accept / decline, media credentials), the media connection gateway (admission before every media connection) and the media provider callback; the platform credential, signaling credential, media credential and provider signature schemes; the error envelope. No generic state mutation. Protected calls (privacyRelaySessionId, PRIVACY_RELAY_V1, fail closed: PRIVACY_AUTHORIZATION_UNAVAILABLE) and the internal Privacy Relay enforcement route (POST /internal/v1/privacy-relay/enforcement). The public Privacy Relay API served by this ingress is specified by cfmeet.privacy-relay.http-api. Part E: protected public-network contact targets on POST /v1/calls (APP_TO_PSTN; PUBLIC_ROUTE_DENIED / PUBLIC_ROUTE_UNAVAILABLE / TELECOM_SPEND_LIMIT_EXCEEDED) the callback relay (callbackRequested on POST /v1/calls) and the internal Telephony event receiver (POST /internal/v1/telephony/events). Part F: the enterprise calling API under /v1/enterprise/** (policies, departments, extensions, ring groups, queues, IVR, business hours, forwarding, voicemail, recording policies, audit; enterprise.* scopes, expectedVersion, VERSION_CONFLICT / ENTERPRISE_POLICY_DENIED) and enterprise call targets. 1.9.0 DCN inbound offers (POST /internal/v1/telephony/dcn-inbound-calls) and presentedNumberResourceId (Part IV L); 1.10.0 the SMS Gateway as a platform-event producer (sms.* webhooks, Part IV N). 1.11.0 Messaging as a platform-event producer (conversation.* / message.* webhooks, Part V I)."
     },
     {
       "id": "cfmeet.calling.call-common",
@@ -93,14 +93,14 @@
     },
     {
       "id": "cfmeet.platform.common",
-      "version": "1.9.0",
+      "version": "1.9.1",
       "kind": "json-schema",
       "path": "platform/common/v1.schema.json",
       "owner": "platform",
       "visibility": "internal",
       "lifecycle": "stable",
       "authority": "contract-first",
-      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M). 1.9.0 number-usage.report, number-risk.report and number-relay.lease (Part IV S, T and P §§119–120)."
+      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M). 1.9.0 number-usage.report, number-risk.report and number-relay.lease (Part IV S, T and P §§119–120). 1.9.1 cfmeet.messaging named as a service identity (Part V A)."
     },
     {
       "id": "cfmeet.platform.service-token-header",
@@ -170,14 +170,14 @@
     },
     {
       "id": "cfmeet.platform.webhooks",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "json-schema",
       "path": "platform/webhooks/v1.schema.json",
       "owner": "platform",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Customer webhooks (Part G §68): application-scoped subscriptions (create / list / get / update / delete / rotate-secret), the safe subscription view (the signing secret is returned only on create / rotation), delivery records with dead-letter visibility and manual replay, and the normalized, signed event body (public catalog projected from committed domain events; never a provider or internal payload). Served by Calling's platform ingress. Part IV: 1.1.0 sms.received (N); 1.2.0 sms.requested / submitted / delivered / failed / unknown / blocked (O) from the SMS Gateway (references, status and codes only; never content or a number)."
+      "description": "Customer webhooks (Part G §68): application-scoped subscriptions (create / list / get / update / delete / rotate-secret), the safe subscription view (the signing secret is returned only on create / rotation), delivery records with dead-letter visibility and manual replay, and the normalized, signed event body (public catalog projected from committed domain events; never a provider or internal payload). Served by Calling's platform ingress. Part IV: 1.1.0 sms.received (N); 1.2.0 sms.requested / submitted / delivered / failed / unknown / blocked (O) from the SMS Gateway (references, status and codes only; never content or a number). Part V I: 1.3.0 conversation.created / updated / member_added / member_removed and message.created / deleted / moderated / expired from Messaging (ids, sequences and codes only; never message content of any security profile)."
     },
     {
       "id": "cfmeet.platform.usage",
@@ -192,25 +192,25 @@
     },
     {
       "id": "cfmeet.platform-access.identity",
-      "version": "1.0.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "platform-access/identity/v1.schema.json",
       "owner": "platform-access",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Messages of the shared identity authority (Part IV Workstream B, ADR 0032): identity snapshots (tenant, application, environment, service account, credential WITHOUT verifier material, principal, scopes), credential authentication outcomes with the trusted authority chain and throttling, the trusted delegated context, credential status, authorization evaluation, the scope registry (Calling, Numbering and SMS scopes; PRIVILEGED_OPERATOR trust for numbers.admin), the commit-ordered identity change feed, Part III import receipts, principal resolution / telephone-endpoint registration / tombstones and the error envelope."
+      "description": "Messages of the shared identity authority (Part IV Workstream B, ADR 0032): identity snapshots (tenant, application, environment, service account, credential WITHOUT verifier material, principal, scopes), credential authentication outcomes with the trusted authority chain and throttling, the trusted delegated context, credential status, authorization evaluation, the scope registry (Calling, Numbering and SMS scopes; PRIVILEGED_OPERATOR trust for numbers.admin), the commit-ordered identity change feed, Part III import receipts, principal resolution / telephone-endpoint registration / first-party principal ensure (Part V H §104) / tombstones and the error envelope. 1.2.0: principals/ensure also accepts BOT_OR_SERVICE (a first-party application's own non-human participant, e.g. the system owner of meeting breakout / private chat conversations)."
     },
     {
       "id": "cfmeet.platform-access.internal-api",
-      "version": "1.0.0",
+      "version": "1.2.0",
       "kind": "openapi",
       "path": "platform-access/internal/v1.openapi.json",
       "owner": "platform-access",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Internal HTTP surface of services/platform-access: GET /health, GET /ready and the service-authenticated /internal/v1 API — credential authentication, credential status, authorization evaluation, trusted context, identity change feed, import receipts, scope registry, principal resolution / registration / tombstone (Calling, Numbering) and operator administration (operator console, audited)."
+      "description": "Internal HTTP surface of services/platform-access: GET /health, GET /ready and the service-authenticated /internal/v1 API — credential authentication, credential status, authorization evaluation, trusted context, identity change feed, import receipts, scope registry, principal resolution / registration / tombstone (Calling, Numbering), first-party principal ensure (Meeting Service, Part V H §104) and operator administration (operator console, audited)."
     },
     {
       "id": "cfmeet.numbering.common",
@@ -511,14 +511,14 @@
     },
     {
       "id": "cfmeet.sms-gateway.common",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "json-schema",
       "path": "sms-gateway/common/v1.schema.json",
       "owner": "sms-gateway",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "SMS Gateway vocabulary and messages (Part IV M–O): transport status, direction, encoding, control reasons, the error envelope; 1.1.0 messages, threads, provider callback acknowledgements (N); 1.2.0 send and opt-out requests (O). Remote parties are masked; no provider identifier."
+      "description": "SMS Gateway vocabulary and messages (Part IV M–O): transport status, direction, encoding, control reasons, the error envelope; 1.1.0 messages, threads, provider callback acknowledgements (N); 1.2.0 send and opt-out requests (O). Remote parties are masked; no provider identifier. Part V H: SMS Bridge bindings, submissions and transport state."
     },
     {
       "id": "cfmeet.sms-gateway.http-api",
@@ -532,6 +532,17 @@
       "description": "HTTP surface of services/sms-gateway, served at /openapi.json: health, readiness; 1.1.0 message / thread reads (sms.read) and the inbound provider callback (N); 1.2.0 sending (sms.send, Idempotency-Key), opt-outs and delivery receipts (O)."
     },
     {
+      "id": "cfmeet.sms-gateway.internal-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "sms-gateway/internal/v1.openapi.json",
+      "owner": "sms-gateway",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Internal HTTP surface of services/sms-gateway (Part V H SMS Bridge): bridge bindings, bridged sends under every transport control, transport state. Messaging only (sms-bridge.submit), delegated scope required."
+    },
+    {
       "id": "cfmeet.sms-gateway.event",
       "version": "1.2.0",
       "kind": "json-schema",
@@ -541,6 +552,193 @@
       "lifecycle": "beta",
       "authority": "contract-first",
       "description": "SMS Gateway message events in the platform envelope (transactional outbox, at least once): received (N); requested, submitted, delivered, failed, unknown, blocked (O). Published to the platform customer webhook delivery as sms.*. Never content, a number or a provider identifier."
+    },
+    {
+      "id": "cfmeet.messaging.common",
+      "version": "1.13.0",
+      "kind": "json-schema",
+      "path": "messaging/common/v1.schema.json",
+      "owner": "messaging",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Messaging vocabulary and messages (Part V C): error envelope, security profiles, protocol and the single accepted MLS cipher suite, devices and their PUBLIC MLS material, registration challenges, KeyPackage publication, revocation, the key-transparency tree head and RFC 9162 proofs (UNWITNESSED). Never a private key, group secret, ciphertext or plaintext. 1.1.0 conversations (eight generic context classes, opaque context references, persisted security profile with MLS binding, lifecycle), the application messaging policy and its effective snapshot (Part V D). 1.2.0 signed key-transparency tree heads (log id, timestamp, Ed25519 signature, key id; Part V G.5) and the effective policy's message features (§28; platform policy version 2: SUPPORT defaults to PRIVATE_E2EE, Appendix G). 1.3.0 (Parts E-G prerequisites): members and roles, messages (PRIVATE_E2EE ciphertext with acceptance digest / MANAGED text; tombstone lifecycle), permalinks, read cursors, durable conversation events and replay pages, MLS commits / group state / KeyPackage claims / Welcomes, blocks; effective policy platform version 3; new error codes. 1.4.0 client tokens, realtime tickets, presence settings, push registrations; readiness reports the realtime gateway. 1.5.0 attachments (Attachment, AttachmentUploadIntent, AttachmentIntentRequest, AttachmentDownloadGrant) and legal holds (Part V F, G). 1.6.0 search results, reports, moderation actions, exports, deletion requests, audit pages; managedDisclosureAcknowledged (Part V G). 1.7.0 Part V H: message securityProvenance (NATIVE / LEGACY_MANAGED), originalCreatedAt, MANAGED presentation, send notify flag, history pagination, internal integration schemas. 1.8.0 Part V H SMS Bridge: message channel, bridges, disclosure, carrier transport state. 1.9.0 Part V I: member roles, bans, replies / threads, reactions, pins, unread counts, usage facts (usage.read; no prices). 1.10.0 key-transparency witnesses: tree heads carry witnessQuorum and verified WitnessCosignature entries; witnessStatus is WITNESSED only with a quorum. 1.11.0 device-to-device history transfer (ADR 0052 AD-07): HistoryTransfer, HistoryTransferRequest, SealedHistoryUpload, SealedHistory — public keys, signatures and opaque sealed bytes only. 1.12.0 server thumbnails of MANAGED images: Attachment.derivatives (AttachmentDerivative) and ThumbnailGrant. 1.13.0 INSPECTION derivatives (MediaInspection: measured container, duration, dimensions of MANAGED media)."
+    },
+    {
+      "id": "cfmeet.messaging.http-api",
+      "version": "1.11.0",
+      "kind": "openapi",
+      "path": "messaging/http/v1.openapi.json",
+      "owner": "messaging",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "HTTP surface of services/messaging, served at /openapi.json: health, readiness and the device / key-directory API under /v1/messaging (Platform Access credential, scopes messages.send / messages.read, verified acting principal). 1.1.0 /v1/conversations (create with Idempotency-Key, list, get, lifecycle PATCH) and /v1/messaging/policy (Part V D). 1.2.0 tree heads in the device directory and transparency proofs are signed; without a configured signing key those routes answer 503 (never an unsigned head). 1.3.0 membership, messages, permalinks, read cursors, event replay, the MLS Delivery Service routes and blocks. 1.4.0 the realtime gateway (/v1/realtime WebSocket with single-use tickets, /v1/realtime/tickets with client tokens), client tokens and sessions, presence settings and push registrations. 1.5.0 attachment upload intents, finalization, metadata, download grants and proxied reads; legal holds. 1.6.0 MANAGED search, reports, moderation, exports, data deletion, audit. 1.7.0 beforeSequence history pagination, client-sessions/revoke-all. 1.8.0 Part V H SMS Bridge: message channel, bridges, disclosure, carrier transport state. 1.9.0 Part V I: member roles, bans, replies / threads, reactions, pins, unread counts, usage facts (usage.read; no prices). 1.9.1: POST /v1/conversations/{id}/bans documents its actual 201 Created (was listed as 200; found by tests/authorization_matrix.rs). 1.10.0 device-to-device history transfer (/v1/messaging/history-transfers: request, list, get, sealed-history upload / download, complete, cancel; ADR 0052 AD-07) and witnessed tree heads. 1.11.0 POST /v1/conversations/{id}/attachments/{attachmentId}/thumbnail-grants (server thumbnails of MANAGED images; never PRIVATE_E2EE)."
+    },
+    {
+      "id": "cfmeet.messaging.internal-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "messaging/internal/v1.openapi.json",
+      "owner": "messaging",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Messaging's service-authenticated internal API (Part V H): delegated first-party backend surface and meeting conversation integration."
+    },
+    {
+      "id": "cfmeet.messaging.event",
+      "version": "1.6.0",
+      "kind": "json-schema",
+      "path": "messaging/events/v1.schema.json",
+      "owner": "messaging",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Messaging domain events in the platform envelope (transactional outbox, at least once): messaging.device.registered, messaging.device.key-packages-published, messaging.device.revoked. No key material, ciphertext or content. 1.1.0 messaging.conversation.created, messaging.conversation.lifecycle-changed, messaging.conversation.updated, messaging.policy.updated. 1.2.0 message, member, read-cursor and MLS welcome events (ids, sequences, states only). 1.3.0 messaging.client-session.revoked. 1.4.0 message.created security_provenance / notify; member.updated role. 1.5.0 reaction and pin events. 1.6.0 optional conversation_id on message events (relayed to Calling's platform-event ingress for customer webhooks)."
+    },
+    {
+      "id": "cfmeet.messaging.realtime-protocol",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "messaging/realtime/v1.schema.json",
+      "owner": "messaging",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Messaging realtime WebSocket protocol v1 (Part V Part E): client frames (subscribe, unsubscribe, ack, typing, presence.set, presence.query, auth.refresh, ping) and server frames (welcome, subscribed, event, sync.required, subscription.revoked, typing, presence, presence.snapshot, device.event, server.draining, error …), close codes and compatibility rules. Durable events reference the ConversationEvent of cfmeet.messaging.common; no plaintext of PRIVATE_E2EE conversations ever appears."
+    },
+    {
+      "id": "cfmeet.calling.http-api-bundled",
+      "version": "1.11.0",
+      "kind": "openapi",
+      "path": "bundled/calling/http/v1.openapi.json",
+      "owner": "calling",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.calling.http-api (calling/http/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.calling.http-api stays the authority."
+    },
+    {
+      "id": "cfmeet.messaging.http-api-bundled",
+      "version": "1.11.0",
+      "kind": "openapi",
+      "path": "bundled/messaging/http/v1.openapi.json",
+      "owner": "messaging",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.messaging.http-api (messaging/http/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.messaging.http-api stays the authority."
+    },
+    {
+      "id": "cfmeet.messaging.internal-api-bundled",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "bundled/messaging/internal/v1.openapi.json",
+      "owner": "messaging",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.messaging.internal-api (messaging/internal/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.messaging.internal-api stays the authority."
+    },
+    {
+      "id": "cfmeet.numbering.internal-api-bundled",
+      "version": "1.12.0",
+      "kind": "openapi",
+      "path": "bundled/numbering/internal/v1.openapi.json",
+      "owner": "numbering",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.numbering.internal-api (numbering/internal/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.numbering.internal-api stays the authority."
+    },
+    {
+      "id": "cfmeet.platform-access.internal-api-bundled",
+      "version": "1.2.0",
+      "kind": "openapi",
+      "path": "bundled/platform-access/internal/v1.openapi.json",
+      "owner": "platform-access",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.platform-access.internal-api (platform-access/internal/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.platform-access.internal-api stays the authority."
+    },
+    {
+      "id": "cfmeet.platform.internal-http-bundled",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "bundled/platform/internal-http/v1.openapi.json",
+      "owner": "platform",
+      "visibility": "internal",
+      "lifecycle": "stable",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.platform.internal-http (platform/internal-http/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.platform.internal-http stays the authority."
+    },
+    {
+      "id": "cfmeet.privacy-relay.http-api-bundled",
+      "version": "1.2.0",
+      "kind": "openapi",
+      "path": "bundled/privacy-relay/http/v1.openapi.json",
+      "owner": "privacy-relay",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.privacy-relay.http-api (privacy-relay/http/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.privacy-relay.http-api stays the authority."
+    },
+    {
+      "id": "cfmeet.privacy-relay.internal-api-bundled",
+      "version": "1.4.0",
+      "kind": "openapi",
+      "path": "bundled/privacy-relay/internal/v1.openapi.json",
+      "owner": "privacy-relay",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.privacy-relay.internal-api (privacy-relay/internal/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.privacy-relay.internal-api stays the authority."
+    },
+    {
+      "id": "cfmeet.sms-gateway.http-api-bundled",
+      "version": "1.2.0",
+      "kind": "openapi",
+      "path": "bundled/sms-gateway/http/v1.openapi.json",
+      "owner": "sms-gateway",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.sms-gateway.http-api (sms-gateway/http/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.sms-gateway.http-api stays the authority."
+    },
+    {
+      "id": "cfmeet.sms-gateway.internal-api-bundled",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "bundled/sms-gateway/internal/v1.openapi.json",
+      "owner": "sms-gateway",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.sms-gateway.internal-api (sms-gateway/internal/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.sms-gateway.internal-api stays the authority."
+    },
+    {
+      "id": "cfmeet.telephony.internal-http-api-bundled",
+      "version": "1.2.0",
+      "kind": "openapi",
+      "path": "bundled/telephony/internal/v1.openapi.json",
+      "owner": "telephony",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Self-contained rendering of cfmeet.telephony.internal-http-api (telephony/internal/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.telephony.internal-http-api stays the authority."
     }
   ]
 }

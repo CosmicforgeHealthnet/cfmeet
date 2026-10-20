@@ -129,7 +129,11 @@ impl RedisEmailQueue {
             .await
             .map_err(|e| ApiError::InternalError(format!("Redis RPUSH error: {}", e)))?;
 
-        tracing::info!("Email job {} re-queued (attempt {})", job.id, job.retry_count);
+        tracing::info!(
+            "Email job {} re-queued (attempt {})",
+            job.id,
+            job.retry_count
+        );
         Ok(true)
     }
 

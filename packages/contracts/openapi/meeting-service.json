@@ -2417,6 +2417,144 @@
         ]
       }
     },
+    "/api/v2/admin/chat-migration": {
+      "get": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Chat migration state, gates and evidence.",
+        "operationId": "v2_chat_migration_status",
+        "responses": {
+          "200": {
+            "description": "Status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationStatusView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/chat-migration/parity-runs": {
+      "post": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Run a shadow-validation parity check now.",
+        "operationId": "v2_chat_migration_parity",
+        "responses": {
+          "200": {
+            "description": "Parity run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParityRunView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/chat-migration/transitions": {
+      "post": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Request a migration transition (gated, version-checked, audited).",
+        "operationId": "v2_chat_migration_transition",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "New status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationStatusView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CHAT_MIGRATION_REFUSED / MEETING_VERSION_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/admin/compat/backfill": {
       "post": {
         "tags": [
@@ -11457,6 +11595,356 @@
         ]
       }
     },
+    "/api/v2/messaging/client-sessions/revoke-all": {
+      "post": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "End every Messaging client session of the caller (all devices).",
+        "operationId": "v2_messaging_revoke_all_sessions",
+        "responses": {
+          "200": {
+            "description": "Revoked (Messaging contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/messaging/client-tokens": {
+      "post": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Issue a short-lived, device-bound Messaging client token (for the realtime gateway).",
+        "operationId": "v2_messaging_client_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Client token (Messaging contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/messaging/devices": {
+      "post": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Register a device with its proof-of-possession KeyPackage.",
+        "operationId": "v2_messaging_register_device",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Device (Messaging contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/messaging/devices/registration-challenges": {
+      "post": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Start a device registration (the challenge the device signs with its own key).",
+        "operationId": "v2_messaging_registration_challenge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Challenge (Messaging contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/messaging/devices/{deviceId}/key-packages": {
+      "post": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Publish one-time KeyPackages of the caller's device.",
+        "operationId": "v2_messaging_publish_key_packages",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "description": "Device id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Published (Messaging contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/messaging/devices/{deviceId}/revoke": {
+      "post": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Revoke one of the caller's devices.",
+        "operationId": "v2_messaging_revoke_device",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "description": "Device id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked (Messaging contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/organizations/{id}/members": {
       "get": {
         "tags": [
@@ -12964,6 +13452,15 @@
           }
         }
       },
+      "ChatMigrationState": {
+        "type": "string",
+        "enum": [
+          "LEGACY_PRIMARY",
+          "SHADOW_VALIDATION",
+          "MESSAGING_PRIMARY",
+          "LEGACY_RETIRED"
+        ]
+      },
       "ChatPolicyUpdateRequest": {
         "type": "object",
         "description": "Chat-only subset of the collaboration policy.",
@@ -14449,6 +14946,8 @@
           "ENDPOINT_NOT_FOUND",
           "METHOD_NOT_ALLOWED",
           "LEGACY_WRITE_DISABLED",
+          "CHAT_UNAVAILABLE",
+          "CHAT_MIGRATION_REFUSED",
           "SERVICE_UNAVAILABLE",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
@@ -15911,6 +16410,71 @@
           }
         }
       },
+      "MigrationStatusView": {
+        "type": "object",
+        "required": [
+          "state",
+          "version",
+          "changedAt",
+          "changedBy",
+          "pendingMirror",
+          "pendingRollbackCopies",
+          "pendingSessionRevocations",
+          "linkedConferences",
+          "transitions",
+          "scope"
+        ],
+        "properties": {
+          "changedAt": {
+            "type": "string"
+          },
+          "changedBy": {
+            "type": "string"
+          },
+          "latestParityRun": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ParityRunView"
+              }
+            ],
+            "nullable": true
+          },
+          "linkedConferences": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pendingMirror": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Legacy messages (every scope) of linked conferences not yet mirrored."
+          },
+          "pendingRollbackCopies": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Messaging-native messages not yet copied back after a rollback."
+          },
+          "pendingSessionRevocations": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "scope": {
+            "description": "What is migrated: every meeting chat scope."
+          },
+          "state": {
+            "$ref": "#/components/schemas/ChatMigrationState"
+          },
+          "transitions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TransitionView"
+            }
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "ModerationResponse": {
         "type": "object",
         "required": [
@@ -16195,6 +16759,45 @@
           },
           "success": {
             "type": "boolean"
+          }
+        }
+      },
+      "ParityRunView": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "startedAt",
+          "conferencesChecked",
+          "messagesChecked",
+          "mismatches"
+        ],
+        "properties": {
+          "conferencesChecked": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "finishedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "messagesChecked": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "mismatches": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
           }
         }
       },
@@ -19104,6 +19707,70 @@
         },
         "additionalProperties": false
       },
+      "TransitionRequest": {
+        "type": "object",
+        "required": [
+          "targetState",
+          "expectedVersion",
+          "reason"
+        ],
+        "properties": {
+          "approvedBy": {
+            "type": "string",
+            "description": "Second operator approving a cutover or retirement (never the requester).",
+            "nullable": true
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Optimistic concurrency: the version the operator looked at."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why (audited), 3–500 characters."
+          },
+          "targetState": {
+            "$ref": "#/components/schemas/ChatMigrationState"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TransitionView": {
+        "type": "object",
+        "required": [
+          "fromState",
+          "toState",
+          "version",
+          "actor",
+          "reason",
+          "createdAt"
+        ],
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "approvedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "fromState": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "toState": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "TranslateRequest": {
         "type": "object",
         "required": [
@@ -19743,6 +20410,10 @@
     {
       "name": "Participants",
       "description": "Participant management (kick, list)"
+    },
+    {
+      "name": "Messaging (v2)",
+      "description": "Part V H: the signed-in user's Unified Messaging identity bridge (devices with client-held keys, short-lived device-bound client tokens, session revocation; Messaging's answer is relayed and no service credential is ever returned) and the platform-admin chat migration controls (state machine, parity, rollback)."
     },
     {
       "name": "Waiting Room",

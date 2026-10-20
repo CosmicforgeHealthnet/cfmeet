@@ -67,6 +67,14 @@ catalog! {
     "sms.failed" => names::SMS_READ,
     "sms.unknown" => names::SMS_READ,
     "sms.blocked" => names::SMS_READ,
+    "conversation.created" => names::MESSAGES_READ,
+    "conversation.updated" => names::MESSAGES_READ,
+    "conversation.member_added" => names::MESSAGES_READ,
+    "conversation.member_removed" => names::MESSAGES_READ,
+    "message.created" => names::MESSAGES_READ,
+    "message.deleted" => names::MESSAGES_READ,
+    "message.moderated" => names::MESSAGES_READ,
+    "message.expired" => names::MESSAGES_READ,
 }
 
 pub fn definition(name: &str) -> Option<&'static EventTypeDef> {
@@ -272,10 +280,104 @@ pub fn project_sms_gateway(envelope: &Value) -> Option<PublicEvent> {
     Some(PublicEvent { event_type, data })
 }
 
+/// Messaging keys that may cross (internal snake_case → public camelCase; numeric?).
+/// Deliberately absent: text, ciphertext, attachment keys, device keys, MLS data, policy
+/// digests, display names, telephone numbers, free-text reasons.
+const MESSAGING_KEYS: &[(&str, &str, bool)] = &[
+    ("conversation_id", "conversationId", false),
+    ("conversation_kind", "conversationKind", false),
+    ("security_profile", "securityProfile", false),
+    ("lifecycle_state", "lifecycleState", false),
+    ("previous_state", "previousState", false),
+    ("version", "conversationVersion", true),
+    ("message_id", "messageId", false),
+    ("sequence", "sequence", true),
+    ("message_kind", "messageKind", false),
+    ("sender_principal_id", "senderPrincipalId", false),
+    ("security_provenance", "securityProvenance", false),
+    ("principal_id", "principalId", false),
+    ("role", "role", false),
+    ("reason", "reason", false),
+    ("channel", "channel", false),
+];
+
+/// Projects a Messaging envelope (`messaging.<aggregate>.<fact>`). Only application
+/// messages are public (`message.created` is never emitted for control, MLS, edit or
+/// reaction messages); the data are ids, sequences and bounded codes — whatever the
+/// security profile, no content can cross (Messaging never puts any in an event, and the
+/// allow-list would drop it regardless).
+pub fn project_messaging(envelope: &Value) -> Option<PublicEvent> {
+    let internal = envelope.get("event_type")?.as_str()?;
+    let payload = envelope.get("payload")?.as_object()?;
+    let event_type = match internal {
+        "messaging.conversation.created" => "conversation.created",
+        "messaging.conversation.lifecycle-changed" => "conversation.updated",
+        "messaging.member.added" => "conversation.member_added",
+        "messaging.member.removed" => "conversation.member_removed",
+        "messaging.message.created"
+            if payload.get("message_kind").and_then(Value::as_str) == Some("APPLICATION") =>
+        {
+            "message.created"
+        }
+        "messaging.message.deleted" => "message.deleted",
+        "messaging.message.moderated" => "message.moderated",
+        "messaging.message.expired" => "message.expired",
+        _ => return None,
+    };
+    let mut data = Map::new();
+    for (internal, public, numeric) in MESSAGING_KEYS {
+        if let Some(v) = payload.get(*internal).and_then(|v| safe_value(v, *numeric)) {
+            data.insert((*public).to_string(), v);
+        }
+    }
+    data.get("conversationId")?;
+    Some(PublicEvent { event_type, data })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn messaging_events_carry_ids_sequences_and_codes_only() {
+        let c = "11111111-1111-4111-8111-111111111111";
+        let env = json!({ "event_type": "messaging.message.created", "payload": {
+            "conversation_id": c, "message_id": "22222222-2222-4222-8222-222222222222",
+            "sequence": 7, "message_kind": "APPLICATION", "security_provenance": "NATIVE",
+            "sender_principal_id": "33333333-3333-4333-8333-333333333333",
+            "sender_device_id": "44444444-4444-4444-8444-444444444444", "notify": true,
+            "text": "the launch code is 1234", "ciphertext": "AAEC", "epoch_secret": "c2Vj",
+            "policy_digest": "ab12", "display_name": "Alice", "phone": "+15550100123" } });
+        let e = project_messaging(&env).unwrap();
+        assert_eq!(e.event_type, "message.created");
+        assert_eq!(
+            Value::Object(e.data),
+            json!({ "conversationId": c, "messageId": "22222222-2222-4222-8222-222222222222",
+                    "sequence": 7, "messageKind": "APPLICATION", "securityProvenance": "NATIVE",
+                    "senderPrincipalId": "33333333-3333-4333-8333-333333333333" })
+        );
+        // Control / MLS / edit messages and internal facts are never public.
+        for (t, kind) in [
+            ("messaging.message.created", "COMMIT"),
+            ("messaging.message.created", "REACTION"),
+            ("messaging.mls.welcome-available", "APPLICATION"),
+            ("messaging.device.registered", "APPLICATION"),
+            ("messaging.reaction.added", "APPLICATION"),
+        ] {
+            let mut other = env.clone();
+            other["event_type"] = json!(t);
+            other["payload"]["message_kind"] = json!(kind);
+            assert!(project_messaging(&other).is_none(), "{t} {kind}");
+        }
+        // A free-text reason never crosses (only bounded codes).
+        let removed = json!({ "event_type": "messaging.member.removed", "payload": {
+            "conversation_id": c, "principal_id": "33333333-3333-4333-8333-333333333333",
+            "reason": "kicked for being rude", "mls_rekey_required": true } });
+        let e = project_messaging(&removed).unwrap();
+        assert_eq!(e.event_type, "conversation.member_removed");
+        assert!(e.data.get("reason").is_none());
+    }
 
     #[test]
     fn sms_events_carry_references_and_codes_only() {

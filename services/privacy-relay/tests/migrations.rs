@@ -18,6 +18,7 @@ const TABLES: &[&str] = &[
     "privacy_relay_commands",
     "privacy_relay_enforcement_jobs",
     "privacy_relay_incidents",
+    "privacy_relay_messaging_authority_jobs",
     "privacy_relay_operator_audit",
     "privacy_relay_outbox",
     "privacy_relay_retention_audit",
@@ -65,8 +66,9 @@ async fn up_down_up_creates_exactly_the_privacy_relay_tables() {
         // Part G §67 adds the outbox publication state (000012); Part H §80 adds
         // retention holds / audit and contact erasure (000013); §81 / §86 add incidents,
         // operator audit and the enforcement dead letter (000014); Part IV Part P adds
-        // the Numbering relay-number lease ledger (000015).
-        15
+        // the Numbering relay-number lease ledger (000015); Part V H adds the Messaging
+        // context-authority jobs (000016).
+        16
     );
     Migrator::down(&db.conn, None).await.unwrap();
     assert_eq!(tables(&db.conn).await, ["privacy_relay_seaql_migrations"]);

@@ -18,10 +18,7 @@ use validator::Validate;
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct InstantMeetingRequest {
     /// Optional title (defaults to "Instant Meeting")
-    #[validate(length(
-        max = 200,
-        message = "Title must not exceed 200 characters"
-    ))]
+    #[validate(length(max = 200, message = "Title must not exceed 200 characters"))]
     pub title: Option<String>,
 }
 
@@ -113,8 +110,6 @@ pub struct UpdateMeetingRequest {
     #[schema(value_type = Option<Object>)]
     pub metadata: Option<JsonValue>,
 }
-
-
 
 /// Request to join a meeting
 #[derive(Debug, Deserialize, Validate, ToSchema)]

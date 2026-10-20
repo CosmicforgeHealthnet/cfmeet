@@ -551,19 +551,28 @@ pub fn key(kid: &str) -> ServiceSigningKey {
 pub struct Peers {
     /// Correctly signing, but not in the gateway's trust bundle.
     pub telephony: Arc<ServiceTokenSigner>,
+    /// Messaging: trusted with exactly `sms-bridge.submit` (Part V H SMS Bridge).
+    pub messaging: Arc<ServiceTokenSigner>,
 }
 
-/// The gateway's service-auth runtime: an empty trust bundle (the gateway serves no
-/// internal operation, so no issuer is trusted).
+/// The gateway's service-auth runtime: Messaging is the only trusted issuer, with
+/// exactly `sms-bridge.submit`.
 pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
     let clock: SharedClock = Arc::new(SystemClock);
     let me = key("sms-gateway-test-1");
     let telephony = key("telephony-test-1");
+    let messaging = key("messaging-test-1");
     let bundle = json!({
         "bundle_version": 1,
         "receiver": cf_service_auth::services::SMS_GATEWAY,
         "runtime_environment": ENV,
-        "trusted_issuers": [],
+        "trusted_issuers": [{
+            "issuer": cf_service_auth::services::MESSAGING,
+            "audience": cf_service_auth::services::SMS_GATEWAY,
+            "runtime_environment": ENV,
+            "keys": [messaging.public_jwk()],
+            "permissions": ["sms-bridge.submit"],
+        }],
     })
     .to_string();
     let policy = TrustPolicy::from_json(&bundle, &ServiceId::sms_gateway(), ENV).unwrap();
@@ -589,6 +598,13 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
             ServiceId::telephony(),
             ENV,
             telephony,
+            TokenTtl::default(),
+            clock.clone(),
+        )),
+        messaging: Arc::new(ServiceTokenSigner::new(
+            ServiceId::messaging(),
+            ENV,
+            messaging,
             TokenTtl::default(),
             clock,
         )),
@@ -858,6 +874,34 @@ impl Harness {
             signed.1.clone(),
         )
         .await
+    }
+
+    /// An internal JSON call signed by `signer`, optionally with a delegated scope.
+    pub async fn internal_call(
+        &self,
+        signer: &ServiceTokenSigner,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        delegated: Option<cf_service_auth::DelegatedPlatformContext>,
+    ) -> Response {
+        let mut outbound = OutboundServiceRequest::new_operation(ServiceId::sms_gateway());
+        if let Some(d) = delegated {
+            outbound = outbound.with_delegated_context(d);
+        }
+        let signed = signer.sign(&outbound).unwrap();
+        let mut b = Request::builder().method(method).uri(path);
+        for (k, v) in signed.headers().iter() {
+            b = b.header(k, v);
+        }
+        let body = match body {
+            Some(v) => {
+                b = b.header("content-type", "application/json");
+                Body::from(v.to_string())
+            }
+            None => Body::empty(),
+        };
+        self.raw(b.body(body).unwrap()).await
     }
 
     /// An internal request signed by `signer`.

@@ -1,6 +1,7 @@
 name: Dependency and image security
 
-# Part K section 109 / Part J section 97: supply-chain gates for the Part III services.
+# Part K section 109 / Part J section 97: supply-chain gates for the Part III services
+# (and the Part V Messaging cryptographic core).
 #
 #  * RustSec advisories for every Calling / Privacy Relay / Telephony / shared-package
 #    lockfile (cargo-audit). A vulnerability fails the job; an advisory is ignored only
@@ -19,6 +20,12 @@ on:
       - "services/calling/**"
       - "services/privacy-relay/**"
       - "services/telephony/**"
+      - "services/messaging/**"
+      - "services/platform-access/**"
+      - "services/sms-gateway/**"
+      - "services/numbering/**"
+      - "services/meeting-service/**"
+      - "scripts/sbom/**"
       - "packages/**"
       - "scripts/secret-scan/**"
       - ".github/workflows/dependency-security.yml"
@@ -27,6 +34,12 @@ on:
       - "services/calling/**"
       - "services/privacy-relay/**"
       - "services/telephony/**"
+      - "services/messaging/**"
+      - "services/platform-access/**"
+      - "services/sms-gateway/**"
+      - "services/numbering/**"
+      - "services/meeting-service/**"
+      - "scripts/sbom/**"
       - "packages/**"
       - "scripts/secret-scan/**"
       - ".github/workflows/dependency-security.yml"
@@ -54,6 +67,13 @@ jobs:
           - packages/webhooks
           - packages/object-storage
           - packages/contracts/validator
+          - packages/messaging-crypto
+          - services/messaging
+          # Part V K §158: every service lockfile is audited (these four were not).
+          - services/platform-access
+          - services/sms-gateway
+          - services/numbering
+          - services/meeting-service
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -62,10 +82,46 @@ jobs:
       # RUSTSEC-2023-0071 (rsa, Marvin timing attack; no fixed release exists): `rsa` is
       # linked only through jsonwebtoken's rust_crypto backend. No Part III code loads,
       # accepts or uses an RSA key: service tokens are EdDSA-only (RS256 is rejected by
-      # packages/service-auth, tested), signaling / media credentials are HS256.
+      # packages/service-auth, tested), signaling / media credentials are HS256. The one
+      # RSA key in the platform — Messaging's FCM service-account key — is parsed and used
+      # for RS256 signing by `ring` (constant time), never by the `rsa` crate
+      # (services/messaging/tests/architecture.rs rsa_keys_are_never_handled_by_the_rsa_crate).
+      #
+      # RUSTSEC-2026-0330 / RUSTSEC-2026-0331 (libcrux-kem 0.0.9; packages/messaging-crypto
+      # only): hpke-rs 0.7.0 pins its optional libcrux backend (hpke-rs-libcrux =0.7.0 ->
+      # libcrux-kem 0.0.9), so the crate is in the lockfile, but the backend is never
+      # enabled: OpenMLS uses the RustCrypto HPKE backend. The step below proves
+      # libcrux-kem is in no build graph (any target, all features); the ignore is lifted
+      # when hpke-rs releases a fixed pin (ADR 0045).
+      - name: libcrux-kem is never compiled into the Messaging crypto core
+        if: matrix.lockfile == 'packages/messaging-crypto' || matrix.lockfile == 'services/messaging' || matrix.lockfile == 'services/meeting-service'
+        working-directory: ${{ matrix.lockfile }}
+        run: |
+          set -euo pipefail
+          out="$(cargo tree --locked -e all --all-features --target all -i libcrux-kem 2>&1 || true)"
+          echo "$out" | grep -q "nothing to print" \
+            || { echo "$out"; echo "::error::libcrux-kem is linked; the advisory ignore no longer holds"; exit 1; }
       - name: cargo audit
         working-directory: ${{ matrix.lockfile }}
-        run: cargo audit --ignore RUSTSEC-2023-0071
+        run: >-
+          cargo audit --ignore RUSTSEC-2023-0071
+          ${{ (matrix.lockfile == 'packages/messaging-crypto' || matrix.lockfile == 'services/messaging' || matrix.lockfile == 'services/meeting-service') && '--ignore RUSTSEC-2026-0330 --ignore RUSTSEC-2026-0331' || '' }}
+
+  sbom:
+    # Part V K §158: a CycloneDX software bill of materials of every tracked Cargo.lock
+    # (exact versions, sources, registry checksums), kept as a build artifact.
+    name: SBOM (CycloneDX, every Rust lockfile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: generate
+        run: |
+          set -euo pipefail
+          python3 scripts/sbom/cargo_lock_sbom.py cfmeet-backend.cdx.json $(git ls-files '*Cargo.lock')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cfmeet-backend-sbom
+          path: cfmeet-backend.cdx.json
 
   image:
     name: image security (${{ matrix.service }})

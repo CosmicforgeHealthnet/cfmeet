@@ -1,5 +1,9 @@
 use crate::{handlers::users, middleware::auth_middleware, state::AppState};
-use axum::{middleware, routing::{get, post}, Router};
+use axum::{
+    middleware,
+    routing::{get, post},
+    Router,
+};
 
 /// Creates user routes
 ///
@@ -10,6 +14,6 @@ pub fn users_routes(state: AppState) -> Router<AppState> {
             "/me",
             get(users::get_current_user).patch(users::update_current_user),
         )
-        .route("/me/deactivate",post(users::deactivate_account))
+        .route("/me/deactivate", post(users::deactivate_account))
         .route_layer(middleware::from_fn_with_state(state, auth_middleware))
 }

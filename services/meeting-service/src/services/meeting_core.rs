@@ -170,6 +170,8 @@ pub struct DomainCore {
     pub artifacts: crate::services::artifacts::ArtifactBackends,
     /// Part I vendor-neutral telemetry sink (failures never affect meetings).
     pub telemetry: Arc<dyn crate::services::quality::sink::QualityTelemetrySink>,
+    /// Part V H: Unified Messaging integration (`None` = legacy chat only).
+    pub unified: Option<Arc<crate::services::unified_messaging::UnifiedMessaging>>,
 }
 
 pub type Core = Arc<DomainCore>;

@@ -58,7 +58,11 @@ impl MigrationTrait for Migration {
                     .add_column(ColumnDef::new(Users::VerificationToken).string().null())
                     .add_column(ColumnDef::new(Users::TokenExpiresAt).timestamp().null())
                     .add_column(ColumnDef::new(Users::ResetToken).string().null())
-                    .add_column(ColumnDef::new(Users::ResetTokenExpiresAt).timestamp().null())
+                    .add_column(
+                        ColumnDef::new(Users::ResetTokenExpiresAt)
+                            .timestamp()
+                            .null(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -113,7 +117,7 @@ impl MigrationTrait for Migration {
         // 4. Recreate email_jobs table
         manager
             .create_table(
-                Table::create() 
+                Table::create()
                     .table(EmailJobs::Table)
                     .if_not_exists()
                     .col(

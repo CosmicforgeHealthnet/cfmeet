@@ -424,6 +424,43 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             get(compat::shadow_compare),
         )
         .route("/admin/compat/backfill", post(compat::run_backfill))
+        // Part V H — Unified Messaging identity bridge (signed-in users) and migration
+        .route(
+            "/messaging/devices/registration-challenges",
+            post(crate::handlers::v2::unified_messaging::registration_challenge),
+        )
+        .route(
+            "/messaging/devices",
+            post(crate::handlers::v2::unified_messaging::register_device),
+        )
+        .route(
+            "/messaging/devices/:id/key-packages",
+            post(crate::handlers::v2::unified_messaging::publish_key_packages),
+        )
+        .route(
+            "/messaging/devices/:id/revoke",
+            post(crate::handlers::v2::unified_messaging::revoke_device),
+        )
+        .route(
+            "/messaging/client-tokens",
+            post(crate::handlers::v2::unified_messaging::client_token),
+        )
+        .route(
+            "/messaging/client-sessions/revoke-all",
+            post(crate::handlers::v2::unified_messaging::revoke_all_sessions),
+        )
+        .route(
+            "/admin/chat-migration",
+            get(crate::handlers::v2::unified_messaging::migration_status),
+        )
+        .route(
+            "/admin/chat-migration/transitions",
+            post(crate::handlers::v2::unified_messaging::migration_transition),
+        )
+        .route(
+            "/admin/chat-migration/parity-runs",
+            post(crate::handlers::v2::unified_messaging::migration_parity),
+        )
         // Organizations
         .route(
             "/admin/organizations",

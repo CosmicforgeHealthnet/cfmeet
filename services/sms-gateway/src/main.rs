@@ -172,6 +172,32 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("CF_CALLING_BASE_URL is not set: events stay PENDING in the outbox");
     }
     tokio::spawn(sms_gateway::sms::workers::run(state.clone()));
+    // Part V H: inbound SMS of bridged parties reach Messaging (durable, retried).
+    {
+        let inbound: Arc<dyn sms_gateway::sms::bridge::BridgeInbound> =
+            if has_target(cf_service_auth::services::MESSAGING) {
+                Arc::new(sms_gateway::sms::bridge::HttpBridgeInbound::new(
+                    service_auth.client(),
+                ))
+            } else {
+                tracing::warn!(
+                    "CF_MESSAGING_BASE_URL is not set: bridged inbound SMS stay PENDING"
+                );
+                Arc::new(sms_gateway::sms::bridge::UnconfiguredBridgeInbound)
+            };
+        let state = state.clone();
+        let every = config.workers.interval;
+        tokio::spawn(async move {
+            loop {
+                if let Err(e) =
+                    sms_gateway::sms::bridge::deliver_due(&state, inbound.as_ref(), 100).await
+                {
+                    tracing::warn!(error = %e, "sms bridge inbound pass failed");
+                }
+                tokio::time::sleep(every).await;
+            }
+        });
+    }
 
     if let Some(address) = config.metrics_address {
         let router = metrics::router(state.clone());

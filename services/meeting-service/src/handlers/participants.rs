@@ -769,4 +769,3 @@ pub async fn stop_screen_share(
         message: "Screen sharing stopped successfully".to_string(),
     }))
 }
-

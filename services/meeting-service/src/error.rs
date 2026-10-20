@@ -103,6 +103,11 @@ pub enum ErrorCode {
     /// Legacy (v1) meeting writes are retired (`FEATURE_LEGACY_MEETING_WRITE_DISABLED`);
     /// use the `/api/v2` equivalent.
     LegacyWriteDisabled,
+    /// Unified Messaging (the main-room chat authority after cutover) is unreachable;
+    /// retry later. The meeting itself is unaffected.
+    ChatUnavailable,
+    /// The chat migration transition is not allowed now (gate, parity or final state).
+    ChatMigrationRefused,
     /// A required dependency (PostgreSQL) is unreachable; retry later. No state changed.
     ServiceUnavailable,
     /// Unexpected database failure (details are logged, never returned).
@@ -195,6 +200,8 @@ impl ErrorCode {
             ErrorCode::EndpointNotFound => "ENDPOINT_NOT_FOUND",
             ErrorCode::MethodNotAllowed => "METHOD_NOT_ALLOWED",
             ErrorCode::LegacyWriteDisabled => "LEGACY_WRITE_DISABLED",
+            ErrorCode::ChatUnavailable => "CHAT_UNAVAILABLE",
+            ErrorCode::ChatMigrationRefused => "CHAT_MIGRATION_REFUSED",
             ErrorCode::ServiceUnavailable => "SERVICE_UNAVAILABLE",
             ErrorCode::DatabaseError => "DATABASE_ERROR",
             ErrorCode::InternalError => "INTERNAL_ERROR",
@@ -284,6 +291,8 @@ impl ErrorCode {
             ErrorCode::EndpointNotFound => StatusCode::NOT_FOUND,
             ErrorCode::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
             ErrorCode::LegacyWriteDisabled => StatusCode::GONE,
+            ErrorCode::ChatUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::ChatMigrationRefused => StatusCode::CONFLICT,
             ErrorCode::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             ErrorCode::DatabaseError | ErrorCode::InternalError => {
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -560,6 +569,8 @@ mod tests {
             ErrorCode::DatabaseError,
             ErrorCode::InternalError,
             ErrorCode::MethodNotAllowed,
+            ErrorCode::ChatUnavailable,
+            ErrorCode::ChatMigrationRefused,
         ];
         for c in all {
             let s = c.as_str();

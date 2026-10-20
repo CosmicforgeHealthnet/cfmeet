@@ -1,0 +1,456 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet Messaging internal API",
+    "version": "1.0.0",
+    "description": "Service-authenticated /internal/v1 surface of services/messaging (Part V H §§97–112, I §116). Every path, including unknown ones, requires a valid Ed25519 service token whose issuer Messaging's trust bundle grants the operation's permission; customer credentials are refused. Scope comes only from the signed delegated platform context, re-validated against Platform Access (forged chains: DELEGATED_CONTEXT_INVALID; suspended: AUTHORITY_SUSPENDED). In addition, /internal/v1/delegated/v1/messaging/** and /internal/v1/delegated/v1/conversations/** expose exactly the customer operations of cfmeet.messaging.http-api to a FIRST_PARTY backend granted messaging-application.delegate, with the standard scopes messages.send, messages.read, conversations.create, conversations.manage, attachments.write and attachments.read (never moderation, export or administration); CF-Acting-Principal is verified as on /v1."
+  },
+  "paths": {
+    "/internal/v1/meeting-conversations": {
+      "post": {
+        "operationId": "resolveMeetingConversation",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Idempotently resolves the MEETING conversation of a meeting reference (context namespace meeting). Never a silent profile fallback. Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/MeetingConversationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/MeetingConversation"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Already resolved (idempotent).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/MeetingConversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/meeting-conversations/{conversationId}/members/{principalId}": {
+      "put": {
+        "operationId": "syncMeetingMember",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Applies a version-fenced meeting membership change (admission, removal, ban, leave, role). Stale / replayed versions change nothing. Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access.",
+        "parameters": [
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "principalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/MeetingMemberSync"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/SyncResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/meeting-conversations/{conversationId}/lifecycle": {
+      "post": {
+        "operationId": "syncMeetingLifecycle",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Applies a version-fenced meeting lifecycle change (e.g. CLOSED when the meeting ends). Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access.",
+        "parameters": [
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/MeetingLifecycleSync"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/SyncResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/meeting-conversations/{conversationId}/legacy-imports": {
+      "post": {
+        "operationId": "importLegacyMeetingChat",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Imports legacy meeting chat with LEGACY_MANAGED provenance into a MANAGED meeting conversation (never PRIVATE_E2EE), idempotently, keeping original times. Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access.",
+        "parameters": [
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/LegacyImportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/LegacyImportResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/meeting-conversations/{conversationId}/messages/{messageId}/moderation": {
+      "post": {
+        "operationId": "moderateMeetingMessage",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Removes (tombstones as MODERATED) a message of a meeting conversation on behalf of the meeting authority. Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access. The content is never returned.",
+        "parameters": [
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/MeetingMessageModeration"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/MeetingMessageModerationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/context-authorities": {
+      "post": {
+        "operationId": "applyContextAuthority",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Applies Privacy Relay's authority for one of its communication contexts to every conversation of that context in the signed delegated environment: SUSPENDED locks, REVOKED closes (and blocks reopening / new conversations), ACTIVE allows creation and unlocks what the authority locked. Permission messaging-context-authority.apply (Privacy Relay only).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ContextAuthorityUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ContextAuthorityResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/sms-bridge/inbound": {
+      "post": {
+        "operationId": "deliverInboundSms",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Permission messaging-sms-bridge.deliver (SMS Gateway only), signed delegated scope re-validated against Platform Access. An inbound SMS of a bridged party becomes a MANAGED message with channel SMS (idempotent per SMS id); never injected into an E2EE conversation.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/InboundSms"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/InboundSmsResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "serviceToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Service-Authorization",
+        "description": "Ed25519 compact JWS (typ cf-service+jwt) from packages/service-auth, audience cfmeet.messaging."
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

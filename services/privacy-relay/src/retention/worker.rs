@@ -317,6 +317,8 @@ impl RetentionWorker {
                    AND privacy_relay_retention_held($2, p.contact_ref, p.tenant_id, p.application_id, p.environment_id)) \
                AND NOT EXISTS (SELECT 1 FROM contact_resolution_grants g WHERE g.context_ref = c.id AND g.status = 'ISSUED') \
                AND NOT EXISTS (SELECT 1 FROM privacy_relay_enforcement_jobs j WHERE j.context_id = c.id AND j.status <> 'APPLIED') \
+               AND NOT EXISTS (SELECT 1 FROM privacy_relay_messaging_authority_jobs m WHERE m.context_id = c.id \
+                   AND m.status NOT IN ('APPLIED', 'DEAD_LETTER')) \
                AND NOT EXISTS (SELECT 1 FROM privacy_relay_outbox o JOIN relay_audit_events e ON e.id = o.source_audit_event_id \
                    WHERE e.context_id = c.id AND o.status <> 'PUBLISHED') \
                AND NOT EXISTS (SELECT 1 FROM relay_number_assignments a WHERE a.context_id = c.id \
@@ -343,6 +345,7 @@ impl RetentionWorker {
             "DELETE FROM contact_resolution_grants WHERE context_ref = ANY($1)",
             "DELETE FROM relay_audit_events WHERE context_id = ANY($1)",
             "DELETE FROM privacy_relay_enforcement_jobs WHERE context_id = ANY($1)",
+            "DELETE FROM privacy_relay_messaging_authority_jobs WHERE context_id = ANY($1)",
             "DELETE FROM relay_authorization_decisions WHERE context_id = ANY($1)",
             "DELETE FROM privacy_relay_session_directions WHERE context_id = ANY($1)",
             "DELETE FROM privacy_relay_session_participants WHERE context_id = ANY($1)",

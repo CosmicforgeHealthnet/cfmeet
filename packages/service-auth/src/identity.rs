@@ -18,6 +18,11 @@ pub mod services {
     /// SMS transport (Part IV Workstreams M–O). Numbering already authorizes it (route
     /// readiness, inbound destinations, sender grants); the service itself is later.
     pub const SMS_GATEWAY: &str = "cfmeet.sms-gateway";
+    /// Unified Messaging (Part V): conversations, messages, Messaging devices and their
+    /// public key material. Called internally only by the Meeting Service (delegated
+    /// first-party backend, meeting sync), Privacy Relay (context authority) and the SMS
+    /// Gateway (bridge delivery), each with its own narrow permission.
+    pub const MESSAGING: &str = "cfmeet.messaging";
     /// Operator administration tooling. Not a deployable service: an issuer identity
     /// that only Platform Access trusts, for identity administration.
     pub const OPERATOR_CONSOLE: &str = "cfmeet.operator-console";
@@ -91,6 +96,14 @@ impl ServiceId {
 
     pub fn sms_gateway() -> Self {
         Self(services::SMS_GATEWAY.to_string())
+    }
+
+    pub fn messaging() -> Self {
+        Self(services::MESSAGING.to_string())
+    }
+
+    pub fn meeting_service() -> Self {
+        Self(services::MEETING_SERVICE.to_string())
     }
 
     pub fn operator_console() -> Self {
@@ -187,6 +200,10 @@ mod tests {
             services::PRIVACY_RELAY,
             services::TELEPHONY,
             services::MEETING_SERVICE,
+            services::PLATFORM_ACCESS,
+            services::NUMBERING,
+            services::SMS_GATEWAY,
+            services::MESSAGING,
             "cfmeet.a1",
         ] {
             assert_eq!(ServiceId::parse(id).unwrap().as_str(), id);

@@ -4,11 +4,12 @@
 //!   provider configured, outbox / attempt backlog (counts only).
 //! * `/v1/sms/**` — the customer API, authenticated by Platform Access and scope-checked.
 //! * `/provider-callbacks/v1/sms/**` — provider callbacks, authenticated by the adapter.
-//! * `/internal/v1/**` — service-authenticated (no internal operation yet; every request
-//!   is authenticated by construction, unknown paths included).
+//! * `/internal/v1/**` — service-authenticated (every request is authenticated by
+//!   construction, unknown paths included): the Part V H SMS Bridge ([`bridge`]).
 //!
 //! Extractor rejections are normalized to the error envelope (they never echo input).
 
+pub mod bridge;
 pub mod callbacks;
 pub mod customer;
 pub mod error;
@@ -69,7 +70,7 @@ pub fn app(state: AppState) -> Router {
     let internal = Router::new()
         .nest(
             "/internal/v1",
-            Router::new()
+            bridge::routes()
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )

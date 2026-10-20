@@ -1938,16 +1938,28 @@ async fn g_recorder_participant_is_not_evicted() {
     recording_active(&app, cid, &owner).await;
     let recorder = "EG_recorder_identity";
     lk(&app).insert_recorder(&room(cid), recorder);
-    let body = livekit_mock::recorder_joined_body(&format!("EV_{}", Uuid::new_v4().simple()), &room(cid), recorder);
+    let body = livekit_mock::recorder_joined_body(
+        &format!("EV_{}", Uuid::new_v4().simple()),
+        &room(cid),
+        recorder,
+    );
     let (s, v) = app.signed_webhook(&body).await;
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["outcome"], "IGNORED", "{v}");
-    assert!(lk(&app).identities(&room(cid)).contains(&recorder.to_string()));
+    assert!(lk(&app)
+        .identities(&room(cid))
+        .contains(&recorder.to_string()));
     let reconciler = backend::workers::ConferenceReconciler::new(app.state.meeting.core.clone());
     let report = reconciler.tick().await.unwrap();
-    assert!(lk(&app).identities(&room(cid)).contains(&recorder.to_string()), "{report:?}");
+    assert!(
+        lk(&app)
+            .identities(&room(cid))
+            .contains(&recorder.to_string()),
+        "{report:?}"
+    );
     assert_eq!(lk(&app).call_count("RemoveParticipant"), 0);
     // A standard unknown identity is still evicted.
-    let (_, v) = common::rtc::provider_event(&app, "participant_joined", cid, Some("ps_intruder")).await;
+    let (_, v) =
+        common::rtc::provider_event(&app, "participant_joined", cid, Some("ps_intruder")).await;
     assert_eq!(v["outcome"], "UNKNOWN_IDENTITY_EVICTED");
 }

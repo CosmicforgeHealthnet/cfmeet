@@ -352,6 +352,17 @@ pub async fn receive(
                         None => {}
                     }
                     events::record(&txn, &row, MessageEvent::Received, ctx, now).await?;
+                    // Part V H: a bridged party's message is queued for Messaging in the
+                    // same transaction (content stays sealed here until delivery).
+                    super::bridge::enqueue_inbound(
+                        &txn,
+                        scope.environment_id,
+                        number_resource_id,
+                        &fp,
+                        id,
+                        now,
+                    )
+                    .await?;
                     // The final delivery boundary: the routing decision must still be
                     // Numbering's CURRENT one (a reassignment, routing change, suspension or
                     // release since the resolution refuses it — the content then goes to

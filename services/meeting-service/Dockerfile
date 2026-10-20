@@ -15,6 +15,9 @@ WORKDIR /app/services/meeting-service
 # checked-in platform OpenAPI contracts shown in its Swagger service selector.
 COPY services/meeting-service/ ./
 COPY packages/contracts/ /app/packages/contracts/
+COPY packages/service-auth/ /app/packages/service-auth/
+# Dev-dependency of the end-to-end tests only (Cargo resolves every path manifest).
+COPY packages/messaging-crypto/ /app/packages/messaging-crypto/
 
 # Build for release
 # Build the migration binary from the migration package

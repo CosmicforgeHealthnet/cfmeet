@@ -1,0 +1,763 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/messaging/realtime/v1.schema.json",
+  "title": "CF Meet Messaging realtime protocol v1",
+  "description": "Frames of the Messaging WebSocket gateway (subprotocol cfmeet.messaging.v1): JSON text frames with a `type`. Clients ignore unknown server frame types and unknown fields; the gateway answers unknown client frames with error UNSUPPORTED_FRAME without closing (forward compatibility). Durable events carry a per-conversation eventSequence (replay / ack cursor); clients order messages by their message sequence and drop duplicates by eventId. Typing and presence are ephemeral (never stored). Close codes: 1000 normal, 1001 idle timeout, 1008 policy (frame rate), 1009 frame too large, 1012 draining (reconnect after reconnectAfterMs), 1013 slow consumer (resume from the cursors in the preceding error), 4401 authorization ended (session expired / revoked, device revoked, principal inactive). A frame validates against ClientFrame or ServerFrame (typing frames exist in both directions).",
+  "$defs": {
+    "ClientFrame": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "conversationId"
+          ],
+          "properties": {
+            "type": {
+              "const": "subscribe"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "conversationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "afterEventSequence": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "conversationId"
+          ],
+          "properties": {
+            "type": {
+              "const": "unsubscribe"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "conversationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "conversationId",
+            "eventSequence"
+          ],
+          "properties": {
+            "type": {
+              "const": "ack"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "conversationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "eventSequence": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "conversationId",
+            "state"
+          ],
+          "properties": {
+            "type": {
+              "const": "typing"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "conversationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "state": {
+              "enum": [
+                "started",
+                "stopped"
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "visibility"
+          ],
+          "properties": {
+            "type": {
+              "const": "presence.set"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "visibility": {
+              "enum": [
+                "CONVERSATION_MEMBERS",
+                "HIDDEN"
+              ]
+            },
+            "shareLastSeen": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "conversationId"
+          ],
+          "properties": {
+            "type": {
+              "const": "presence.query"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "conversationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "ticket"
+          ],
+          "properties": {
+            "type": {
+              "const": "auth.refresh"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "ticket": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "ping"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "ServerFrame": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "protocolVersion",
+            "connectionId",
+            "sessionExpiresAt"
+          ],
+          "properties": {
+            "type": {
+              "const": "welcome"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "protocolVersion": {
+              "const": 1
+            },
+            "connectionId": {
+              "type": "string"
+            },
+            "sessionExpiresAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "heartbeatIntervalMs": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "limits": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "conversationId",
+            "afterEventSequence",
+            "headEventSequence"
+          ],
+          "properties": {
+            "type": {
+              "const": "subscribed"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "conversationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "afterEventSequence": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "headEventSequence": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "conversationId"
+          ],
+          "properties": {
+            "type": {
+              "const": "unsubscribed"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "conversationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "event"
+          ],
+          "properties": {
+            "type": {
+              "const": "event"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "event": {
+              "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ConversationEvent"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "conversationId",
+            "afterEventSequence",
+            "headEventSequence",
+            "path"
+          ],
+          "properties": {
+            "type": {
+              "const": "sync.required"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "conversationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "afterEventSequence": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "headEventSequence": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "conversationId",
+            "reason"
+          ],
+          "properties": {
+            "type": {
+              "const": "subscription.revoked"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "conversationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "reason": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "conversationId",
+            "eventSequence"
+          ],
+          "properties": {
+            "type": {
+              "const": "ack.recorded"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "conversationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "eventSequence": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "conversationId",
+            "principalId",
+            "state",
+            "ttlMs"
+          ],
+          "properties": {
+            "type": {
+              "const": "typing"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "conversationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "principalId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "state": {
+              "enum": [
+                "started",
+                "stopped"
+              ]
+            },
+            "ttlMs": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "conversationId",
+            "principalId",
+            "state"
+          ],
+          "properties": {
+            "type": {
+              "const": "presence"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "conversationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "principalId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "state": {
+              "enum": [
+                "AVAILABLE",
+                "OFFLINE"
+              ]
+            },
+            "lastSeenAt": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "conversationId",
+            "members"
+          ],
+          "properties": {
+            "type": {
+              "const": "presence.snapshot"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "conversationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "members": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "object",
+                "required": [
+                  "principalId",
+                  "state"
+                ],
+                "properties": {
+                  "principalId": {
+                    "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                  },
+                  "state": {
+                    "enum": [
+                      "AVAILABLE",
+                      "OFFLINE",
+                      "POLICY_RESTRICTED"
+                    ]
+                  },
+                  "lastSeenAt": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "settings"
+          ],
+          "properties": {
+            "type": {
+              "const": "presence.settings"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "settings": {
+              "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/PresenceSettings"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "event"
+          ],
+          "properties": {
+            "type": {
+              "const": "device.event"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "event": {
+              "type": "object",
+              "required": [
+                "type",
+                "referenceId"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "referenceId": {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                },
+                "conversationId": {
+                  "oneOf": [
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "sessionExpiresAt"
+          ],
+          "properties": {
+            "type": {
+              "const": "auth.refreshed"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "sessionExpiresAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "reconnectAfterMs"
+          ],
+          "properties": {
+            "type": {
+              "const": "server.draining"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "reconnectAfterMs": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "pong"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "code",
+            "message"
+          ],
+          "properties": {
+            "type": {
+              "const": "error"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "code": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+            },
+            "message": {
+              "type": "string"
+            },
+            "resume": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "conversationId",
+                  "afterEventSequence"
+                ],
+                "properties": {
+                  "conversationId": {
+                    "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                  },
+                  "afterEventSequence": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    }
+  },
+  "anyOf": [
+    {
+      "$ref": "#/$defs/ClientFrame"
+    },
+    {
+      "$ref": "#/$defs/ServerFrame"
+    }
+  ]
+}

@@ -4,8 +4,10 @@ import { ThemeProvider as NextThemesProvider } from "next-themes";
 
 export default function ThemeProvider({
   children,
+  nonce,
 }: {
   children: React.ReactNode;
+  nonce?: string;
 }) {
   return (
     <NextThemesProvider
@@ -13,6 +15,7 @@ export default function ThemeProvider({
       defaultTheme="system"
       enableSystem
       disableTransitionOnChange
+      nonce={nonce}
     >
       {children}
     </NextThemesProvider>

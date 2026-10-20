@@ -8,9 +8,9 @@ use crate::models::{
 };
 
 /// Format MeetingStatus enum to string representation
-/// 
+///
 /// Converts the database enum to user-friendly string for API responses.
-/// 
+///
 /// # Examples
 /// - `MeetingStatus::Scheduled` → "scheduled"
 /// - `MeetingStatus::Ongoing` → "live"
@@ -26,9 +26,9 @@ pub fn format_status(status: &MeetingStatus) -> String {
 }
 
 /// Format ParticipantRole enum to string representation
-/// 
+///
 /// Converts the database enum to user-friendly string for API responses.
-/// 
+///
 /// # Examples
 /// - `ParticipantRole::Host` → "host"
 /// - `ParticipantRole::Participant` → "participant"
@@ -42,9 +42,9 @@ pub fn format_role(role: &ParticipantRole) -> String {
 }
 
 /// Format ParticipantStatus enum to string representation
-/// 
+///
 /// Converts the database enum to user-friendly string for API responses.
-/// 
+///
 /// # Examples
 /// - `ParticipantStatus::Waiting` → "waiting"
 /// - `ParticipantStatus::Joined` → "joined"
@@ -58,10 +58,10 @@ pub fn format_participant_status(status: &ParticipantStatus) -> String {
 }
 
 /// Format duration in minutes to human-readable format
-/// 
+///
 /// Converts a duration in minutes to a natural language string with weeks, days, hours, and minutes.
 /// Handles singular/plural forms correctly and joins multiple units with commas and "and".
-/// 
+///
 /// # Examples
 /// - `30` → "30 minutes"
 /// - `60` → "1 hour"
@@ -70,10 +70,10 @@ pub fn format_participant_status(status: &ParticipantStatus) -> String {
 /// - `1440` → "1 day"
 /// - `10080` → "1 week"
 /// - `11520` → "1 week and 1 day"
-/// 
+///
 /// # Arguments
 /// * `minutes` - Duration in minutes (negative values are treated as 0)
-/// 
+///
 /// # Returns
 /// A human-readable string representation of the duration
 pub fn format_duration(minutes: i64) -> String {
@@ -89,16 +89,28 @@ pub fn format_duration(minutes: i64) -> String {
     let mut parts = Vec::new();
 
     if weeks > 0 {
-        parts.push(format!("{} week{}", weeks, if weeks == 1 { "" } else { "s" }));
+        parts.push(format!(
+            "{} week{}",
+            weeks,
+            if weeks == 1 { "" } else { "s" }
+        ));
     }
     if days > 0 {
         parts.push(format!("{} day{}", days, if days == 1 { "" } else { "s" }));
     }
     if hours > 0 {
-        parts.push(format!("{} hour{}", hours, if hours == 1 { "" } else { "s" }));
+        parts.push(format!(
+            "{} hour{}",
+            hours,
+            if hours == 1 { "" } else { "s" }
+        ));
     }
     if mins > 0 {
-        parts.push(format!("{} minute{}", mins, if mins == 1 { "" } else { "s" }));
+        parts.push(format!(
+            "{} minute{}",
+            mins,
+            if mins == 1 { "" } else { "s" }
+        ));
     }
 
     if parts.is_empty() {

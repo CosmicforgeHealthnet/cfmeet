@@ -586,6 +586,101 @@ class RealRepository(unittest.TestCase):
             lambda r: write(r, "services/calling/migration/src/m_sms.rs", 'const UP: &str = "CREATE TABLE sms_transports (id UUID)";\n'),
         )
 
+    # Part V A: Messaging owns conversations and device public keys; no E2EE secret is
+    # ever a column; contexts are product-neutral.
+    @staticmethod
+    def messaging(r: Path, migration_sql: str = "CREATE TABLE messaging_conversations (id UUID)", code: str = "pub fn ok() {}\n"):
+        write(r, "services/messaging/Cargo.toml", '[package]\nname = "messaging"\nversion = "0.1.0"\n[dependencies]\ncf-messaging-crypto = { path = "../../packages/messaging-crypto" }\n')
+        write(r, "services/messaging/migration/src/m1.rs", f'const UP: &str = "{migration_sql}";\n')
+        write(r, "services/messaging/src/lib.rs", code)
+
+    def test_a_clean_messaging_service_passes(self):
+        found = self.mutated(lambda r: self.messaging(
+            r,
+            "CREATE TABLE messaging_devices (id UUID, signature_public_key BYTEA, CONSTRAINT ck CHECK (NOT (detail ? 'plaintext'))); "
+            "CREATE TABLE messaging_key_packages (id UUID); CREATE TABLE messaging_conversations (context_class TEXT)",
+            "//! Never Karryam or HealthNet tables; contexts are opaque.\npub const SQL: &str = \"SELECT id FROM messaging_conversations\";\n",
+        ))
+        self.assertEqual([v for v in found if "messaging" in v.path], [], found)
+
+    def test_messaging_tables_outside_messaging(self):
+        self.assertMutationFails(
+            "MESSAGING_DOMAIN_ELSEWHERE",
+            lambda r: write(r, "services/meeting-service/migration/src/m_msg.rs", 'const UP: &str = "CREATE TABLE messaging_conversations (id UUID)";\n'),
+        )
+
+    def test_device_keys_or_mls_state_outside_messaging(self):
+        self.assertMutationFails(
+            "MESSAGING_CRYPTO_ELSEWHERE",
+            lambda r: write(r, "services/platform-access/migration/src/m_kp.rs", 'const UP: &str = "CREATE TABLE platform_key_packages (id UUID)";\n'),
+        )
+        self.assertMutationFails(
+            "MESSAGING_CRYPTO_ELSEWHERE",
+            lambda r: write(r, "services/calling/migration/src/m_mls.rs", 'const UP: &str = "ALTER TABLE calls ADD COLUMN mls_group_id BYTEA";\n'),
+        )
+
+    def test_e2ee_private_material_in_a_schema(self):
+        self.assertMutationFails(
+            "E2EE_SECRET_IN_SCHEMA",
+            lambda r: write(r, "services/platform-access/migration/src/m_dev.rs", 'const UP: &str = "ALTER TABLE platform_principals ADD COLUMN device_private_key BYTEA";\n'),
+        )
+        for column in ("epoch_secret BYTEA", "init_private BYTEA", "message_body TEXT", "plaintext TEXT", "attachment_key BYTEA", "recovery_key BYTEA"):
+            with self.subTest(column=column):
+                self.assertMutationFails(
+                    "E2EE_SECRET_IN_SCHEMA",
+                    lambda r, c=column: self.messaging(r, f"CREATE TABLE messaging_groups (id UUID, {c})"),
+                )
+
+    def test_product_business_tables_or_names_in_messaging(self):
+        for table in ("messaging_orders", "messaging_trip_chats", "messaging_patients", "karryam_threads"):
+            with self.subTest(table=table):
+                self.assertMutationFails(
+                    "PRODUCT_DOMAIN_IN_MESSAGING",
+                    lambda r, t=table: self.messaging(r, f"CREATE TABLE {t} (id UUID)"),
+                )
+        self.assertMutationFails(
+            "PRODUCT_DOMAIN_IN_MESSAGING",
+            lambda r: self.messaging(r, code='pub fn allowed(app: &str) -> bool { app == "healthnet-clinic" }\n'),
+        )
+
+    def test_messaging_crossing_other_boundaries(self):
+        self.assertMutationFails(
+            "CROSS_SERVICE_TABLE_ACCESS",
+            lambda r: self.messaging(r, code='pub const Q: &str = "SELECT body FROM conference_messages";\n'),
+        )
+        self.assertMutationFails(
+            "CROSS_SERVICE_DATABASE_URL",
+            lambda r: self.messaging(r, code='pub fn u() -> Option<String> { std::env::var("PLATFORM_ACCESS_DATABASE_URL").ok() }\n'),
+        )
+        self.assertMutationFails(
+            "CARGO_CROSS_SERVICE_DEPENDENCY",
+            lambda r: (self.messaging(r), append(r, "services/messaging/Cargo.toml", 'meeting = { path = "../meeting-service" }\n')),
+        )
+        self.assertMutationFails(
+            "PLAINTEXT_CONTACT_FIELD",
+            lambda r: self.messaging(r, code="pub struct Party { pub phone_number: String }\n"),
+        )
+        self.assertMutationFails(
+            "PLAINTEXT_CONTACT_FIELD",
+            lambda r: self.messaging(r, "CREATE TABLE messaging_contacts (id UUID, msisdn TEXT)"),
+        )
+
+    def test_shared_packages_never_depend_on_messaging(self):
+        self.assertMutationFails(
+            "PACKAGE_DEPENDS_ON_SERVICE",
+            lambda r: (self.messaging(r), append(r, "packages/messaging-crypto/Cargo.toml", '\n[dev-dependencies.messaging]\npath = "../../services/messaging"\n')),
+        )
+
+    def test_other_services_cannot_read_the_messaging_database(self):
+        self.assertMutationFails(
+            "CROSS_SERVICE_DATABASE_URL",
+            lambda r: append(r, "services/meeting-service/src/main.rs", '\nconst M: &str = "MESSAGING_DATABASE_URL";\n'),
+        )
+        self.assertMutationFails(
+            "CROSS_SERVICE_DB_HELPER",
+            lambda r: append(r, "services/calling/src/main.rs", "\nfn load_conversations_from_messaging_db() {}\n"),
+        )
+
     def test_credential_verification_outside_platform_access(self):
         self.assertMutationFails(
             "IDENTITY_AUTHORITY_ELSEWHERE",

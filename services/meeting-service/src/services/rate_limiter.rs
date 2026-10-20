@@ -36,7 +36,10 @@ impl RateLimiterService {
     /// Returns Ok(remaining_attempts) if under limit, Err if rate limited.
     pub async fn check_login_rate(&self, identifier: &str) -> ApiResult<i64> {
         let key = self.login_key(identifier);
-        let count = self.redis.incr_with_ttl(&key, LOGIN_RATE_LIMIT_TTL_SECS).await?;
+        let count = self
+            .redis
+            .incr_with_ttl(&key, LOGIN_RATE_LIMIT_TTL_SECS)
+            .await?;
 
         if count > MAX_LOGIN_ATTEMPTS {
             let ttl = self.redis.ttl(&key).await?;

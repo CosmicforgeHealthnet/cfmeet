@@ -294,7 +294,24 @@ async fn m02_rollback_and_reapply() {
     let c = &db.conn;
     Migrator::up(c, None).await.unwrap();
     let spaces = count(c, "SELECT count(*) FROM meeting_spaces").await;
-    // Part M index down-migration alone first: only the index goes.
+    // Remediation down-migration alone first: only the scoped-chat objects go; the
+    // main-room integration stays.
+    let scoped_tables = "SELECT count(*) FROM information_schema.tables WHERE table_name IN \
+        ('conference_chat_scope_links','conference_chat_scope_member_sync')";
+    assert_eq!(count(c, scoped_tables).await, 2);
+    Migrator::down(c, Some(1)).await.unwrap();
+    assert_eq!(count(c, scoped_tables).await, 0);
+    assert_eq!(count(c, "SELECT count(*) FROM information_schema.columns WHERE table_name='conference_chat_message_links' AND column_name='conversation_id'").await, 0);
+    // Part V H integration down-migration alone first: only its objects go; legacy chat
+    // and v2 messages stay (and lose only the additive `origin` label).
+    let um_tables = "SELECT count(*) FROM information_schema.tables WHERE table_name IN \
+        ('conference_chat_migration','conference_chat_links','conference_chat_message_links','communication_principal_links')";
+    assert_eq!(count(c, um_tables).await, 4);
+    Migrator::down(c, Some(1)).await.unwrap();
+    assert_eq!(count(c, um_tables).await, 0);
+    assert_eq!(count(c, "SELECT count(*) FROM information_schema.columns WHERE table_name='conference_messages' AND column_name='origin'").await, 0);
+    assert_eq!(count(c, "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('conference_messages','chat_messages')").await, 2);
+    // Part M index down-migration alone next: only the index goes.
     let main_cursor_index =
         "SELECT count(*) FROM pg_indexes WHERE indexname = 'idx_messages_main_cursor'";
     assert_eq!(count(c, main_cursor_index).await, 1);
@@ -318,8 +335,9 @@ async fn m02_rollback_and_reapply() {
     Migrator::up(c, None).await.unwrap();
     assert_eq!(count(c, main_cursor_index).await, 1, "re-applied");
     // All eight Phase 2 migrations (schema, backfill, organizations, recurrence
-    // exceptions, Part E rtc control plane, Part F collaboration, Parts G–I, Part M index).
-    Migrator::down(c, Some(8)).await.unwrap();
+    // exceptions, Part E rtc control plane, Part F collaboration, Parts G–I, Part M index)
+    // plus the Part V H integration and the scoped-chat remediation on top.
+    Migrator::down(c, Some(10)).await.unwrap();
     assert_eq!(count(c, "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('meeting_spaces','conference_sessions','participant_sessions','outbox_events','organizations','meeting_recurrence_exceptions','rtc_webhook_events','rtc_drift_events','worker_leases','conference_messages','meeting_poll_ballots','transcription_jobs','webinar_registrations')").await, 0);
     assert_eq!(count(c, "SELECT count(*) FROM meetings").await, 5);
     assert_eq!(count(c, "SELECT count(*) FROM participants").await, 8);
