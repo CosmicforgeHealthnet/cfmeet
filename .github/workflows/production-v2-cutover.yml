@@ -1,0 +1,78 @@
+name: CF Meet production API cutover
+
+# No automatic production cutover. The VPS already has a staged Meeting Service.
+# Audit / cutover / rollback run only when manually selected on the default branch.
+on:
+  pull_request:
+    paths:
+      - "scripts/production-v2-cutover.sh"
+      - ".github/workflows/production-v2-cutover.yml"
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Read-only audit, guarded cutover, or rollback"
+        required: true
+        default: audit
+        type: choice
+        options:
+          - audit
+          - cutover
+          - rollback
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfmeet-api-production-cutover
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate cutover script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bash parser
+        run: bash -n scripts/production-v2-cutover.sh
+      - name: Cutover preconditions
+        run: |
+          grep -q 'verify_backend' scripts/production-v2-cutover.sh
+          grep -q 'verify_public' scripts/production-v2-cutover.sh
+          grep -q 'rollback_on_error' scripts/production-v2-cutover.sh
+
+  execute:
+    name: VPS production API operation
+    if: github.event_name == 'workflow_dispatch'
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: SSH setup
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST"
+          test -n "$VPS_SSH_KEY"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          ssh-keyscan -H "$VPS_HOST" >> "$HOME/.ssh/known_hosts"
+
+      - name: Execute guarded VPS operation
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          set -euo pipefail
+          case "$OPERATION" in audit|cutover|rollback) ;; *) exit 1 ;; esac
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          ssh -o BatchMode=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 \
+            "$VPS_USER@$VPS_HOST" "sudo bash -s -- $OPERATION" \
+            < scripts/production-v2-cutover.sh
