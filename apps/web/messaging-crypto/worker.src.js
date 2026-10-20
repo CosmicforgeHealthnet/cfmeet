@@ -59,10 +59,10 @@ function loadCore() {
   ready ??= (async () => {
     const res = await fetch(WASM_URL, { credentials: "same-origin", redirect: "error" });
     if (!res.ok) fail("CRYPTO_MODULE_UNAVAILABLE");
-    const module = new Uint8Array(await res.arrayBuffer());
-    const digest = new Uint8Array(await crypto.subtle.digest("SHA-384", module));
+    const wasmBytes = new Uint8Array(await res.arrayBuffer());
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-384", wasmBytes));
     if (btoa(String.fromCharCode(...digest)) !== WASM_SHA384) fail("CRYPTO_MODULE_INTEGRITY");
-    await init({ module_or_path: module });
+    await init({ module_or_path: wasmBytes });
   })();
   return ready;
 }

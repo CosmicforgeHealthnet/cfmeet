@@ -17,9 +17,8 @@ import { MessagingEngine, type ConversationView, type MessageView, type Security
 import type { Colleague } from "@/lib/messaging/api";
 
 function useEngine(): MessagingEngine {
-  const ref = useRef<MessagingEngine | null>(null);
-  ref.current ??= new MessagingEngine();
-  const engine = ref.current;
+  // One engine per mounted page (lazy state initializer, never re-created on render).
+  const [engine] = useState(() => new MessagingEngine());
   useEffect(() => {
     void engine.start();
     return () => engine.stop();
