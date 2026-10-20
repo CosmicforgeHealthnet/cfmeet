@@ -301,7 +301,16 @@ async fn a_stuck_queue_entry_is_an_incident_and_drains_later() {
     e.extension("8400", "QUEUE", queue_id).await;
     let call = dial(&e, &caller, "8400").await;
     e.h().state.app.expire_due(100).await.unwrap();
-    assert!(calling::metrics::gauge("calling_enterprise_queue_depth", &[]).unwrap_or(0) >= 1);
+    // The gauge is process-wide and other tests can resample it concurrently.
+    // Assert our own queue entry, which is authoritative and isolated.
+    assert_eq!(
+        e.count(&format!(
+            "SELECT count(*) FROM enterprise_queue_entries WHERE call_id = '{call}' AND state = 'WAITING'"
+        ))
+        .await,
+        1,
+        "the queue entry must be waiting before the deadline"
+    );
     e.h().clock.advance(chrono::Duration::seconds(30 + 121));
     // Another instance holds the Call row (crashed mid-transaction, long lock).
     let conn = e.h().conn();
