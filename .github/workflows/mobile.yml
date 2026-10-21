@@ -1,6 +1,7 @@
 name: Mobile
 
 # apps/mobile — React Native Expo app (deployed via EAS).
+# Main pushes run validation only. EAS builds and OTA are explicit manual operations.
 #
 # Requires GitHub Secrets:
 #   - EXPO_TOKEN: Expo access token (from expo.dev)
@@ -35,6 +36,11 @@ on:
           - development
           - preview
           - production
+      publish_preview_ota:
+        description: 'Explicitly authorize an Expo preview OTA update (manual action only)'
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: mobile-${{ github.ref }}
@@ -77,7 +83,7 @@ jobs:
     name: EAS Build (Preview)
     needs: lint
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.profile == 'preview' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
 
@@ -175,7 +181,7 @@ jobs:
   update-ota:
     name: OTA Update (Expo Updates)
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish_preview_ota == 'true' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
 
