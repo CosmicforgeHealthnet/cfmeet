@@ -32,15 +32,15 @@ async fn connections_require_a_valid_single_use_ticket_from_a_valid_client_token
     // No / garbage ticket.
     assert_eq!(rt.open(&"0".repeat(64), None).await.err(), Some(401));
     assert_eq!(rt.open("not-a-ticket", None).await.err(), Some(401));
-    // Client tokens are never accepted on the server API, and a server credential is
-    // never accepted for tickets.
+    // Client tokens reach only the member operations of the server API (§105; see
+    // tests/client_tokens_rest.rs), and a server credential is never accepted for tickets.
     let token = rt.token(&c, &alice).await;
     let r = h
         .send(
             axum::http::Method::GET,
             None,
             Some(alice.principal),
-            "/v1/conversations",
+            "/v1/messaging/policy",
             None,
             &[("authorization", &format!("CF-Client-Token {token}"))],
         )

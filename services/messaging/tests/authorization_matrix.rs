@@ -1253,7 +1253,15 @@ fn default_expect(op: &Op, case: Case) -> (u16, &'static str) {
         Case::NoCredential | Case::InvalidCredential | Case::RevokedCredential => {
             (401, "AUTHENTICATION_FAILED")
         }
-        Case::ClientTokenOnCustomerRoute => (401, "CLIENT_TOKENS_NOT_ENABLED"),
+        // §105: member operations accept a client token — a forged one is refused by its
+        // signature; every other operation refuses client tokens outright.
+        Case::ClientTokenOnCustomerRoute => {
+            if messaging::http::middleware::client_token_route(&op.method, op.template).is_some() {
+                (401, "AUTHENTICATION_FAILED")
+            } else {
+                (401, "CLIENT_TOKENS_NOT_ENABLED")
+            }
+        }
         Case::InsufficientScope => (403, "INSUFFICIENT_SCOPE"),
         Case::CrossTenantIds => (404, "NOT_FOUND"),
         Case::CrossTenantActingAsOurPrincipal

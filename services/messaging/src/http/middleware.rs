@@ -94,8 +94,95 @@ impl<S: Send + Sync> FromRequestParts<S> for CustomerCaller {
 
 enum Presented {
     Credential(String),
-    ClientToken,
+    ClientToken(String),
     Invalid,
+}
+
+/// Part V §105: the member operations an end-user device may call DIRECTLY with its
+/// client token (method, path pattern; `*` is any id segment, `{device}` must be the
+/// session's own device). Everything else — conversation creation and administration,
+/// membership management, policy, compliance, moderation, device registration and
+/// revocation, client-token issuance — stays with the customer's backend credential.
+const CLIENT_TOKEN_ROUTES: &[(&str, &str)] = &[
+    ("GET", "/v1/conversations"),
+    ("GET", "/v1/conversations/*"),
+    ("GET", "/v1/conversations/*/members"),
+    ("GET", "/v1/conversations/*/messages"),
+    ("POST", "/v1/conversations/*/messages"),
+    ("GET", "/v1/conversations/*/messages/*"),
+    ("PATCH", "/v1/conversations/*/messages/*"),
+    ("DELETE", "/v1/conversations/*/messages/*"),
+    ("GET", "/v1/conversations/*/messages/*/revisions"),
+    ("GET", "/v1/conversations/*/messages/*/reactions"),
+    ("PUT", "/v1/conversations/*/messages/*/reactions/*"),
+    ("DELETE", "/v1/conversations/*/messages/*/reactions/*"),
+    ("GET", "/v1/conversations/*/messages/*/sms-transport"),
+    ("PUT", "/v1/conversations/*/read-cursor"),
+    ("GET", "/v1/conversations/*/events"),
+    ("GET", "/v1/conversations/*/unread"),
+    ("GET", "/v1/conversations/*/pins"),
+    ("GET", "/v1/conversations/*/search"),
+    ("POST", "/v1/conversations/*/reports"),
+    ("POST", "/v1/conversations/*/mls/commits"),
+    ("GET", "/v1/conversations/*/mls/state"),
+    ("POST", "/v1/conversations/*/mls/key-package-claims"),
+    ("POST", "/v1/conversations/*/attachments"),
+    ("GET", "/v1/conversations/*/attachments/*"),
+    ("POST", "/v1/conversations/*/attachments/*/finalize"),
+    ("POST", "/v1/conversations/*/attachments/*/download-grants"),
+    ("POST", "/v1/conversations/*/attachments/*/thumbnail-grants"),
+    ("GET", "/v1/conversations/*/attachments/*/content"),
+    ("GET", "/v1/messaging/search"),
+    ("GET", "/v1/messaging/principals/*/devices"),
+    ("GET", "/v1/messaging/key-transparency/proofs"),
+    ("POST", "/v1/messaging/devices/{device}/key-packages"),
+    ("GET", "/v1/messaging/devices/{device}/welcomes"),
+    ("POST", "/v1/messaging/devices/{device}/welcomes/*/consume"),
+    ("PUT", "/v1/messaging/devices/{device}/push-registration"),
+    ("DELETE", "/v1/messaging/devices/{device}/push-registration"),
+    ("GET", "/v1/messaging/blocks"),
+    ("POST", "/v1/messaging/blocks"),
+    ("DELETE", "/v1/messaging/blocks/*"),
+    ("GET", "/v1/messaging/presence/settings"),
+    ("PUT", "/v1/messaging/presence/settings"),
+    ("POST", "/v1/messaging/history-transfers"),
+    ("GET", "/v1/messaging/history-transfers"),
+    ("GET", "/v1/messaging/history-transfers/*"),
+    ("PUT", "/v1/messaging/history-transfers/*/sealed-history"),
+    ("GET", "/v1/messaging/history-transfers/*/sealed-history"),
+    ("POST", "/v1/messaging/history-transfers/*/complete"),
+    ("POST", "/v1/messaging/history-transfers/*/cancel"),
+    ("POST", "/v1/messaging/backups"),
+    ("GET", "/v1/messaging/backups/latest"),
+    ("DELETE", "/v1/messaging/backups/*"),
+    ("POST", "/v1/messaging/backups/*/finalize"),
+    ("POST", "/v1/messaging/backups/*/download-grants"),
+];
+
+/// Whether a client token may call `method path`; `Some(Some(device))` when the route
+/// names a device that must be the session's own.
+pub fn client_token_route(method: &Method, path: &str) -> Option<Option<String>> {
+    let segments: Vec<&str> = path.trim_end_matches('/').split('/').collect();
+    'routes: for (m, pattern) in CLIENT_TOKEN_ROUTES {
+        if *m != method.as_str() {
+            continue;
+        }
+        let want: Vec<&str> = pattern.split('/').collect();
+        if want.len() != segments.len() {
+            continue;
+        }
+        let mut device = None;
+        for (w, got) in want.iter().zip(&segments) {
+            match *w {
+                "*" if !got.is_empty() => {}
+                "{device}" if !got.is_empty() => device = Some(got.to_string()),
+                literal if literal == *got => {}
+                _ => continue 'routes,
+            }
+        }
+        return Some(device);
+    }
+    None
 }
 
 /// Exactly one bounded `Authorization` header.
@@ -116,7 +203,7 @@ fn presented(request: &Request) -> Presented {
     } else if scheme.eq_ignore_ascii_case("bearer") {
         Presented::Credential(token.to_string())
     } else if scheme.eq_ignore_ascii_case("cf-client-token") {
-        Presented::ClientToken
+        Presented::ClientToken(token.to_string())
     } else {
         Presented::Invalid
     }
@@ -142,8 +229,9 @@ pub async fn require_customer(
             }
             let token = match presented(&request) {
                 Presented::Credential(t) => zeroize::Zeroizing::new(t),
-                Presented::ClientToken => {
-                    return ApiError::code(ErrorCode::ClientTokensNotEnabled).into_response()
+                Presented::ClientToken(t) => {
+                    let token = zeroize::Zeroizing::new(t);
+                    return client_token_request(&state, &token, request, next).await;
                 }
                 Presented::Invalid => {
                     return ApiError::code(ErrorCode::AuthenticationFailed).into_response()
@@ -192,6 +280,73 @@ pub async fn require_customer(
     )
     .await;
     with_request_id(response, &context)
+}
+
+/// A device-direct REST request with a client token (§105): only the allow-listed member
+/// operations; the token's session (validated now: device ACTIVE, session ACTIVE and
+/// unexpired, principal ACTIVE in Platform Access) becomes the trusted context — its
+/// scopes, its environment, and its principal as the ONLY principal it may act for.
+async fn client_token_request(
+    state: &AppState,
+    token: &str,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    // A deployment without client-token keys accepts client tokens nowhere.
+    if state.realtime.keys.is_none() {
+        return ApiError::code(ErrorCode::ClientTokensNotEnabled).into_response();
+    }
+    let Some(device) = client_token_route(request.method(), request.uri().path()) else {
+        crate::metrics::inc(
+            "messaging_client_token_rest_total",
+            &[("outcome", "route_not_allowed")],
+        );
+        return ApiError::code(ErrorCode::ClientTokensNotEnabled).into_response();
+    };
+    let session = match crate::realtime::sessions::authenticate(state, token).await {
+        Ok(s) => s,
+        Err(e) => {
+            crate::metrics::inc(
+                "messaging_client_token_rest_total",
+                &[("outcome", "rejected")],
+            );
+            return e.into_response();
+        }
+    };
+    // Own-device routes: another device of the same principal is NOT_FOUND.
+    if device.is_some_and(|d| Uuid::parse_str(&d).ok() != Some(session.device_id)) {
+        return ApiError::code(ErrorCode::NotFound).into_response();
+    }
+    match acting_header(request.headers()) {
+        Ok(None) => {
+            let value = HeaderValue::from_str(&session.principal_id.hyphenated().to_string())
+                .expect("uuid is a valid header value");
+            request.headers_mut().insert(ACTING_PRINCIPAL, value);
+        }
+        Ok(Some(p)) if p == session.principal_id => {}
+        Ok(Some(_)) => {
+            return ApiError::reason(
+                ErrorCode::PrincipalNotAuthorized,
+                "ACTING_PRINCIPAL_MISMATCH",
+            )
+            .into_response()
+        }
+        Err(e) => return e.into_response(),
+    }
+    let Some(ctx) = session.trusted_context() else {
+        return ApiError::code(ErrorCode::AuthenticationFailed).into_response();
+    };
+    crate::metrics::inc(
+        "messaging_client_token_rest_total",
+        &[("outcome", "accepted")],
+    );
+    let mutation = request.method() != Method::GET && request.method() != Method::HEAD;
+    request.extensions_mut().insert(CustomerCaller(ctx));
+    let response = next.run(request).await;
+    if mutation && response.status().is_success() {
+        state.wake_outbox();
+    }
+    response
 }
 
 /// The principal an authenticated application backend acts for, verified now.

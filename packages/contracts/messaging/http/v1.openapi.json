@@ -3,7 +3,7 @@
   "info": {
     "title": "CF Meet Messaging API",
     "version": "1.12.0",
-    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are refused there with CLIENT_TOKENS_NOT_ENABLED; the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB."
+    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB."
   },
   "paths": {
     "/health": {
@@ -189,6 +189,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send. Publishes 1–20 KeyPackages of the acting principal's ACTIVE device: validated, bound to the device and its key, never last-resort or registration packages, unique by KeyPackageRef (re-submission is ALREADY_PUBLISHED), bounded per device.",
@@ -338,6 +341,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read. The ACTIVE devices (public keys) of an ACTIVE messaging principal of the credential's own environment; any other principal is NOT_FOUND. Rate-limited per credential. The tree head is signed with the log's Ed25519 key (Part V G.5); without a configured signing key the route answers 503, never an unsigned head.",
@@ -398,6 +404,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read. Inclusion proofs (RFC 9162) of a device's log entries against the current tree head and, with fromTreeSize, a consistency proof. The log is UNWITNESSED: verifiable, not anti-equivocation. The tree head is signed with the log's Ed25519 key (Part V G.5); without a configured signing key the route answers 503, never an unsigned head.",
@@ -539,6 +548,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Keyset-paginated, newest first (limit 1-100, cursor). With CF-Acting-Principal: that principal's conversations (messages.read); without: the environment's conversations (conversations.manage).",
@@ -622,6 +634,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "One conversation of the credential's environment; for a member principal (messages.read) or the administration (conversations.manage). Others: NOT_FOUND.",
@@ -839,6 +854,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "ACTIVE members. With an acting member (messages.read) or the administration (conversations.manage); a non-member is NOT_FOUND.",
@@ -1145,6 +1163,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read, acting member. Canonical order by sequence, within the member's history window; tombstones carry no content.",
@@ -1244,6 +1265,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send, acting member. Commits the message with the next canonical sequence and its durable event in one transaction (no realtime publish before commit). PRIVATE_E2EE: the PUBLIC MLS framing must name this group, an application message and the group's current epoch (EPOCH_MISMATCH otherwise; MLS_REKEY_REQUIRED while removals are pending). Retries with the same clientMessageId and bytes replay (200).",
@@ -1330,6 +1354,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Permalink resolution (scope messages.read): current membership is checked on every resolution; a permalink is never authority.",
@@ -1399,6 +1426,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "MANAGED only (PRIVATE_E2EE edits are new ciphertexts with kind EDIT). Scope messages.send; the sender, within the policy's edit window. The superseded version is kept as a sealed revision (never overwritten in place); expectedEditCount turns a concurrent edit into 409 VERSION_CONFLICT.",
@@ -1481,6 +1511,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send. scope=EVERYONE (default, sender only): a server tombstone for every member, purged after the retention grace unless a legal hold protects it. scope=ME: hidden on the acting principal's own devices.",
@@ -1563,6 +1596,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read. The kept prior versions of an edited MANAGED message (§46), oldest first, for current members; only when the policy's editing.revisionHistoryVisible is true (else 503 FEATURE_DISABLED, reason REVISION_HISTORY_HIDDEN). PRIVATE_E2EE edits are ciphertext messages: 422 CONTENT_REJECTED (E2EE_EDITS_ARE_CIPHERTEXT).",
@@ -1637,6 +1673,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read. A monotonic read position (distinct from transport delivery and application acknowledgements); shared as read.cursor.updated only when the privacy policy enables read receipts.",
@@ -1710,6 +1749,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read, acting member. Durable events after a per-conversation cursor (exclusive), oldest first, within the member's history window; the REST synchronization path of realtime clients.",
@@ -1792,6 +1834,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send, acting member. The MLS Delivery Service accepts exactly one commit per epoch (the first; others EPOCH_MISMATCH), stores it as an MLS_COMMIT message in the canonical sequence and the Welcome per welcomed device (ACTIVE devices of ACTIVE members only).",
@@ -1878,6 +1923,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read, acting member: the group's current epoch and pending removals.",
@@ -1941,6 +1989,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send, acting member: claims (single use) one published KeyPackage of every ACTIVE device of the given ACTIVE members.",
@@ -2014,6 +2065,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read: pending Welcomes of one of the acting principal's ACTIVE devices, for conversations it is still an ACTIVE member of.",
@@ -2077,6 +2131,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send: marks a Welcome processed.",
@@ -2148,6 +2205,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read: the acting principal's blocks.",
@@ -2201,6 +2261,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send. Blocks direct conversations and direct messages with the principal (either direction); serialized with concurrent sends (no message commits after the block). Never changes Calling or Meeting permissions.",
@@ -2276,6 +2339,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send.",
@@ -2538,6 +2604,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read: the acting principal's presence visibility.",
@@ -2591,6 +2660,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send. HIDDEN: reported OFFLINE everywhere, indistinguishable from offline; last seen is shared only when the policy allows it and shareLastSeen is true.",
@@ -2656,6 +2728,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send, the device's principal: the device's push handle and preference. Payloads are metadata only (never content, ciphertext or keys).",
@@ -2727,6 +2802,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send: disables notifications for the device.",
@@ -2790,6 +2868,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope attachments.write, acting member. Policy-checked (attachments enabled for the environment and context, kind, size, quotas reserved atomically). Returns a signed upload bound to size / digest / type. PRIVATE_E2EE: the client encrypts BEFORE upload; file name, media type and durations are refused (they travel inside MLS). 200: the same pending upload reused.",
@@ -2876,6 +2957,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope attachments.read. The uploader, or a member through a message within their history window.",
@@ -2947,6 +3031,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope attachments.write, the uploader. Re-verifies the stored object's size and SHA-256; MANAGED: content-type security and the self-hosted scan (fail closed: VERIFYING while the scanner is unavailable, QUARANTINED when infected). Idempotent.",
@@ -3021,6 +3108,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope attachments.read. Authorization re-checked now (membership, history window, message ACTIVE, attachment READY); a removed member gets no fresh grant.",
@@ -3092,6 +3182,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope attachments.read. A proxied, bounded read re-authorized on every request (immediate revocation). Responds with the stored bytes, Content-Disposition: attachment, X-Content-Type-Options: nosniff, Cache-Control: no-store and a sandboxing CSP.",
@@ -3383,6 +3476,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read, acting member. MANAGED only (PRIVATE_E2EE: LOCAL_SEARCH_ONLY — search on the device). Membership, history window, ACTIVE messages and delete-for-me honoured; rate-limited; query never logged.",
@@ -3474,6 +3570,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read, acting principal: their ACTIVE MANAGED conversations (E2EE conversations counted, never searched).",
@@ -3549,6 +3648,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send, acting member. Policy: moderation and reporting enabled for the environment and context; rate-limited.",
@@ -4532,6 +4634,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read (members). The carrier state of a bridged message (separate from in-app receipts).",
@@ -4820,6 +4925,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read (members, within their history window). Counts per reaction; no list of who reacted.",
@@ -4894,6 +5002,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send (members). MANAGED only: in PRIVATE_E2EE conversations reactions are encrypted application messages (E2EE_REACTIONS_ARE_MESSAGES). Idempotent per principal; emits messaging.reaction.added.",
@@ -4977,6 +5088,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send (members). Idempotent; emits messaging.reaction.removed.",
@@ -5062,6 +5176,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read (members; only pins inside their history window).",
@@ -5274,6 +5391,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read (members). Application messages of others after the read cursor, inside the history window, not hidden.",
@@ -5398,6 +5518,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send. The NEW (target) device's request for history held by an existing (source) device of the same principal: a single-use transfer public key and an expiry, signed with the target's device key (verified against its registered key). E2EE devices only (FEATURE_DISABLED where production E2EE is off).",
@@ -5461,6 +5584,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read. The transfers of one of the acting principal's ACTIVE devices (as source or target), newest first.",
@@ -5521,6 +5647,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read. One transfer of the acting principal.",
@@ -5581,6 +5710,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send. The SOURCE device's sealed history (accepted only when its signature verifies under the source device key for exactly this transfer; at most MESSAGING_HISTORY_TRANSFER_MAX_BYTES). Messaging stores ciphertext only.",
@@ -5655,6 +5787,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read. The sealed history, for the TARGET device to verify and open (while SEALED and unexpired).",
@@ -5718,6 +5853,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send. The target opened the history; the sealed bytes are deleted.",
@@ -5781,6 +5919,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send. Either device ends the transfer (e.g. the comparison codes differed); the sealed bytes are deleted.",
@@ -5854,6 +5995,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope attachments.read, a member who may read the original: a short-lived read of the server thumbnail of a MANAGED image (409 ATTACHMENT_NOT_READY / THUMBNAIL_NOT_READY until it exists). PRIVATE_E2EE attachments have no server thumbnail.",
@@ -5925,6 +6069,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send. An upload intent (signed PUT of exactly size bytes with that SHA-256) for the acting principal's own ACTIVE device; at most 3 unfinished intents; size ≤ backups.maxBytes (413 BACKUP_TOO_LARGE). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
@@ -5993,6 +6140,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read. Metadata of the acting principal's newest READY backup (404 when none). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
@@ -6045,6 +6195,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send. Marks the backup DELETED and queues its object for deletion. Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
@@ -6105,6 +6258,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.send. Verifies the uploaded object (size, SHA-256, format magic, header principal = acting principal); READY on success (idempotent), else REJECTED with 422 INTEGRITY_CHECK_FAILED (SIZE_MISMATCH, DIGEST_MISMATCH, NOT_A_BACKUP, WRONG_PRINCIPAL) and the object is deleted. Keeps the newest backups.retainCount READY backups. Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
@@ -6171,6 +6327,9 @@
         "security": [
           {
             "customerCredential": []
+          },
+          {
+            "clientToken": []
           }
         ],
         "description": "Scope messages.read. A short-lived signed read of a READY backup object (409 BACKUP_NOT_READY otherwise). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
@@ -6249,7 +6408,7 @@
         "type": "apiKey",
         "in": "header",
         "name": "Authorization",
-        "description": "CF-Client-Token <Messaging Client Access Token> (device-direct; accepted ONLY by POST /v1/realtime/tickets)."
+        "description": "CF-Client-Token <Messaging Client Access Token> (device-direct, §105). Accepted by POST /v1/realtime/tickets and, as an alternative to customerCredential, by the member operations that list it: the token's session (device ACTIVE, session ACTIVE and unexpired, principal ACTIVE) is the caller, acting only for its own principal and own device (CF-Acting-Principal may only repeat it). Every other operation answers 401 CLIENT_TOKENS_NOT_ENABLED."
       },
       "realtimeTicket": {
         "type": "apiKey",

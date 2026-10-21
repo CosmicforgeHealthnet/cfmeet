@@ -1190,6 +1190,49 @@ async fn external_developer_journey_with_attachments_search_and_webhooks() {
         }
     }
     assert!(delivered, "bob received the message over the WebSocket");
+    // §105 / §152: Bob's device replies and reads over REST with ONLY its client token
+    // (no customer credential), as itself; administration stays refused.
+    let device_call = |method: reqwest::Method, path: String, body: Option<Value>| {
+        let mut r = world.http.request(method, format!("{url}{path}")).header(
+            "authorization",
+            format!("CF-Client-Token {}", ct["token"].as_str().unwrap()),
+        );
+        if let Some(b) = body {
+            r = r.json(&b);
+        }
+        r.send()
+    };
+    let reply = device_call(
+        reqwest::Method::POST,
+        format!("/v1/conversations/{id}/messages"),
+        Some(json!({ "clientMessageId": Uuid::new_v4(), "text": "replied from bob's device" })),
+    )
+    .await
+    .unwrap();
+    assert_eq!(reply.status(), 201);
+    let reply: Value = reply.json().await.unwrap();
+    assert_eq!(reply["senderPrincipalId"], json!(bob));
+    let read = device_call(
+        reqwest::Method::GET,
+        format!("/v1/conversations/{id}/messages"),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(read.status(), 200);
+    assert!(read
+        .text()
+        .await
+        .unwrap()
+        .contains("replied from bob's device"));
+    let admin = device_call(reqwest::Method::GET, "/v1/messaging/policy".into(), None)
+        .await
+        .unwrap();
+    assert_eq!(
+        admin.status(),
+        401,
+        "administration never accepts a client token"
+    );
     let (s, list) = m
         .call(
             M::GET,
