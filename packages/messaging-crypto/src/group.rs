@@ -168,6 +168,33 @@ impl Device {
         })
     }
 
+    /// Commits a fresh leaf for this device (new HPKE and path secrets; same signature
+    /// key) and merges it locally: post-compromise security — after this commit, state
+    /// copied from the device earlier cannot follow the group.
+    pub fn update_keys(&self, group: &mut ClientGroup) -> Result<CommitOutput, GroupError> {
+        let epoch = group.epoch();
+        let bundle = group
+            .group
+            .self_update(
+                self.provider(),
+                self.signer(),
+                openmls::treesync::LeafNodeParameters::default(),
+            )
+            .map_err(|_| GroupError::Refused)?;
+        group
+            .group
+            .merge_pending_commit(self.provider())
+            .map_err(|_| GroupError::Refused)?;
+        Ok(CommitOutput {
+            commit: bundle
+                .commit()
+                .tls_serialize_detached()
+                .map_err(|_| GroupError::Refused)?,
+            welcome: None,
+            epoch,
+        })
+    }
+
     /// The device's state of a group it created or joined earlier, read back from its
     /// own storage (after [`Device::import_state`]). `None`: the device has no such group.
     pub fn load_group(&self, group_id: &[u8]) -> Result<Option<ClientGroup>, GroupError> {
