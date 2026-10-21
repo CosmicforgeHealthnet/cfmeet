@@ -4,6 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { buildCsp, MESSAGING_CRYPTO_PATH, MESSAGING_CRYPTO_WORKER_CSP, SECURITY_HEADERS } from "../src/lib/security/csp.ts";
 
 const directive = (csp, name) =>
@@ -72,7 +73,7 @@ test("no DOM XSS sinks in the app source", () => {
       else if (/\.(tsx?|jsx?|mjs)$/.test(f)) files.push(p);
     }
   };
-  walk(new URL("../src", import.meta.url).pathname);
+  walk(fileURLToPath(new URL("../src", import.meta.url)));
   const sinks = [/dangerouslySetInnerHTML/, /\.innerHTML\s*=/, /\.outerHTML\s*=/, /insertAdjacentHTML/, /document\.write/, /\beval\s*\(/, /new Function\s*\(/];
   const hits = [];
   for (const f of files) {

@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
  * Plain CSS-overflow scroll area.
  *
  * Previously this wrapped `@radix-ui/react-scroll-area`, which renders an
- * inline `<style dangerouslySetInnerHTML>` on mount. Under the site's
+ * inline style markup through an HTML sink on mount. Under the site's
  * Content-Security-Policy (`require-trusted-types-for 'script'`) that raw
  * `innerHTML` assignment is blocked and throws during React's commit phase,
  * crashing any client-rendered page that uses it (e.g. the dashboard, which
