@@ -416,7 +416,6 @@ pub async fn get(state: &AppState, ctx: &TrustedContext, id: Uuid) -> Result<Val
         (Some(s), Some(n), Some(k), Some(ring)) => ring
             .open_record(
                 &state.db,
-                r.environment_id,
                 &evidence_aad(r.tenant_id, r.application_id, r.environment_id, r.id),
                 s,
                 n,

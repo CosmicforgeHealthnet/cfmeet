@@ -414,7 +414,6 @@ impl ManagedKeyring {
     async fn open_bytes(
         &self,
         pool: &DatabaseConnection,
-        environment_id: Uuid,
         aad: &[u8],
         sealed: &[u8],
         nonce: &[u8],
@@ -423,10 +422,9 @@ impl ManagedKeyring {
     ) -> Option<Vec<u8>> {
         let plain = match key_id.strip_prefix(DEK_PREFIX) {
             Some(id) => {
+                // A DEK was unwrapped under its environment binding, and the content
+                // AAD binds the environment again.
                 let key = self.dek(pool, Uuid::parse_str(id).ok()?).await?;
-                // A DEK belongs to one environment; its cache entry was unwrapped with
-                // that binding, and the content AAD binds the environment again.
-                let _ = environment_id;
                 aead_open(&key, aad, sealed, nonce)?
             }
             None => aead_open(self.file.keys.get(key_id)?, aad, sealed, nonce)?,
@@ -471,7 +469,6 @@ impl ManagedKeyring {
         let plain = self
             .open_bytes(
                 pool,
-                scope.environment_id,
                 &Self::content_aad(scope),
                 sealed,
                 nonce,
@@ -496,18 +493,16 @@ impl ManagedKeyring {
         Ok((s.sealed, s.nonce, s.key_id))
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn open_record(
         &self,
         pool: &DatabaseConnection,
-        environment_id: Uuid,
         aad: &[u8],
         sealed: &[u8],
         nonce: &[u8],
         key_id: &str,
         purpose: DecryptPurpose,
     ) -> Option<Vec<u8>> {
-        self.open_bytes(pool, environment_id, aad, sealed, nonce, key_id, purpose)
+        self.open_bytes(pool, aad, sealed, nonce, key_id, purpose)
             .await
     }
 
