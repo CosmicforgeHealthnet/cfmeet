@@ -984,3 +984,41 @@ async fn the_realtime_connect_switch_refuses_new_tickets_and_connections() {
     ws.send(json!({ "type": "ping", "requestId": "p" })).await;
     ws.next_of("pong").await;
 }
+
+/// Appendix H.3: permessage-deflate is not negotiated (compression side channels) —
+/// a client offering it gets a connection without the extension.
+#[tokio::test]
+async fn websocket_compression_is_never_negotiated() {
+    use tokio_tungstenite::tungstenite::{client::IntoClientRequest, http::HeaderValue};
+    let Some(rt) = Rt::start().await else { return };
+    let h = &rt.h;
+    let c = h.customer(ALL_SCOPES);
+    let (_conv, people) = h.managed_group(&c, 1).await;
+    let m = Member {
+        principal: people[0],
+        device: h.active_device(&c, people[0]).await,
+        group: None,
+        cursor: 0,
+    };
+    let ticket = rt.ticket(&c, &m).await;
+    let mut req = format!("ws://{}/v1/realtime", rt.addr)
+        .into_client_request()
+        .unwrap();
+    req.headers_mut().insert(
+        "sec-websocket-protocol",
+        HeaderValue::from_str(&format!("cfmeet.messaging.v1, cfmeet.ticket.{ticket}")).unwrap(),
+    );
+    req.headers_mut().insert(
+        "sec-websocket-extensions",
+        HeaderValue::from_static("permessage-deflate; client_max_window_bits"),
+    );
+    let (_stream, resp) = tokio_tungstenite::connect_async(req)
+        .await
+        .expect("handshake");
+    assert_eq!(resp.status(), 101);
+    assert!(
+        resp.headers().get("sec-websocket-extensions").is_none(),
+        "no extension is negotiated: {:?}",
+        resp.headers()
+    );
+}

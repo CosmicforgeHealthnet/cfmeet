@@ -1307,3 +1307,78 @@ async fn managed_edits_keep_sealed_revisions_that_holds_preserve_and_purge_remov
         "revisions are purged with the message"
     );
 }
+
+/// §88 / §133: sustained rejected sends are an abuse signal that eventually restricts the
+/// sender (a short burst does not); recipient complaints are recorded but never restrict
+/// a principal by themselves (no silencing by report-bombing).
+#[tokio::test]
+async fn rejected_sends_and_complaints_feed_abuse_scoring_without_report_bombing() {
+    let Some((h, _)) = harness().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    policy(
+        &h,
+        &c,
+        json!({}),
+        json!({ "abuse": { "reportsPerHour": 1000 } }),
+    )
+    .await;
+    let (conv, people) = managed_group(&h, &c, 3).await;
+    let (owner, target, other) = (people[0], people[1], people[2]);
+    let id = cid(&conv);
+    // 30 complaints about one member from two reporters: recorded, no restriction.
+    for i in 0..30 {
+        let reporter = if i % 2 == 0 { owner } else { other };
+        let r = h
+            .post(
+                &c,
+                Some(reporter),
+                &format!("/v1/conversations/{id}/reports"),
+                json!({ "category": "SPAM", "reportedPrincipalId": target }),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    }
+    assert_eq!(
+        h.scalar(&format!("SELECT count(*) FROM messaging_abuse_signals WHERE principal_id = '{target}' AND signal = 'REPORTED'")).await,
+        30
+    );
+    assert_eq!(
+        h.send_managed(&c, &conv, target, "still allowed")
+            .await
+            .status,
+        StatusCode::CREATED
+    );
+
+    // The owner mutes `other`; a burst of 10 refused sends does not restrict ...
+    let mute = h
+        .post(&c, None, "/v1/messaging/moderation/actions",
+              json!({ "kind": "MUTE_MEMBER", "conversationId": id, "principalId": other, "reason": "COOL_DOWN", "durationSeconds": 3600 }))
+        .await;
+    assert_eq!(mute.status, StatusCode::CREATED, "{}", mute.text);
+    for _ in 0..10 {
+        assert_eq!(
+            h.send_managed(&c, &conv, other, "x").await.code(),
+            "SEND_RESTRICTED"
+        );
+    }
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_principal_restrictions WHERE principal_id = '{other}'"
+        ))
+        .await,
+        0
+    );
+    // ... sustained retrying (five times the threshold within the hour) does.
+    for _ in 0..40 {
+        h.send_managed(&c, &conv, other, "x").await;
+    }
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_principal_restrictions WHERE principal_id = '{other}' AND source = 'AUTOMATIC' AND reason = 'REJECTED_SEND'"
+        ))
+        .await,
+        1
+    );
+}

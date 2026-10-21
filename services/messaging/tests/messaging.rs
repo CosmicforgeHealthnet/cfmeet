@@ -1001,3 +1001,43 @@ async fn edit_and_delete_windows_close_per_policy() {
         .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
 }
+
+/// §41: MANAGED text is plain text — markup and scripts are never interpreted: stored and
+/// returned exactly as sent, as a JSON string, so clients render them as text.
+#[tokio::test]
+async fn managed_text_is_plain_text_never_interpreted_markup() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let markup =
+        "<script>alert(1)</script> <img src=x onerror=alert(2)> **bold** [link](javascript:x)";
+    let sent = h.send_managed(&c, &conv, people[0], markup).await;
+    assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+    assert_eq!(
+        sent.json["managed"]["text"], markup,
+        "stored verbatim, not sanitized or rendered"
+    );
+    let cid = conv["conversationId"].as_str().unwrap();
+    let list = h
+        .get(
+            &c,
+            Some(people[1]),
+            &format!("/v1/conversations/{cid}/messages"),
+        )
+        .await;
+    assert!(list
+        .headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("application/json")));
+    assert!(list.json["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|m| m["managed"]["text"] == markup));
+    // Control characters are refused (the only content rule besides the length bound).
+    let bad = h.send_managed(&c, &conv, people[0], "bell\u{7}").await;
+    assert_eq!(bad.code(), "CONTENT_REJECTED", "{}", bad.text);
+}

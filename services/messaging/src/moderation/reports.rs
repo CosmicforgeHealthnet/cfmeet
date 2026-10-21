@@ -288,6 +288,11 @@ pub async fn create(
     )
     .await?;
     crate::metrics::inc("messaging_reports_total", &[("evidence", evidence_kind)]);
+    // §88: a recipient complaint is a scoring signal on the reported principal (never an
+    // automatic restriction by itself).
+    if let Some(reported) = request.reported_principal_id {
+        crate::safety::abuse::signal(state, ctx, reported, crate::safety::abuse::COMPLAINT).await;
+    }
     // The reporter learns only that the report was received.
     Ok(
         json!({ "reportId": id, "status": "OPEN", "category": request.category, "evidenceKind": evidence_kind, "createdAt": rfc3339(now) }),

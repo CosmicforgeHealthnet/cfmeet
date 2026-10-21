@@ -153,6 +153,12 @@ pub async fn render(state: &AppState, row: &MessageRow, hidden: bool) -> Value {
     match row.profile() {
         SecurityProfile::PrivateE2ee => {
             v["e2ee"] = json!({
+                "envelopeVersion": 1,
+                "protocol": cf_messaging_crypto::profile::PROTOCOL_ID,
+                "cipherSuite": cf_messaging_crypto::profile::CIPHERSUITE_NAME,
+                "tenantId": row.tenant_id,
+                "applicationId": row.application_id,
+                "environmentId": row.environment_id,
                 "epoch": row.mls_epoch,
                 "ciphertext": if show { row.mls_ciphertext.as_deref().map(b64) } else { None },
                 "ciphertextSha256": row.ciphertext_sha256,
@@ -384,6 +390,32 @@ pub(crate) async fn lock_sender<C: ConnectionTrait>(
 }
 
 pub async fn send(
+    state: &AppState,
+    ctx: &TrustedContext,
+    acting: &Acting,
+    conversation_id: Uuid,
+    request: SendRequest,
+) -> Result<(u16, Value)> {
+    let result = send_checked(state, ctx, acting, conversation_id, request).await;
+    // §133: repeated rejected sends are an abuse signal (never the content).
+    if let Err(e) = &result {
+        if matches!(
+            e.error_code(),
+            ErrorCode::DeliveryRefused | ErrorCode::SendRestricted | ErrorCode::ContentRejected
+        ) {
+            crate::safety::abuse::signal(
+                state,
+                ctx,
+                acting.principal_id,
+                crate::safety::abuse::REJECTED_SEND,
+            )
+            .await;
+        }
+    }
+    result
+}
+
+async fn send_checked(
     state: &AppState,
     ctx: &TrustedContext,
     acting: &Acting,
@@ -922,6 +954,9 @@ pub struct EventRow {
     pub id: Uuid,
     pub event_type: String,
     pub schema_version: i16,
+    pub tenant_id: Uuid,
+    pub application_id: Uuid,
+    pub environment_id: Uuid,
     pub conversation_id: Option<Uuid>,
     pub conversation_event_sequence: Option<i64>,
     pub payload: Value,
@@ -937,7 +972,8 @@ pub async fn events_after<C: ConnectionTrait>(
 ) -> Result<Vec<EventRow>> {
     Ok(db::all(
         db,
-        "SELECT id, event_type, schema_version, conversation_id, conversation_event_sequence, payload, occurred_at \
+        "SELECT id, event_type, schema_version, tenant_id, application_id, environment_id, conversation_id, \
+           conversation_event_sequence, payload, occurred_at \
          FROM messaging_outbox_events WHERE conversation_id = $1 AND conversation_event_sequence > $2 \
          ORDER BY conversation_event_sequence LIMIT $3",
         vec![conversation_id.into(), after.into(), limit.into()],
@@ -1040,6 +1076,9 @@ pub async fn hydrate(
             "eventId": format!("evt_{}", e.id.simple()),
             "type": client_type(&e.event_type),
             "schemaVersion": e.schema_version,
+            "tenantId": e.tenant_id,
+            "applicationId": e.application_id,
+            "environmentId": e.environment_id,
             "conversationId": e.conversation_id,
             "eventSequence": e.conversation_event_sequence,
             "occurredAt": rfc3339(e.occurred_at),

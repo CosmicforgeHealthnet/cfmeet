@@ -2086,7 +2086,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 16384,
-          "description": "MANAGED only."
+          "description": "MANAGED plain text (UTF-8, 1-16384 characters, no control characters). No markup subset is defined: the server never interprets HTML, Markdown or scripts, stores the text exactly as given and returns it as a JSON string; clients render it as text (escaping it), never as markup."
         },
         "kind": {
           "enum": [
@@ -2243,14 +2243,39 @@
                   "type": "null"
                 }
               ]
+            },
+            "envelopeVersion": {
+              "const": 1
+            },
+            "protocol": {
+              "const": "MLS_1_0"
+            },
+            "cipherSuite": {
+              "const": "MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519"
+            },
+            "tenantId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "applicationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "environmentId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
             }
           },
           "required": [
             "epoch",
             "ciphertext",
             "ciphertextSha256",
-            "acceptanceDigest"
-          ]
+            "acceptanceDigest",
+            "envelopeVersion",
+            "protocol",
+            "cipherSuite",
+            "tenantId",
+            "applicationId",
+            "environmentId"
+          ],
+          "description": "The protected envelope (Appendix H.1): version, protocol, cipher suite and the scope the client bound into the AAD; the server stores and relays the ciphertext without reading it."
         },
         "managed": {
           "type": "object",
@@ -2404,7 +2429,8 @@
         "text": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 16384
+          "maxLength": 16384,
+          "description": "MANAGED plain text (UTF-8, 1-16384 characters, no control characters). No markup subset is defined: the server never interprets HTML, Markdown or scripts, stores the text exactly as given and returns it as a JSON string; clients render it as text (escaping it), never as markup."
         },
         "expectedEditCount": {
           "type": "integer",
@@ -2502,6 +2528,15 @@
         "data": {
           "type": "object",
           "description": "camelCase payload; message events carry the message's CURRENT representation (a deleted message replays as a tombstone)."
+        },
+        "tenantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "applicationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
         }
       },
       "required": [
@@ -2511,9 +2546,12 @@
         "conversationId",
         "eventSequence",
         "occurredAt",
-        "data"
+        "data",
+        "tenantId",
+        "applicationId",
+        "environmentId"
       ],
-      "description": "A durable conversation event (derived from committed state, replayable by its per-conversation eventSequence)."
+      "description": "A durable conversation event (derived from committed state, replayable by its per-conversation eventSequence). Every durable event names its tenant, application and environment (§117)."
     },
     "EventPage": {
       "type": "object",
