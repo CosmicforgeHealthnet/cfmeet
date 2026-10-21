@@ -208,15 +208,24 @@ pub async fn create(
         };
         let bytes =
             serde_json::to_vec(&evidence).map_err(|_| Error::code(ErrorCode::InternalError))?;
-        Some(ring.seal_record(
-            &evidence_aad(
-                ctx.scope.tenant_id,
-                ctx.scope.application_id,
-                ctx.scope.environment_id,
-                id,
-            ),
-            &bytes,
-        )?)
+        Some(
+            ring.seal_record(
+                &state.db,
+                &crate::messages::keys::KeyScope {
+                    tenant_id: ctx.scope.tenant_id,
+                    application_id: ctx.scope.application_id,
+                    environment_id: ctx.scope.environment_id,
+                },
+                &evidence_aad(
+                    ctx.scope.tenant_id,
+                    ctx.scope.application_id,
+                    ctx.scope.environment_id,
+                    id,
+                ),
+                &bytes,
+            )
+            .await?,
+        )
     } else {
         None
     };
@@ -398,26 +407,39 @@ pub async fn get(state: &AppState, ctx: &TrustedContext, id: Uuid) -> Result<Val
         vec![r.conversation_id.into(), r.message_ids.clone().into()],
     )
     .await?;
-    let evidence: Option<Evidence> =
-        match (&r.sealed_evidence, &r.evidence_nonce, &r.evidence_key_id) {
-            (Some(s), Some(n), Some(k)) => state
-                .managed_keys
-                .as_ref()
-                .and_then(|ring| {
-                    ring.open_record(
-                        &evidence_aad(r.tenant_id, r.application_id, r.environment_id, r.id),
-                        s,
-                        n,
-                        k,
-                    )
-                })
-                .and_then(|b| serde_json::from_slice(&b).ok()),
-            _ => None,
-        };
+    let evidence: Option<Evidence> = match (
+        &r.sealed_evidence,
+        &r.evidence_nonce,
+        &r.evidence_key_id,
+        state.managed_keys.as_ref(),
+    ) {
+        (Some(s), Some(n), Some(k), Some(ring)) => ring
+            .open_record(
+                &state.db,
+                r.environment_id,
+                &evidence_aad(r.tenant_id, r.application_id, r.environment_id, r.id),
+                s,
+                n,
+                k,
+                crate::messages::keys::DecryptPurpose::ReportEvidence,
+            )
+            .await
+            .and_then(|b| serde_json::from_slice(&b).ok()),
+        _ => None,
+    };
     let show_managed = effective.moderation.managed_evidence_allowed;
+    let mut managed_texts = Vec::with_capacity(rows.len());
+    for m in &rows {
+        managed_texts.push(if show_managed {
+            managed::stored_text_of(state, m).await
+        } else {
+            None
+        });
+    }
     let messages: Vec<Value> = rows
         .iter()
-        .map(|m| {
+        .zip(managed_texts)
+        .map(|(m, managed_text)| {
             let disclosed = evidence
                 .as_ref()
                 .and_then(|e| e.disclosure.iter().find(|d| d.message_id == m.id))
@@ -442,7 +464,7 @@ pub async fn get(state: &AppState, ctx: &TrustedContext, id: Uuid) -> Result<Val
                 }
                 SecurityProfile::Managed => {
                     v["managed"] = json!({
-                        "text": if show_managed { managed::stored_text_of(state, m) } else { None },
+                        "text": managed_text,
                         "visibility": if show_managed { "POLICY_ALLOWS_MODERATOR_ACCESS" } else { "POLICY_WITHHOLDS_CONTENT" },
                     });
                 }

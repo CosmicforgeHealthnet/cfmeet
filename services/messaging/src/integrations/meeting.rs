@@ -562,6 +562,7 @@ pub async fn import_legacy(
                     match managed::import_legacy(
                         txn,
                         ring,
+                        &st.db,
                         &ctx,
                         &conversation,
                         m.sender_principal_id,

@@ -279,16 +279,25 @@ async fn build(
     let mut messages = Vec::with_capacity(rows.len());
     for r in &rows {
         let text = if r.is_active() {
-            Some(managed::text_of(state, r).ok_or("SEAL_UNREADABLE")?)
+            Some(
+                managed::text_of(state, r, managed::DecryptPurpose::ComplianceExport)
+                    .await
+                    .ok_or("SEAL_UNREADABLE")?,
+            )
         } else {
             None
         };
         // §46: prior versions of an edited message (kept sealed; opened for the export).
         let mut revisions = Vec::new();
         if r.is_active() && r.edit_count > 0 {
-            for v in managed::revisions_of(state, &state.db, r)
-                .await
-                .map_err(|_| "DATABASE_UNAVAILABLE")?
+            for v in managed::revisions_of(
+                state,
+                &state.db,
+                r,
+                managed::DecryptPurpose::ComplianceExport,
+            )
+            .await
+            .map_err(|_| "DATABASE_UNAVAILABLE")?
             {
                 revisions.push(json!({
                     "revision": v.revision,

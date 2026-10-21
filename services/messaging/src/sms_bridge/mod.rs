@@ -543,6 +543,7 @@ pub async fn accept_inbound(
                 let row = managed::insert_channel(
                     txn,
                     ring,
+                    &st.db,
                     &ctx2,
                     &conversation,
                     bridge.external_principal_id,
@@ -698,7 +699,11 @@ pub async fn run_due(state: &AppState, limit: i64) -> Result<usize> {
         .delegated();
         let result = if d.status == "QUEUED" {
             let row = messages::load_message(&txn, d.conversation_id, d.message_id, false).await?;
-            match row.as_ref().filter(|r| r.is_active()).and_then(|r| managed::text_of(state, r)) {
+            let text = match row.as_ref().filter(|r| r.is_active()) {
+                Some(r) => managed::text_of(state, r, managed::DecryptPurpose::SmsDelivery).await,
+                None => None,
+            };
+            match text {
                 // Deleted / moderated before it was sent: nothing goes to the carrier.
                 None => Ok(json!({ "status": "FAILED", "failureCode": "MESSAGE_WITHDRAWN" })),
                 Some(text) => state

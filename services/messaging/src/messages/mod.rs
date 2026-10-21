@@ -19,6 +19,7 @@
 
 pub mod e2ee;
 pub mod http;
+pub mod keys;
 pub mod managed;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
@@ -160,7 +161,7 @@ pub async fn render(state: &AppState, row: &MessageRow, hidden: bool) -> Value {
         }
         SecurityProfile::Managed => {
             let text = if show {
-                managed::text_of(state, row)
+                managed::text_of(state, row, managed::DecryptPurpose::MemberRead).await
             } else {
                 None
             };
