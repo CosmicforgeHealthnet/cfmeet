@@ -827,3 +827,103 @@ async fn protocol_errors_never_close_and_frames_are_bounded() {
 use futures_util::SinkExt;
 use messaging::realtime::broker::Broker;
 use sea_orm::ConnectionTrait;
+
+/// §52 / §55 / §148: a message is DELIVERED to a recipient once one of its sessions
+/// acknowledged it (the sender sees `delivery.cursor.updated`), and one device advancing
+/// the read cursor moves the principal's other sessions even when read receipts are not
+/// shared with other members — who then learn nothing about it.
+#[tokio::test]
+async fn delivery_receipts_and_own_device_read_sync_respect_the_privacy_policy() {
+    let Some(rt) = Rt::start().await else { return };
+    let h = &rt.h;
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (alice, bob) = (people[0], people[1]);
+    h.set_policy(
+        &c,
+        json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
+                "privacy": { "readReceipts": false } }),
+    )
+    .await;
+    let member = |principal, device| Member {
+        principal,
+        device,
+        group: None,
+        cursor: 0,
+    };
+    let a = member(alice, h.active_device(&c, alice).await);
+    let b1 = member(bob, h.active_device(&c, bob).await);
+    let b2 = member(bob, h.active_device(&c, bob).await);
+    let mut wa = rt.connect(&c, &a).await;
+    let mut wb1 = rt.connect(&c, &b1).await;
+    let mut wb2 = rt.connect(&c, &b2).await;
+    for w in [&mut wa, &mut wb1, &mut wb2] {
+        w.subscribe(&conv, None).await;
+    }
+    let sent = h.send_managed(&c, &conv, alice, "are you there?").await;
+    let seq = sent.json["sequence"].as_i64().unwrap();
+    wa.events(1).await;
+    wb2.events(1).await;
+    let created = wb1.events(1).await.remove(0);
+    let event_seq = created["eventSequence"].as_i64().unwrap();
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_delivery_cursors")
+            .await,
+        0,
+        "nothing is DELIVERED before a session acknowledges it"
+    );
+
+    // Bob's first device acknowledges: the message is DELIVERED to Bob.
+    wb1.send(json!({ "type": "ack", "conversationId": conv["conversationId"], "eventSequence": event_seq, "requestId": "d1" })).await;
+    wb1.next_of("ack.recorded").await;
+    let receipt = wa.events(1).await.remove(0);
+    assert_eq!(receipt["type"], "delivery.cursor.updated", "{receipt}");
+    assert_eq!(receipt["data"]["principalId"], json!(bob));
+    assert_eq!(receipt["data"]["deliveredSequence"], seq);
+    assert_eq!(
+        h.scalar(&format!("SELECT delivered_sequence FROM messaging_delivery_cursors WHERE principal_id = '{bob}'")).await,
+        seq
+    );
+    // A second acknowledgement of the same position records nothing new.
+    wb2.send(json!({ "type": "ack", "conversationId": conv["conversationId"], "eventSequence": event_seq, "requestId": "d2" })).await;
+    wb2.next_of("ack.recorded").await;
+
+    // Bob reads on a device: his other session follows; Alice learns nothing.
+    let r = h
+        .put(
+            &c,
+            Some(bob),
+            &format!(
+                "/v1/conversations/{}/read-cursor",
+                conv["conversationId"].as_str().unwrap()
+            ),
+            json!({ "sequence": seq }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    for w in [&mut wb1, &mut wb2] {
+        let synced = w.next_of("read-cursor.synced").await;
+        assert_eq!(
+            (
+                synced["conversationId"].clone(),
+                synced["readSequence"].clone()
+            ),
+            (conv["conversationId"].clone(), json!(seq))
+        );
+    }
+    wa.quiet("read-cursor.synced", Duration::from_millis(600))
+        .await;
+    wa.quiet("event", Duration::from_millis(300)).await;
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_outbox_events WHERE event_type IN ('messaging.read-cursor.updated', 'messaging.delivery-cursor.updated') \
+                  AND payload->>'principal_id' = (SELECT principal_id::text FROM messaging_delivery_cursors LIMIT 1) AND event_type = 'messaging.read-cursor.updated'").await,
+        0,
+        "read receipts are off: no member-visible read event"
+    );
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_outbox_events WHERE event_type = 'messaging.delivery-cursor.updated'").await,
+        1,
+        "one receipt per advance"
+    );
+    h.conforming_event_types().await;
+}

@@ -49,6 +49,11 @@ pub fn broker_message(event: &OutboxEvent) -> Option<BrokerMessage> {
             .map(|device_id| BrokerMessage::DeviceRevoked { device_id }),
         "messaging.client-session.revoked" => uuid_at(&event.payload, "session_id")
             .map(|session_id| BrokerMessage::SessionRevoked { session_id }),
+        "messaging.read-cursor.synced" => Some(BrokerMessage::ReadCursor {
+            conversation_id: uuid_at(&event.payload, "conversation_id")?,
+            principal_id: uuid_at(&event.payload, "principal_id")?,
+            read_sequence: event.payload.get("read_sequence")?.as_i64()?,
+        }),
         "messaging.mls.welcome-available" => Some(BrokerMessage::Device {
             device_id: uuid_at(&event.payload, "device_id")?,
             event_type: event.event_type.clone(),

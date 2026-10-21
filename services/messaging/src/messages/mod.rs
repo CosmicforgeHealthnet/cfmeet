@@ -794,6 +794,31 @@ pub async fn set_read_cursor(
                     vec![conversation.id.into(), acting.principal_id.into(), request.sequence.into(), now.into()],
                 )
                 .await?;
+                // Synchronizing past a message delivers it (§52).
+                advance_delivery(
+                    txn,
+                    scope_of(&ctx),
+                    conversation.id,
+                    acting.principal_id,
+                    current,
+                    effective.privacy.delivery_receipts,
+                    now,
+                )
+                .await?;
+                // §55: the principal's other sessions follow its read position, whether or
+                // not read receipts are shared with other members.
+                if current == request.sequence {
+                    outbox::record(
+                        txn,
+                        "messaging.read-cursor.synced",
+                        "CONVERSATION",
+                        conversation.id,
+                        scope_of(&ctx),
+                        json!({ "conversation_id": conversation.id, "principal_id": acting.principal_id, "read_sequence": current }),
+                        now,
+                    )
+                    .await?;
+                }
                 if effective.privacy.read_receipts && current == request.sequence {
                     outbox::enqueue_conversation(
                         txn,
@@ -815,6 +840,76 @@ pub async fn set_read_cursor(
         })
         .await
         .map_err(Error::from)
+}
+
+/// Advances a member's delivery cursor (§52: DELIVERED once a session acknowledged the
+/// message or the member synchronized past it) and, when the policy shares delivery
+/// receipts, records `messaging.delivery-cursor.updated` in the same transaction.
+/// Returns the new delivered sequence when it moved.
+pub(crate) async fn advance_delivery<C: ConnectionTrait>(
+    txn: &C,
+    scope: crate::events::outbox::EventScope,
+    conversation_id: Uuid,
+    principal_id: Uuid,
+    sequence: i64,
+    share: bool,
+    now: DateTime<Utc>,
+) -> Result<Option<i64>> {
+    if sequence <= 0 {
+        return Ok(None);
+    }
+    let moved: Option<i64> = db::one::<DeliveredRow, _>(
+        txn,
+        "INSERT INTO messaging_delivery_cursors (conversation_id, principal_id, delivered_sequence, updated_at) \
+         VALUES ($1, $2, $3, $4) ON CONFLICT (conversation_id, principal_id) DO UPDATE \
+           SET delivered_sequence = EXCLUDED.delivered_sequence, updated_at = EXCLUDED.updated_at \
+           WHERE messaging_delivery_cursors.delivered_sequence < EXCLUDED.delivered_sequence \
+         RETURNING delivered_sequence",
+        vec![conversation_id.into(), principal_id.into(), sequence.into(), now.into()],
+    )
+    .await?
+    .map(|r| r.delivered_sequence);
+    if let (Some(delivered), true) = (moved, share) {
+        outbox::enqueue_conversation(
+            txn,
+            conversation_id,
+            NewEvent {
+                event_type: "messaging.delivery-cursor.updated",
+                aggregate_type: "CONVERSATION",
+                aggregate_id: conversation_id,
+                scope,
+                payload: json!({ "principal_id": principal_id, "delivered_sequence": delivered }),
+            },
+            &request_context(),
+            now,
+        )
+        .await?;
+    }
+    Ok(moved)
+}
+
+#[derive(Debug, FromQueryResult)]
+struct DeliveredRow {
+    delivered_sequence: i64,
+}
+
+/// The highest APPLICATION message sequence among the `message.created` events at or
+/// before an acknowledged conversation event position (MLS handshake messages are not
+/// "delivered" to a person).
+pub(crate) async fn message_sequence_at<C: ConnectionTrait>(
+    db: &C,
+    conversation_id: Uuid,
+    event_sequence: i64,
+) -> Result<i64> {
+    Ok(db::scalar_i64(
+        db,
+        "SELECT COALESCE((SELECT (payload->>'sequence')::bigint FROM messaging_outbox_events \
+            WHERE conversation_id = $1 AND conversation_event_sequence <= $2 AND event_type = 'messaging.message.created' \
+              AND payload->>'message_kind' = 'APPLICATION' \
+            ORDER BY conversation_event_sequence DESC LIMIT 1), 0)",
+        vec![conversation_id.into(), event_sequence.into()],
+    )
+    .await?)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -883,6 +978,7 @@ pub fn client_type(event_type: &str) -> String {
         .strip_prefix("messaging.")
         .unwrap_or(event_type)
         .replace("read-cursor", "read.cursor")
+        .replace("delivery-cursor", "delivery.cursor")
         .replace("lifecycle-changed", "lifecycle.changed")
 }
 

@@ -23,7 +23,7 @@ use std::{
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
-use sea_orm::FromQueryResult;
+use sea_orm::{FromQueryResult, TransactionTrait};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -530,6 +530,20 @@ impl Connection {
         }
     }
 
+    /// The event position of this principal's latest removal from `conversation`.
+    async fn own_removal(&self, conversation: Uuid) -> Option<i64> {
+        db::scalar_i64(
+            &self.state.db,
+            "SELECT COALESCE((SELECT conversation_event_sequence FROM messaging_outbox_events \
+                WHERE conversation_id = $1 AND event_type = 'messaging.member.removed' AND payload->>'principal_id' = $2 \
+                ORDER BY conversation_event_sequence DESC LIMIT 1), 0)",
+            vec![conversation.into(), self.session.principal_id.to_string().into()],
+        )
+        .await
+        .ok()
+        .filter(|s| *s > 0)
+    }
+
     async fn head(&self, conversation: Uuid) -> Option<i64> {
         db::scalar_i64(
             &self.state.db,
@@ -636,15 +650,38 @@ impl Connection {
             .await;
             return Flow::Continue;
         }
-        let r = db::exec(
-            &self.state.db,
-            "INSERT INTO messaging_ack_cursors (conversation_id, device_id, principal_id, acked_event_sequence, updated_at) \
-             VALUES ($1, $2, $3, $4, $5) ON CONFLICT (conversation_id, device_id) DO UPDATE \
-               SET acked_event_sequence = GREATEST(messaging_ack_cursors.acked_event_sequence, EXCLUDED.acked_event_sequence), \
-                   updated_at = EXCLUDED.updated_at",
-            vec![conversation.into(), self.session.device_id.into(), self.session.principal_id.into(), seq.into(), self.state.now().into()],
-        )
-        .await;
+        // The acknowledgement and the DELIVERED state it implies (§52) commit together.
+        let (device, principal, now) = (
+            self.session.device_id,
+            self.session.principal_id,
+            self.state.now(),
+        );
+        let scope = crate::events::outbox::EventScope {
+            tenant_id: self.session.tenant_id,
+            application_id: self.session.application_id,
+            environment_id: self.session.environment_id,
+        };
+        let share = self.policy.privacy.delivery_receipts;
+        let r = self
+            .state
+            .db
+            .transaction::<_, (), crate::error::Error>(move |txn| {
+                Box::pin(async move {
+                    db::exec(
+                        txn,
+                        "INSERT INTO messaging_ack_cursors (conversation_id, device_id, principal_id, acked_event_sequence, updated_at) \
+                         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (conversation_id, device_id) DO UPDATE \
+                           SET acked_event_sequence = GREATEST(messaging_ack_cursors.acked_event_sequence, EXCLUDED.acked_event_sequence), \
+                               updated_at = EXCLUDED.updated_at",
+                        vec![conversation.into(), device.into(), principal.into(), seq.into(), now.into()],
+                    )
+                    .await?;
+                    let delivered = messages::message_sequence_at(txn, conversation, seq).await?;
+                    messages::advance_delivery(txn, scope, conversation, principal, delivered, share, now).await?;
+                    Ok(())
+                })
+            })
+            .await;
         if r.is_err() {
             self.send(error_frame(
                 "SERVICE_UNAVAILABLE",
@@ -845,6 +882,17 @@ impl Connection {
                     Flow::Close(CLOSE_SLOW, "SEND_TIMEOUT")
                 }
             }
+            HubEvent::ReadCursor {
+                conversation_id,
+                read_sequence,
+            } => {
+                // Only this principal's own sessions get it (routed by the hub).
+                if self.send(json!({ "type": "read-cursor.synced", "conversationId": conversation_id, "readSequence": read_sequence })).await {
+                    Flow::Continue
+                } else {
+                    Flow::Close(CLOSE_SLOW, "SEND_TIMEOUT")
+                }
+            }
             HubEvent::Typing {
                 conversation_id,
                 principal_id,
@@ -947,7 +995,17 @@ impl Connection {
             {
                 for c in ids {
                     if !active.iter().any(|a| a.conversation_id == c) {
-                        self.revoke_subscription(c, "MEMBERSHIP_ENDED").await;
+                        // Events committed before the removal were authorized for this
+                        // member: deliver them, ending with its own removal (which revokes
+                        // the subscription), exactly as the live path does.
+                        if let Some(removed_at) = self.own_removal(c).await {
+                            if let Flow::Close(code, reason) = self.deliver_until(c, removed_at).await {
+                                return Flow::Close(code, reason);
+                            }
+                        }
+                        if self.subs.contains_key(&c) {
+                            self.revoke_subscription(c, "MEMBERSHIP_ENDED").await;
+                        }
                     }
                 }
             }

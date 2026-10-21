@@ -785,6 +785,38 @@
               "$ref": "#/$defs/MessagePurged"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.delivery-cursor.updated"
+            },
+            "payload": {
+              "$ref": "#/$defs/DeliveryCursorUpdated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.read-cursor.synced"
+            },
+            "payload": {
+              "$ref": "#/$defs/ReadCursorSynced"
+            }
+          }
         }
       ]
     },
@@ -1599,6 +1631,46 @@
         "conversation_id",
         "security_profile",
         "sequence"
+      ]
+    },
+    "DeliveryCursorUpdated": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A member's DELIVERED position advanced (§52: a session acknowledged the message or the member synchronized past it). Only when the policy's privacy.deliveryReceipts is true.",
+      "properties": {
+        "principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "delivered_sequence": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "principal_id",
+        "delivered_sequence"
+      ]
+    },
+    "ReadCursorSynced": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A principal's read cursor moved; delivered to that principal's own sessions only (never another member's stream).",
+      "properties": {
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "read_sequence": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "conversation_id",
+        "principal_id",
+        "read_sequence"
       ]
     }
   }

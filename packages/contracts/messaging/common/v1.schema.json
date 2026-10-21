@@ -1312,6 +1312,9 @@
             },
             "lastSeen": {
               "type": "boolean"
+            },
+            "deliveryReceipts": {
+              "type": "boolean"
             }
           }
         },
@@ -1668,7 +1671,8 @@
             "presence",
             "typingIndicators",
             "readReceipts",
-            "lastSeen"
+            "lastSeen",
+            "deliveryReceipts"
           ],
           "properties": {
             "presence": {
@@ -1682,6 +1686,10 @@
             },
             "lastSeen": {
               "type": "boolean"
+            },
+            "deliveryReceipts": {
+              "type": "boolean",
+              "description": "Other members learn when a message was DELIVERED to a recipient (messaging.delivery-cursor.updated / delivery-cursor.updated events)."
             }
           }
         },

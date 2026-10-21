@@ -303,8 +303,11 @@ impl Ws {
     }
 
     pub async fn recv(&mut self, wait: Duration) -> Observed {
+        // One deadline for the whole call: control frames (the server's pings) must not
+        // restart the wait, or a frame that never comes hangs the test instead of failing.
+        let deadline = tokio::time::Instant::now() + wait;
         loop {
-            match tokio::time::timeout(wait, self.stream.next()).await {
+            match tokio::time::timeout_at(deadline, self.stream.next()).await {
                 Err(_) => return Observed::Timeout,
                 Ok(None) => return Observed::Closed(None, String::new()),
                 Ok(Some(Err(_))) => return Observed::Closed(None, String::new()),

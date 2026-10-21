@@ -108,6 +108,8 @@ pub struct PrivacyPolicy {
     pub typing_indicators: bool,
     pub read_receipts: bool,
     pub last_seen: bool,
+    /// §52: other members learn when a message was DELIVERED to a recipient.
+    pub delivery_receipts: bool,
 }
 
 /// Retention (§89–§90). `None` days: kept until deleted.
@@ -250,6 +252,7 @@ pub fn platform_defaults() -> EffectivePolicy {
             typing_indicators: true,
             read_receipts: true,
             last_seen: false,
+            delivery_receipts: true,
         },
         retention: RetentionPolicy {
             message_days: None,
@@ -330,6 +333,7 @@ overrides!(PrivacyOverride {
     typing_indicators: bool,
     read_receipts: bool,
     last_seen: bool,
+    delivery_receipts: bool,
 });
 overrides!(RetentionOverride {
     message_days: i64,
@@ -670,6 +674,9 @@ pub fn resolve(
         }
         if let Some(v) = o.last_seen {
             t.last_seen = v;
+        }
+        if let Some(v) = o.delivery_receipts {
+            t.delivery_receipts = v;
         }
     }
     if let Some(o) = &overrides.retention {

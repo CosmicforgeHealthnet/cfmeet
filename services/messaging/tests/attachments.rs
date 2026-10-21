@@ -2684,8 +2684,8 @@ async fn existing_thumbnails_are_backfilled_once_by_the_upgrade() {
     assert_eq!(e.usage(&c).await, (s + ta + tb, 0));
     use messaging_migration::MigratorTrait;
     let conn = &e.h.db.conn;
-    // Back to before migration 18 (migrations 20, 19 and 18 rolled back).
-    messaging_migration::Migrator::down(conn, Some(3))
+    // Back to before migration 18 (migrations 21, 20, 19 and 18 rolled back).
+    messaging_migration::Migrator::down(conn, Some(4))
         .await
         .unwrap();
     assert_eq!(
@@ -2711,8 +2711,8 @@ async fn existing_thumbnails_are_backfilled_once_by_the_upgrade() {
         .await
         .unwrap()
         .is_empty());
-    // 20 and 19 down / up (migration 20 does not touch storage accounting).
-    messaging_migration::Migrator::down(conn, Some(2))
+    // 21, 20 and 19 down / up (migrations 20 and 21 do not touch storage accounting).
+    messaging_migration::Migrator::down(conn, Some(3))
         .await
         .unwrap();
     messaging_migration::Migrator::up(conn, None).await.unwrap();
