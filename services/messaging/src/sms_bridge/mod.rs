@@ -266,6 +266,22 @@ pub async fn create(
             "E2EE_CONVERSATION_NOT_BRIDGEABLE",
         ));
     }
+    // §28 / §108: the context's policy decides whether its conversations may be bridged.
+    let effective =
+        crate::conversations::policy::current(&state.db, ctx.scope.environment_id).await?;
+    let eligible = crate::conversations::ContextClass::parse(&conversation.context_class)
+        .and_then(|c| effective.contexts.get(&c))
+        .is_some_and(|c| c.sms_bridge_eligible);
+    if !eligible {
+        crate::metrics::inc(
+            "messaging_sms_bridge_refusals_total",
+            &[("reason", "policy")],
+        );
+        return Err(Error::reason(
+            ErrorCode::FeatureDisabled,
+            "SMS_BRIDGE_NOT_ELIGIBLE",
+        ));
+    }
     if !request.sms_disclosure_acknowledged || request.disclosure_version != DISCLOSURE_VERSION {
         return Err(Error::reason(
             ErrorCode::ContentRejected,

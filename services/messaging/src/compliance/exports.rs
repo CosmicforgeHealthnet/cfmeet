@@ -271,6 +271,21 @@ async fn build(
         } else {
             None
         };
+        // §46: prior versions of an edited message (kept sealed; opened for the export).
+        let mut revisions = Vec::new();
+        if r.is_active() && r.edit_count > 0 {
+            for v in managed::revisions_of(state, &state.db, r)
+                .await
+                .map_err(|_| "DATABASE_UNAVAILABLE")?
+            {
+                revisions.push(json!({
+                    "revision": v.revision,
+                    "text": v.text.ok_or("SEAL_UNREADABLE")?,
+                    "createdAt": rfc3339(v.created_at),
+                    "supersededAt": rfc3339(v.superseded_at),
+                }));
+            }
+        }
         let atts: Vec<Value> = attachments
             .iter()
             .filter(|a| a.message_id == Some(r.id))
@@ -280,7 +295,7 @@ async fn build(
         messages.push(json!({
             "messageId": r.id, "sequence": r.sequence, "kind": r.message_kind, "senderPrincipalId": r.sender_principal_id,
             "createdAt": rfc3339(r.created_at), "lifecycle": r.lifecycle, "editCount": r.edit_count,
-            "editedAt": r.edited_at.map(rfc3339), "text": text, "attachments": atts,
+            "editedAt": r.edited_at.map(rfc3339), "text": text, "revisions": revisions, "attachments": atts,
         }));
     }
     let doc = json!({

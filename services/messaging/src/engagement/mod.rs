@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 use crate::{
     conversations::{
-        access,
+        access, policy,
         service::{request_context, rfc3339, scope_of, ConversationRow},
     },
     db,
@@ -123,6 +123,10 @@ pub async fn react(
                 if conversation.profile() != SecurityProfile::Managed {
                     return Err(Error::reason(ErrorCode::ContentRejected, "E2EE_REACTIONS_ARE_MESSAGES"));
                 }
+                // Turning reactions off stops new ones; existing ones can still be removed.
+                if add && !policy::current(txn, ctx.scope.environment_id).await?.messages.reactions {
+                    return Err(Error::reason(ErrorCode::FeatureDisabled, "REACTIONS_DISABLED"));
+                }
                 if add && !message.is_active() {
                     return Err(Error::reason(ErrorCode::MessageNotModifiable, "MESSAGE_NOT_ACTIVE"));
                 }
@@ -220,6 +224,9 @@ pub async fn pin(
                 let (conversation, member) = access::as_member(txn, &ctx, conversation_id, acting.principal_id).await?;
                 if !member.is_admin() {
                     return Err(Error::reason(ErrorCode::PrincipalNotAuthorized, "NOT_ADMIN"));
+                }
+                if add && !policy::current(txn, ctx.scope.environment_id).await?.messages.pins {
+                    return Err(Error::reason(ErrorCode::FeatureDisabled, "PINS_DISABLED"));
                 }
                 let changed = if add {
                     let message = load_message(txn, conversation.id, message_id, false)
@@ -337,12 +344,14 @@ pub async fn unread(
 
 /// Records the reply relation of a new message (same transaction as the message).
 /// Returns the reloaded row. The target must be a visible application message of the
-/// same conversation.
+/// same conversation. With threads turned off by policy (§47) the reply is kept but no
+/// thread root is recorded.
 pub async fn set_reply<C: ConnectionTrait>(
     txn: &C,
     conversation: &ConversationRow,
     row: MessageRow,
     reply_to: Option<Uuid>,
+    threads: bool,
 ) -> Result<MessageRow> {
     let Some(target) = reply_to else {
         return Ok(row);
@@ -376,7 +385,7 @@ pub async fn set_reply<C: ConnectionTrait>(
         vec![
             row.id.into(),
             t.id.into(),
-            t.thread_root_id.unwrap_or(t.id).into(),
+            threads.then(|| t.thread_root_id.unwrap_or(t.id)).into(),
         ],
     )
     .await?;

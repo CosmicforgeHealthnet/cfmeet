@@ -332,7 +332,8 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
         &a,
         json!({
             "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED", "exportsEnabled": true } },
-            "attachments": { "enabled": true, "managedScanRequired": false }
+            "attachments": { "enabled": true, "managedScanRequired": false },
+            "editing": { "revisionHistoryVisible": true }
         }),
     )
     .await;
@@ -944,6 +945,9 @@ fn ops() -> Vec<Op> {
         Op { method: M::PATCH, template: "/v1/conversations/{conversationId}/messages/{messageId}", scopes: SEND, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/messages/{}", f.conv, f.msg), Some(f.owner.principal),
                         Some(json!({ "text": "edited by the sender" }))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/conversations/{conversationId}/messages/{messageId}/revisions", scopes: READ, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/conversations/{}/messages/{}/revisions", f.conv, f.msg), Some(f.owner.principal), None),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         Op { method: M::DELETE, template: "/v1/conversations/{conversationId}/messages/{messageId}", scopes: SEND, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/messages/{}", f.conv, f.msg), Some(f.owner.principal), None),

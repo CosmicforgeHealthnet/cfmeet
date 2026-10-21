@@ -25,7 +25,7 @@ use chacha20poly1305::{
     AeadCore, XChaCha20Poly1305, XNonce,
 };
 use chrono::{DateTime, Utc};
-use sea_orm::{ConnectionTrait, TransactionTrait};
+use sea_orm::{ConnectionTrait, FromQueryResult, TransactionTrait};
 use serde_json::Value;
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -420,6 +420,7 @@ pub async fn send(
     effective: &EffectivePolicy,
     request: SendRequest,
 ) -> Result<(u16, Value)> {
+    let threads = effective.messages.threads;
     crate::operations::require_open(
         &state.db,
         crate::operations::KillSwitch::MessageSend,
@@ -512,7 +513,7 @@ pub async fn send(
                 .await?;
                 crate::attachments::link_to_message(txn, &conversation, row.id, acting.principal_id, &attachments)
                     .await?;
-                let row = crate::engagement::set_reply(txn, &conversation, row, reply_to).await?;
+                let row = crate::engagement::set_reply(txn, &conversation, row, reply_to, threads).await?;
                 super::record_created_notify(txn, &ctx2, &row, &request_ctx, now, notify).await?;
                 // A bridged conversation: queue the SMS copy in the same transaction.
                 crate::sms_bridge::enqueue_outbound(txn, &conversation, &row, now).await?;
@@ -528,11 +529,16 @@ pub async fn send(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EditRequest {
     pub text: String,
+    /// Optimistic version check (§155): the `editCount` the editor saw. A concurrent
+    /// edit that committed first makes this one `409 VERSION_CONFLICT`.
+    #[serde(default)]
+    pub expected_edit_count: Option<i32>,
 }
 
-/// Edits a MANAGED message in place (sender only, within the policy's window): the
-/// sealed text and the search index are replaced together, and `message.edited` is
-/// recorded in the same transaction.
+/// Edits a MANAGED message (sender only, within the policy's window). The superseded
+/// version is first kept as a sealed revision (§46: edits never overwrite evidence in
+/// place), then the current text and the search index are replaced together, and
+/// `message.edited` is recorded in the same transaction.
 pub async fn edit(
     state: &AppState,
     ctx: &TrustedContext,
@@ -557,6 +563,7 @@ pub async fn edit(
     crate::conversations::access::require_accepting(&conversation, state.now())?;
     let effective =
         crate::conversations::policy::current(&state.db, ctx.scope.environment_id).await?;
+    let expected_edit_count = request.expected_edit_count;
     let content = admit(request.text)?;
     ring(state)?;
     let st = state.clone();
@@ -587,6 +594,11 @@ pub async fn edit(
                 {
                     return Err(Error::reason(ErrorCode::MessageNotModifiable, "WINDOW_CLOSED"));
                 }
+                if expected_edit_count.is_some_and(|expected| expected != row.edit_count)
+                {
+                    return Err(Error::reason(ErrorCode::VersionConflict, "EDITED_CONCURRENTLY"));
+                }
+                keep_revision(txn, &row, acting.principal_id, now).await?;
                 let sealed = ring.seal(&scope_of_row(&row), content.text())?;
                 db::exec(
                     txn,
@@ -630,6 +642,150 @@ pub async fn edit(
         .await
         .map_err(Error::from)?;
     Ok(render(state, &row, false).await)
+}
+
+/// Copies the version a MANAGED edit supersedes into `messaging_message_revisions`
+/// (still sealed under the message's own scope). Revision `n` is the text as it stood
+/// after `n` edits.
+async fn keep_revision<C: ConnectionTrait>(
+    db: &C,
+    row: &MessageRow,
+    edited_by: Uuid,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    let (Some(sealed), Some(nonce), Some(key_id)) = (
+        row.managed_sealed.clone(),
+        row.managed_seal_nonce.clone(),
+        row.managed_seal_key_id.clone(),
+    ) else {
+        return Err(Error::code(ErrorCode::InternalError));
+    };
+    db::exec(
+        db,
+        "INSERT INTO messaging_message_revisions (message_id, revision, environment_id, conversation_id, \
+           edited_by_principal_id, managed_sealed, managed_seal_nonce, managed_seal_key_id, created_at, superseded_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+        vec![
+            row.id.into(),
+            row.edit_count.into(),
+            row.environment_id.into(),
+            row.conversation_id.into(),
+            edited_by.into(),
+            sealed.into(),
+            nonce.into(),
+            key_id.into(),
+            row.edited_at.unwrap_or(row.created_at).into(),
+            now.into(),
+        ],
+    )
+    .await?;
+    Ok(())
+}
+
+/// One kept revision of a MANAGED message, opened with the message's seal scope.
+#[derive(Debug, Clone)]
+pub struct Revision {
+    pub revision: i32,
+    pub text: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub superseded_at: DateTime<Utc>,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct RevisionRow {
+    revision: i32,
+    managed_sealed: Vec<u8>,
+    managed_seal_nonce: Vec<u8>,
+    managed_seal_key_id: String,
+    created_at: DateTime<Utc>,
+    superseded_at: DateTime<Utc>,
+}
+
+/// The kept revisions of a MANAGED message, oldest first (empty for PRIVATE_E2EE).
+pub async fn revisions_of<C: ConnectionTrait>(
+    state: &AppState,
+    db: &C,
+    row: &MessageRow,
+) -> Result<Vec<Revision>> {
+    if row.profile() != SecurityProfile::Managed {
+        return Ok(Vec::new());
+    }
+    let rows: Vec<RevisionRow> = db::all(
+        db,
+        "SELECT revision, managed_sealed, managed_seal_nonce, managed_seal_key_id, created_at, superseded_at \
+           FROM messaging_message_revisions WHERE message_id = $1 ORDER BY revision",
+        vec![row.id.into()],
+    )
+    .await?;
+    let scope = scope_of_row(row);
+    Ok(rows
+        .into_iter()
+        .map(|r| Revision {
+            revision: r.revision,
+            text: state.managed_keys.as_ref().and_then(|ring| {
+                ring.open(
+                    &scope,
+                    &r.managed_sealed,
+                    &r.managed_seal_nonce,
+                    &r.managed_seal_key_id,
+                )
+            }),
+            created_at: r.created_at,
+            superseded_at: r.superseded_at,
+        })
+        .collect())
+}
+
+/// `GET /v1/conversations/{id}/messages/{messageId}/revisions` — the kept prior
+/// versions of a MANAGED message, for members, only when the tenant's policy makes
+/// revision history visible (§46). A deleted message shows no content.
+pub async fn list_revisions(
+    state: &AppState,
+    ctx: &TrustedContext,
+    acting: &Acting,
+    conversation_id: Uuid,
+    message_id: Uuid,
+) -> Result<Value> {
+    let (conversation, member) = crate::conversations::access::as_member(
+        &state.db,
+        ctx,
+        conversation_id,
+        acting.principal_id,
+    )
+    .await?;
+    if conversation.profile() != SecurityProfile::Managed {
+        return Err(Error::reason(
+            ErrorCode::ContentRejected,
+            "E2EE_EDITS_ARE_CIPHERTEXT",
+        ));
+    }
+    let effective =
+        crate::conversations::policy::current(&state.db, ctx.scope.environment_id).await?;
+    if !effective.editing.revision_history_visible {
+        return Err(Error::reason(
+            ErrorCode::FeatureDisabled,
+            "REVISION_HISTORY_HIDDEN",
+        ));
+    }
+    let row = load_message(&state.db, conversation.id, message_id, false)
+        .await?
+        .filter(|r| r.sequence >= member.visible_from_sequence)
+        .ok_or(Error::code(ErrorCode::NotFound))?;
+    let revisions = if row.is_active() {
+        revisions_of(state, &state.db, &row).await?
+    } else {
+        Vec::new()
+    };
+    Ok(serde_json::json!({
+        "messageId": row.id,
+        "editCount": row.edit_count,
+        "revisions": revisions.iter().map(|r| serde_json::json!({
+            "revision": r.revision,
+            "text": r.text,
+            "createdAt": crate::conversations::service::rfc3339(r.created_at),
+            "supersededAt": crate::conversations::service::rfc3339(r.superseded_at),
+        })).collect::<Vec<_>>(),
+    }))
 }
 
 /// Imports one legacy chat message (Part V H §101) inside the caller's transaction:

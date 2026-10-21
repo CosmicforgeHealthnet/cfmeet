@@ -57,6 +57,14 @@ pub async fn purge_message<C: ConnectionTrait>(
         vec![row.id.into(), now.into()],
     )
     .await?;
+    // Kept MANAGED revisions go with the message (the database allows this only once
+    // the message is PURGED).
+    db::exec(
+        db,
+        "DELETE FROM messaging_message_revisions WHERE message_id = $1",
+        vec![row.id.into()],
+    )
+    .await?;
     let attachments: Vec<AttachmentRow> = db::all(
         db,
         &format!("SELECT {ATTACHMENT_COLUMNS} FROM messaging_attachments WHERE message_id = $1 AND state <> 'DELETED'"),

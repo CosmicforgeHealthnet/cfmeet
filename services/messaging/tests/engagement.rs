@@ -418,3 +418,79 @@ async fn usage_is_metered_as_facts_without_prices_and_scoped_to_the_environment(
         .await
         .is_err());
 }
+
+/// §28 / §47 / §49: the effective policy governs threads, reactions and pins. With threads
+/// off, replies are still recorded but carry no thread root; with reactions or pins off,
+/// new ones are refused (existing reactions can still be removed).
+#[tokio::test]
+async fn the_policy_snapshot_governs_threads_reactions_and_pins() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(false);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (owner, member) = (people[0], people[1]);
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let root = h.send_managed(&c, &conv, owner, "agenda?").await;
+    let root_id = root.json["messageId"].as_str().unwrap().to_string();
+    let rpath = format!("/v1/conversations/{cid}/messages/{root_id}/reactions/:thumbsup:");
+    assert_eq!(
+        h.put(&c, Some(member), &rpath, json!({})).await.status,
+        StatusCode::OK
+    );
+
+    let effective = h.get(&c, None, "/v1/messaging/policy").await;
+    assert_eq!(
+        effective.json["effective"]["messages"],
+        json!({ "replies": true, "threads": true, "reactions": true, "pins": true }),
+        "{}",
+        effective.text
+    );
+    h.set_policy(
+        &c,
+        json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
+                "messages": { "threads": false, "reactions": false, "pins": false } }),
+    )
+    .await;
+    let effective = h.get(&c, None, "/v1/messaging/policy").await;
+    assert_eq!(
+        effective.json["effective"]["messages"],
+        json!({ "replies": true, "threads": false, "reactions": false, "pins": false })
+    );
+
+    let reply = h
+        .post(&c, Some(member), &format!("/v1/conversations/{cid}/messages"),
+              json!({ "clientMessageId": Uuid::new_v4(), "text": "item 1", "replyToMessageId": root_id }))
+        .await;
+    assert_eq!(reply.status, StatusCode::CREATED, "{}", reply.text);
+    assert_eq!(
+        reply.json["replyToMessageId"].as_str(),
+        Some(root_id.as_str())
+    );
+    assert_eq!(
+        reply.json["threadRootId"],
+        Value::Null,
+        "threads off: a reply, not a thread"
+    );
+
+    let refused = h
+        .put(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{cid}/messages/{root_id}/reactions/:tada:"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(refused.reason(), "REACTIONS_DISABLED", "{}", refused.text);
+    let removed = h.delete(&c, Some(member), &rpath).await;
+    assert_eq!(removed.status, StatusCode::OK, "{}", removed.text);
+    let pin = h
+        .put(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{cid}/pins/{root_id}"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(pin.reason(), "PINS_DISABLED", "{}", pin.text);
+}

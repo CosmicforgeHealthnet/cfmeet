@@ -1062,3 +1062,217 @@ async fn a_legal_hold_is_never_overtaken_by_an_in_flight_purge() {
         waited.as_millis()
     );
 }
+
+/// §46 / §121 / §155: a MANAGED edit keeps the superseded version as a sealed revision
+/// (never overwritten in place); concurrent edits resolve with a version check; members
+/// see revisions only when the tenant's policy shows history; exports include them; a
+/// legal hold preserves them and the purge removes them with the message.
+#[tokio::test]
+async fn managed_edits_keep_sealed_revisions_that_holds_preserve_and_purge_removes() {
+    use sea_orm::ConnectionTrait;
+    let Some((h, store)) = harness().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    policy(
+        &h,
+        &c,
+        json!({ "exportsEnabled": true }),
+        json!({ "retention": { "messageDays": 30 } }),
+    )
+    .await;
+    let (conv, people) = managed_group(&h, &c, 2).await;
+    let (alice, bob) = (people[0], people[1]);
+    let id = cid(&conv);
+    let sent = h
+        .send_managed(&c, &conv, alice, "original wording zebra")
+        .await;
+    let mid = sent.json["messageId"].as_str().unwrap().to_string();
+    let path = format!("/v1/conversations/{id}/messages/{mid}");
+
+    // Two editors saw editCount 0: the first wins, the second is a version conflict.
+    let first = h
+        .patch(
+            &c,
+            Some(alice),
+            &path,
+            json!({ "text": "middle wording yak", "expectedEditCount": 0 }),
+        )
+        .await;
+    assert_eq!(first.status, StatusCode::OK, "{}", first.text);
+    let stale = h
+        .patch(
+            &c,
+            Some(alice),
+            &path,
+            json!({ "text": "lost update", "expectedEditCount": 0 }),
+        )
+        .await;
+    assert_eq!(stale.status, StatusCode::CONFLICT, "{}", stale.text);
+    assert_eq!(
+        (stale.code(), stale.reason()),
+        ("VERSION_CONFLICT", "EDITED_CONCURRENTLY")
+    );
+    let last = h
+        .patch(
+            &c,
+            Some(alice),
+            &path,
+            json!({ "text": "final wording xylophone", "expectedEditCount": 1 }),
+        )
+        .await;
+    assert_eq!(last.json["editCount"], 2, "{}", last.text);
+    assert_eq!(last.json["managed"]["text"], "final wording xylophone");
+
+    // Both superseded versions are kept, sealed (no plaintext in the row).
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_message_revisions WHERE message_id = '{mid}'"
+        ))
+        .await,
+        2
+    );
+    assert_eq!(
+        h.scalar(&format!("SELECT count(*) FROM messaging_message_revisions WHERE message_id = '{mid}' \
+             AND (position(convert_to('zebra', 'UTF8') in managed_sealed) > 0 OR position(convert_to('yak', 'UTF8') in managed_sealed) > 0)")).await,
+        0,
+        "revisions are sealed at rest"
+    );
+    // Search follows the current text only.
+    let search = |q: &str| format!("/v1/conversations/{id}/search?q={q}");
+    let old = h.get(&c, Some(bob), &search("zebra")).await;
+    assert_eq!(old.status, StatusCode::OK, "{}", old.text);
+    assert!(
+        !old.text.contains(&mid),
+        "a superseded word is not searchable: {}",
+        old.text
+    );
+    assert!(h
+        .get(&c, Some(bob), &search("xylophone"))
+        .await
+        .text
+        .contains(&mid));
+
+    // Members see history only when the policy shows it.
+    let revisions = format!("{path}/revisions");
+    let hidden = h.get(&c, Some(bob), &revisions).await;
+    assert_eq!(
+        hidden.reason(),
+        "REVISION_HISTORY_HIDDEN",
+        "{}",
+        hidden.text
+    );
+    policy(
+        &h,
+        &c,
+        json!({ "exportsEnabled": true }),
+        json!({ "retention": { "messageDays": 30 }, "editing": { "revisionHistoryVisible": true } }),
+    )
+    .await;
+    let shown = h.get(&c, Some(bob), &revisions).await;
+    assert_eq!(shown.status, StatusCode::OK, "{}", shown.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/MessageRevisionPage",
+        &shown.json,
+    );
+    let texts: Vec<&str> = shown.json["revisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(texts, ["original wording zebra", "middle wording yak"]);
+    let outsider = h.principal(&c);
+    assert_eq!(
+        h.get(&c, Some(outsider), &revisions).await.status,
+        StatusCode::NOT_FOUND
+    );
+
+    // Exports carry the revisions.
+    let r = h
+        .post(
+            &c,
+            None,
+            "/v1/messaging/exports",
+            json!({ "conversationId": conv["conversationId"] }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let eid = r.json["exportId"].as_str().unwrap().to_string();
+    messaging::compliance::run_once(&h.state).await.unwrap();
+    let key = format!(
+        "exp/{}/{}",
+        c.context.scope.environment_id.simple(),
+        Uuid::parse_str(&eid).unwrap().simple()
+    );
+    let doc: Value = serde_json::from_slice(&store.get_raw(&key).unwrap()).unwrap();
+    assert_eq!(doc["messages"][0]["text"], "final wording xylophone");
+    assert_eq!(
+        doc["messages"][0]["revisions"][0]["text"],
+        "original wording zebra"
+    );
+    assert_eq!(
+        doc["messages"][0]["revisions"][1]["text"],
+        "middle wording yak"
+    );
+
+    // The database keeps revisions immutable and bound to their message.
+    assert!(h
+        .state
+        .db
+        .execute_unprepared(&format!(
+            "UPDATE messaging_message_revisions SET revision = 9 WHERE message_id = '{mid}'"
+        ))
+        .await
+        .is_err());
+    assert!(
+        h.state
+            .db
+            .execute_unprepared(&format!(
+                "DELETE FROM messaging_message_revisions WHERE message_id = '{mid}'"
+            ))
+            .await
+            .is_err(),
+        "not removable while the message exists"
+    );
+
+    // Under a legal hold, expiry keeps every version; after release the purge removes them.
+    let hold = h
+        .post(&c, None, "/v1/messaging/legal-holds", json!({ "scopeKind": "CONVERSATION", "conversationId": conv["conversationId"], "reasonCategory": "LITIGATION" }))
+        .await;
+    assert_eq!(hold.status, StatusCode::CREATED, "{}", hold.text);
+    h.clock.advance(chrono::Duration::days(31));
+    let r = messaging::compliance::run_once(&h.state).await.unwrap();
+    assert!(r.held >= 1 && r.purged == 0, "{r:?}");
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_message_revisions WHERE message_id = '{mid}'"
+        ))
+        .await,
+        2,
+        "held revisions are preserved"
+    );
+    let rel = h
+        .post(
+            &c,
+            None,
+            &format!(
+                "/v1/messaging/legal-holds/{}/release",
+                hold.json["holdId"].as_str().unwrap()
+            ),
+            json!({ "reason": "AUDIT_DONE" }),
+        )
+        .await;
+    assert_eq!(rel.status, StatusCode::OK, "{}", rel.text);
+    h.clock.advance(chrono::Duration::hours(2));
+    let r = messaging::compliance::run_once(&h.state).await.unwrap();
+    assert!(r.purged >= 1, "{r:?}");
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_message_revisions WHERE message_id = '{mid}'"
+        ))
+        .await,
+        0,
+        "revisions are purged with the message"
+    );
+}

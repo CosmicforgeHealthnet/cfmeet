@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging API",
-    "version": "1.11.0",
+    "version": "1.12.0",
     "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are refused there with CLIENT_TOKENS_NOT_ENABLED; the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB."
   },
   "paths": {
@@ -1401,7 +1401,7 @@
             "customerCredential": []
           }
         ],
-        "description": "MANAGED only (PRIVATE_E2EE edits are new ciphertexts with kind EDIT). Scope messages.send; the sender, within the policy's edit window.",
+        "description": "MANAGED only (PRIVATE_E2EE edits are new ciphertexts with kind EDIT). Scope messages.send; the sender, within the policy's edit window. The superseded version is kept as a sealed revision (never overwritten in place); expectedEditCount turns a concurrent edit into 409 VERSION_CONFLICT.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -1546,6 +1546,80 @@
             "$ref": "#/components/responses/Error"
           },
           "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversationId}/messages/{messageId}/revisions": {
+      "get": {
+        "operationId": "listMessageRevisions",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.read. The kept prior versions of an edited MANAGED message (§46), oldest first, for current members; only when the policy's editing.revisionHistoryVisible is true (else 503 FEATURE_DISABLED, reason REVISION_HISTORY_HIDDEN). PRIVATE_E2EE edits are ciphertext messages: 422 CONTENT_REJECTED (E2EE_EDITS_ARE_CIPHERTEXT).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.MessageRevisionPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
             "$ref": "#/components/responses/Error"
           },
           "429": {
@@ -5963,6 +6037,10 @@
                   "type": "integer",
                   "minimum": 1,
                   "maximum": 36500
+                },
+                "smsBridgeEligible": {
+                  "type": "boolean",
+                  "description": "Requires MANAGED among allowedProfiles; SMS is never end-to-end encrypted."
                 }
               }
             }
@@ -6082,6 +6160,9 @@
               "deleteWindowSeconds": {
                 "type": "integer",
                 "minimum": 1
+              },
+              "revisionHistoryVisible": {
+                "type": "boolean"
               }
             }
           },
@@ -6108,6 +6189,21 @@
               "managedLinksPerHour": {
                 "type": "integer",
                 "minimum": 1
+              }
+            }
+          },
+          "messages": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "threads": {
+                "type": "boolean"
+              },
+              "reactions": {
+                "type": "boolean"
+              },
+              "pins": {
+                "type": "boolean"
               }
             }
           }
@@ -7864,6 +7960,11 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 16384
+          },
+          "expectedEditCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optimistic version check: the editCount the editor last saw. If another edit committed first the request is refused with 409 VERSION_CONFLICT (reason EDITED_CONCURRENTLY). Omitted: last writer wins."
           }
         },
         "required": [
@@ -7962,7 +8063,8 @@
                   "type": "boolean"
                 },
                 "smsBridgeEligible": {
-                  "const": false
+                  "const": false,
+                  "description": "A MANAGED conversation of this context may be bridged to SMS (default: whenever MANAGED is allowed; never for an E2EE-only context)."
                 },
                 "regulated": {
                   "type": "boolean"
@@ -8005,12 +8107,27 @@
           },
           "messages": {
             "type": "object",
-            "description": "Message features of later workstreams (replies, threads, reactions, pins): null = not yet available. Platform policy version 2.",
-            "additionalProperties": {
-              "type": [
-                "boolean",
-                "null"
-              ]
+            "additionalProperties": false,
+            "required": [
+              "replies",
+              "threads",
+              "reactions",
+              "pins"
+            ],
+            "description": "Message features (platform policy version 4). Replies are always supported; a tenant may turn threads off (replies are kept without a thread root), reactions or pins.",
+            "properties": {
+              "replies": {
+                "const": true
+              },
+              "threads": {
+                "type": "boolean"
+              },
+              "reactions": {
+                "type": "boolean"
+              },
+              "pins": {
+                "type": "boolean"
+              }
             }
           },
           "attachments": {
@@ -8167,7 +8284,8 @@
             "additionalProperties": false,
             "required": [
               "editWindowSeconds",
-              "deleteWindowSeconds"
+              "deleteWindowSeconds",
+              "revisionHistoryVisible"
             ],
             "properties": {
               "editWindowSeconds": {
@@ -8191,6 +8309,10 @@
                     "type": "null"
                   }
                 ]
+              },
+              "revisionHistoryVisible": {
+                "type": "boolean",
+                "description": "Members may read the kept revisions of edited MANAGED messages. Revisions are always kept (exports and legal holds include them)."
               }
             }
           },
@@ -9435,6 +9557,58 @@
           "messages",
           "nextAfterSequence"
         ]
+      },
+      "messaging.common.v1.MessageRevisionPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "messageId",
+          "editCount",
+          "revisions"
+        ],
+        "description": "The kept prior versions of a MANAGED message, oldest first (revision n = the text after n edits). Visible to members only when editing.revisionHistoryVisible; empty for a deleted message.",
+        "properties": {
+          "messageId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "editCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "revisions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "revision",
+                "text",
+                "createdAt",
+                "supersededAt"
+              ],
+              "properties": {
+                "revision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "text": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "supersededAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        }
       },
       "messaging.common.v1.MlsGroupState": {
         "type": "object",
