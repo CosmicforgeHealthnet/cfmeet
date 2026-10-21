@@ -588,14 +588,14 @@
     },
     {
       "id": "cfmeet.messaging.event",
-      "version": "1.6.0",
+      "version": "1.7.0",
       "kind": "json-schema",
       "path": "messaging/events/v1.schema.json",
       "owner": "messaging",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Messaging domain events in the platform envelope (transactional outbox, at least once): messaging.device.registered, messaging.device.key-packages-published, messaging.device.revoked. No key material, ciphertext or content. 1.1.0 messaging.conversation.created, messaging.conversation.lifecycle-changed, messaging.conversation.updated, messaging.policy.updated. 1.2.0 message, member, read-cursor and MLS welcome events (ids, sequences, states only). 1.3.0 messaging.client-session.revoked. 1.4.0 message.created security_provenance / notify; member.updated role. 1.5.0 reaction and pin events. 1.6.0 optional conversation_id on message events (relayed to Calling's platform-event ingress for customer webhooks)."
+      "description": "Messaging domain events in the platform envelope (transactional outbox, at least once): messaging.device.registered, messaging.device.key-packages-published, messaging.device.revoked. No key material, ciphertext or content. 1.1.0 messaging.conversation.created, messaging.conversation.lifecycle-changed, messaging.conversation.updated, messaging.policy.updated. 1.2.0 message, member, read-cursor and MLS welcome events (ids, sequences, states only). 1.3.0 messaging.client-session.revoked. 1.4.0 message.created security_provenance / notify; member.updated role. 1.5.0 reaction and pin events. 1.6.0 optional conversation_id on message events (relayed to Calling's platform-event ingress for customer webhooks). 1.7.0 Part V backend closure (§118, Appendix D): messaging.attachment.{ready,rejected,quarantined,deleted,derivative-ready}, messaging.report.created, messaging.moderation.actioned, messaging.legal-hold.{applied,released}, messaging.export.{ready,failed,expired}, messaging.message.sms-transport-changed, messaging.message.purged — recorded in the same transaction as the state change; not part of any conversation's member-visible stream and not relayed to customer webhooks."
     },
     {
       "id": "cfmeet.messaging.realtime-protocol",

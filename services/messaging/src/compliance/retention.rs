@@ -57,6 +57,22 @@ pub async fn purge_message<C: ConnectionTrait>(
         vec![row.id.into(), now.into()],
     )
     .await?;
+    // Appendix D purge_completed: ids only, never content.
+    crate::events::outbox::record(
+        db,
+        "messaging.message.purged",
+        "MESSAGE",
+        row.id,
+        crate::events::outbox::EventScope {
+            tenant_id: row.tenant_id,
+            application_id: row.application_id,
+            environment_id: row.environment_id,
+        },
+        serde_json::json!({ "message_id": row.id, "conversation_id": row.conversation_id,
+                            "security_profile": row.security_profile, "sequence": row.sequence }),
+        now,
+    )
+    .await?;
     // Kept MANAGED revisions go with the message (the database allows this only once
     // the message is PURGED).
     db::exec(

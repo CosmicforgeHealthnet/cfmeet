@@ -396,6 +396,21 @@ async fn e2ee_reports_carry_only_voluntary_disclosure_and_moderation_tombstones(
     );
     let list = h.get(&c, None, "/v1/messaging/moderation/actions").await;
     assert_eq!(list.json["actions"].as_array().unwrap().len(), 1);
+    // §118 / Appendix D: the transitions above recorded their domain events, and every
+    // event conforms to the published event contract.
+    let types = h.conforming_event_types().await;
+    for t in [
+        "messaging.report.created",
+        "messaging.moderation.actioned",
+        "messaging.message.purged",
+    ] {
+        assert!(types.contains(t), "{t} not recorded: {types:?}");
+    }
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_outbox_events WHERE payload::text LIKE '%unique-threat-7731%'").await,
+        0,
+        "no content in any event"
+    );
 }
 
 #[tokio::test]
@@ -620,6 +635,16 @@ async fn retention_expires_and_purges_but_legal_holds_preserve() {
         .await,
         1
     );
+    // §118 / Appendix D: the transitions above recorded their domain events, and every
+    // event conforms to the published event contract.
+    let types = h.conforming_event_types().await;
+    for t in [
+        "messaging.legal-hold.applied",
+        "messaging.legal-hold.released",
+        "messaging.message.purged",
+    ] {
+        assert!(types.contains(t), "{t} not recorded: {types:?}");
+    }
 }
 
 #[tokio::test]
@@ -783,6 +808,12 @@ async fn exports_are_managed_only_authorized_and_expire() {
         )
         .await;
     assert_eq!(r.reason(), "EXPORTS_DISABLED", "{}", r.text);
+    // §118 / Appendix D: the transitions above recorded their domain events, and every
+    // event conforms to the published event contract.
+    let types = h.conforming_event_types().await;
+    for t in ["messaging.export.ready", "messaging.export.expired"] {
+        assert!(types.contains(t), "{t} not recorded: {types:?}");
+    }
 }
 
 #[tokio::test]

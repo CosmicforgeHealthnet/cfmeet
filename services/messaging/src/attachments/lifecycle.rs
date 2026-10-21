@@ -157,6 +157,15 @@ pub async fn delete_attachment<C: ConnectionTrait>(
     .await?
         == 1;
     if ok {
+        super::record_attachment_event(
+            db,
+            row,
+            "messaging.attachment.deleted",
+            "DELETED",
+            Some(reason),
+            now,
+        )
+        .await?;
         super::derivatives::delete_for_attachment(db, row, reason, now).await?;
         // The object's committed bytes move to its deletion request: still charged until
         // the object is really removed (a legal hold keeps both).
@@ -237,6 +246,8 @@ pub async fn rescan_due(state: &AppState, batch: i64) -> Result<usize> {
                         {
                             super::quota::release(txn, &r, now).await?;
                             enqueue_deletion(txn, &r.object_key, r.environment_id, Some(r.id), "SCAN_UNAVAILABLE", now).await?;
+                            super::record_attachment_event(txn, &r, "messaging.attachment.rejected", "REJECTED", Some("SCAN_UNAVAILABLE"), now)
+                                .await?;
                         }
                         Ok(())
                     })

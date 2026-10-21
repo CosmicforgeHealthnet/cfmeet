@@ -8063,8 +8063,8 @@
                   "type": "boolean"
                 },
                 "smsBridgeEligible": {
-                  "const": false,
-                  "description": "A MANAGED conversation of this context may be bridged to SMS (default: whenever MANAGED is allowed; never for an E2EE-only context)."
+                  "description": "A MANAGED conversation of this context may be bridged to SMS (default: whenever MANAGED is allowed; never for an E2EE-only context).",
+                  "type": "boolean"
                 },
                 "regulated": {
                   "type": "boolean"

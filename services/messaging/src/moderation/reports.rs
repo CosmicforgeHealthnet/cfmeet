@@ -224,8 +224,9 @@ pub async fn create(
         Some((s, n, k)) => (Some(s), Some(n), Some(k)),
         None => (None, None, None),
     };
+    let txn = sea_orm::TransactionTrait::begin(&state.db).await?;
     db::exec(
-        &state.db,
+        &txn,
         "INSERT INTO messaging_reports (id, tenant_id, application_id, environment_id, conversation_id, security_profile, \
            reporter_principal_id, reported_principal_id, message_ids, category, evidence_kind, sealed_evidence, \
            evidence_nonce, evidence_key_id, created_at) \
@@ -249,6 +250,19 @@ pub async fn create(
         ],
     )
     .await?;
+    // §118: message.reported (ids and codes only; the reporter is not disclosed).
+    crate::events::outbox::record(
+        &txn,
+        "messaging.report.created",
+        "REPORT",
+        id,
+        crate::conversations::service::scope_of(ctx),
+        json!({ "report_id": id, "conversation_id": conversation.id, "security_profile": profile.as_str(),
+                "category": request.category, "evidence_kind": evidence_kind, "message_count": ids.len() }),
+        now,
+    )
+    .await?;
+    txn.commit().await?;
     audit::record(
         &state.db,
         AuditEntry {

@@ -632,6 +632,7 @@ pub async fn message_transport(
 struct DueTransport {
     message_id: Uuid,
     bridge_id: Uuid,
+    direction: String,
     sms_message_id: Option<Uuid>,
     status: String,
     attempt_count: i32,
@@ -657,7 +658,7 @@ pub async fn run_due(state: &AppState, limit: i64) -> Result<usize> {
         let now = state.now();
         let due: Option<DueTransport> = db::one(
             &txn,
-            "SELECT t.message_id, t.bridge_id, t.sms_message_id, t.status, t.attempt_count, \
+            "SELECT t.message_id, t.bridge_id, t.direction, t.sms_message_id, t.status, t.attempt_count, \
                     b.tenant_id, b.application_id, b.environment_id, b.environment_kind, b.service_account_id, b.conversation_id \
                FROM messaging_sms_transports t JOIN messaging_sms_bridges b ON b.id = t.bridge_id \
               WHERE t.next_attempt_at IS NOT NULL AND t.next_attempt_at <= $1 \
@@ -803,6 +804,39 @@ pub async fn run_due(state: &AppState, limit: i64) -> Result<usize> {
                     gave_up.push(d.message_id);
                 }
             }
+        }
+        // §118 / Appendix D: a carrier transport state change is a domain event (ids and
+        // codes only; never the text or a telephone number).
+        #[derive(FromQueryResult)]
+        struct Now {
+            status: String,
+            failure_code: Option<String>,
+            blocked_reason: Option<String>,
+        }
+        if let Some(after) = db::one::<Now, _>(
+            &txn,
+            "SELECT status, failure_code, blocked_reason FROM messaging_sms_transports WHERE message_id = $1",
+            vec![d.message_id.into()],
+        )
+        .await?
+        .filter(|a| a.status != d.status)
+        {
+            crate::events::outbox::record(
+                &txn,
+                "messaging.message.sms-transport-changed",
+                "SMS_TRANSPORT",
+                d.message_id,
+                crate::events::outbox::EventScope {
+                    tenant_id: d.tenant_id,
+                    application_id: d.application_id,
+                    environment_id: d.environment_id,
+                },
+                json!({ "message_id": d.message_id, "conversation_id": d.conversation_id, "bridge_id": d.bridge_id,
+                        "direction": d.direction, "previous_status": d.status, "status": after.status,
+                        "failure_code": after.failure_code, "blocked_reason": after.blocked_reason }),
+                now,
+            )
+            .await?;
         }
         txn.commit().await?;
         changed += 1;

@@ -234,6 +234,17 @@ pub async fn apply(
                     ],
                 )
                 .await?;
+                crate::events::outbox::record(
+                    txn,
+                    "messaging.moderation.actioned",
+                    "MODERATION_ACTION",
+                    id,
+                    crate::conversations::service::scope_of(&ctx2),
+                    json!({ "action_id": id, "kind": req.kind, "conversation_id": req.conversation_id,
+                            "message_id": req.message_id, "principal_id": req.principal_id, "report_id": req.report_id }),
+                    now,
+                )
+                .await?;
                 audit::record(
                     txn,
                     AuditEntry {

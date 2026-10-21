@@ -344,8 +344,9 @@ pub async fn run_pending(state: &AppState, batch: i64) -> Result<usize> {
         };
         match outcome {
             Ok((stored, count)) => {
-                db::exec(
-                    &state.db,
+                let txn = sea_orm::TransactionTrait::begin(&state.db).await?;
+                let ready = db::exec(
+                    &txn,
                     "UPDATE messaging_exports SET status = 'READY', size = $3, sha256 = $4, message_count = $5, completed_at = $6, \
                        expires_at = $7, lease_token = NULL, lease_expires_at = NULL WHERE id = $1 AND lease_token = $2",
                     vec![
@@ -359,20 +360,37 @@ pub async fn run_pending(state: &AppState, batch: i64) -> Result<usize> {
                     ],
                 )
                 .await?;
+                if ready == 1 {
+                    export_event(&txn, &e, "messaging.export.ready", "READY", None, now).await?;
+                }
+                txn.commit().await?;
                 done += 1;
                 crate::metrics::inc("messaging_exports_total", &[("outcome", "ready")]);
             }
             Err(reason) => {
                 let permanent = matches!(reason, "TOO_LARGE" | "NOT_MANAGED" | "SEAL_UNREADABLE")
                     || e.attempts >= MAX_ATTEMPTS;
-                db::exec(
-                    &state.db,
+                let txn = sea_orm::TransactionTrait::begin(&state.db).await?;
+                let settled = db::exec(
+                    &txn,
                     "UPDATE messaging_exports SET status = CASE WHEN $3 THEN 'FAILED' ELSE 'PENDING' END, \
                        failure = $4, lease_token = NULL, lease_expires_at = NULL, \
                        completed_at = CASE WHEN $3 THEN $5 ELSE NULL END WHERE id = $1 AND lease_token = $2",
                     vec![e.id.into(), token.into(), permanent.into(), reason.into(), now.into()],
                 )
                 .await?;
+                if permanent && settled == 1 {
+                    export_event(
+                        &txn,
+                        &e,
+                        "messaging.export.failed",
+                        "FAILED",
+                        Some(reason),
+                        now,
+                    )
+                    .await?;
+                }
+                txn.commit().await?;
                 tracing::warn!(export = %e.id, reason, permanent, "export failed");
                 crate::metrics::inc(
                     "messaging_exports_total",
@@ -387,22 +405,19 @@ pub async fn run_pending(state: &AppState, batch: i64) -> Result<usize> {
 /// Expired READY exports: EXPIRED, object queued for deletion.
 pub async fn expire(state: &AppState, batch: i64) -> Result<usize> {
     let now = state.now();
-    #[derive(FromQueryResult)]
-    struct X {
-        id: Uuid,
-        environment_id: Uuid,
-        object_key: String,
-    }
-    let due: Vec<X> = db::all(
-        &state.db,
-        "UPDATE messaging_exports SET status = 'EXPIRED' WHERE id IN (SELECT id FROM messaging_exports WHERE status = 'READY' \
-           AND expires_at <= $1 ORDER BY expires_at LIMIT $2 FOR UPDATE SKIP LOCKED) RETURNING id, environment_id, object_key",
+    let txn = sea_orm::TransactionTrait::begin(&state.db).await?;
+    let due: Vec<ExportRow> = db::all(
+        &txn,
+        &format!(
+            "UPDATE messaging_exports SET status = 'EXPIRED' WHERE id IN (SELECT id FROM messaging_exports WHERE status = 'READY' \
+               AND expires_at <= $1 ORDER BY expires_at LIMIT $2 FOR UPDATE SKIP LOCKED) RETURNING {COLUMNS}"
+        ),
         vec![now.into(), batch.into()],
     )
     .await?;
     for x in &due {
         enqueue_deletion(
-            &state.db,
+            &txn,
             &x.object_key,
             x.environment_id,
             None,
@@ -410,7 +425,34 @@ pub async fn expire(state: &AppState, batch: i64) -> Result<usize> {
             now,
         )
         .await?;
-        let _ = x.id;
+        export_event(&txn, x, "messaging.export.expired", "EXPIRED", None, now).await?;
     }
+    txn.commit().await?;
     Ok(due.len())
+}
+
+/// Records an export transition (§118 export.ready; ids and codes only).
+async fn export_event<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    e: &ExportRow,
+    event_type: &'static str,
+    status: &str,
+    failure: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    crate::events::outbox::record(
+        db,
+        event_type,
+        "EXPORT",
+        e.id,
+        crate::events::outbox::EventScope {
+            tenant_id: e.tenant_id,
+            application_id: e.application_id,
+            environment_id: e.environment_id,
+        },
+        json!({ "export_id": e.id, "conversation_id": e.conversation_id, "status": status, "failure": failure }),
+        now,
+    )
+    .await?;
+    Ok(())
 }
