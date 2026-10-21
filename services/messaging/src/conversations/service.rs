@@ -101,7 +101,11 @@ impl ConversationRow {
     }
 }
 
-fn view(c: &ConversationRow, members: &[MemberRow]) -> Value {
+/// Members embedded in a conversation view (§30: large groups page through
+/// `GET …/members`; the view carries the first page and the count).
+pub const EMBEDDED_MEMBERS: usize = 100;
+
+fn view(c: &ConversationRow, members: &[MemberRow], member_count: i64) -> Value {
     let profile = c.profile();
     json!({
         "conversationId": c.id,
@@ -124,7 +128,9 @@ fn view(c: &ConversationRow, members: &[MemberRow]) -> Value {
         "version": c.version,
         "createdByPrincipalId": c.created_by_principal_id,
         "ownerPrincipalId": c.owner_principal_id,
-        "members": members.iter().map(|m| json!({ "principalId": m.principal_id, "role": m.role })).collect::<Vec<_>>(),
+        "members": members.iter().take(EMBEDDED_MEMBERS).map(|m| json!({ "principalId": m.principal_id, "role": m.role })).collect::<Vec<_>>(),
+        "memberCount": member_count,
+        "membersTruncated": member_count > EMBEDDED_MEMBERS as i64,
         "createdAt": rfc3339(c.created_at),
         "updatedAt": rfc3339(c.updated_at),
         "stateChangedAt": rfc3339(c.state_changed_at),
@@ -155,14 +161,21 @@ pub async fn load<C: ConnectionTrait>(
     .await?)
 }
 
-async fn members<C: ConnectionTrait>(db: &C, id: Uuid) -> Result<Vec<MemberRow>> {
-    Ok(db::all(
+async fn members<C: ConnectionTrait>(db: &C, id: Uuid) -> Result<(Vec<MemberRow>, i64)> {
+    let rows = db::all(
         db,
         "SELECT principal_id, role FROM messaging_conversation_members WHERE conversation_id = $1 AND state = 'ACTIVE' \
-         ORDER BY CASE role WHEN 'OWNER' THEN 0 WHEN 'ADMIN' THEN 1 ELSE 2 END, principal_id",
+         ORDER BY CASE role WHEN 'OWNER' THEN 0 WHEN 'ADMIN' THEN 1 ELSE 2 END, principal_id LIMIT $2",
+        vec![id.into(), (EMBEDDED_MEMBERS as i64).into()],
+    )
+    .await?;
+    let count = db::scalar_i64(
+        db,
+        "SELECT count(*) FROM messaging_conversation_members WHERE conversation_id = $1 AND state = 'ACTIVE'",
         vec![id.into()],
     )
-    .await?)
+    .await?;
+    Ok((rows, count))
 }
 
 /// Live conversations of the caller's environment with this context reference, locked.
@@ -184,7 +197,8 @@ pub async fn load_by_context<C: ConnectionTrait>(
 }
 
 pub async fn full_view<C: ConnectionTrait>(db: &C, row: &ConversationRow) -> Result<Value> {
-    Ok(view(row, &members(db, row.id).await?))
+    let (members, count) = members(db, row.id).await?;
+    Ok(view(row, &members, count))
 }
 
 // ---------------------------------------------------------------------------------------

@@ -59,6 +59,7 @@ async fn list(
     caller: CustomerCaller,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    axum::extract::Query(q): axum::extract::Query<super::ListQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let acting = match acting_header(&headers)? {
         Some(p) => {
@@ -71,7 +72,7 @@ async fn list(
         }
     };
     Ok(Json(
-        super::list(&state, caller.context(), acting.as_ref(), id).await?,
+        super::list(&state, caller.context(), acting.as_ref(), id, q).await?,
     ))
 }
 

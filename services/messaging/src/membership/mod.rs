@@ -96,11 +96,40 @@ async fn require_admin<C: ConnectionTrait>(
     Ok(())
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ListQuery {
+    /// 1–500 (default 100).
+    #[serde(default)]
+    pub limit: Option<i64>,
+    /// `nextCursor` of the previous page.
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+fn member_cursor(joined_at: chrono::DateTime<chrono::Utc>, principal: Uuid) -> String {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    URL_SAFE_NO_PAD.encode(format!("{}|{principal}", joined_at.timestamp_micros()))
+}
+
+fn parse_member_cursor(c: &str) -> Option<(chrono::DateTime<chrono::Utc>, Uuid)> {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    let raw = String::from_utf8(URL_SAFE_NO_PAD.decode(c).ok()?).ok()?;
+    let (t, p) = raw.split_once('|')?;
+    Some((
+        chrono::DateTime::from_timestamp_micros(t.parse().ok()?)?,
+        Uuid::parse_str(p).ok()?,
+    ))
+}
+
+/// `GET /v1/conversations/{id}/members` — ACTIVE members in join order, keyset-paginated
+/// (§30: large groups never return an unbounded list).
 pub async fn list(
     state: &AppState,
     ctx: &TrustedContext,
     reader: Option<&Acting>,
     conversation_id: Uuid,
+    q: ListQuery,
 ) -> Result<Value> {
     match reader {
         Some(a) => {
@@ -110,14 +139,39 @@ pub async fn list(
             access::in_scope(&state.db, ctx, conversation_id).await?;
         }
     }
+    let limit = q.limit.unwrap_or(100);
+    if !(1..=500).contains(&limit) {
+        return Err(Error::validation("limit must be between 1 and 500"));
+    }
+    let after = match q.cursor.as_deref() {
+        None => None,
+        Some(c) => {
+            Some(parse_member_cursor(c).ok_or(Error::validation("cursor is not a member cursor"))?)
+        }
+    };
     let rows: Vec<MemberViewRow> = db::all(
         &state.db,
         "SELECT principal_id, role, state, joined_at, send_restricted_until, version FROM messaging_conversation_members \
-         WHERE conversation_id = $1 AND state = 'ACTIVE' ORDER BY joined_at, principal_id LIMIT 1000",
-        vec![conversation_id.into()],
+         WHERE conversation_id = $1 AND state = 'ACTIVE' \
+           AND ($2::timestamptz IS NULL OR (joined_at, principal_id) > ($2, $3)) \
+         ORDER BY joined_at, principal_id LIMIT $4",
+        vec![
+            conversation_id.into(),
+            after.map(|a| a.0).into(),
+            after.map(|a| a.1).into(),
+            (limit + 1).into(),
+        ],
     )
     .await?;
-    Ok(json!({ "members": rows.iter().map(member_view).collect::<Vec<_>>() }))
+    let more = rows.len() as i64 > limit;
+    let page = &rows[..rows.len().min(limit as usize)];
+    let next = more
+        .then(|| {
+            page.last()
+                .map(|m| member_cursor(m.joined_at, m.principal_id))
+        })
+        .flatten();
+    Ok(json!({ "members": page.iter().map(member_view).collect::<Vec<_>>(), "nextCursor": next }))
 }
 
 #[derive(Debug, Clone, Deserialize)]

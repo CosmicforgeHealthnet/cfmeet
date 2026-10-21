@@ -581,7 +581,9 @@
           "createdAt",
           "updatedAt",
           "stateChangedAt",
-          "expiresAt"
+          "expiresAt",
+          "memberCount",
+          "membersTruncated"
         ],
         "properties": {
           "conversationId": {
@@ -695,7 +697,7 @@
           },
           "members": {
             "type": "array",
-            "maxItems": 2,
+            "maxItems": 100,
             "items": {
               "type": "object",
               "additionalProperties": false,
@@ -711,11 +713,13 @@
                   "type": "string",
                   "enum": [
                     "OWNER",
+                    "ADMIN",
                     "MEMBER"
                   ]
                 }
               }
-            }
+            },
+            "description": "The first 100 ACTIVE members (owner, administrators, then members); page through GET /v1/conversations/{id}/members for the rest (membersTruncated)."
           },
           "createdAt": {
             "type": "string",
@@ -739,6 +743,13 @@
                 "type": "null"
               }
             ]
+          },
+          "memberCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "membersTruncated": {
+            "type": "boolean"
           }
         },
         "description": "The canonical Conversation aggregate. PRIVATE_E2EE: MLS 1.0 with the server-assigned 32-byte MLS group id; serverCanReadContent is false. MANAGED: no MLS binding; serverCanReadContent is true.",

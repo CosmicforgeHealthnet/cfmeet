@@ -494,3 +494,99 @@ async fn the_policy_snapshot_governs_threads_reactions_and_pins() {
         .await;
     assert_eq!(pin.reason(), "PINS_DISABLED", "{}", pin.text);
 }
+
+/// §30: a large group's members page through `GET …/members` (complete, in join order,
+/// without duplicates) and the conversation view embeds a bounded first page and the count.
+#[tokio::test]
+async fn large_group_membership_is_paginated_and_the_view_is_bounded() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 1).await;
+    let owner = people[0];
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let mut all = std::collections::BTreeSet::from([owner]);
+    for _ in 0..150 {
+        let p = h.principal(&c);
+        let r = h
+            .post(
+                &c,
+                Some(owner),
+                &format!("/v1/conversations/{cid}/members"),
+                json!({ "principalId": p }),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        all.insert(p);
+    }
+    let mut seen = Vec::new();
+    let mut cursor: Option<String> = None;
+    let mut pages = 0;
+    loop {
+        let path = match &cursor {
+            Some(c) => format!("/v1/conversations/{cid}/members?limit=60&cursor={c}"),
+            None => format!("/v1/conversations/{cid}/members?limit=60"),
+        };
+        let page = h.get(&c, Some(owner), &path).await;
+        assert_eq!(page.status, StatusCode::OK, "{}", page.text);
+        conforms(
+            "messaging/common/v1.schema.json#/$defs/MemberPage",
+            &page.json,
+        );
+        pages += 1;
+        for m in page.json["members"].as_array().unwrap() {
+            seen.push(Uuid::parse_str(m["principalId"].as_str().unwrap()).unwrap());
+        }
+        match page.json["nextCursor"].as_str() {
+            Some(next) => cursor = Some(next.to_string()),
+            None => break,
+        }
+    }
+    assert_eq!(pages, 3);
+    assert_eq!(seen.len(), 151, "complete");
+    assert_eq!(
+        seen.iter().collect::<std::collections::BTreeSet<_>>().len(),
+        151,
+        "no duplicates"
+    );
+    assert_eq!(
+        seen.iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>(),
+        all
+    );
+    // (joined_at, principal_id) order; under the fixed test clock every join time ties,
+    // so the keyset must order (and resume) by principal id alone.
+    let mut sorted = seen.clone();
+    sorted.sort();
+    assert_eq!(seen, sorted, "keyset order across equal join times");
+    let bad = h
+        .get(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{cid}/members?limit=501"),
+        )
+        .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    let bad = h
+        .get(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{cid}/members?cursor=bm90LWEtY3Vyc29y"),
+        )
+        .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+
+    let view = h
+        .get(&c, Some(owner), &format!("/v1/conversations/{cid}"))
+        .await;
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/Conversation",
+        &view.json,
+    );
+    assert_eq!(view.json["members"].as_array().unwrap().len(), 100);
+    assert_eq!(view.json["memberCount"], 151);
+    assert_eq!(view.json["membersTruncated"], true);
+    assert_eq!(view.json["members"][0]["role"], "OWNER");
+}

@@ -859,7 +859,7 @@
             "clientToken": []
           }
         ],
-        "description": "ACTIVE members. With an acting member (messages.read) or the administration (conversations.manage); a non-member is NOT_FOUND.",
+        "description": "ACTIVE members. With an acting member (messages.read) or the administration (conversations.manage); a non-member is NOT_FOUND. Keyset-paginated in join order (limit 1-500, default 100; cursor = the previous page's nextCursor).",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -876,6 +876,26 @@
             "required": true,
             "schema": {
               "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,256}$"
             }
           }
         ],
