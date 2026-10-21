@@ -11,7 +11,11 @@
 //!   deleted; a failing deletion retries with backoff and ends DEAD (visible, alerting) —
 //!   never silently dropped;
 //! * orphan reconciliation: objects under `att/` with no attachment record (a crash
-//!   between upload and record, a lost deletion) are queued for deletion.
+//!   between upload and record, a lost deletion) and objects under `drv/` no derivative
+//!   references are queued for deletion;
+//! * storage accounting (ADR 0054): a logically deleted object stays charged to its
+//!   environment while its deletion is PENDING, HELD by a legal hold or DEAD; the bytes are
+//!   released (by a database trigger) only when the object deletion is DONE.
 
 use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, FromQueryResult, TransactionTrait};
@@ -27,7 +31,8 @@ use crate::{
 
 pub const MAX_DELETION_ATTEMPTS: i32 = 12;
 
-/// Queues `object_key` for deletion (idempotent while a request is open).
+/// Queues `object_key` for deletion (idempotent while a request is open). The object
+/// carries no storage charge (a partial upload, an orphan, an export).
 pub async fn enqueue_deletion<C: ConnectionTrait>(
     db: &C,
     object_key: &str,
@@ -36,11 +41,46 @@ pub async fn enqueue_deletion<C: ConnectionTrait>(
     reason: &str,
     now: DateTime<Utc>,
 ) -> Result<()> {
+    enqueue_charged_deletion(
+        db,
+        object_key,
+        environment_id,
+        attachment_id,
+        reason,
+        0,
+        now,
+    )
+    .await
+}
+
+/// Queues `object_key` for deletion with `charged_bytes` of the environment's committed
+/// storage: the trigger of migration 19 adds them on insert and releases them only when
+/// the deletion is DONE. A second request for an open deletion adds its charge to it.
+pub async fn enqueue_charged_deletion<C: ConnectionTrait>(
+    db: &C,
+    object_key: &str,
+    environment_id: Uuid,
+    attachment_id: Option<Uuid>,
+    reason: &str,
+    charged_bytes: i64,
+    now: DateTime<Utc>,
+) -> Result<()> {
     db::exec(
         db,
-        "INSERT INTO messaging_object_deletions (id, object_key, environment_id, attachment_id, reason, next_attempt_at, created_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $6) ON CONFLICT DO NOTHING",
-        vec![Uuid::new_v4().into(), object_key.into(), environment_id.into(), attachment_id.into(), reason.into(), now.into()],
+        "INSERT INTO messaging_object_deletions (id, object_key, environment_id, attachment_id, reason, charged_bytes, \
+           next_attempt_at, created_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $7) \
+         ON CONFLICT (object_key) WHERE status IN ('PENDING', 'HELD') \
+         DO UPDATE SET charged_bytes = messaging_object_deletions.charged_bytes + EXCLUDED.charged_bytes",
+        vec![
+            Uuid::new_v4().into(),
+            object_key.into(),
+            environment_id.into(),
+            attachment_id.into(),
+            reason.into(),
+            charged_bytes.max(0).into(),
+            now.into(),
+        ],
     )
     .await?;
     Ok(())
@@ -50,6 +90,7 @@ pub async fn enqueue_deletion<C: ConnectionTrait>(
 pub struct LifecycleReport {
     pub derivatives_ready: usize,
     pub derivatives_failed: usize,
+    pub derivatives_deferred: usize,
     pub expired_intents: usize,
     pub abandoned: usize,
     pub rescanned: usize,
@@ -117,13 +158,16 @@ pub async fn delete_attachment<C: ConnectionTrait>(
         == 1;
     if ok {
         super::derivatives::delete_for_attachment(db, row, reason, now).await?;
-        super::quota::free(db, row, now).await?;
-        enqueue_deletion(
+        // The object's committed bytes move to its deletion request: still charged until
+        // the object is really removed (a legal hold keeps both).
+        let committed = super::quota::free(db, row, now).await?;
+        enqueue_charged_deletion(
             db,
             &row.object_key,
             row.environment_id,
             Some(row.id),
             reason,
+            committed,
             now,
         )
         .await?;
@@ -327,7 +371,36 @@ pub async fn reconcile_orphans(
     batch: usize,
     report: &mut LifecycleReport,
 ) -> Result<Option<String>> {
-    let listed = match state.storage.list("att/", cursor.as_deref(), batch).await {
+    reconcile_prefix(state, "att/", cursor, batch, report).await
+}
+
+/// The same for derivative objects under `drv/`: an object no derivative references (an
+/// attempt that lost its lease, a crash after the upload whose deletion already ran) and
+/// no open deletion covers.
+pub async fn reconcile_derivative_orphans(
+    state: &AppState,
+    cursor: Option<String>,
+    batch: usize,
+    report: &mut LifecycleReport,
+) -> Result<Option<String>> {
+    reconcile_prefix(
+        state,
+        super::derivatives::OBJECT_PREFIX,
+        cursor,
+        batch,
+        report,
+    )
+    .await
+}
+
+async fn reconcile_prefix(
+    state: &AppState,
+    prefix: &str,
+    cursor: Option<String>,
+    batch: usize,
+    report: &mut LifecycleReport,
+) -> Result<Option<String>> {
+    let listed = match state.storage.list(prefix, cursor.as_deref(), batch).await {
         Ok(l) => l,
         Err(_) => return Ok(cursor),
     };
@@ -335,7 +408,7 @@ pub async fn reconcile_orphans(
     let next = listed.last().map(|o| o.key.clone());
     let keys: Vec<String> = listed
         .iter()
-        // Too young objects may belong to an intent being created right now.
+        // Too young objects may belong to an intent / a render being created right now.
         .filter(|o| {
             o.last_modified
                 .is_none_or(|t| t < now - chrono::Duration::hours(1))
@@ -343,18 +416,25 @@ pub async fn reconcile_orphans(
         .map(|o| o.key.clone())
         .collect();
     if !keys.is_empty() {
-        #[derive(FromQueryResult)]
-        struct K {
-            object_key: String,
-        }
-        let known: Vec<K> = db::all(
-            &state.db,
-            "SELECT object_key FROM messaging_attachments WHERE object_key = ANY($1)",
-            vec![keys.clone().into()],
-        )
-        .await?;
+        let known: Vec<String> = if prefix == "att/" {
+            #[derive(FromQueryResult)]
+            struct K {
+                object_key: String,
+            }
+            db::all::<K, _>(
+                &state.db,
+                "SELECT object_key FROM messaging_attachments WHERE object_key = ANY($1)",
+                vec![keys.clone().into()],
+            )
+            .await?
+            .into_iter()
+            .map(|k| k.object_key)
+            .collect()
+        } else {
+            super::derivatives::referenced_keys(&state.db, &keys).await?
+        };
         for k in keys {
-            if known.iter().any(|x| x.object_key == k) {
+            if known.contains(&k) {
                 continue;
             }
             let env = k
@@ -380,12 +460,14 @@ pub async fn run_once(state: &AppState) -> Result<LifecycleReport> {
     let d = super::derivatives::process_due(state, 20).await?;
     r.derivatives_ready = d.ready;
     r.derivatives_failed = d.failed;
+    r.derivatives_deferred = d.deferred;
     process_deletions(state, 500, &mut r).await?;
     Ok(r)
 }
 
 pub async fn run(state: AppState, interval: std::time::Duration) {
     let mut cursor: Option<String> = None;
+    let mut derivative_cursor: Option<String> = None;
     let mut ticks = 0u64;
     loop {
         match run_once(&state).await {
@@ -409,6 +491,21 @@ pub async fn run(state: AppState, interval: std::time::Duration) {
             match reconcile_orphans(&state, cursor.clone(), 1000, &mut r).await {
                 Ok(c) => cursor = c,
                 Err(e) => tracing::warn!(error = %e, "orphan reconciliation failed"),
+            }
+            match reconcile_derivative_orphans(&state, derivative_cursor.clone(), 1000, &mut r)
+                .await
+            {
+                Ok(c) => derivative_cursor = c,
+                Err(e) => tracing::warn!(error = %e, "derivative orphan reconciliation failed"),
+            }
+        }
+        if ticks.is_multiple_of(60) {
+            match super::quota::audit_all(&state.db).await {
+                Ok(drifted) => crate::metrics::gauge(
+                    "messaging_storage_accounting_drift_environments",
+                    drifted.len() as i64,
+                ),
+                Err(e) => tracing::warn!(error = %e, "storage accounting audit failed"),
             }
         }
         tokio::time::sleep(interval).await;

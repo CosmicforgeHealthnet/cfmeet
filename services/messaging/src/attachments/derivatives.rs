@@ -17,11 +17,18 @@
 //!   no metadata (EXIF location, comments) of the original survives.
 //! * A derivative lives and dies with its attachment: deleting the attachment queues the
 //!   derivative object for deletion too (legal holds apply to both).
+//! * Storage (ADR 0054): a rendered thumbnail's bytes are reserved against the environment
+//!   budget, under the usage row lock, *before* its object is written; the database trigger
+//!   turns the reservation into committed bytes when the thumbnail becomes READY. A
+//!   thumbnail that does not fit is `QUOTA_DEFERRED` (no object written, the original is
+//!   untouched) and is retried later or when the budget changes. Every attempt writes its
+//!   own object key, so a crashed or superseded attempt's object is queued for deletion
+//!   with its reservation as the charge and never overwrites or deletes a live thumbnail.
 
 use std::{io::Cursor, time::Duration};
 
 use chrono::{DateTime, Utc};
-use sea_orm::FromQueryResult;
+use sea_orm::{FromQueryResult, TransactionTrait};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -103,14 +110,22 @@ pub fn render_thumbnail(
     })
 }
 
-/// Deterministic per attachment: a retried render overwrites it, and deleting the
-/// attachment always deletes it (no derivative object can be orphaned).
-pub fn thumbnail_key(environment_id: Uuid, attachment_id: Uuid) -> String {
+/// The object key of one render attempt (unique per lease): a retry never overwrites an
+/// object another attempt may still reference, and a stale attempt's object can be
+/// deleted without touching the READY thumbnail.
+pub fn attempt_key(environment_id: Uuid, attachment_id: Uuid, attempt: Uuid) -> String {
     format!(
-        "drv/{environment_id}/thumbnail/{}.png",
-        attachment_id.simple()
+        "drv/{environment_id}/thumbnail/{}/{}.png",
+        attachment_id.simple(),
+        attempt.simple()
     )
 }
+
+/// Prefix of every derivative object (orphan reconciliation lists it).
+pub const OBJECT_PREFIX: &str = "drv/";
+/// A thumbnail deferred for storage budget is retried after this long (or as soon as the
+/// environment's attachment policy changes).
+pub const QUOTA_RETRY: chrono::Duration = chrono::Duration::minutes(15);
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct DerivativeReport {
@@ -118,9 +133,11 @@ pub struct DerivativeReport {
     pub ready: usize,
     pub failed: usize,
     pub retried: usize,
+    /// Thumbnails not written because the environment's storage budget had no room.
+    pub deferred: usize,
 }
 
-#[derive(FromQueryResult)]
+#[derive(FromQueryResult, Clone)]
 struct Due {
     id: Uuid,
     attachment_id: Uuid,
@@ -173,9 +190,11 @@ pub async fn process_due(state: &AppState, batch: i64) -> Result<DerivativeRepor
     let token = Uuid::new_v4();
     let due: Vec<Due> = db::all(
         &state.db,
-        "WITH due AS (SELECT id FROM messaging_attachment_derivatives WHERE status = 'PENDING' AND next_attempt_at <= $1 \
-             AND (lease_expires_at IS NULL OR lease_expires_at <= $1) ORDER BY next_attempt_at LIMIT $2 FOR UPDATE SKIP LOCKED) \
-         UPDATE messaging_attachment_derivatives d SET lease_token = $3, lease_expires_at = $4 FROM due WHERE d.id = due.id \
+        "WITH due AS (SELECT id FROM messaging_attachment_derivatives WHERE status IN ('PENDING', 'QUOTA_DEFERRED') \
+             AND next_attempt_at <= $1 AND (lease_expires_at IS NULL OR lease_expires_at <= $1) \
+             ORDER BY next_attempt_at LIMIT $2 FOR UPDATE SKIP LOCKED) \
+         UPDATE messaging_attachment_derivatives d SET status = 'PENDING', lease_token = $3, lease_expires_at = $4 \
+           FROM due WHERE d.id = due.id \
          RETURNING d.id, d.attachment_id, d.environment_id, d.kind, d.attempts",
         vec![
             now.into(),
@@ -215,12 +234,29 @@ pub async fn process_due(state: &AppState, batch: i64) -> Result<DerivativeRepor
             }
             continue;
         }
+        // An environment already at its budget gets no render at all (saves the decode).
+        if budget_exhausted(state, d.environment_id).await? {
+            if defer(state, &d, token).await? {
+                report.deferred += 1;
+            }
+            continue;
+        }
         match render_one(state, d.attachment_id).await {
             Ok(t) => {
-                let key = thumbnail_key(d.environment_id, d.attachment_id);
+                let key = attempt_key(d.environment_id, d.attachment_id, token);
                 let digest = hex::encode(Sha256::digest(&t.png));
                 let size = t.png.len() as i64;
+                match reserve(state, &d, token, size, &key).await? {
+                    Reservation::Granted => {}
+                    Reservation::Deferred => {
+                        report.deferred += 1;
+                        continue;
+                    }
+                    Reservation::Lost => continue,
+                }
                 if let Err(e) = state.storage.put(&key, t.png, "image/png").await {
+                    // A failed PUT has an unknown outcome: the reservation stays with this
+                    // attempt; the retry or the final failure moves it to the deletion queue.
                     retry_or_fail(
                         state,
                         &d,
@@ -232,16 +268,18 @@ pub async fn process_due(state: &AppState, batch: i64) -> Result<DerivativeRepor
                     .await?;
                     continue;
                 }
+                // The trigger turns this attempt's reservation into committed bytes.
                 let updated = db::exec(
                     &state.db,
-                    "UPDATE messaging_attachment_derivatives SET status = 'READY', object_key = $3, media_type = 'image/png', \
+                    "UPDATE messaging_attachment_derivatives SET status = 'READY', object_key = pending_object_key, \
+                       pending_object_key = NULL, reserved_bytes = 0, media_type = 'image/png', \
                        width = $4, height = $5, source_width = $6, source_height = $7, bytes = $8, sha256 = $9, error_code = NULL, \
                        attempts = attempts + 1, lease_token = NULL, lease_expires_at = NULL, completed_at = $10 \
-                     WHERE id = $1 AND lease_token = $2 AND status = 'PENDING'",
+                     WHERE id = $1 AND lease_token = $2 AND status = 'PENDING' AND pending_object_key = $3",
                     vec![
                         d.id.into(),
                         token.into(),
-                        key.into(),
+                        key.clone().into(),
                         (t.width as i32).into(),
                         (t.height as i32).into(),
                         (t.source_width as i32).into(),
@@ -253,11 +291,19 @@ pub async fn process_due(state: &AppState, batch: i64) -> Result<DerivativeRepor
                 )
                 .await?;
                 if updated == 0 {
-                    // The attachment was deleted while rendering: remove what was written.
-                    let _ = state
-                        .storage
-                        .delete(&thumbnail_key(d.environment_id, d.attachment_id))
-                        .await;
+                    // The attachment was deleted, or another worker took the lease over,
+                    // while this attempt rendered. Its object is referenced by nothing:
+                    // whoever ended the attempt moved its reservation to the deletion queue;
+                    // queue the object again in case that deletion already ran.
+                    super::lifecycle::enqueue_deletion(
+                        &state.db,
+                        &key,
+                        d.environment_id,
+                        Some(d.attachment_id),
+                        "DERIVATIVE_SUPERSEDED",
+                        state.now(),
+                    )
+                    .await?;
                     continue;
                 }
                 report.ready += 1;
@@ -276,6 +322,237 @@ pub async fn process_due(state: &AppState, batch: i64) -> Result<DerivativeRepor
         }
     }
     Ok(report)
+}
+
+/// The environment's storage budget: the application policy's, bounded by the
+/// deployment's `MESSAGING_STORAGE_BUDGET_BYTES` (the rule of [`super::quota::reserve`]).
+async fn budget(state: &AppState, environment_id: Uuid) -> Result<Option<i64>> {
+    let policy = crate::conversations::policy::current(&state.db, environment_id).await?;
+    Ok(super::quota::effective_budget(
+        &policy.attachments,
+        state.attachments.storage_budget_bytes,
+    ))
+}
+
+/// Advisory pre-check (no lock): the environment has no room left at all.
+async fn budget_exhausted(state: &AppState, environment_id: Uuid) -> Result<bool> {
+    let Some(b) = budget(state, environment_id).await? else {
+        return Ok(false);
+    };
+    let used = db::scalar_i64(
+        &state.db,
+        "SELECT COALESCE((SELECT committed_bytes + reserved_bytes FROM messaging_storage_usage WHERE environment_id = $1), 0)",
+        vec![environment_id.into()],
+    )
+    .await?;
+    Ok(used >= b)
+}
+
+enum Reservation {
+    Granted,
+    Deferred,
+    /// The attachment was deleted or another worker owns the derivative now.
+    Lost,
+}
+
+#[derive(FromQueryResult)]
+struct Attempt {
+    reserved_bytes: i64,
+    pending_object_key: Option<String>,
+}
+
+/// Locks this worker's derivative row (only while it still holds the lease).
+async fn locked_attempt<C: sea_orm::ConnectionTrait>(
+    txn: &C,
+    d: &Due,
+    token: Uuid,
+) -> Result<Option<Attempt>> {
+    Ok(db::one(
+        txn,
+        "SELECT reserved_bytes, pending_object_key FROM messaging_attachment_derivatives \
+          WHERE id = $1 AND lease_token = $2 AND status = 'PENDING' FOR UPDATE",
+        vec![d.id.into(), token.into()],
+    )
+    .await?)
+}
+
+/// A previous attempt's object (a crash after its upload, or a lost lease) may exist: it
+/// is queued for deletion carrying its reservation as the charge, so it stays accounted
+/// until it is really gone. The caller clears the row's reservation in the same transaction.
+async fn retire_attempt<C: sea_orm::ConnectionTrait>(
+    txn: &C,
+    d: &Due,
+    attempt: &Attempt,
+    reason: &str,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    if let Some(key) = &attempt.pending_object_key {
+        super::lifecycle::enqueue_charged_deletion(
+            txn,
+            key,
+            d.environment_id,
+            Some(d.attachment_id),
+            reason,
+            attempt.reserved_bytes,
+            now,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// Reserves `size` bytes for this attempt under the environment's usage row lock (the
+/// same lock upload intents take, so concurrent workers and uploads cannot overshoot).
+async fn reserve(
+    state: &AppState,
+    d: &Due,
+    token: Uuid,
+    size: i64,
+    key: &str,
+) -> Result<Reservation> {
+    let budget = budget(state, d.environment_id).await?;
+    let st = state.clone();
+    let d = d.clone();
+    let key = key.to_string();
+    state
+        .db
+        .transaction::<_, Reservation, Error>(move |txn| {
+            Box::pin(async move {
+                let now = st.now();
+                #[derive(FromQueryResult)]
+                struct Usage {
+                    committed_bytes: i64,
+                    reserved_bytes: i64,
+                }
+                // Lock order: the derivative row, then the usage row (the order of the
+                // accounting triggers and of attachment deletion: no deadlock).
+                let Some(attempt) = locked_attempt(txn, &d, token).await? else {
+                    return Ok(Reservation::Lost);
+                };
+                let usage: Usage = db::one(
+                    txn,
+                    "SELECT committed_bytes, reserved_bytes FROM messaging_storage_usage WHERE environment_id = $1 FOR UPDATE",
+                    vec![d.environment_id.into()],
+                )
+                .await?
+                .ok_or(Error::code(ErrorCode::InternalError))?;
+                // A previous attempt's reservation is still part of `reserved_bytes`: its
+                // object may exist, so it is not subtracted (it moves to the deletion queue).
+                let fits = budget
+                    .is_none_or(|b| usage.committed_bytes + usage.reserved_bytes + size <= b);
+                retire_attempt(txn, &d, &attempt, "DERIVATIVE_RETRIED", now).await?;
+                if !fits {
+                    mark_deferred(txn, &d, token, now).await?;
+                    return Ok(Reservation::Deferred);
+                }
+                db::exec(
+                    txn,
+                    "UPDATE messaging_attachment_derivatives SET reserved_bytes = $3, pending_object_key = $4 \
+                     WHERE id = $1 AND lease_token = $2",
+                    vec![d.id.into(), token.into(), size.into(), key.into()],
+                )
+                .await?;
+                Ok(Reservation::Granted)
+            })
+        })
+        .await
+        .map_err(Error::from)
+}
+
+async fn mark_deferred<C: sea_orm::ConnectionTrait>(
+    txn: &C,
+    d: &Due,
+    token: Uuid,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    db::exec(
+        txn,
+        "UPDATE messaging_attachment_derivatives SET status = 'QUOTA_DEFERRED', error_code = 'STORAGE_BUDGET', \
+           reserved_bytes = 0, pending_object_key = NULL, next_attempt_at = $3, lease_token = NULL, lease_expires_at = NULL \
+         WHERE id = $1 AND lease_token = $2",
+        vec![d.id.into(), token.into(), (now + QUOTA_RETRY).into()],
+    )
+    .await?;
+    crate::metrics::inc(
+        "messaging_attachment_derivatives_total",
+        &[("outcome", "quota_deferred")],
+    );
+    Ok(())
+}
+
+/// Defers this derivative for storage budget (retiring any previous attempt's object).
+async fn defer(state: &AppState, d: &Due, token: Uuid) -> Result<bool> {
+    let st = state.clone();
+    let d = d.clone();
+    state
+        .db
+        .transaction::<_, bool, Error>(move |txn| {
+            Box::pin(async move {
+                let now = st.now();
+                let Some(attempt) = locked_attempt(txn, &d, token).await? else {
+                    return Ok(false);
+                };
+                retire_attempt(txn, &d, &attempt, "DERIVATIVE_DEFERRED", now).await?;
+                mark_deferred(txn, &d, token, now).await?;
+                Ok(true)
+            })
+        })
+        .await
+        .map_err(Error::from)
+}
+
+/// Makes the environment's QUOTA_DEFERRED thumbnails due now (its budget changed).
+pub async fn requeue_quota_deferred<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    environment_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<u64> {
+    Ok(db::exec(
+        db,
+        "UPDATE messaging_attachment_derivatives SET next_attempt_at = $2 \
+         WHERE environment_id = $1 AND status = 'QUOTA_DEFERRED' AND next_attempt_at > $2",
+        vec![environment_id.into(), now.into()],
+    )
+    .await?)
+}
+
+/// Re-renders a READY thumbnail (an operator action, e.g. after a rendering change). The
+/// current object stays charged in the deletion queue until it is removed; the new render
+/// is reserved and charged on its own, so usage never drops below what is stored.
+pub async fn regenerate_thumbnail<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    attachment_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<bool> {
+    #[derive(FromQueryResult)]
+    struct Old {
+        environment_id: Uuid,
+        object_key: String,
+        bytes: i64,
+    }
+    let old: Option<Old> = db::one(
+        db,
+        "WITH old AS (SELECT id, environment_id, object_key, bytes FROM messaging_attachment_derivatives \
+                       WHERE attachment_id = $1 AND kind = 'THUMBNAIL' AND status = 'READY' FOR UPDATE) \
+         UPDATE messaging_attachment_derivatives d SET status = 'PENDING', object_key = NULL, media_type = NULL, width = NULL, \
+           height = NULL, source_width = NULL, source_height = NULL, bytes = NULL, sha256 = NULL, error_code = NULL, attempts = 0, \
+           next_attempt_at = $2, completed_at = NULL \
+           FROM old WHERE d.id = old.id RETURNING old.environment_id, old.object_key, old.bytes",
+        vec![attachment_id.into(), now.into()],
+    )
+    .await?;
+    let Some(old) = old else { return Ok(false) };
+    super::lifecycle::enqueue_charged_deletion(
+        db,
+        &old.object_key,
+        old.environment_id,
+        Some(attachment_id),
+        "DERIVATIVE_REPLACED",
+        old.bytes,
+        now,
+    )
+    .await?;
+    Ok(true)
 }
 
 enum RenderError {
@@ -399,13 +676,32 @@ async fn inspect_one(
 }
 
 async fn fail(state: &AppState, d: &Due, token: Uuid, code: &str) -> Result<()> {
-    db::exec(
-        &state.db,
-        "UPDATE messaging_attachment_derivatives SET status = 'FAILED', error_code = $3, attempts = attempts + 1, \
-           lease_token = NULL, lease_expires_at = NULL, completed_at = $4 WHERE id = $1 AND lease_token = $2",
-        vec![d.id.into(), token.into(), code.into(), state.now().into()],
-    )
-    .await?;
+    let st = state.clone();
+    let d = d.clone();
+    let code = code.to_string();
+    state
+        .db
+        .transaction::<_, (), Error>(move |txn| {
+            Box::pin(async move {
+                let now = st.now();
+                let Some(attempt) = locked_attempt(txn, &d, token).await? else {
+                    return Ok(());
+                };
+                // A failed attempt may have left an object: it is deleted, still charged.
+                retire_attempt(txn, &d, &attempt, "DERIVATIVE_FAILED", now).await?;
+                db::exec(
+                    txn,
+                    "UPDATE messaging_attachment_derivatives SET status = 'FAILED', error_code = $3, attempts = attempts + 1, \
+                       reserved_bytes = 0, pending_object_key = NULL, lease_token = NULL, lease_expires_at = NULL, completed_at = $4 \
+                     WHERE id = $1 AND lease_token = $2",
+                    vec![d.id.into(), token.into(), code.into(), now.into()],
+                )
+                .await?;
+                Ok(())
+            })
+        })
+        .await
+        .map_err(Error::from)?;
     crate::metrics::inc(
         "messaging_attachment_derivatives_total",
         &[("outcome", "failed")],
@@ -544,7 +840,9 @@ pub async fn thumbnail_grant(
 }
 
 /// Queues the deletion of an attachment's derivative objects (inside the attachment's
-/// deletion transaction); the deletion worker honours legal holds on the attachment.
+/// deletion transaction); the deletion worker honours legal holds on the attachment. The
+/// derivative's bytes (a READY thumbnail, or an attempt's reservation) move with each
+/// object into the deletion queue and stay charged until the object is really removed.
 pub async fn delete_for_attachment<C: sea_orm::ConnectionTrait>(
     db: &C,
     row: &AttachmentRow,
@@ -558,30 +856,69 @@ pub async fn delete_for_attachment<C: sea_orm::ConnectionTrait>(
     struct Old {
         previous: String,
         kind: String,
+        object_key: Option<String>,
+        bytes: Option<i64>,
+        pending_object_key: Option<String>,
+        reserved_bytes: i64,
     }
     let ended: Vec<Old> = db::all(
         db,
-        "WITH old AS (SELECT id, status FROM messaging_attachment_derivatives WHERE attachment_id = $1 AND status <> 'DELETED' FOR UPDATE) \
-         UPDATE messaging_attachment_derivatives d SET status = 'DELETED', object_key = NULL, metadata = NULL, completed_at = $2 \
-           FROM old WHERE d.id = old.id RETURNING old.status AS previous, d.kind",
+        "WITH old AS (SELECT id, status, object_key, bytes, pending_object_key, reserved_bytes FROM messaging_attachment_derivatives \
+                       WHERE attachment_id = $1 AND status <> 'DELETED' FOR UPDATE) \
+         UPDATE messaging_attachment_derivatives d SET status = 'DELETED', object_key = NULL, metadata = NULL, \
+           pending_object_key = NULL, reserved_bytes = 0, lease_token = NULL, lease_expires_at = NULL, completed_at = $2 \
+           FROM old WHERE d.id = old.id \
+         RETURNING old.status AS previous, d.kind, old.object_key, old.bytes, old.pending_object_key, old.reserved_bytes",
         vec![row.id.into(), now.into()],
     )
     .await?;
-    // Only a produced thumbnail has an object to delete (an in-flight render notices the
-    // deletion and removes its own output: `process_due`).
-    if ended
-        .iter()
-        .any(|o| o.previous == "READY" && o.kind == "THUMBNAIL")
-    {
-        super::lifecycle::enqueue_deletion(
-            db,
-            &thumbnail_key(row.environment_id, row.id),
-            row.environment_id,
-            Some(row.id),
-            reason,
-            now,
-        )
-        .await?;
+    for o in ended.iter().filter(|o| o.kind == "THUMBNAIL") {
+        if let (true, Some(key)) = (o.previous == "READY", &o.object_key) {
+            super::lifecycle::enqueue_charged_deletion(
+                db,
+                key,
+                row.environment_id,
+                Some(row.id),
+                reason,
+                o.bytes.unwrap_or(0),
+                now,
+            )
+            .await?;
+        }
+        // An in-flight or crashed attempt (an in-flight render also notices the deletion
+        // and queues its own output again: `process_due`).
+        if let Some(key) = &o.pending_object_key {
+            super::lifecycle::enqueue_charged_deletion(
+                db,
+                key,
+                row.environment_id,
+                Some(row.id),
+                reason,
+                o.reserved_bytes,
+                now,
+            )
+            .await?;
+        }
     }
     Ok(())
+}
+
+/// Every object key a live derivative references (orphan reconciliation).
+pub async fn referenced_keys<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    keys: &[String],
+) -> Result<Vec<String>> {
+    #[derive(FromQueryResult)]
+    struct K {
+        k: String,
+    }
+    let rows: Vec<K> = db::all(
+        db,
+        "SELECT object_key AS k FROM messaging_attachment_derivatives WHERE object_key = ANY($1) \
+         UNION SELECT pending_object_key AS k FROM messaging_attachment_derivatives WHERE pending_object_key = ANY($1) \
+         UNION SELECT object_key AS k FROM messaging_object_deletions WHERE object_key = ANY($1) AND status IN ('PENDING', 'HELD', 'DEAD')",
+        vec![keys.to_vec().into()],
+    )
+    .await?;
+    Ok(rows.into_iter().map(|r| r.k).collect())
 }

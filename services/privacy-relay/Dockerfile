@@ -17,6 +17,10 @@ WORKDIR /src
 COPY packages/service-auth packages/service-auth
 COPY services/privacy-relay services/privacy-relay
 WORKDIR /src/services/privacy-relay
+# Registry/CDN connectivity can be transient on fresh CI builders. Cargo's default
+# fetch retry budget was exhausted in the Privacy Relay image-security job.
+# Increase network retries/timeouts; never relax --locked or security checks.
+ENV CARGO_NET_RETRY=10 CARGO_HTTP_TIMEOUT=180
 RUN cargo build --release --locked -p privacy-relay-migration --bin privacy-relay-migration \
  && cargo build --release --locked -p privacy-relay --bin privacy-relay --bin privacy-relay-admin
 

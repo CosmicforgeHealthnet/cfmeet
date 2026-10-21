@@ -88,6 +88,7 @@ export default function ProfileMenu({
           </button>
 
           <button
+            data-testid="logout-open"
             onClick={() => {
               setShowProfileMenu(false);
               setShowLogoutDialog(true);
@@ -118,6 +119,7 @@ export default function ProfileMenu({
             </Button>
             <Button
               variant="destructive"
+              data-testid="logout-confirm"
               onClick={handleLogout}
               loading={logout.isPending}
             >
@@ -128,6 +130,7 @@ export default function ProfileMenu({
       </Dialog>
 
       <button
+        data-testid="profile-menu-toggle"
         onClick={() => setShowProfileMenu(!showProfileMenu)}
         className={cn(
           "w-full flex items-center gap-3 p-2 rounded-xl transition-all hover:bg-card hover:shadow-sm border border-transparent hover:border-border group",

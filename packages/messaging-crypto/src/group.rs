@@ -168,6 +168,14 @@ impl Device {
         })
     }
 
+    /// The device's state of a group it created or joined earlier, read back from its
+    /// own storage (after [`Device::import_state`]). `None`: the device has no such group.
+    pub fn load_group(&self, group_id: &[u8]) -> Result<Option<ClientGroup>, GroupError> {
+        MlsGroup::load(self.provider().storage(), &GroupId::from_slice(group_id))
+            .map(|g| g.map(|group| ClientGroup { group }))
+            .map_err(|_| GroupError::Malformed)
+    }
+
     /// Joins a group from a Welcome addressed to one of this device's KeyPackages.
     pub fn join(&self, welcome: &[u8]) -> Result<ClientGroup, GroupError> {
         let message =
@@ -175,15 +183,15 @@ impl Device {
         let MlsMessageBodyIn::Welcome(welcome) = message.extract() else {
             return Err(GroupError::Malformed);
         };
-        let group = StagedWelcome::new_from_welcome(
-            self.provider(),
-            &MlsGroupJoinConfig::default(),
-            welcome,
-            None,
-        )
-        .map_err(|_| GroupError::Refused)?
-        .into_group(self.provider())
-        .map_err(|_| GroupError::Refused)?;
+        // The same ratchet-tree policy as `create_group`: Welcomes this member sends later
+        // must carry the tree, or the devices it adds can never join.
+        let config = MlsGroupJoinConfig::builder()
+            .use_ratchet_tree_extension(true)
+            .build();
+        let group = StagedWelcome::new_from_welcome(self.provider(), &config, welcome, None)
+            .map_err(|_| GroupError::Refused)?
+            .into_group(self.provider())
+            .map_err(|_| GroupError::Refused)?;
         Ok(ClientGroup { group })
     }
 

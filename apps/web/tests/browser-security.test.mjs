@@ -151,3 +151,53 @@ test("injected script, untyped DOM sinks, eval and framing are refused", async (
   await host.close();
   await page.close();
 });
+
+test("client navigation loads route chunks under Trusted Types; the default policy admits nothing else", async () => {
+  const { page, errors } = await open("/login");
+  const consoleErrors = [];
+  page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
+  await page.evaluate(() => {
+    window.__spa = "still-the-same-document";
+  });
+  await page.click('a[href="/signup"]');
+  await page.waitForFunction(() => window.location.pathname === "/signup", null, { timeout: 30000 });
+  await page.waitForTimeout(1000);
+  assert.equal(await page.evaluate(() => window.__spa ?? null), "still-the-same-document", "client-side navigation, no full reload");
+  assert.deepEqual(await page.evaluate(() => window.__violations), [], "no CSP / Trusted Types violation");
+  assert.deepEqual(consoleErrors.filter((e) => /Trusted|RSC payload/i.test(e)), [], "no Trusted Types fallback");
+  const r = await page.evaluate(() => {
+    const out = {};
+    const tryUrl = (name, url) => {
+      try {
+        document.createElement("script").src = url;
+        out[name] = "assigned";
+      } catch (e) {
+        out[name] = e.name;
+      }
+    };
+    tryUrl("crossOrigin", "https://evil.example/x.js");
+    tryUrl("dataUrl", "data:text/javascript,alert(1)");
+    tryUrl("outsideStatic", "/api/x.js");
+    tryUrl("traversal", "/_next/static/../../evil.js");
+    tryUrl("notJs", "/_next/static/chunks/x.css");
+    tryUrl("ownChunk", "/_next/static/chunks/route.js");
+    try {
+      document.body.innerHTML += "<b>x</b>";
+      out.html = "assigned";
+    } catch (e) {
+      out.html = e.name;
+    }
+    return out;
+  });
+  assert.deepEqual(r, {
+    crossOrigin: "TypeError",
+    dataUrl: "TypeError",
+    outsideStatic: "TypeError",
+    traversal: "TypeError",
+    notJs: "TypeError",
+    ownChunk: "assigned",
+    html: "TypeError",
+  });
+  assert.deepEqual(errors.filter((e) => /Trusted/i.test(e)), []);
+  await page.close();
+});

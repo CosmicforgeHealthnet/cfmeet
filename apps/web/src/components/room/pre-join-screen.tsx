@@ -217,11 +217,12 @@ export default function PreJoinScreen({ roomId, onJoin }: PreJoinScreenProps) {
     if (!v2Response.rtc) {
       return null;
     }
+    const rtcCredential = v2Response.rtc.credential;
     return {
       meeting_id: v2Response.conference.meetingSpaceId,
       participant_id: v2Response.participant.id,
       role: v2Response.participant.role.toLowerCase() as "host" | "participant" | "viewer",
-      join_token: v2Response.rtc.credential,
+      join_token: rtcCredential,
       livekit_url: v2Response.rtc.url,
       room_name: v2Response.conference.id,
     };

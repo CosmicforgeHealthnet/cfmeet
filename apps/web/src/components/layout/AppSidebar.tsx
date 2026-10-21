@@ -8,6 +8,7 @@ import {
   Home,
   Video,
   Calendar,
+  MessageSquare,
   Code2,
   Settings,
   ChevronRight,
@@ -20,6 +21,7 @@ const menu = [
   { label: "Dashboard", icon: Home, href: "/dashboard" },
   { label: "Meetings", icon: Video, href: "/dashboard/meetings" },
   { label: "Schedule", icon: Calendar, href: "/dashboard/schedule" },
+  { label: "Messages", icon: MessageSquare, href: "/dashboard/messages" },
   { label: "Developers", icon: Code2, href: "/dashboard/developers" },
   { label: "Settings", icon: Settings, href: "/dashboard/settings" },
 ];

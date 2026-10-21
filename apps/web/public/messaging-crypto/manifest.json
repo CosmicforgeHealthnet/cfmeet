@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "description": "CF Meet Messaging browser crypto core (packages/messaging-crypto/wasm). Rebuild and verify with scripts/messaging/build-web-crypto.sh --check.",
+  "toolchain": "rustc 1.97.0, wasm-bindgen 0.2.129",
+  "files": {
+    "crypto-worker.da221a6ccdc31685.js": {
+      "role": "worker",
+      "integrity": "sha384-FovefD04IK6sFdYdzE0AVPzImajbMACTcsWVkaVcfPYubZJeaeljuSWKdaLT4BBX",
+      "bytes": 28162
+    },
+    "cf-messaging-crypto.44076f63c6687d75.js": {
+      "role": "glue",
+      "integrity": "sha384-AIbMMMmnkqv1CfDjaViJGCZ94ON0/qPQex0VP9dbn/u86OPkINuSdkP+uij2IQz8",
+      "bytes": 47922
+    },
+    "cf-messaging-crypto.b445c0e39ea4c159.wasm": {
+      "role": "wasm",
+      "integrity": "sha384-8Oj3DcxLpVNcMfEbPjYSbgmatT8jZrS9LWKLabinx+vOLIIplXTnZCORgEU5YV1G",
+      "bytes": 1627200
+    }
+  }
+}

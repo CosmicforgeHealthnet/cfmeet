@@ -114,6 +114,28 @@ pub trait MessagingGateway: Send + Sync {
         body: Option<&Value>,
     ) -> Result<(u16, Value), GatewayError>;
 
+    /// [`call_raw`](Self::call_raw) that also forwards the client's allowlisted request
+    /// headers (`Idempotency-Key`). Adapters without header support relay without them.
+    #[allow(clippy::too_many_arguments)]
+    async fn call_raw_with_headers(
+        &self,
+        peer: Peer,
+        acting: Option<Acting>,
+        method: Method,
+        path: &str,
+        query: &[(&str, &str)],
+        headers: &[(&str, &str)],
+        body: Option<&Value>,
+    ) -> Result<(u16, Value), GatewayError> {
+        let _ = headers;
+        self.call_raw(peer, acting, method, path, query, body).await
+    }
+
+    /// CF Meet's communication scope (tenant, application, environment), when known.
+    fn scope_ids(&self) -> Option<(Uuid, Uuid, Uuid)> {
+        None
+    }
+
     /// [`call_raw`](Self::call_raw) that maps non-2xx answers to [`GatewayError`].
     async fn call(
         &self,
@@ -142,6 +164,7 @@ pub struct ServiceAuthGateway {
     client: InternalServiceClient,
     scope: DelegatedPlatformContext,
     environment_id: Uuid,
+    ids: (Uuid, Uuid, Uuid),
 }
 
 impl ServiceAuthGateway {
@@ -179,23 +202,19 @@ impl ServiceAuthGateway {
                 s.service_account_id,
             ),
             environment_id: s.environment_id,
+            ids: (s.tenant_id, s.application_id, s.environment_id),
         })
     }
-}
 
-#[async_trait]
-impl MessagingGateway for ServiceAuthGateway {
-    fn environment_id(&self) -> Uuid {
-        self.environment_id
-    }
-
-    async fn call_raw(
+    #[allow(clippy::too_many_arguments)]
+    async fn exchange(
         &self,
         peer: Peer,
         acting: Option<Acting>,
         method: Method,
         path: &str,
         query: &[(&str, &str)],
+        headers: &[(&str, &str)],
         body: Option<&Value>,
     ) -> Result<(u16, Value), GatewayError> {
         let audience = match peer {
@@ -211,10 +230,15 @@ impl MessagingGateway for ServiceAuthGateway {
         };
         let request = OutboundServiceRequest::new_operation(audience).with_delegated_context(scope);
         let started = std::time::Instant::now();
-        let result = self
-            .client
-            .exchange_json_query(&request, method, path, query, body)
-            .await;
+        let result = if headers.is_empty() {
+            self.client
+                .exchange_json_query(&request, method, path, query, body)
+                .await
+        } else {
+            self.client
+                .exchange_json_query_with_headers(&request, method, path, query, headers, body)
+                .await
+        };
         let peer_label = match peer {
             Peer::PlatformAccess => "platform-access",
             Peer::Messaging => "messaging",
@@ -226,6 +250,7 @@ impl MessagingGateway for ServiceAuthGateway {
                     InternalCallError::Timeout { .. } => "timeout",
                     InternalCallError::Connect { .. } => "connect",
                     InternalCallError::ResponseTooLarge { .. } => "response too large",
+                    InternalCallError::InvalidHeader => "invalid forwarded header",
                     _ => "transport",
                 };
                 crate::services::ops_metrics::unified_messaging_call(peer_label, why);
@@ -261,5 +286,43 @@ impl MessagingGateway for ServiceAuthGateway {
                 .map_err(|_| GatewayError::Unavailable("invalid response body"))?
         };
         Ok((status, value))
+    }
+}
+
+#[async_trait]
+impl MessagingGateway for ServiceAuthGateway {
+    fn environment_id(&self) -> Uuid {
+        self.environment_id
+    }
+
+    fn scope_ids(&self) -> Option<(Uuid, Uuid, Uuid)> {
+        Some(self.ids)
+    }
+
+    async fn call_raw(
+        &self,
+        peer: Peer,
+        acting: Option<Acting>,
+        method: Method,
+        path: &str,
+        query: &[(&str, &str)],
+        body: Option<&Value>,
+    ) -> Result<(u16, Value), GatewayError> {
+        self.exchange(peer, acting, method, path, query, &[], body)
+            .await
+    }
+
+    async fn call_raw_with_headers(
+        &self,
+        peer: Peer,
+        acting: Option<Acting>,
+        method: Method,
+        path: &str,
+        query: &[(&str, &str)],
+        headers: &[(&str, &str)],
+        body: Option<&Value>,
+    ) -> Result<(u16, Value), GatewayError> {
+        self.exchange(peer, acting, method, path, query, headers, body)
+            .await
     }
 }

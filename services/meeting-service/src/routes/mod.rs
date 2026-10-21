@@ -9,7 +9,44 @@ pub mod v2;
 pub mod webhooks;
 
 use crate::{handlers, middleware::legacy_write::legacy_write_guard, state::AppState};
-use axum::{routing::get, Router};
+use axum::{
+    http::{header, HeaderName, HeaderValue, Method},
+    routing::get,
+    Router,
+};
+use tower_http::cors::CorsLayer;
+
+/// Browser access to the API: the configured frontend origins only (exact matches), the
+/// methods the API uses and the request headers the CF Meet clients send —
+/// `Idempotency-Key` included (Messaging conversation creation through the client relay).
+pub fn cors_layer(frontend_urls: &[String]) -> CorsLayer {
+    let allowed_origins: Vec<HeaderValue> = frontend_urls
+        .iter()
+        .filter_map(|url| url.parse().ok())
+        .collect();
+    CorsLayer::new()
+        .allow_origin(allowed_origins)
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+            Method::PATCH,
+        ])
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            header::ACCEPT,
+            header::ORIGIN,
+            HeaderName::from_static("x-participant-token"),
+            HeaderName::from_static("x-request-id"),
+            HeaderName::from_static("x-client-kind"),
+            HeaderName::from_static("idempotency-key"),
+        ])
+        .expose_headers([HeaderName::from_static("x-request-id")])
+        .allow_credentials(true)
+}
 
 fn legacy_writes(router: Router<AppState>, state: &AppState) -> Router<AppState> {
     router.layer(axum::middleware::from_fn_with_state(

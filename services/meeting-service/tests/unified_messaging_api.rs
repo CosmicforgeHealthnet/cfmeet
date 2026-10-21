@@ -26,6 +26,8 @@ struct Call {
     acting: Option<Acting>,
     method: Method,
     path: String,
+    query: Vec<(String, String)>,
+    headers: Vec<(String, String)>,
     body: Option<Value>,
 }
 
@@ -59,23 +61,48 @@ impl MessagingGateway for Scripted {
         self.env
     }
 
+    fn scope_ids(&self) -> Option<(Uuid, Uuid, Uuid)> {
+        Some((Uuid::nil(), Uuid::max(), self.env))
+    }
+
     async fn call_raw(
         &self,
         peer: Peer,
         acting: Option<Acting>,
         method: Method,
         path: &str,
-        _query: &[(&str, &str)],
+        query: &[(&str, &str)],
+        body: Option<&Value>,
+    ) -> Result<(u16, Value), GatewayError> {
+        self.call_raw_with_headers(peer, acting, method, path, query, &[], body)
+            .await
+    }
+
+    async fn call_raw_with_headers(
+        &self,
+        peer: Peer,
+        acting: Option<Acting>,
+        method: Method,
+        path: &str,
+        query: &[(&str, &str)],
+        headers: &[(&str, &str)],
         body: Option<&Value>,
     ) -> Result<(u16, Value), GatewayError> {
         if *self.down.lock().unwrap() {
             return Err(GatewayError::Unavailable("connect"));
         }
+        let own = |v: &[(&str, &str)]| -> Vec<(String, String)> {
+            v.iter()
+                .map(|(a, b)| (a.to_string(), b.to_string()))
+                .collect()
+        };
         self.calls.lock().unwrap().push(Call {
             peer,
             acting,
             method: method.clone(),
             path: path.to_string(),
+            query: own(query),
+            headers: own(headers),
             body: body.cloned(),
         });
         Ok(match (peer, path) {
@@ -102,6 +129,10 @@ impl MessagingGateway for Scripted {
             (Peer::Messaging, "/internal/v1/meeting-conversations") => (
                 201,
                 json!({ "created": true, "conversation": { "conversationId": Uuid::new_v4() } }),
+            ),
+            (Peer::Messaging, p) if p.starts_with("/internal/v1/delegated/v1/conversations") => (
+                if method == Method::POST { 201 } else { 200 },
+                json!({ "relayed": p }),
             ),
             (Peer::Messaging, p) if p.ends_with("/messages") => (200, json!({ "messages": [] })),
             _ => (200, json!({ "applied": true })),
@@ -216,9 +247,9 @@ async fn the_identity_bridge_acts_only_for_verified_cf_meet_accounts() {
             c.path
         );
     }
-    assert!(relayed
-        .iter()
-        .any(|c| c.path.ends_with("/revoke") && c.body.is_none()));
+    // Messaging requires a revocation reason: USER_REQUESTED unless the user names one.
+    assert!(relayed.iter().any(|c| c.path.ends_with("/revoke")
+        && c.body.as_ref() == Some(&json!({ "reason": "USER_REQUESTED" }))));
     // A guest (no account) and an anonymous caller are refused before any peer call.
     let (_, cid, guests) = collab::meeting(&app, collab::public(), 1).await;
     let _ = cid;
@@ -417,4 +448,280 @@ async fn chat_migration_controls_are_platform_admin_only_and_gated() {
         .await,
         1
     );
+}
+
+/// The CF Meet client's Messaging API: only allowlisted end-user operations reach
+/// Messaging, always acting for the signed-in account's own principal; the client cannot
+/// choose another principal, administration routes or extra query parameters.
+#[tokio::test]
+async fn the_client_relay_forwards_only_allowlisted_operations_for_the_caller() {
+    let gw = Scripted::new();
+    let Some(app) = app(Some(gw.clone()), RedisMode::FromEnv).await else {
+        return;
+    };
+    let user = app.user("relay-user").await;
+    let auth = || Auth::Bearer(&user.token);
+    let conv = Uuid::new_v4();
+    let relay = |p: &str| format!("{BRIDGE}/relay/v1/{p}");
+
+    // An allowlisted read with its query, and a send.
+    let (s, v) = app
+        .get(
+            relay(&format!(
+                "conversations/{conv}/messages?afterSequence=7&limit=50"
+            )),
+            auth(),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v) = app
+        .post(
+            &relay(&format!("conversations/{conv}/messages")),
+            auth(),
+            // A body that names another principal changes nothing: identity is signed.
+            json!({ "clientMessageId": Uuid::new_v4(), "text": "hi", "actingPrincipalId": Uuid::new_v4() }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    // Conversation creation forwards the client's Idempotency-Key (and nothing else).
+    let (s, v) = app
+        .call_with_headers(
+            Method::POST,
+            &relay("conversations"),
+            &[
+                ("authorization", &format!("Bearer {}", user.token)),
+                ("idempotency-key", "web-create-1"),
+                ("cf-acting-principal", &Uuid::new_v4().to_string()),
+            ],
+            json!({ "contextClass": "DIRECT", "counterpartPrincipalId": Uuid::new_v4() })
+                .to_string(),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    // Deleting one's own message is relayed as DELETE, without a body.
+    let msg = Uuid::new_v4();
+    let (s, v) = app
+        .delete(
+            relay(&format!("conversations/{conv}/messages/{msg}")),
+            auth(),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    // Moving one's own read cursor is relayed as PUT.
+    let (s, v) = app
+        .call(
+            Method::PUT,
+            &relay(&format!("conversations/{conv}/read-cursor")),
+            auth(),
+            Some(json!({ "sequence": 7 })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let principal: Uuid = *gw.principals.lock().unwrap().values().next().unwrap();
+    let relayed: Vec<Call> = gw
+        .calls()
+        .into_iter()
+        .filter(|c| c.peer == Peer::Messaging)
+        .collect();
+    assert_eq!(relayed.len(), 5, "{relayed:?}");
+    assert_eq!(relayed[4].method, Method::PUT);
+    assert_eq!(relayed[4].body, Some(json!({ "sequence": 7 })));
+    assert_eq!(relayed[3].method, Method::DELETE);
+    assert!(relayed[3].body.is_none(), "DELETE carries no body");
+    assert!(
+        relayed[3]
+            .path
+            .ends_with(&format!("/conversations/{conv}/messages/{msg}")),
+        "{}",
+        relayed[3].path
+    );
+    for c in &relayed {
+        assert_eq!(
+            c.acting,
+            Some(Acting {
+                principal_id: principal,
+                kind: PrincipalKind::NativeCfUser
+            })
+        );
+        assert!(
+            c.path.starts_with("/internal/v1/delegated/v1/"),
+            "{}",
+            c.path
+        );
+    }
+    assert_eq!(
+        relayed[0].query,
+        vec![
+            ("afterSequence".to_string(), "7".to_string()),
+            ("limit".to_string(), "50".to_string())
+        ]
+    );
+    assert!(relayed[0].body.is_none(), "GET carries no body");
+    assert!(relayed[1].headers.is_empty());
+    assert_eq!(
+        relayed[2].headers,
+        vec![("idempotency-key".to_string(), "web-create-1".to_string())],
+        "only the Idempotency-Key is forwarded"
+    );
+
+    // Refused before any Messaging call: administration, unknown shapes, extra query keys,
+    // non-JSON bodies, anonymous callers.
+    let before = gw.calls().len();
+    for (method, path) in [
+        (Method::PUT, relay("messaging/policy")),
+        (Method::POST, relay("messaging/legal-holds")),
+        (Method::POST, relay("messaging/exports")),
+        (Method::GET, relay("messaging/audit")),
+        (Method::POST, relay(&format!("conversations/{conv}/bans"))),
+        (
+            Method::GET,
+            relay(&format!("conversations/{conv}/attachments/{conv}/content")),
+        ),
+        (Method::GET, relay("conversations/not-a-uuid")),
+        (
+            Method::GET,
+            format!("{BRIDGE}/relay/internal/v1/meeting-conversations"),
+        ),
+    ] {
+        let (s, v) = app
+            .call(method.clone(), &path, auth(), Some(json!({})))
+            .await;
+        assert_eq!(s, StatusCode::NOT_FOUND, "{method} {path}: {v}");
+    }
+    let (s, v) = app
+        .get(
+            relay(&format!(
+                "conversations/{conv}/messages?principalId={}",
+                Uuid::new_v4()
+            )),
+            auth(),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    let (s, _) = app
+        .post_raw(
+            &relay(&format!("conversations/{conv}/messages")),
+            auth(),
+            "not json",
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = app.get(relay("conversations"), Auth::None).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    // DELETE is allowlisted per route: a whole conversation cannot be deleted, and an
+    // anonymous DELETE is refused.
+    let (s, v) = app
+        .delete(relay(&format!("conversations/{conv}")), auth())
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
+    let (s, _) = app
+        .delete(
+            relay(&format!("conversations/{conv}/messages/{msg}")),
+            Auth::None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert_eq!(gw.calls().len(), before, "nothing refused reached a peer");
+
+    // The caller's identity for client-side encryption (identifiers only).
+    let (s, v) = app.get(format!("{BRIDGE}/me"), auth()).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["principalId"], json!(principal));
+    assert_eq!(v["environmentId"], json!(gw.env));
+    assert!(v.get("tenantId").is_some() && v.get("applicationId").is_some());
+}
+
+/// The directory is bounded by the caller's verified organizations: colleagues are found
+/// and resolved to principals; anyone else is neither listed, resolvable nor named.
+#[tokio::test]
+async fn the_directory_lists_and_resolves_only_organization_colleagues() {
+    use sea_orm::ConnectionTrait;
+    let gw = Scripted::new();
+    let Some(app) = app(Some(gw.clone()), RedisMode::FromEnv).await else {
+        return;
+    };
+    let alice = app.user("dir-alice").await;
+    let bob = app.user("dir-bob").await;
+    let mallory = app.user("dir-mallory").await;
+    let org = Uuid::new_v4();
+    let other_org = Uuid::new_v4();
+    let sql = |q: String| {
+        let conn = app.db.conn.clone();
+        async move { conn.execute_unprepared(&q).await.unwrap() }
+    };
+    for (id, slug) in [(org, "dir-org"), (other_org, "dir-other")] {
+        sql(format!(
+            "INSERT INTO organizations (id, name, slug, status, created_at, updated_at, profile_policy) \
+             VALUES ('{id}', '{slug}', '{slug}-{}', 'ACTIVE', now(), now(), '{{}}')",
+            &Uuid::new_v4().simple().to_string()[..6]
+        ))
+        .await;
+    }
+    for (o, u) in [(org, alice.id), (org, bob.id), (other_org, mallory.id)] {
+        sql(format!(
+            "INSERT INTO organization_memberships (id, organization_id, user_id, role, status, created_at, updated_at) \
+             VALUES ('{}', '{o}', '{u}', 'MEMBER', 'ACTIVE', now(), now())",
+            Uuid::new_v4()
+        ))
+        .await;
+    }
+    let auth = Auth::Bearer(&alice.token);
+    let (s, v) = app
+        .get(format!("{BRIDGE}/directory"), Auth::Bearer(&alice.token))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let people = v["people"].as_array().unwrap();
+    assert_eq!(people.len(), 1, "{v}");
+    assert_eq!(people[0]["userId"], json!(bob.id));
+    let (s, v) = app
+        .post(
+            &format!("{BRIDGE}/directory/resolve"),
+            auth,
+            json!({ "userIds": [bob.id] }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let bob_principal = v["people"][0]["principalId"].clone();
+    assert!(bob_principal.is_string());
+    let (s, v) = app
+        .post(
+            &format!("{BRIDGE}/directory/resolve"),
+            Auth::Bearer(&alice.token),
+            json!({ "userIds": [mallory.id] }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
+    // Mallory gets a principal of her own; Alice cannot learn her name.
+    let (_, m) = app
+        .get(format!("{BRIDGE}/me"), Auth::Bearer(&mallory.token))
+        .await;
+    let (s, v) = app
+        .post(
+            &format!("{BRIDGE}/principals/names"),
+            Auth::Bearer(&alice.token),
+            json!({ "principalIds": [bob_principal, m["principalId"]] }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let named = v["principals"].as_array().unwrap();
+    assert_eq!(named.len(), 1, "{v}");
+    assert_eq!(named[0]["principalId"], bob_principal);
+    // Anonymous callers get nothing from any of the client endpoints.
+    for (method, path, body) in [
+        (Method::GET, format!("{BRIDGE}/me"), None),
+        (Method::GET, format!("{BRIDGE}/directory"), None),
+        (
+            Method::POST,
+            format!("{BRIDGE}/directory/resolve"),
+            Some(json!({ "userIds": [bob.id] })),
+        ),
+        (
+            Method::POST,
+            format!("{BRIDGE}/principals/names"),
+            Some(json!({ "principalIds": [bob_principal] })),
+        ),
+    ] {
+        let (s, v) = app.call(method, &path, Auth::None, body).await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED, "{path}: {v}");
+    }
 }

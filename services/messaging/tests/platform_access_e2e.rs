@@ -1544,3 +1544,354 @@ async fn external_developer_journey_with_attachments_search_and_webhooks() {
         envelopes.len()
     );
 }
+
+/// Runs one of the hosted-staging kit's Node tools (scripts/staging) to completion.
+fn staging_tool(node: &str, tool: &str, args: &[String]) -> (i32, String) {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let out = std::process::Command::new(node)
+        .arg(root.join("scripts/staging").join(tool))
+        .args(args)
+        .env_remove("CFMEET_STAGING_ALLOWED_HOSTS")
+        .env("NO_PROXY", "127.0.0.1,localhost")
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    (out.status.code().unwrap_or(-1), text)
+}
+
+/// Part K gate 16 preparation — the hosted-staging capacity kit (`scripts/staging`)
+/// rehearsed against REAL processes: Platform Access, the Messaging binary, MinIO and
+/// clamd, driven only through the public API as an external application (API credential,
+/// acting principals, device registration with the pinned browser crypto core, client
+/// tokens, single-use tickets, WebSockets, presigned uploads). Proves the kit's
+/// correctness checks, its cleanup (devices revoked, policy restored), owner thresholds and
+/// its refusals (production host, plain HTTP, unlisted host, readable credential file).
+/// It is a rehearsal on loopback, NOT hosted-staging evidence.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn hosted_staging_kit_rehearsal_against_real_services() {
+    let Some(admin) = common::admin_url() else {
+        return;
+    };
+    let node = std::env::var("NODE_BIN").unwrap_or_else(|_| "node".into());
+    let node_ok = std::process::Command::new(&node)
+        .arg("-e")
+        .arg("process.exit(typeof WebSocket === 'function' && Number(process.versions.node.split('.')[0]) >= 22 ? 0 : 1)")
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !node_ok {
+        let _ = skip("Node 22+ (global WebSocket) is not available for scripts/staging");
+        return;
+    }
+    let Some(mut world) = setup(&admin).await else {
+        return;
+    };
+    let endpoint = std::env::var("OBJECT_STORAGE_TEST_ENDPOINT").ok();
+    if let Some(endpoint) = endpoint.clone() {
+        let var = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
+        let bucket = format!(
+            "{}-staging-kit",
+            var("OBJECT_STORAGE_TEST_BUCKET", "cfmeet-object-storage-test")
+        );
+        let (access, secret) = (
+            var("OBJECT_STORAGE_TEST_ACCESS_KEY", "testing"),
+            var("OBJECT_STORAGE_TEST_SECRET_KEY", "testing"),
+        );
+        let sse = Some(var("OBJECT_STORAGE_TEST_SSE", "AES256")).filter(|s| !s.is_empty());
+        cf_object_storage::S3ObjectStore::new(cf_object_storage::S3Config {
+            endpoint: endpoint.clone(),
+            public_endpoint: None,
+            region: "us-east-1".into(),
+            bucket: bucket.clone(),
+            access_key: access.clone(),
+            secret_key: secret.clone(),
+            path_style: true,
+            server_side_encryption: sse.clone(),
+        })
+        .unwrap()
+        .ensure_bucket()
+        .await
+        .unwrap();
+        for (k, v) in [
+            ("MESSAGING_ATTACHMENTS_S3_ENDPOINT", Some(endpoint)),
+            ("MESSAGING_ATTACHMENTS_S3_BUCKET", Some(bucket)),
+            ("MESSAGING_ATTACHMENTS_S3_ACCESS_KEY_ID", Some(access)),
+            ("MESSAGING_ATTACHMENTS_S3_SECRET_ACCESS_KEY", Some(secret)),
+            ("MESSAGING_ATTACHMENTS_S3_PATH_STYLE", Some("true".into())),
+            ("MESSAGING_ATTACHMENTS_S3_SERVER_SIDE_ENCRYPTION", sse),
+            (
+                "MESSAGING_CLAMAV_ADDRESS",
+                std::env::var("MESSAGING_TEST_CLAMAV_ADDRESS").ok(),
+            ),
+            ("MESSAGING_WORKER_INTERVAL_MS", Some("200".into())),
+        ] {
+            if let Some(v) = v {
+                world.messaging_env.push((k.into(), v));
+            }
+        }
+    }
+    let keyring = world.dir.join("managed-keyring");
+    {
+        use base64::Engine as _;
+        let key: [u8; 32] = rand::random();
+        std::fs::write(
+            &keyring,
+            format!(
+                "kit-1 {}\n",
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key)
+            ),
+        )
+        .unwrap();
+    }
+    world.messaging_env.push((
+        "MESSAGING_MANAGED_KEYRING_FILE".into(),
+        keyring.display().to_string(),
+    ));
+    let db = TestDb::empty().await.unwrap();
+    messaging_migration::Migrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    let (_messaging, url) = world.start_messaging(&db.url).await;
+
+    // What the owner prepares for a hosted run: a SANDBOX environment, a scoped
+    // credential (file, mode 600) and a list of principals.
+    let scopes = [
+        "messages.send",
+        "messages.read",
+        "conversations.create",
+        "conversations.manage",
+        "attachments.write",
+        "attachments.read",
+    ];
+    let (env, sa) = world.tenant(&scopes).await;
+    let (token, _) = world.credential(sa, &scopes).await;
+    let members = 6;
+    let mut principals = Vec::new();
+    for _ in 0..members {
+        principals.push(world.principal(env).await);
+    }
+    let cred = world.dir.join("credential");
+    std::fs::write(&cred, &token).unwrap();
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(&cred, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let plist = world.dir.join("principals.json");
+    std::fs::write(&plist, json!(principals).to_string()).unwrap();
+    let m = Client {
+        http: &world.http,
+        base: url.clone(),
+    };
+    // The owner's staging policy (a prerequisite of the smoke check): MANAGED groups.
+    let (_, p) = m
+        .call(
+            reqwest::Method::GET,
+            &token,
+            None,
+            "/v1/messaging/policy",
+            None,
+            None,
+        )
+        .await;
+    let (st, p) = m
+        .call(
+            reqwest::Method::PUT,
+            &token,
+            None,
+            "/v1/messaging/policy",
+            Some(json!({ "expectedVersion": p["version"], "policy": {
+                "contexts": { "GROUP": { "allowedProfiles": ["MANAGED"], "defaultProfile": "MANAGED" } },
+                "attachments": { "enabled": true,
+                    "managedScanRequired": std::env::var("MESSAGING_TEST_CLAMAV_ADDRESS").is_ok() } } })),
+            None,
+        )
+        .await;
+    assert_eq!(st, 200, "{p}");
+    let (_, policy_before) = m
+        .call(
+            reqwest::Method::GET,
+            &token,
+            None,
+            "/v1/messaging/policy",
+            None,
+            None,
+        )
+        .await;
+    let s = |x: &std::path::Path| x.display().to_string();
+
+    // Preflight with the smoke journey.
+    let pre = world.dir.join("preflight.json");
+    let (code, out) = staging_tool(
+        &node,
+        "preflight.mjs",
+        &[
+            "--messaging-url".into(),
+            url.clone(),
+            "--credential-file".into(),
+            s(&cred),
+            "--principals-file".into(),
+            s(&plist),
+            "--members".into(),
+            members.to_string(),
+            "--smoke".into(),
+            "--out".into(),
+            s(&pre),
+        ],
+    );
+    assert_eq!(code, 0, "{out}");
+
+    // The capacity run (small parameters: correctness and the kit itself, not capacity).
+    let report = world.dir.join("capacity.json");
+    let mut workloads = vec![
+        "managed-send",
+        "history-read",
+        "fanout",
+        "reconnect-storm",
+        "search",
+    ];
+    if endpoint.is_some() {
+        workloads.push("attachments");
+    }
+    let (code, out) = staging_tool(
+        &node,
+        "capacity-runner.mjs",
+        &[
+            "--messaging-url".into(),
+            url.clone(),
+            "--credential-file".into(),
+            s(&cred),
+            "--principals-file".into(),
+            s(&plist),
+            "--members".into(),
+            members.to_string(),
+            "--messages-per-sender".into(),
+            "8".into(),
+            "--fanout-messages".into(),
+            "8".into(),
+            "--fanout-interval-ms".into(),
+            "20".into(),
+            "--searches".into(),
+            "6".into(),
+            "--attachments".into(),
+            "3".into(),
+            "--attachment-bytes".into(),
+            "65536".into(),
+            "--workloads".into(),
+            workloads.join(","),
+            "--label".into(),
+            "loopback rehearsal".into(),
+            "--out".into(),
+            s(&report),
+        ],
+    );
+    let r: Value = serde_json::from_str(&std::fs::read_to_string(&report).unwrap()).unwrap();
+    assert_eq!(code, 0, "{out}\n{r:#}");
+    assert_eq!(r["correct"], true, "{r:#}");
+    for w in &workloads {
+        assert_eq!(r["workloads"][w]["correct"], true, "{w}: {r:#}");
+    }
+    assert_eq!(r["workloads"]["managed-send"]["accepted"], members * 8);
+    assert_eq!(
+        r["workloads"]["fanout"]["deliveries"],
+        (members - 1) * 8,
+        "every receiver got every message exactly once"
+    );
+    // One device per realtime receiver (the fan-out sender needs none).
+    assert_eq!(r["devicesRegisteredAndRevoked"], members - 1);
+    assert_eq!(r["policyRestored"], true);
+    // Cleanup is real: the policy is back and every device the run made is revoked.
+    let (_, policy_after) = m
+        .call(
+            reqwest::Method::GET,
+            &token,
+            None,
+            "/v1/messaging/policy",
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(policy_after["policy"], policy_before["policy"]);
+    for p in &principals {
+        let (st, devs) = m
+            .call(
+                reqwest::Method::GET,
+                &token,
+                Some(*p),
+                &format!("/v1/messaging/principals/{p}/devices"),
+                None,
+                None,
+            )
+            .await;
+        assert_eq!(st, 200, "{devs}");
+        assert!(
+            !devs.to_string().contains("\"ACTIVE\""),
+            "no device of the run stays active: {devs}"
+        );
+    }
+
+    // Report: MEASURED without owner thresholds; an owner threshold is enforced.
+    let (code, md) = staging_tool(&node, "report.mjs", &["--in".into(), s(&report)]);
+    assert_eq!(code, 0, "{md}");
+    assert!(
+        md.contains("MEASURED (no owner thresholds supplied)"),
+        "{md}"
+    );
+    let th = world.dir.join("thresholds.json");
+    std::fs::write(
+        &th,
+        json!({ "fanout": { "send_to_receive_latency.p95_ms": { "max": -1 } } }).to_string(),
+    )
+    .unwrap();
+    let (code, md) = staging_tool(
+        &node,
+        "report.mjs",
+        &["--in".into(), s(&report), "--thresholds".into(), s(&th)],
+    );
+    assert_eq!(code, 1, "an unmet owner threshold fails the report: {md}");
+
+    // Refusals: nothing is contacted.
+    for target in [
+        "https://api.cfmeet.com",
+        "http://staging.example.test",
+        "https://unlisted.example.test",
+    ] {
+        let (code, out) = staging_tool(
+            &node,
+            "capacity-runner.mjs",
+            &[
+                "--messaging-url".into(),
+                target.into(),
+                "--credential-file".into(),
+                s(&cred),
+                "--principals-file".into(),
+                s(&plist),
+                "--authorization".into(),
+                "test".into(),
+            ],
+        );
+        assert_eq!(code, 3, "{target}: {out}");
+        assert!(out.contains("REFUSED"), "{out}");
+    }
+    std::fs::set_permissions(&cred, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let (code, out) = staging_tool(
+        &node,
+        "preflight.mjs",
+        &[
+            "--messaging-url".into(),
+            url.clone(),
+            "--credential-file".into(),
+            s(&cred),
+        ],
+    );
+    assert_eq!(
+        code, 3,
+        "a credential file other users can read is refused: {out}"
+    );
+    println!(
+        "EVIDENCE staging_kit_rehearsal real_platform_access=1 real_messaging_binary=1 real_s3={} report={}",
+        endpoint.is_some(),
+        serde_json::to_string(&r["workloads"]).unwrap()
+    );
+}

@@ -1,6 +1,7 @@
 import api from "./api";
 import { cookieStore } from "@/store";
 import { storageStore } from "@/store";
+import { signOutMessaging } from "@/lib/messaging/signout";
 import type {
   RegisterRequest,
   RegisterResponse,
@@ -59,6 +60,8 @@ export const authService = {
 
   logout: async () => {
     try {
+      // While still signed in: revoke this browser's messaging device, erase its keys.
+      await signOutMessaging();
       await api.post<MessageResponse>("/auth/logout");
     } finally {
       cookieStore.clearTokens();

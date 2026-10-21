@@ -1,0 +1,27 @@
+# Swagger / OpenAPI verification, 2026-10-20 (commit 8999ac6 tree)
+
+## Peer documents served by the Meeting Service Swagger UI (scripts/contracts/swagger-render, Chromium, schemas.cfmeet.com blocked)
+# EVIDENCE swagger calling/http/v1.openapi.json operations=136 schemas=251 resolver_errors=0
+# EVIDENCE swagger messaging/http/v1.openapi.json operations=89 schemas=120 resolver_errors=0
+# EVIDENCE swagger messaging/internal/v1.openapi.json operations=7 schemas=24 resolver_errors=0
+# EVIDENCE swagger numbering/internal/v1.openapi.json operations=98 schemas=201 resolver_errors=0
+# EVIDENCE swagger platform/internal-http/v1.openapi.json operations=0 schemas=4 resolver_errors=0
+# EVIDENCE swagger platform-access/internal/v1.openapi.json operations=37 schemas=61 resolver_errors=0
+# EVIDENCE swagger privacy-relay/http/v1.openapi.json operations=22 schemas=55 resolver_errors=0
+# EVIDENCE swagger privacy-relay/internal/v1.openapi.json operations=25 schemas=64 resolver_errors=0
+# EVIDENCE swagger sms-gateway/http/v1.openapi.json operations=11 schemas=19 resolver_errors=0
+# EVIDENCE swagger sms-gateway/internal/v1.openapi.json operations=4 schemas=11 resolver_errors=0
+# EVIDENCE swagger telephony/internal/v1.openapi.json operations=17 schemas=30 resolver_errors=0
+# pass 13
+# fail 0
+TOTAL documents=11 operations=446 schemas=840 resolver_errors=0
+
+## Meeting Service document (packages/contracts/openapi/meeting-service.json)
+operations=205 (v2=153, legacy v1=52)
+v2 route table == documented v2 operations: tests/openapi_contract.rs::j_e2e_06_route_table_and_openapi_are_identical
+every documented v2 operation routed with the standard error contract: tests/api_contract_matrix.rs::j_api_01 (153 probed)
+success + error path per v2 operation: scripts/certification/route_coverage.py --strict (CI: Meeting service / test / v2 operation coverage)
+legacy v1 operations: documented, not covered by the parity / coverage gates
+
+## Production Swagger
+not redeployed and not re-verified (no production deployment was authorized)

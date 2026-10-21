@@ -11892,7 +11892,8 @@
         "tags": [
           "Messaging (v2)"
         ],
-        "summary": "Revoke one of the caller's devices.",
+        "summary": "Revoke one of the caller's devices (optional `reason`: USER_REQUESTED by default,",
+        "description": "LOST_OR_STOLEN, COMPROMISED or REPLACED).",
         "operationId": "v2_messaging_revoke_device",
         "parameters": [
           {
@@ -11906,6 +11907,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Revoked (Messaging contract)",
@@ -11919,6 +11930,475 @@
           },
           "401": {
             "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/messaging/directory": {
+      "get": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Colleagues (active members of the caller's organizations) the caller may message.",
+        "operationId": "v2_messaging_directory",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Name filter",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "people: userId, displayName, principalId (null until first use)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/messaging/directory/resolve": {
+      "post": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "The Messaging principals of directory colleagues (so they can be added).",
+        "operationId": "v2_messaging_directory_resolve",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "people: userId, principalId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND (not a colleague)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/messaging/me": {
+      "get": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "The caller's Messaging principal and the scope ids its devices bind into every",
+        "description": "encrypted message.",
+        "operationId": "v2_messaging_me",
+        "responses": {
+          "200": {
+            "description": "principalId, tenantId, applicationId, environmentId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/messaging/principals/names": {
+      "post": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Display names of the principals the caller can see (self and colleagues).",
+        "operationId": "v2_messaging_principal_names",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "principals: principalId, displayName",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/messaging/relay/{path}": {
+      "get": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Relayed read (allowlisted path under `v1/`, e.g. `v1/conversations/{id}/messages`).",
+        "operationId": "v2_messaging_relay_get",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "description": "An allowlisted Messaging customer path under v1/",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Messaging contract answer (status relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ENDPOINT_NOT_FOUND (not relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Relayed create / action (allowlisted path under `v1/`).",
+        "operationId": "v2_messaging_relay_post",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "description": "An allowlisted Messaging customer path under v1/",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Messaging contract answer (status relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ENDPOINT_NOT_FOUND (not relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Relayed replace (allowlisted path under `v1/`, e.g. a read cursor or sealed history).",
+        "operationId": "v2_messaging_relay_put",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "description": "An allowlisted Messaging customer path under v1/",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Messaging contract answer (status relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ENDPOINT_NOT_FOUND (not relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Relayed removal (allowlisted path under `v1/`, e.g. leaving a conversation).",
+        "operationId": "v2_messaging_relay_delete",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "description": "An allowlisted Messaging customer path under v1/",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Messaging contract answer (status relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ENDPOINT_NOT_FOUND (not relayed)",
             "content": {
               "application/json": {
                 "schema": {
@@ -14077,6 +14557,43 @@
           "FAILED"
         ]
       },
+      "ConferenceSummary": {
+        "type": "object",
+        "description": "Minimal conference info included in space responses.",
+        "required": [
+          "id",
+          "status"
+        ],
+        "properties": {
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scheduledEndAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "scheduledStartAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "status": {
+            "$ref": "#/components/schemas/ConferenceStatus"
+          }
+        }
+      },
       "ConsentDecision": {
         "type": "string",
         "enum": [
@@ -16085,6 +16602,14 @@
           },
           "isLegacy": {
             "type": "boolean"
+          },
+          "latestConference": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ConferenceSummary"
+              }
+            ],
+            "nullable": true
           },
           "meetingCode": {
             "type": "string"
@@ -20413,7 +20938,7 @@
     },
     {
       "name": "Messaging (v2)",
-      "description": "Part V H: the signed-in user's Unified Messaging identity bridge (devices with client-held keys, short-lived device-bound client tokens, session revocation; Messaging's answer is relayed and no service credential is ever returned) and the platform-admin chat migration controls (state machine, parity, rollback)."
+      "description": "Part V H: the signed-in user's Unified Messaging identity bridge (devices with client-held keys, short-lived device-bound client tokens, session revocation; Messaging's answer is relayed and no service credential is ever returned), the client Messaging API (the caller's principal and scope ids, organization colleagues, and an allowlist of end-user conversation, MLS Delivery Service, attachment and history-transfer operations relayed with the caller's principal signed) and the platform-admin chat migration controls (state machine, parity, rollback)."
     },
     {
       "name": "Waiting Room",

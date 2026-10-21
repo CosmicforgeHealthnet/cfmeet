@@ -1,7 +1,8 @@
 name: Deploy Backend
 
-# Meeting Service: validate pull requests, then automatically deploy verified main commits.
-# Manual production deployments remain available. No staging target is configured here.
+# Meeting Service: validate pull requests; production deployment is MANUAL ONLY.
+# Promoting validated staging code to main must not modify the live VPS.
+# A separately authorized workflow_dispatch deploys production. No staging target is configured here.
 # Never deploy PR commits or overwrite the live service before smoke checks and rollback setup.
 # Requires GitHub Secrets:
 #   - VPS_HOST: VPS IP or hostname (e.g., 173.249.30.55)
@@ -10,12 +11,6 @@ name: Deploy Backend
 #   - VPS_DEPLOY_PATH: Deployment path (e.g., /opt/cfmeet-production)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "services/meeting-service/**"
-      - "packages/contracts/**"
-      - ".github/workflows/deploy-backend.yml"
   pull_request:
     paths:
       - "services/meeting-service/**"
@@ -87,7 +82,7 @@ jobs:
         run: cargo test --workspace --no-fail-fast
 
   deploy:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch'
     name: Deploy to VPS
     needs: test
     runs-on: ubuntu-latest

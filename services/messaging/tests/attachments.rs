@@ -1717,10 +1717,7 @@ async fn managed_images_get_safe_thumbnails_and_e2ee_attachments_never_do() {
     assert_eq!(g.status, StatusCode::OK, "{}", g.text);
     assert_eq!(g.json["mediaType"], "image/png");
     // The thumbnail is a re-encoded PNG: bounded, decodable, and the private text is gone.
-    let key = messaging::attachments::derivatives::thumbnail_key(
-        c.context.scope.environment_id,
-        Uuid::parse_str(&ids[0]).unwrap(),
-    );
+    let key = thumbnail_object(&e, &ids[0]).await;
     let thumb = e.store.get(&key, 10 << 20).await.unwrap().unwrap();
     let decoded = image::load_from_memory(&thumb).unwrap();
     assert!(decoded.width() <= 320 && decoded.height() <= 320);
@@ -1848,19 +1845,23 @@ async fn managed_images_get_safe_thumbnails_and_e2ee_attachments_never_do() {
             .unwrap()
     );
     let generated_bytes = d["size"].as_i64().expect("measured thumbnail bytes");
-    assert_eq!(
-        e.usage(&c).await.0,
-        committed_before_delete - row.committed_bytes - generated_bytes,
-        "both original and derivative quota usage must be released exactly once"
-    );
+    // Both objects still exist until the deletion worker removes them: their bytes stay
+    // charged, now through their deletion requests.
+    assert_eq!(e.usage(&c).await.0, committed_before_delete);
     assert_eq!(
         e.h.scalar(&format!(
-            "SELECT count(*) FROM messaging_object_deletions WHERE object_key = '{key}'"
+            "SELECT count(*) FROM messaging_object_deletions WHERE object_key = '{key}' AND charged_bytes = {generated_bytes}"
         ))
         .await,
         1
     );
     lifecycle::run_once(&e.h.state).await.unwrap();
+    assert_eq!(
+        e.usage(&c).await.0,
+        committed_before_delete - row.committed_bytes - generated_bytes,
+        "both original and derivative quota usage must be released exactly once"
+    );
+    assert_no_drift(&e).await;
     assert!(
         e.store.get(&key, 10 << 20).await.unwrap().is_none(),
         "the thumbnail object is gone"
@@ -2025,4 +2026,859 @@ async fn managed_voice_notes_and_videos_are_measured_not_trusted() {
         0
     );
     println!("EVIDENCE inspection wav_ms=4000 mp4_ms=12000 declared_mismatch_flagged=1");
+}
+
+// ---------------------------------------------------------------------------
+// Derivative storage accounting (ADR 0054, migrations 18 and 19)
+// ---------------------------------------------------------------------------
+
+use messaging::attachments::{derivatives, quota};
+use sea_orm::ConnectionTrait;
+
+/// How the derivative-write wrapper answers `put` of a `drv/` object.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DerivativeWrites {
+    Normal,
+    /// The write fails and stores nothing.
+    Fail,
+    /// The write stores the object, then the answer is lost (an unknown outcome).
+    WriteThenFail,
+}
+
+/// The in-memory store with failure injection for derivative writes only (originals,
+/// reads and deletions keep working).
+struct FlakyDerivatives {
+    inner: Arc<MemoryObjectStore>,
+    mode: Mutex<DerivativeWrites>,
+}
+
+#[async_trait::async_trait]
+impl ObjectStore for FlakyDerivatives {
+    fn backend(&self) -> &'static str {
+        "memory-flaky-derivatives"
+    }
+    async fn put(
+        &self,
+        key: &str,
+        bytes: Vec<u8>,
+        content_type: &str,
+    ) -> cf_object_storage::StorageResult<cf_object_storage::StoredObject> {
+        let mode = *self.mode.lock().unwrap();
+        if key.starts_with(derivatives::OBJECT_PREFIX) {
+            match mode {
+                DerivativeWrites::Normal => {}
+                DerivativeWrites::Fail => return Err(cf_object_storage::StorageError::Unavailable),
+                DerivativeWrites::WriteThenFail => {
+                    self.inner.put(key, bytes, content_type).await?;
+                    return Err(cf_object_storage::StorageError::Unavailable);
+                }
+            }
+        }
+        self.inner.put(key, bytes, content_type).await
+    }
+    async fn head(
+        &self,
+        key: &str,
+    ) -> cf_object_storage::StorageResult<Option<cf_object_storage::ObjectMeta>> {
+        self.inner.head(key).await
+    }
+    async fn get(
+        &self,
+        key: &str,
+        max_bytes: usize,
+    ) -> cf_object_storage::StorageResult<Option<Vec<u8>>> {
+        self.inner.get(key, max_bytes).await
+    }
+    async fn delete(&self, key: &str) -> cf_object_storage::StorageResult<()> {
+        self.inner.delete(key).await
+    }
+    fn signed_read(
+        &self,
+        key: &str,
+        ttl: std::time::Duration,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> cf_object_storage::StorageResult<cf_object_storage::SignedRead> {
+        self.inner.signed_read(key, ttl, now)
+    }
+    fn signed_read_as(
+        &self,
+        key: &str,
+        ttl: std::time::Duration,
+        now: chrono::DateTime<chrono::Utc>,
+        overrides: &cf_object_storage::ResponseOverrides,
+    ) -> cf_object_storage::StorageResult<cf_object_storage::SignedRead> {
+        self.inner.signed_read_as(key, ttl, now, overrides)
+    }
+    fn signed_write(
+        &self,
+        key: &str,
+        ttl: std::time::Duration,
+        now: chrono::DateTime<chrono::Utc>,
+        size: u64,
+        sha256_hex: &str,
+        content_type: &str,
+    ) -> cf_object_storage::StorageResult<SignedWrite> {
+        self.inner
+            .signed_write(key, ttl, now, size, sha256_hex, content_type)
+    }
+    async fn stored_sha256(&self, key: &str) -> cf_object_storage::StorageResult<Option<String>> {
+        self.inner.stored_sha256(key).await
+    }
+    async fn list(
+        &self,
+        prefix: &str,
+        start_after: Option<&str>,
+        max: usize,
+    ) -> cf_object_storage::StorageResult<Vec<cf_object_storage::ListedObject>> {
+        self.inner.list(prefix, start_after, max).await
+    }
+}
+
+async fn flaky_env() -> Option<(Env, Arc<FlakyDerivatives>)> {
+    let store = Arc::new(MemoryObjectStore::new());
+    let flaky = Arc::new(FlakyDerivatives {
+        inner: store.clone(),
+        mode: Mutex::new(DerivativeWrites::Normal),
+    });
+    let scanner = ScriptedScanner::new(ScanOutcome::Clean);
+    let (f2, sc2) = (flaky.clone(), scanner.clone());
+    let h = Harness::build(move |s| {
+        s.storage = f2;
+        s.scanner = sc2;
+    })
+    .await?;
+    Some((Env { h, store, scanner }, flaky))
+}
+
+async fn text(e: &Env, sql: &str) -> Option<String> {
+    e.h.state
+        .db
+        .query_one(sea_orm::Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            sql.to_string(),
+        ))
+        .await
+        .unwrap()
+        .and_then(|r| r.try_get_by_index::<Option<String>>(0).unwrap())
+}
+
+/// The object key of an attachment's READY thumbnail.
+async fn thumbnail_object(e: &Env, attachment_id: &str) -> String {
+    text(
+        e,
+        &format!(
+            "SELECT object_key FROM messaging_attachment_derivatives WHERE attachment_id = '{attachment_id}' \
+               AND kind = 'THUMBNAIL' AND status = 'READY'"
+        ),
+    )
+    .await
+    .unwrap_or_else(|| panic!("no READY thumbnail of {attachment_id}"))
+}
+
+async fn thumbnail_status(e: &Env, attachment_id: &str) -> (String, Option<String>, i64) {
+    let status = text(e, &format!("SELECT status FROM messaging_attachment_derivatives WHERE attachment_id = '{attachment_id}' AND kind = 'THUMBNAIL'")).await.unwrap();
+    let code = text(e, &format!("SELECT error_code FROM messaging_attachment_derivatives WHERE attachment_id = '{attachment_id}' AND kind = 'THUMBNAIL'")).await;
+    let reserved = e.h.scalar(&format!("SELECT reserved_bytes FROM messaging_attachment_derivatives WHERE attachment_id = '{attachment_id}' AND kind = 'THUMBNAIL'")).await;
+    (status, code, reserved)
+}
+
+/// Every environment's recorded usage equals what its rows add up to.
+async fn assert_no_drift(e: &Env) {
+    let drifted = quota::audit_all(&e.h.state.db).await.unwrap();
+    assert!(drifted.is_empty(), "storage accounting drift: {drifted:?}");
+}
+
+fn derivative_objects(e: &Env) -> Vec<String> {
+    e.store
+        .keys()
+        .into_iter()
+        .filter(|k| k.starts_with(derivatives::OBJECT_PREFIX))
+        .collect()
+}
+
+/// A distinct real PNG and the size of the thumbnail the server will make of it.
+fn image_and_thumbnail(seed: u8) -> (Vec<u8>, i64) {
+    let img = image::RgbImage::from_fn(900, 600, |x, y| {
+        image::Rgb([(x % 256) as u8 ^ seed, (y % 256) as u8, seed])
+    });
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgb8(img)
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    let t = derivatives::render_thumbnail(&png, "image/png").unwrap();
+    (png, t.png.len() as i64)
+}
+
+impl Env {
+    async fn upload_image(&self, c: &Customer, conv: &Value, who: Uuid, png: &[u8]) -> String {
+        let r = self
+            .managed_upload(c, conv, who, "IMAGE", "image/png", "photo.png", png)
+            .await;
+        assert_eq!(r.json["state"], "READY", "{}", r.text);
+        r.json["attachmentId"].as_str().unwrap().to_string()
+    }
+}
+
+/// Part K gate 6 / ADR 0054: a thumbnail is reserved against the budget, under the usage
+/// row lock, before its object is written. When the budget has no room the original stays
+/// READY and usable, the thumbnail is QUOTA_DEFERRED with no object (never stored
+/// unaccounted), and it is produced once room exists. Concurrent workers cannot overshoot,
+/// and another environment's budget is independent.
+#[tokio::test]
+async fn thumbnails_reserve_storage_before_writing_and_defer_over_budget() {
+    let Some(e) = env().await else { return };
+    let c = e.h.customer(ALL_SCOPES);
+    e.policy(&c, json!({})).await;
+    let (conv, people) = e.managed_group(&c, 2).await;
+    let (a, ta) = image_and_thumbnail(1);
+    let (b, tb) = image_and_thumbnail(2);
+    let ida = e.upload_image(&c, &conv, people[0], &a).await;
+    let idb = e.upload_image(&c, &conv, people[0], &b).await;
+    let originals = (a.len() + b.len()) as i64;
+    assert_eq!(e.usage(&c).await, (originals, 0));
+    // Room for exactly one of the two thumbnails.
+    let budget = originals + ta.max(tb) + ta.min(tb) - 1;
+    e.policy(&c, json!({ "storageBudgetBytes": budget })).await;
+    // Another environment, unlimited, with its own image.
+    let other = e.h.customer(ALL_SCOPES);
+    e.policy(&other, json!({})).await;
+    let (oconv, opeople) = e.managed_group(&other, 1).await;
+    let (o, to) = image_and_thumbnail(3);
+    let ido = e.upload_image(&other, &oconv, opeople[0], &o).await;
+
+    // Eight workers race over the queue (FOR UPDATE SKIP LOCKED leases + the usage lock).
+    let workers: Vec<_> = (0..8)
+        .map(|_| {
+            let s = e.h.state.clone();
+            tokio::spawn(async move { derivatives::process_due(&s, 20).await.unwrap() })
+        })
+        .collect();
+    let mut deferred = 0;
+    for w in workers {
+        deferred += w.await.unwrap().deferred;
+    }
+    assert_eq!(deferred, 1, "exactly one thumbnail does not fit");
+    let (sa, sb) = (
+        thumbnail_status(&e, &ida).await,
+        thumbnail_status(&e, &idb).await,
+    );
+    let (ready_id, deferred_id, ready_size) = match (sa.0.as_str(), sb.0.as_str()) {
+        ("READY", "QUOTA_DEFERRED") => (&ida, &idb, ta),
+        ("QUOTA_DEFERRED", "READY") => (&idb, &ida, tb),
+        other => panic!("unexpected thumbnail states {other:?}"),
+    };
+    let d = thumbnail_status(&e, deferred_id).await;
+    assert_eq!((d.1.as_deref(), d.2), (Some("STORAGE_BUDGET"), 0));
+    assert_eq!(
+        e.h.scalar(&format!("SELECT count(*) FROM messaging_attachment_derivatives WHERE attachment_id = '{deferred_id}' AND kind = 'THUMBNAIL' AND object_key IS NULL AND pending_object_key IS NULL")).await,
+        1,
+        "a deferred thumbnail has no object"
+    );
+    // One stored derivative object for this environment, and it is the READY one.
+    let env_a = c.context.scope.environment_id.to_string();
+    let mine: Vec<String> = derivative_objects(&e)
+        .into_iter()
+        .filter(|k| k.contains(&env_a))
+        .collect();
+    assert_eq!(mine, vec![thumbnail_object(&e, ready_id).await]);
+    assert_eq!(e.usage(&c).await, (originals + ready_size, 0));
+    assert!(e.usage(&c).await.0 <= budget, "never over the budget");
+    // The actual stored object size is what is charged.
+    assert_eq!(
+        e.store.get_raw(&mine[0]).unwrap().len() as i64,
+        ready_size,
+        "charged bytes are the persisted object's size"
+    );
+    // The other environment's thumbnail was made regardless.
+    assert_eq!(thumbnail_status(&e, &ido).await.0, "READY");
+    assert_eq!(e.usage(&other).await, (o.len() as i64 + to, 0));
+
+    // The original of the deferred thumbnail is untouched and downloadable; the API tells
+    // the truth about the derivative.
+    // (Not yet sent in a message: only the uploader can read it.)
+    let meta =
+        e.h.get(
+            &c,
+            Some(people[0]),
+            &format!("/v1/conversations/{}/attachments/{deferred_id}", cid(&conv)),
+        )
+        .await;
+    assert_eq!(meta.status, StatusCode::OK, "{}", meta.text);
+    assert_eq!(meta.json["state"], "READY");
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/Attachment",
+        &meta.json,
+    );
+    let t = meta.json["derivatives"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["kind"] == "THUMBNAIL")
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        (t["status"].as_str(), t["errorCode"].as_str()),
+        (Some("QUOTA_DEFERRED"), Some("STORAGE_BUDGET"))
+    );
+    let g = e.grant(&c, &conv, people[0], &json!(deferred_id)).await;
+    assert_eq!(g.status, StatusCode::OK, "{}", g.text);
+
+    // Re-running before the retry time changes nothing (no object, no charge).
+    lifecycle::run_once(&e.h.state).await.unwrap();
+    assert_eq!(thumbnail_status(&e, deferred_id).await.0, "QUOTA_DEFERRED");
+    assert_eq!(e.usage(&c).await, (originals + ready_size, 0));
+    // Even when the retry is due, a still-full budget defers again.
+    e.h.clock
+        .advance(derivatives::QUOTA_RETRY + chrono::Duration::seconds(1));
+    let r = lifecycle::run_once(&e.h.state).await.unwrap();
+    assert_eq!(r.derivatives_deferred, 1, "{r:?}");
+    assert_eq!(e.usage(&c).await, (originals + ready_size, 0));
+
+    // An authorized budget change requeues it at once.
+    e.policy(&c, json!({ "storageBudgetBytes": originals + ta + tb }))
+        .await;
+    let r = lifecycle::run_once(&e.h.state).await.unwrap();
+    assert_eq!(r.derivatives_ready, 1, "{r:?}");
+    assert_eq!(thumbnail_status(&e, deferred_id).await.0, "READY");
+    assert_eq!(e.usage(&c).await, (originals + ta + tb, 0));
+    assert_no_drift(&e).await;
+    println!("EVIDENCE derivative-quota deferral: originals={originals} thumbnails={ta}+{tb} budget={budget} deferred=1 workers=8 drift=0");
+}
+
+/// A worker that wrote its thumbnail object and died before the database acknowledged it
+/// (lease expired, reservation still recorded). The next attempt retires that object to
+/// the deletion queue (still charged), writes its own, and the environment ends charged
+/// exactly once for the stored thumbnail.
+#[tokio::test]
+async fn a_crash_between_thumbnail_upload_and_acknowledgement_is_charged_once() {
+    let Some(e) = env().await else { return };
+    let c = e.h.customer(ALL_SCOPES);
+    e.policy(&c, json!({})).await;
+    let (conv, people) = e.managed_group(&c, 1).await;
+    let (png, t) = image_and_thumbnail(7);
+    let id = e.upload_image(&c, &conv, people[0], &png).await;
+    let s = png.len() as i64;
+    // Enqueue only (no budget for decoding yet: the pre-check defers without rendering).
+    e.policy(&c, json!({ "storageBudgetBytes": s })).await;
+    lifecycle::run_once(&e.h.state).await.unwrap();
+    assert_eq!(thumbnail_status(&e, &id).await.0, "QUOTA_DEFERRED");
+    assert!(
+        derivative_objects(&e).is_empty(),
+        "nothing rendered or stored"
+    );
+    e.policy(&c, json!({})).await;
+    // The crashed attempt: reserved, its object written, its lease expired.
+    let env = c.context.scope.environment_id;
+    let stale = derivatives::attempt_key(env, Uuid::parse_str(&id).unwrap(), Uuid::new_v4());
+    e.store.put_raw(&stale, vec![7u8; t as usize]);
+    e.h.sql(&format!(
+        "UPDATE messaging_attachment_derivatives SET status = 'PENDING', error_code = NULL, reserved_bytes = {t}, \
+           pending_object_key = '{stale}', lease_token = gen_random_uuid(), lease_expires_at = now() - interval '1 hour', \
+           next_attempt_at = now() - interval '1 hour' \
+         WHERE attachment_id = '{id}' AND kind = 'THUMBNAIL'"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(
+        e.usage(&c).await,
+        (s, t),
+        "the crashed attempt is reserved, not free"
+    );
+    assert_no_drift(&e).await;
+    e.h.clock
+        .set(chrono::Utc::now() + chrono::Duration::minutes(5));
+
+    let r = lifecycle::run_once(&e.h.state).await.unwrap();
+    assert_eq!((r.derivatives_ready, r.deleted_objects), (1, 1), "{r:?}");
+    let key = thumbnail_object(&e, &id).await;
+    assert_ne!(
+        key, stale,
+        "the retry never reuses the crashed attempt's key"
+    );
+    assert!(
+        e.store.get_raw(&stale).is_none(),
+        "the crashed attempt's object is deleted"
+    );
+    assert_eq!(derivative_objects(&e), vec![key.clone()]);
+    assert_eq!(e.store.get_raw(&key).unwrap().len() as i64, t);
+    assert_eq!(e.usage(&c).await, (s + t, 0), "charged exactly once");
+    assert_eq!(
+        e.h.scalar(&format!("SELECT count(*) FROM messaging_object_deletions WHERE object_key = '{stale}' AND status = 'DONE' AND charged_bytes = {t}")).await,
+        1
+    );
+    assert_no_drift(&e).await;
+}
+
+/// Storage outages while writing a thumbnail: a write that fails, and a write that stored
+/// the object but lost its answer. Every attempt's object is retired with its charge;
+/// after the final failure no derivative object remains, the original is untouched and
+/// the environment is charged for the original only.
+#[tokio::test]
+async fn failed_thumbnail_writes_release_their_reservation_and_leave_no_object() {
+    let Some((e, flaky)) = flaky_env().await else {
+        return;
+    };
+    let c = e.h.customer(ALL_SCOPES);
+    e.policy(&c, json!({})).await;
+    let (conv, people) = e.managed_group(&c, 1).await;
+    let (png, t) = image_and_thumbnail(9);
+    let id = e.upload_image(&c, &conv, people[0], &png).await;
+    let s = png.len() as i64;
+    for mode in [
+        DerivativeWrites::WriteThenFail,
+        DerivativeWrites::Fail,
+        DerivativeWrites::WriteThenFail,
+    ] {
+        *flaky.mode.lock().unwrap() = mode;
+        lifecycle::run_once(&e.h.state).await.unwrap();
+        let st = thumbnail_status(&e, &id).await;
+        if st.0 == "PENDING" {
+            // Between attempts the outcome is unknown: the attempt stays reserved.
+            assert_eq!(st.2, t, "{st:?}");
+            assert_eq!(e.usage(&c).await.1, t);
+        }
+        assert_no_drift(&e).await;
+        e.h.clock.advance(chrono::Duration::minutes(2));
+    }
+    let st = thumbnail_status(&e, &id).await;
+    assert_eq!(
+        (st.0.as_str(), st.1.as_deref(), st.2),
+        ("FAILED", Some("STORAGE_UNAVAILABLE"), 0)
+    );
+    *flaky.mode.lock().unwrap() = DerivativeWrites::Normal;
+    lifecycle::run_once(&e.h.state).await.unwrap();
+    assert!(
+        derivative_objects(&e).is_empty(),
+        "{:?}",
+        derivative_objects(&e)
+    );
+    assert_eq!(e.usage(&c).await, (s, 0));
+    let a =
+        e.h.get(
+            &c,
+            Some(people[0]),
+            &format!("/v1/conversations/{}/attachments/{id}", cid(&conv)),
+        )
+        .await;
+    assert_eq!(
+        a.json["state"], "READY",
+        "the original survives every derivative failure"
+    );
+    assert_no_drift(&e).await;
+}
+
+/// Legal holds preserve objects and their accounting: a deleted attachment whose objects
+/// are HELD stays charged (original and thumbnail) until the hold is released and the
+/// objects are really removed.
+#[tokio::test]
+async fn held_derivatives_keep_their_storage_charge_until_really_deleted() {
+    let Some(e) = env().await else { return };
+    let c = e.h.customer(ALL_SCOPES);
+    e.policy(&c, json!({})).await;
+    let (conv, people) = e.managed_group(&c, 1).await;
+    let (png, t) = image_and_thumbnail(11);
+    let id = e.upload_image(&c, &conv, people[0], &png).await;
+    let s = png.len() as i64;
+    lifecycle::run_once(&e.h.state).await.unwrap();
+    let thumb = thumbnail_object(&e, &id).await;
+    assert_eq!(e.usage(&c).await, (s + t, 0));
+    let hold = e.h.post(&c, None, "/v1/messaging/legal-holds", json!({ "scopeKind": "CONVERSATION", "conversationId": conv["conversationId"], "reasonCategory": "LITIGATION" })).await;
+    assert_eq!(hold.status, StatusCode::CREATED, "{}", hold.text);
+    let row = messaging::attachments::load(
+        &e.h.state.db,
+        Uuid::parse_str(&cid(&conv)).unwrap(),
+        Uuid::parse_str(&id).unwrap(),
+        false,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        lifecycle::delete_attachment(&e.h.state.db, &row, "TEST_DELETE", e.h.now())
+            .await
+            .unwrap()
+    );
+    let r = lifecycle::run_once(&e.h.state).await.unwrap();
+    assert_eq!((r.held, r.deleted_objects), (2, 0), "{r:?}");
+    assert!(e.store.get_raw(&thumb).is_some() && e.store.get_raw(&row.object_key).is_some());
+    assert_eq!(
+        e.usage(&c).await,
+        (s + t, 0),
+        "held objects keep their accounting"
+    );
+    assert_no_drift(&e).await;
+    let rel =
+        e.h.post(
+            &c,
+            None,
+            &format!(
+                "/v1/messaging/legal-holds/{}/release",
+                hold.json["holdId"].as_str().unwrap()
+            ),
+            json!({ "reason": "CASE_CLOSED" }),
+        )
+        .await;
+    assert_eq!(rel.status, StatusCode::OK, "{}", rel.text);
+    e.h.clock.advance(chrono::Duration::hours(2));
+    let r = lifecycle::run_once(&e.h.state).await.unwrap();
+    assert_eq!(r.deleted_objects, 2, "{r:?}");
+    assert!(e.store.is_empty(), "{:?}", e.store.keys());
+    assert_eq!(e.usage(&c).await, (0, 0));
+    assert_no_drift(&e).await;
+}
+
+/// Retention purges an expired message's attachment and its thumbnail; both charges are
+/// released once the objects are gone.
+#[tokio::test]
+async fn retention_purge_releases_derivative_storage() {
+    let Some(e) = env().await else { return };
+    let c = e.h.customer(ALL_SCOPES);
+    e.h.set_policy(&c, json!({
+        "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
+        "attachments": { "enabled": true },
+        "retention": { "messageDays": 30 },
+    })).await;
+    let (conv, people) = e.managed_group(&c, 1).await;
+    let (png, t) = image_and_thumbnail(13);
+    let id = e.upload_image(&c, &conv, people[0], &png).await;
+    let sent =
+        e.h.post(
+            &c,
+            Some(people[0]),
+            &format!("/v1/conversations/{}/messages", cid(&conv)),
+            json!({ "clientMessageId": Uuid::new_v4(), "text": "photo", "attachmentIds": [id] }),
+        )
+        .await;
+    assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+    lifecycle::run_once(&e.h.state).await.unwrap();
+    assert_eq!(e.usage(&c).await, (png.len() as i64 + t, 0));
+    e.h.clock.advance(chrono::Duration::days(31));
+    let r = messaging::compliance::run_once(&e.h.state).await.unwrap();
+    assert_eq!(r.attachments_deleted, 1, "{r:?}");
+    lifecycle::run_once(&e.h.state).await.unwrap();
+    assert!(e.store.is_empty(), "{:?}", e.store.keys());
+    assert_eq!(e.usage(&c).await, (0, 0));
+    assert_no_drift(&e).await;
+}
+
+/// A regenerated (replaced) thumbnail: the old object stays charged until deleted, the new
+/// one is reserved and charged on its own — usage never under-counts what is stored and
+/// ends at exactly the new object's size.
+#[tokio::test]
+async fn a_replaced_thumbnail_adjusts_usage_exactly() {
+    let Some(e) = env().await else { return };
+    let c = e.h.customer(ALL_SCOPES);
+    e.policy(&c, json!({})).await;
+    let (conv, people) = e.managed_group(&c, 1).await;
+    let (png, t) = image_and_thumbnail(17);
+    let id = e.upload_image(&c, &conv, people[0], &png).await;
+    let s = png.len() as i64;
+    lifecycle::run_once(&e.h.state).await.unwrap();
+    let old = thumbnail_object(&e, &id).await;
+    assert!(derivatives::regenerate_thumbnail(
+        &e.h.state.db,
+        Uuid::parse_str(&id).unwrap(),
+        e.h.now()
+    )
+    .await
+    .unwrap());
+    assert_eq!(
+        e.usage(&c).await,
+        (s + t, 0),
+        "the old object is still charged"
+    );
+    assert_no_drift(&e).await;
+    let r = lifecycle::run_once(&e.h.state).await.unwrap();
+    assert_eq!((r.derivatives_ready, r.deleted_objects), (1, 1), "{r:?}");
+    let new = thumbnail_object(&e, &id).await;
+    assert_ne!(old, new);
+    assert!(e.store.get_raw(&old).is_none());
+    assert_eq!(derivative_objects(&e), vec![new]);
+    assert_eq!(e.usage(&c).await, (s + t, 0));
+    // Nothing to regenerate for a missing READY thumbnail.
+    assert!(
+        !derivatives::regenerate_thumbnail(&e.h.state.db, Uuid::new_v4(), e.h.now())
+            .await
+            .unwrap()
+    );
+    assert_no_drift(&e).await;
+}
+
+/// Orphaned derivative objects (no row references them) are found and deleted; live
+/// thumbnails and objects already queued are left alone.
+#[tokio::test]
+async fn orphaned_derivative_objects_are_reconciled() {
+    let Some(e) = env().await else { return };
+    let c = e.h.customer(ALL_SCOPES);
+    e.policy(&c, json!({})).await;
+    let (conv, people) = e.managed_group(&c, 1).await;
+    let (png, t) = image_and_thumbnail(19);
+    let id = e.upload_image(&c, &conv, people[0], &png).await;
+    lifecycle::run_once(&e.h.state).await.unwrap();
+    let live = thumbnail_object(&e, &id).await;
+    let env = c.context.scope.environment_id;
+    let orphan = derivatives::attempt_key(env, Uuid::parse_str(&id).unwrap(), Uuid::new_v4());
+    e.store.put_raw(&orphan, vec![1u8; 64]);
+    let mut report = lifecycle::LifecycleReport::default();
+    assert!(
+        lifecycle::reconcile_derivative_orphans(&e.h.state, None, 100, &mut report)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(report.orphans, 1);
+    lifecycle::run_once(&e.h.state).await.unwrap();
+    assert!(e.store.get_raw(&orphan).is_none());
+    assert!(
+        e.store.get_raw(&live).is_some(),
+        "the live thumbnail is kept"
+    );
+    assert_eq!(
+        e.usage(&c).await,
+        (png.len() as i64 + t, 0),
+        "orphans were never charged"
+    );
+    assert_no_drift(&e).await;
+}
+
+/// Existing derivatives (migration path): rolled back to the schema before derivative
+/// accounting, the environment is charged for originals only; upgrading backfills every
+/// READY thumbnail exactly once, and migration 19 alone neither charges nor releases.
+#[tokio::test]
+async fn existing_thumbnails_are_backfilled_once_by_the_upgrade() {
+    let Some(e) = env().await else { return };
+    let c = e.h.customer(ALL_SCOPES);
+    e.policy(&c, json!({})).await;
+    let (conv, people) = e.managed_group(&c, 1).await;
+    let (a, ta) = image_and_thumbnail(23);
+    let (b, tb) = image_and_thumbnail(29);
+    e.upload_image(&c, &conv, people[0], &a).await;
+    e.upload_image(&c, &conv, people[0], &b).await;
+    lifecycle::run_once(&e.h.state).await.unwrap();
+    let s = (a.len() + b.len()) as i64;
+    assert_eq!(e.usage(&c).await, (s + ta + tb, 0));
+    use messaging_migration::MigratorTrait;
+    let conn = &e.h.db.conn;
+    messaging_migration::Migrator::down(conn, Some(2))
+        .await
+        .unwrap();
+    assert_eq!(
+        e.usage(&c).await,
+        (s, 0),
+        "the pre-ADR-0054 schema charged originals only"
+    );
+    messaging_migration::Migrator::up(conn, Some(1))
+        .await
+        .unwrap();
+    assert_eq!(
+        e.usage(&c).await,
+        (s + ta + tb, 0),
+        "migration 18 backfills each READY thumbnail once"
+    );
+    messaging_migration::Migrator::up(conn, None).await.unwrap();
+    assert_eq!(
+        e.usage(&c).await,
+        (s + ta + tb, 0),
+        "migration 19 changes no existing charge"
+    );
+    assert!(messaging_migration::Migrator::get_pending_migrations(conn)
+        .await
+        .unwrap()
+        .is_empty());
+    messaging_migration::Migrator::down(conn, Some(1))
+        .await
+        .unwrap();
+    messaging_migration::Migrator::up(conn, None).await.unwrap();
+    assert_eq!(
+        e.usage(&c).await,
+        (s + ta + tb, 0),
+        "19 down / up is neutral"
+    );
+    assert_no_drift(&e).await;
+}
+
+/// Gate 6 on a real S3-compatible server (MinIO in CI): the charged thumbnail bytes equal
+/// the size the store reports for the persisted object, deletion releases them only once
+/// both objects are gone from the bucket, and an orphaned derivative object in the bucket
+/// is found and removed.
+#[tokio::test]
+async fn real_object_storage_thumbnail_accounting() {
+    let Ok(endpoint) = std::env::var("OBJECT_STORAGE_TEST_ENDPOINT") else {
+        assert!(
+            std::env::var("OBJECT_STORAGE_TEST_REQUIRED").as_deref() != Ok("1"),
+            "OBJECT_STORAGE_TEST_ENDPOINT is required"
+        );
+        eprintln!("SKIPPED: OBJECT_STORAGE_TEST_ENDPOINT not set");
+        return;
+    };
+    let var = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
+    let store = Arc::new(
+        cf_object_storage::S3ObjectStore::new(cf_object_storage::S3Config {
+            endpoint,
+            public_endpoint: None,
+            region: var("OBJECT_STORAGE_TEST_REGION", "us-east-1"),
+            bucket: format!(
+                "{}-drv",
+                var("OBJECT_STORAGE_TEST_BUCKET", "cfmeet-object-storage-test")
+            ),
+            access_key: var("OBJECT_STORAGE_TEST_ACCESS_KEY", "testing"),
+            secret_key: var("OBJECT_STORAGE_TEST_SECRET_KEY", "testing"),
+            path_style: true,
+            server_side_encryption: Some(var("OBJECT_STORAGE_TEST_SSE", "AES256"))
+                .filter(|s| !s.is_empty()),
+        })
+        .unwrap(),
+    );
+    store.ensure_bucket().await.unwrap();
+    let s2: Arc<dyn ObjectStore> = store.clone();
+    let Some(h) = Harness::build(move |s| {
+        s.storage = s2;
+        s.scanner = ScriptedScanner::new(ScanOutcome::Clean);
+    })
+    .await
+    else {
+        return;
+    };
+    h.clock.set(chrono::Utc::now());
+    let http = reqwest::Client::new();
+    let c = h.customer(ALL_SCOPES);
+    h.set_policy(&c, json!({
+        "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
+        "attachments": { "enabled": true },
+    }))
+    .await;
+    let alice = h.principal(&c);
+    let conv = h
+        .create_conversation(
+            &c,
+            alice,
+            json!({ "contextClass": "GROUP", "securityProfile": "MANAGED" }),
+        )
+        .await;
+    assert_eq!(conv.status, StatusCode::CREATED, "{}", conv.text);
+    let id = cid(&conv.json);
+    let (png, _) = image_and_thumbnail(31);
+    let intent = h
+        .post(&c, Some(alice), &format!("/v1/conversations/{id}/attachments"),
+            json!({ "kind": "IMAGE", "size": png.len(), "sha256": sha256_hex(&png), "mediaType": "image/png", "fileName": "real.png" }))
+        .await;
+    assert_eq!(intent.status, StatusCode::CREATED, "{}", intent.text);
+    let upload = &intent.json["upload"];
+    let mut req = http.put(upload["url"].as_str().unwrap());
+    for hd in upload["headers"].as_array().unwrap() {
+        req = req.header(hd["name"].as_str().unwrap(), hd["value"].as_str().unwrap());
+    }
+    let r = req.body(png.clone()).send().await.unwrap();
+    assert!(r.status().is_success(), "{}", r.status());
+    let aid = intent.json["attachmentId"].as_str().unwrap().to_string();
+    let f = h
+        .post(
+            &c,
+            Some(alice),
+            &format!("/v1/conversations/{id}/attachments/{aid}/finalize"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(f.json["state"], "READY", "{}", f.text);
+    let r = lifecycle::run_once(&h.state).await.unwrap();
+    assert_eq!(r.derivatives_ready, 2, "thumbnail + inspection: {r:?}");
+
+    let usage = |h: &Harness| {
+        let env = c.context.scope.environment_id;
+        let db = h.state.db.clone();
+        async move {
+            db.query_one(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Postgres,
+                format!("SELECT committed_bytes, reserved_bytes FROM messaging_storage_usage WHERE environment_id = '{env}'"),
+            ))
+            .await
+            .unwrap()
+            .map(|r| (r.try_get_by_index::<i64>(0).unwrap(), r.try_get_by_index::<i64>(1).unwrap()))
+            .unwrap()
+        }
+    };
+    let key: String = h
+        .state
+        .db
+        .query_one(sea_orm::Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            format!("SELECT object_key FROM messaging_attachment_derivatives WHERE attachment_id = '{aid}' AND kind = 'THUMBNAIL' AND status = 'READY'"),
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get_by_index(0)
+        .unwrap();
+    let stored = store
+        .head(&key)
+        .await
+        .unwrap()
+        .expect("thumbnail in the bucket");
+    let original = store
+        .head(&messaging::attachments::object_key(
+            c.context.scope.environment_id,
+            Uuid::parse_str(&id).unwrap(),
+            Uuid::parse_str(&aid).unwrap(),
+        ))
+        .await
+        .unwrap()
+        .expect("original in the bucket");
+    assert_eq!(original.size, png.len() as u64);
+    assert_eq!(
+        usage(&h).await,
+        ((original.size + stored.size) as i64, 0),
+        "charged bytes are the sizes the bucket reports"
+    );
+    // A stray derivative object (as a lost answer would leave) is found and removed.
+    let stray = derivatives::attempt_key(
+        c.context.scope.environment_id,
+        Uuid::parse_str(&aid).unwrap(),
+        Uuid::new_v4(),
+    );
+    store
+        .put(&stray, vec![0u8; 128], "image/png")
+        .await
+        .unwrap();
+    h.clock.advance(chrono::Duration::hours(2));
+    let mut report = lifecycle::LifecycleReport::default();
+    let mut cursor = None;
+    loop {
+        cursor = lifecycle::reconcile_derivative_orphans(&h.state, cursor, 1000, &mut report)
+            .await
+            .unwrap();
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert!(report.orphans >= 1, "{report:?}");
+    // Delete the attachment: both objects leave the bucket, then the charge is released.
+    let row = messaging::attachments::load(
+        &h.state.db,
+        Uuid::parse_str(&id).unwrap(),
+        Uuid::parse_str(&aid).unwrap(),
+        false,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        lifecycle::delete_attachment(&h.state.db, &row, "TEST_DELETE", h.now())
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        usage(&h).await.0,
+        (original.size + stored.size) as i64,
+        "still stored, still charged"
+    );
+    lifecycle::run_once(&h.state).await.unwrap();
+    assert!(store.head(&key).await.unwrap().is_none());
+    assert!(store.head(&stray).await.unwrap().is_none());
+    assert!(store.head(&row.object_key).await.unwrap().is_none());
+    assert_eq!(usage(&h).await, (0, 0));
+    assert!(quota::audit_all(&h.state.db).await.unwrap().is_empty());
+    println!(
+        "EVIDENCE real-s3 thumbnail accounting: original={} thumbnail={} released=both",
+        original.size, stored.size
+    );
 }

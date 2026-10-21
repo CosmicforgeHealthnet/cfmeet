@@ -70,6 +70,16 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: http://localhost:8080/api/v1
 
+      # Preserve a release-time SHA-384 manifest for the compiled Next static assets.
+      # This checks artifact integrity, not browser-enforced SRI or MLS device security.
+      - name: Test release asset tamper detection
+        run: node --test tests/build-assets.test.mjs
+
+      - name: Record and verify production build asset integrity
+        run: |
+          node scripts/verify-build-assets.mjs --write
+          node scripts/verify-build-assets.mjs --verify
+
       # The BUILT app in real Chromium: every page carries a fresh-nonce CSP with Trusted
       # Types and the security headers and hydrates with no violation; injected inline
       # script, untyped DOM sinks, eval and framing are refused.

@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { buildCsp, SECURITY_HEADERS } from "../src/lib/security/csp.ts";
+import { buildCsp, MESSAGING_CRYPTO_PATH, MESSAGING_CRYPTO_WORKER_CSP, SECURITY_HEADERS } from "../src/lib/security/csp.ts";
 
 const directive = (csp, name) =>
   csp.split(";").map((d) => d.trim()).find((d) => d === name || d.startsWith(`${name} `));
@@ -20,16 +20,30 @@ test("production policy: nonce scripts only, Trusted Types, no plugins / framing
   assert.ok(!csp.includes("'unsafe-eval'"));
 });
 
-test("MLS WebAssembly permission is opt-in and never enables JavaScript eval", () => {
+test("pages never compile WebAssembly; only the crypto worker's own policy allows it", () => {
   const nonce = "AAAAAAAAAAAAAAAAAAAAAAAA";
-  const secure = buildCsp({ nonce, dev: false, allowMessagingWasm: true });
-  const scripts = directive(secure, "script-src");
-  assert.ok(scripts.includes("'wasm-unsafe-eval'"), scripts);
-  assert.ok(!scripts.includes("'unsafe-eval'"), scripts);
-  assert.ok(!scripts.includes("'unsafe-inline'"), scripts);
-  assert.ok(secure.includes("require-trusted-types-for 'script'"));
-  const ordinary = buildCsp({ nonce, dev: false });
-  assert.ok(!ordinary.includes("'wasm-unsafe-eval'"), ordinary);
+  for (const csp of [buildCsp({ nonce, dev: false }), buildCsp({ nonce, dev: false, secure: true })]) {
+    assert.ok(!csp.includes("wasm-unsafe-eval"), csp);
+  }
+  const w = MESSAGING_CRYPTO_WORKER_CSP;
+  assert.equal(directive(w, "default-src"), "default-src 'none'");
+  assert.equal(directive(w, "script-src"), "script-src 'self' 'wasm-unsafe-eval'");
+  assert.equal(directive(w, "connect-src"), "connect-src 'self'");
+  assert.equal(directive(w, "worker-src"), "worker-src 'none'");
+  assert.ok(!w.includes("'unsafe-eval'") && !w.includes("'unsafe-inline'") && !w.includes("*"), w);
+  assert.equal(MESSAGING_CRYPTO_PATH, "/messaging-crypto");
+});
+
+test("messaging and storage origins: HTTPS, or loopback HTTP only; origin, never a path", () => {
+  const nonce = "DDDDDDDDDDDDDDDDDDDDDDDD";
+  const csp = buildCsp({ nonce, dev: false, messagingUrl: "https://msg.cfmeet.com/", storageUrl: "https://files.cfmeet.com/bucket?x=1" });
+  const c = directive(csp, "connect-src");
+  assert.ok(c.includes("https://msg.cfmeet.com") && c.includes("wss://msg.cfmeet.com"), c);
+  assert.ok(c.includes("https://files.cfmeet.com") && !c.includes("/bucket") && !c.includes("wss://files"), c);
+  const local = directive(buildCsp({ nonce, dev: false, messagingUrl: "http://127.0.0.1:18090", storageUrl: "http://127.0.0.1:9000" }), "connect-src");
+  assert.ok(local.includes("http://127.0.0.1:18090") && local.includes("ws://127.0.0.1:18090") && local.includes("http://127.0.0.1:9000"), local);
+  const insecure = directive(buildCsp({ nonce, dev: false, messagingUrl: "http://msg.example.com", storageUrl: "javascript:alert(1)" }), "connect-src");
+  assert.ok(!insecure.includes("msg.example.com") && !insecure.includes("javascript"), insecure);
 });
 
 test("development adds only what next dev needs; plain HTTP is not upgraded", () => {
