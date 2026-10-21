@@ -152,6 +152,18 @@ pub struct MessageFeatures {
     pub pins: bool,
 }
 
+/// Opt-in secure backups (Appendix I.3): client-encrypted objects the server stores but
+/// cannot read. OFF until an application enables them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupPolicy {
+    pub enabled: bool,
+    /// Largest backup object (bytes).
+    pub max_bytes: i64,
+    /// READY backups kept per principal (older ones are deleted when a new one is ready).
+    pub retain_count: i64,
+}
+
 /// Abuse limits (§88), per acting principal unless stated.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -180,6 +192,7 @@ pub struct EffectivePolicy {
     pub retention: RetentionPolicy,
     pub moderation: ModerationPolicy,
     pub abuse: AbusePolicy,
+    pub backups: BackupPolicy,
 }
 
 /// Attachment kinds (generic; no product vocabulary).
@@ -270,6 +283,11 @@ pub fn platform_defaults() -> EffectivePolicy {
             uploads_per_hour: 120,
             managed_links_per_hour: 60,
         },
+        backups: BackupPolicy {
+            enabled: false,
+            max_bytes: 256 * 1024 * 1024,
+            retain_count: 2,
+        },
     }
 }
 
@@ -349,6 +367,11 @@ overrides!(EditingOverride {
     delete_window_seconds: i64,
     revision_history_visible: bool,
 });
+overrides!(BackupOverride {
+    enabled: bool,
+    max_bytes: i64,
+    retain_count: i64,
+});
 overrides!(MessageFeaturesOverride {
     threads: bool,
     reactions: bool,
@@ -384,6 +407,8 @@ pub struct ApplicationPolicy {
     pub abuse: Option<AbuseOverride>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub messages: Option<MessageFeaturesOverride>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backups: Option<BackupOverride>,
 }
 
 const MAX_LIFETIME: i64 = 10 * 365 * 86_400;
@@ -515,6 +540,10 @@ impl ApplicationPolicy {
                 MAX_LIFETIME,
                 "editing.deleteWindowSeconds",
             )?;
+        }
+        if let Some(b) = &self.backups {
+            within(b.max_bytes, 1024, 1024 * 1024 * 1024, "backups.maxBytes")?;
+            within(b.retain_count, 1, 10, "backups.retainCount")?;
         }
         if let Some(a) = &self.abuse {
             within(a.messages_per_minute, 1, 100_000, "abuse.messagesPerMinute")?;
@@ -708,6 +737,18 @@ pub fn resolve(
         }
         if let Some(v) = o.revision_history_visible {
             p.editing.revision_history_visible = v;
+        }
+    }
+    if let Some(o) = &overrides.backups {
+        let t = &mut p.backups;
+        if let Some(v) = o.enabled {
+            t.enabled = v;
+        }
+        if let Some(v) = o.max_bytes {
+            t.max_bytes = v;
+        }
+        if let Some(v) = o.retain_count {
+            t.retain_count = v;
         }
     }
     if let Some(o) = &overrides.messages {

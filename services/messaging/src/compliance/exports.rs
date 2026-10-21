@@ -95,6 +95,12 @@ pub async fn request(
     ctx: &TrustedContext,
     request: ExportRequest,
 ) -> Result<Value> {
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::Exports,
+        ctx.scope.environment_id,
+    )
+    .await?;
     let now = state.now();
     let conversation = service::load(&state.db, ctx, request.conversation_id, false)
         .await?
@@ -180,6 +186,12 @@ pub async fn get(state: &AppState, ctx: &TrustedContext, id: Uuid) -> Result<Val
 
 /// `POST /v1/messaging/exports/{id}/download-grants`.
 pub async fn grant(state: &AppState, ctx: &TrustedContext, id: Uuid) -> Result<Value> {
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::Exports,
+        ctx.scope.environment_id,
+    )
+    .await?;
     let now = state.now();
     let e = load(state, ctx, id).await?;
     if e.status != "READY" || e.expires_at <= now {

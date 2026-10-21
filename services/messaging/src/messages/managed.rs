@@ -427,6 +427,13 @@ pub async fn send(
         ctx.scope.environment_id,
     )
     .await?;
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::ManagedMessaging,
+        ctx.scope.environment_id,
+    )
+    .await?;
+
     if request.ciphertext.is_some() || request.device_id.is_some() || request.epoch.is_some() {
         return Err(Error::reason(
             ErrorCode::ContentRejected,
@@ -563,6 +570,12 @@ pub async fn edit(
     crate::conversations::access::require_accepting(&conversation, state.now())?;
     let effective =
         crate::conversations::policy::current(&state.db, ctx.scope.environment_id).await?;
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::ManagedMessaging,
+        ctx.scope.environment_id,
+    )
+    .await?;
     let expected_edit_count = request.expected_edit_count;
     let content = admit(request.text)?;
     ring(state)?;

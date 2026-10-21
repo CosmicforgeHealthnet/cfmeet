@@ -412,3 +412,147 @@ async fn the_operator_cli_changes_switches_only_with_a_named_operator() {
     );
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stdout));
 }
+
+/// §134: each capability has its own switch. Engaging one refuses exactly that capability
+/// (FEATURE_DISABLED / KILL_SWITCH_ENGAGED), leaves the others working, and never turns
+/// one security profile into the other.
+#[tokio::test]
+async fn every_capability_has_an_independent_kill_switch() {
+    let store = std::sync::Arc::new(cf_object_storage::MemoryObjectStore::new());
+    let Some(h) = Harness::build(move |s| s.storage = store).await else {
+        return;
+    };
+    let now = chrono::Utc::now();
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    h.set_policy(
+        &c,
+        json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED", "exportsEnabled": true } } }),
+    )
+    .await;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let env = c.context.scope.environment_id;
+    let sent = h
+        .send_managed(&c, &conv, people[0], "before the switches")
+        .await;
+    let mid = sent.json["messageId"].as_str().unwrap().to_string();
+    let device = h.active_device(&c, people[0]).await.device_id();
+    let refused =
+        |r: &Response| r.code() == "FEATURE_DISABLED" && r.reason() == "KILL_SWITCH_ENGAGED";
+    let engage = |s: KillSwitch, on: bool| {
+        let h = &h;
+        async move {
+            assert!(
+                operations::set_switch(h.conn(), s, Some(env), on, "INCIDENT", "ops-1", now)
+                    .await
+                    .unwrap()
+            );
+        }
+    };
+
+    // E2EE conversation creation: refused, MANAGED creation unaffected, never a fallback.
+    engage(KillSwitch::E2eeConversationCreate, true).await;
+    let r = h
+        .create_conversation(
+            &c,
+            people[0],
+            json!({ "contextClass": "GROUP", "securityProfile": "PRIVATE_E2EE" }),
+        )
+        .await;
+    assert!(refused(&r), "{}", r.text);
+    let m = h
+        .create_conversation(
+            &c,
+            people[0],
+            json!({ "contextClass": "GROUP", "securityProfile": "MANAGED" }),
+        )
+        .await;
+    assert_eq!(m.status, StatusCode::CREATED, "{}", m.text);
+    assert_eq!(
+        h.scalar(
+            "SELECT count(*) FROM messaging_conversations WHERE security_profile = 'PRIVATE_E2EE'"
+        )
+        .await,
+        0
+    );
+    engage(KillSwitch::E2eeConversationCreate, false).await;
+
+    // MANAGED messaging: no new MANAGED conversation, send or edit.
+    engage(KillSwitch::ManagedMessaging, true).await;
+    assert!(refused(
+        &h.send_managed(&c, &conv, people[0], "refused").await
+    ));
+    assert!(refused(
+        &h.patch(
+            &c,
+            Some(people[0]),
+            &format!("/v1/conversations/{cid}/messages/{mid}"),
+            json!({ "text": "x" })
+        )
+        .await
+    ));
+    assert!(refused(
+        &h.create_conversation(
+            &c,
+            people[0],
+            json!({ "contextClass": "GROUP", "securityProfile": "MANAGED" })
+        )
+        .await
+    ));
+    // Reading still works.
+    assert_eq!(
+        h.get(
+            &c,
+            Some(people[1]),
+            &format!("/v1/conversations/{cid}/messages")
+        )
+        .await
+        .status,
+        StatusCode::OK
+    );
+    engage(KillSwitch::ManagedMessaging, false).await;
+
+    // Search, exports, moderation actions, key-transparency proofs.
+    for switch in [
+        KillSwitch::Search,
+        KillSwitch::Exports,
+        KillSwitch::ModerationActions,
+        KillSwitch::KtProofs,
+    ] {
+        let call = || async {
+            match switch {
+                KillSwitch::Search => h.get(&c, Some(people[1]), &format!("/v1/conversations/{cid}/search?q=before")).await,
+                KillSwitch::Exports => h.post(&c, None, "/v1/messaging/exports", json!({ "conversationId": cid })).await,
+                KillSwitch::ModerationActions => {
+                    h.post(&c, None, "/v1/messaging/moderation/actions",
+                           json!({ "kind": "RESTRICT_PRINCIPAL", "principalId": people[1], "reason": "SPAM_WAVE",
+                                   "durationSeconds": 600, "conversationId": cid }))
+                        .await
+                }
+                _ => h.get(&c, Some(people[0]), &format!("/v1/messaging/key-transparency/proofs?deviceId={device}")).await,
+            }
+        };
+        engage(switch, true).await;
+        let r = call().await;
+        assert!(refused(&r), "{}: {}", switch.as_str(), r.text);
+        // Every OTHER capability keeps working while this one is off.
+        assert_eq!(
+            h.send_managed(&c, &conv, people[0], "still sending")
+                .await
+                .status,
+            StatusCode::CREATED
+        );
+        engage(switch, false).await;
+        let r = call().await;
+        assert!(
+            !refused(&r) && r.status.is_success(),
+            "{} after release: {}",
+            switch.as_str(),
+            r.text
+        );
+    }
+    assert_eq!(KillSwitch::ALL.len(), 14);
+    for s in KillSwitch::ALL {
+        assert_eq!(KillSwitch::parse(s.as_str()), Some(s));
+    }
+}

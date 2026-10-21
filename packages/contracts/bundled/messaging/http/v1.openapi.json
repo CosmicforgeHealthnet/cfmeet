@@ -5918,6 +5918,318 @@
           }
         }
       }
+    },
+    "/v1/messaging/backups": {
+      "post": {
+        "operationId": "createBackupUpload",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.send. An upload intent (signed PUT of exactly size bytes with that SHA-256) for the acting principal's own ACTIVE device; at most 3 unfinished intents; size ≤ backups.maxBytes (413 BACKUP_TOO_LARGE). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.BackupUploadIntent"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.BackupIntentRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/messaging/backups/latest": {
+      "get": {
+        "operationId": "getLatestBackup",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.read. Metadata of the acting principal's newest READY backup (404 when none). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.Backup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/backups/{backupId}": {
+      "delete": {
+        "operationId": "deleteBackup",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.send. Marks the backup DELETED and queues its object for deletion. Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "backupId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.BackupDeletion"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/backups/{backupId}/finalize": {
+      "post": {
+        "operationId": "finalizeBackup",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.send. Verifies the uploaded object (size, SHA-256, format magic, header principal = acting principal); READY on success (idempotent), else REJECTED with 422 INTEGRITY_CHECK_FAILED (SIZE_MISMATCH, DIGEST_MISMATCH, NOT_A_BACKUP, WRONG_PRINCIPAL) and the object is deleted. Keeps the newest backups.retainCount READY backups. Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "backupId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.Backup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/backups/{backupId}/download-grants": {
+      "post": {
+        "operationId": "createBackupDownloadGrant",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.read. A short-lived signed read of a READY backup object (409 BACKUP_NOT_READY otherwise). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "backupId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.BackupDownloadGrant"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6207,6 +6519,25 @@
               },
               "pins": {
                 "type": "boolean"
+              }
+            }
+          },
+          "backups": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "maxBytes": {
+                "type": "integer",
+                "minimum": 1024,
+                "maximum": 1073741824
+              },
+              "retainCount": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
               }
             }
           }
@@ -7012,6 +7343,241 @@
           "entries",
           "nextBefore"
         ]
+      },
+      "messaging.common.v1.Backup": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "backupId",
+          "status",
+          "format",
+          "deviceId",
+          "size",
+          "sha256",
+          "clientBackupId",
+          "keyId",
+          "rejectReason",
+          "createdAt",
+          "finalizedAt",
+          "serverCanDecrypt"
+        ],
+        "description": "Metadata of an opaque backup object. keyId and clientBackupId come from the object's public header; the server cannot decrypt the object.",
+        "properties": {
+          "backupId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "status": {
+            "enum": [
+              "PENDING",
+              "READY",
+              "REJECTED",
+              "DELETED"
+            ]
+          },
+          "format": {
+            "const": "CFMEET_BACKUP_XCHACHA20POLY1305_STREAM_V1"
+          },
+          "deviceId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "clientBackupId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "keyId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{32}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rejectReason": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finalizedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "serverCanDecrypt": {
+            "const": false
+          }
+        }
+      },
+      "messaging.common.v1.BackupDeletion": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "backupId",
+          "status"
+        ],
+        "properties": {
+          "backupId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "status": {
+            "const": "DELETED"
+          }
+        }
+      },
+      "messaging.common.v1.BackupDownloadGrant": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "backupId",
+          "method",
+          "url",
+          "expiresAt",
+          "size",
+          "sha256"
+        ],
+        "properties": {
+          "backupId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "method": {
+            "const": "GET"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      },
+      "messaging.common.v1.BackupIntentRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deviceId",
+          "size",
+          "sha256",
+          "format"
+        ],
+        "description": "An upload intent for one client-encrypted backup object (Appendix I.3). The client encrypts with the shared crypto core under a root key only the user holds; the server never receives a key or content.",
+        "properties": {
+          "deviceId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "format": {
+            "const": "CFMEET_BACKUP_XCHACHA20POLY1305_STREAM_V1"
+          }
+        }
+      },
+      "messaging.common.v1.BackupUploadIntent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "backupId",
+          "status",
+          "upload"
+        ],
+        "properties": {
+          "backupId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "status": {
+            "const": "PENDING"
+          },
+          "upload": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "method": {
+                "const": "PUT"
+              },
+              "url": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "headers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "value"
+                  ]
+                }
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "method",
+              "url",
+              "headers",
+              "expiresAt"
+            ],
+            "description": "A signed single-object upload bound to the exact size (content-length), SHA-256 (x-amz-checksum-sha256) and content type: the store rejects any other bytes. Send exactly these headers."
+          }
+        }
       },
       "messaging.common.v1.Ban": {
         "type": "object",
@@ -7981,7 +8547,8 @@
           "platformPolicyVersion",
           "applicationPolicyVersion",
           "contexts",
-          "sendingEnabled"
+          "sendingEnabled",
+          "backups"
         ],
         "properties": {
           "schemaVersion": {
@@ -8354,6 +8921,31 @@
               "managedLinksPerHour": {
                 "type": "integer",
                 "minimum": 1
+              }
+            }
+          },
+          "backups": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "enabled",
+              "maxBytes",
+              "retainCount"
+            ],
+            "description": "Opt-in secure backups (off by default).",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "maxBytes": {
+                "type": "integer",
+                "minimum": 1024,
+                "maximum": 1073741824
+              },
+              "retainCount": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
               }
             }
           }

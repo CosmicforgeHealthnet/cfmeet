@@ -109,6 +109,12 @@ pub async fn conversation(
     conversation_id: Uuid,
     q: SearchQuery,
 ) -> Result<Value> {
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::Search,
+        ctx.scope.environment_id,
+    )
+    .await?;
     let limit = validate(&q)?;
     let (conversation, member) =
         access::as_member(&state.db, ctx, conversation_id, acting.principal_id).await?;
@@ -150,6 +156,12 @@ pub async fn across(
     acting: &Acting,
     q: SearchQuery,
 ) -> Result<Value> {
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::Search,
+        ctx.scope.environment_id,
+    )
+    .await?;
     let limit = validate(&q)?;
     if q.before_sequence.is_some() {
         return Err(Error::validation(

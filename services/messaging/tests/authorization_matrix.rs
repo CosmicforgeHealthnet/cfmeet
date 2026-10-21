@@ -214,6 +214,10 @@ struct Fx {
     transfer_download: String,
     transfer_complete: String,
     transfer_cancel: String,
+    /// Opt-in secure backups of the owner: an intent body, a READY and an uploaded PENDING one.
+    backup_create_body: Value,
+    backup_ready: String,
+    backup_pending: String,
 }
 
 impl Fx {
@@ -236,6 +240,8 @@ impl Fx {
             self.transfer_download.clone(),
             self.transfer_complete.clone(),
             self.transfer_cancel.clone(),
+            self.backup_ready.clone(),
+            self.backup_pending.clone(),
             self.owner.device_id().to_string(),
             self.member.principal.to_string(),
         ];
@@ -333,7 +339,8 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
         json!({
             "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED", "exportsEnabled": true } },
             "attachments": { "enabled": true, "managedScanRequired": false },
-            "editing": { "revisionHistoryVisible": true }
+            "editing": { "revisionHistoryVisible": true },
+            "backups": { "enabled": true }
         }),
     )
     .await;
@@ -690,7 +697,31 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
         transfer_ids.push(id);
     }
     let (transfer_create_body, _, _, _) = transfer(4, false);
+    let owner_device = owner.device_id();
+    let (_, ready_bytes) = encrypted_backup(owner.principal, &[("MESSAGES", b"matrix backup")]);
+    let backup_ready = h
+        .upload_backup(&a, store, owner.principal, owner_device, &ready_bytes)
+        .await;
+    let r = h
+        .post(
+            &a,
+            Some(owner.principal),
+            &format!("/v1/messaging/backups/{backup_ready}/finalize"),
+            json!({}),
+        )
+        .await;
+    ok(&r, "backup");
+    let (_, pending_bytes) = encrypted_backup(owner.principal, &[("MESSAGES", b"matrix pending")]);
+    let backup_pending = h
+        .upload_backup(&a, store, owner.principal, owner_device, &pending_bytes)
+        .await;
+    let (_, create_bytes) = encrypted_backup(owner.principal, &[("MESSAGES", b"matrix intent")]);
+    let backup_create_body = json!({ "deviceId": owner_device, "size": create_bytes.len(),
+        "sha256": sha256_hex(&create_bytes), "format": cf_messaging_crypto::backup::BACKUP_FORMAT_V1 });
     Fx {
+        backup_create_body,
+        backup_ready,
+        backup_pending,
         transfer_create_body,
         transfer_requested: transfer_ids[0].clone(),
         transfer_seal_body: seal_body,
@@ -859,6 +890,22 @@ fn ops() -> Vec<Op> {
              ok: 200, skip: NO_SKIP,
              expect: &[(Case::CrossTenantIds, 404, "NOT_FOUND")] },
         // ------------------------------------------------ history transfers (AD-07)
+        // ---------------------------------------------------------------- backups
+        Op { method: M::POST, template: "/v1/messaging/backups", scopes: SEND, acting: AM, res: Res::Device,
+             req: |f| r("/v1/messaging/backups".into(), Some(f.owner.principal), Some(f.backup_create_body.clone())),
+             ok: 201, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/messaging/backups/latest", scopes: READ, acting: AM, res: Res::Device,
+             req: |f| r("/v1/messaging/backups/latest".into(), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/messaging/backups/{backupId}/finalize", scopes: SEND, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/backups/{}/finalize", f.backup_pending), Some(f.owner.principal), Some(json!({}))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/messaging/backups/{backupId}/download-grants", scopes: READ, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/backups/{}/download-grants", f.backup_ready), Some(f.owner.principal), Some(json!({}))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::DELETE, template: "/v1/messaging/backups/{backupId}", scopes: SEND, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/backups/{}", f.backup_ready), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         Op { method: M::POST, template: "/v1/messaging/history-transfers", scopes: SEND, acting: AM, res: Res::Device,
              req: |f| r("/v1/messaging/history-transfers".into(), Some(f.owner.principal), Some(f.transfer_create_body.clone())),
              ok: 201, skip: NO_SKIP, expect: NO_EXPECT },

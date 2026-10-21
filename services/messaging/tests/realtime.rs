@@ -927,3 +927,60 @@ async fn delivery_receipts_and_own_device_read_sync_respect_the_privacy_policy()
     );
     h.conforming_event_types().await;
 }
+
+/// §134: the REALTIME_CONNECT switch refuses new tickets and connections (established
+/// connections are governed by revalidation as usual); releasing it restores them.
+#[tokio::test]
+async fn the_realtime_connect_switch_refuses_new_tickets_and_connections() {
+    use messaging::operations::{self, KillSwitch};
+    let Some(rt) = Rt::start().await else { return };
+    let h = &rt.h;
+    let c = h.customer(ALL_SCOPES);
+    let (_conv, people) = h.managed_group(&c, 1).await;
+    let m = Member {
+        principal: people[0],
+        device: h.active_device(&c, people[0]).await,
+        group: None,
+        cursor: 0,
+    };
+    let ticket = rt.ticket(&c, &m).await; // issued before the switch
+    let token = rt.token(&c, &m).await;
+    let env = c.context.scope.environment_id;
+    let now = chrono::Utc::now();
+    operations::set_switch(
+        h.conn(),
+        KillSwitch::RealtimeConnect,
+        Some(env),
+        true,
+        "INCIDENT",
+        "ops-1",
+        now,
+    )
+    .await
+    .unwrap();
+    let r = rt.ticket_with(&token).await;
+    assert_eq!(
+        (r.code(), r.reason()),
+        ("FEATURE_DISABLED", "KILL_SWITCH_ENGAGED"),
+        "{}",
+        r.text
+    );
+    assert!(
+        rt.open(&ticket, None).await.is_err(),
+        "a ticket issued before the switch cannot connect"
+    );
+    operations::set_switch(
+        h.conn(),
+        KillSwitch::RealtimeConnect,
+        Some(env),
+        false,
+        "RESOLVED",
+        "ops-1",
+        now,
+    )
+    .await
+    .unwrap();
+    let mut ws = rt.connect(&c, &m).await;
+    ws.send(json!({ "type": "ping", "requestId": "p" })).await;
+    ws.next_of("pong").await;
+}

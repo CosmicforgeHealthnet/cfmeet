@@ -336,9 +336,10 @@ async fn a_managed_conversation_bridges_to_sms_with_explicit_disclosure_and_sepa
     // §118 / Appendix D: the transitions above recorded their domain events, and every
     // event conforms to the published event contract.
     let types = h.conforming_event_types().await;
-    for t in ["messaging.message.sms-transport-changed"] {
-        assert!(types.contains(t), "{t} not recorded: {types:?}");
-    }
+    assert!(
+        types.contains("messaging.message.sms-transport-changed"),
+        "sms-transport-changed not recorded: {types:?}"
+    );
 }
 
 #[tokio::test]

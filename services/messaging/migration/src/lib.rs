@@ -31,6 +31,7 @@ mod m20261120_000018_derivative_quota_accounting;
 mod m20261121_000019_derivative_reservations;
 mod m20261122_000020_message_revisions;
 mod m20261123_000021_delivery_cursors;
+mod m20261124_000022_backups_and_switches;
 
 /// Name of the table recording which Messaging migrations have been applied.
 pub const MIGRATION_TABLE: &str = "messaging_seaql_migrations";
@@ -62,6 +63,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261121_000019_derivative_reservations::Migration),
             Box::new(m20261122_000020_message_revisions::Migration),
             Box::new(m20261123_000021_delivery_cursors::Migration),
+            Box::new(m20261124_000022_backups_and_switches::Migration),
         ]
     }
 

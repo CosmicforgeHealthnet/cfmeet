@@ -2684,8 +2684,17 @@ async fn existing_thumbnails_are_backfilled_once_by_the_upgrade() {
     assert_eq!(e.usage(&c).await, (s + ta + tb, 0));
     use messaging_migration::MigratorTrait;
     let conn = &e.h.db.conn;
-    // Back to before migration 18 (migrations 21, 20, 19 and 18 rolled back).
-    messaging_migration::Migrator::down(conn, Some(4))
+    // How many migrations, counted from the newest, reach back to (and include) `n`.
+    let since = |n: &str| {
+        let all = messaging_migration::Migrator::migrations();
+        let at = all
+            .iter()
+            .position(|m| m.name().contains(n))
+            .expect("migration exists");
+        (all.len() - at) as u32
+    };
+    // Back to before migration 18.
+    messaging_migration::Migrator::down(conn, Some(since("_000018_")))
         .await
         .unwrap();
     assert_eq!(
@@ -2711,8 +2720,9 @@ async fn existing_thumbnails_are_backfilled_once_by_the_upgrade() {
         .await
         .unwrap()
         .is_empty());
-    // 21, 20 and 19 down / up (migrations 20 and 21 do not touch storage accounting).
-    messaging_migration::Migrator::down(conn, Some(3))
+    // 19 and everything after it down / up (later migrations do not touch storage
+    // accounting).
+    messaging_migration::Migrator::down(conn, Some(since("_000019_")))
         .await
         .unwrap();
     messaging_migration::Migrator::up(conn, None).await.unwrap();

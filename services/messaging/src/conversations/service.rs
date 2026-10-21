@@ -472,6 +472,17 @@ async fn create_in(
             },
         ));
     }
+    // §134: E2EE creation and MANAGED messaging are switched independently (an engaged
+    // switch refuses; it never turns one profile into the other).
+    crate::operations::require_open(
+        txn,
+        match profile {
+            SecurityProfile::PrivateE2ee => crate::operations::KillSwitch::E2eeConversationCreate,
+            SecurityProfile::Managed => crate::operations::KillSwitch::ManagedMessaging,
+        },
+        env,
+    )
+    .await?;
     if profile == SecurityProfile::Managed
         && context_policy.regulated
         && !request.managed_disclosure_acknowledged

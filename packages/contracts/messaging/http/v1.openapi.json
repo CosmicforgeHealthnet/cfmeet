@@ -5918,6 +5918,318 @@
           }
         }
       }
+    },
+    "/v1/messaging/backups": {
+      "post": {
+        "operationId": "createBackupUpload",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.send. An upload intent (signed PUT of exactly size bytes with that SHA-256) for the acting principal's own ACTIVE device; at most 3 unfinished intents; size ≤ backups.maxBytes (413 BACKUP_TOO_LARGE). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/BackupUploadIntent"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/BackupIntentRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/messaging/backups/latest": {
+      "get": {
+        "operationId": "getLatestBackup",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.read. Metadata of the acting principal's newest READY backup (404 when none). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Backup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/backups/{backupId}": {
+      "delete": {
+        "operationId": "deleteBackup",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.send. Marks the backup DELETED and queues its object for deletion. Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "backupId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/BackupDeletion"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/backups/{backupId}/finalize": {
+      "post": {
+        "operationId": "finalizeBackup",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.send. Verifies the uploaded object (size, SHA-256, format magic, header principal = acting principal); READY on success (idempotent), else REJECTED with 422 INTEGRITY_CHECK_FAILED (SIZE_MISMATCH, DIGEST_MISMATCH, NOT_A_BACKUP, WRONG_PRINCIPAL) and the object is deleted. Keeps the newest backups.retainCount READY backups. Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "backupId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Backup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/backups/{backupId}/download-grants": {
+      "post": {
+        "operationId": "createBackupDownloadGrant",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Scope messages.read. A short-lived signed read of a READY backup object (409 BACKUP_NOT_READY otherwise). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "backupId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/BackupDownloadGrant"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {

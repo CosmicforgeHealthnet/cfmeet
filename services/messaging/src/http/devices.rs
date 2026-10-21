@@ -310,6 +310,12 @@ async fn proofs(
     let ctx = caller.require_scope(MESSAGES_READ)?;
     require_acting(&state, &caller, &headers).await?;
     devices::directory_lookup_allowed(&state, ctx).await?;
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::KtProofs,
+        ctx.scope.environment_id,
+    )
+    .await?;
     // A device of another environment is reported exactly like a missing one.
     if devices::load_device(&state.db, ctx, q.device_id, false)
         .await?

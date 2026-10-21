@@ -18,7 +18,7 @@ path = "src/lib.rs"
 default = []
 # Client-side device cryptography: generates and holds MLS signature / HPKE PRIVATE keys.
 # The Messaging backend must never enable it (services/messaging architecture test).
-client = ["dep:openmls_basic_credential", "dep:openmls_traits", "dep:chacha20poly1305", "dep:aead", "dep:zeroize"]
+client = ["dep:openmls_basic_credential", "dep:openmls_traits", "dep:chacha20poly1305", "dep:aead", "dep:zeroize", "dep:hkdf"]
 # Browser (wasm32-unknown-unknown) builds of the client core: OpenMLS `js` (Web Crypto
 # randomness and time) and the same for the getrandom 0.2 used by the RustCrypto stack.
 web = ["client", "openmls/js", "dep:getrandom02"]
@@ -41,6 +41,8 @@ thiserror = "2"
 chacha20poly1305 = { version = "0.10", optional = true }
 aead = { version = "0.5", features = ["stream", "getrandom"], optional = true }
 zeroize = { version = "1", optional = true }
+# HKDF-SHA256 for backup content keys (feature `client`; already in the OpenMLS graph).
+hkdf = { version = "0.12", optional = true }
 uuid = "1"
 
 [dev-dependencies]

@@ -20,6 +20,7 @@
 //! MLS 1.0 does not provide post-quantum confidentiality, and this crate makes no Signal
 //! Protocol interoperability claim.
 
+pub mod backup;
 pub mod binding;
 pub mod framing;
 pub mod history_transfer;

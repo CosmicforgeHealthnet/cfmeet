@@ -1406,6 +1406,25 @@
               "type": "boolean"
             }
           }
+        },
+        "backups": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxBytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 1073741824
+            },
+            "retainCount": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            }
+          }
         }
       },
       "description": "An application environment's overrides of the platform defaults. MANAGED is available for a context only when listed here."
@@ -1434,7 +1453,8 @@
         "platformPolicyVersion",
         "applicationPolicyVersion",
         "contexts",
-        "sendingEnabled"
+        "sendingEnabled",
+        "backups"
       ],
       "properties": {
         "schemaVersion": {
@@ -1807,6 +1827,31 @@
             "managedLinksPerHour": {
               "type": "integer",
               "minimum": 1
+            }
+          }
+        },
+        "backups": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "maxBytes",
+            "retainCount"
+          ],
+          "description": "Opt-in secure backups (off by default).",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxBytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 1073741824
+            },
+            "retainCount": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
             }
           }
         }
@@ -6419,6 +6464,241 @@
               }
             }
           }
+        }
+      }
+    },
+    "BackupIntentRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deviceId",
+        "size",
+        "sha256",
+        "format"
+      ],
+      "description": "An upload intent for one client-encrypted backup object (Appendix I.3). The client encrypts with the shared crypto core under a root key only the user holds; the server never receives a key or content.",
+      "properties": {
+        "deviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "format": {
+          "const": "CFMEET_BACKUP_XCHACHA20POLY1305_STREAM_V1"
+        }
+      }
+    },
+    "BackupUploadIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backupId",
+        "status",
+        "upload"
+      ],
+      "properties": {
+        "backupId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "const": "PENDING"
+        },
+        "upload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "PUT"
+            },
+            "url": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "headers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "value"
+                ]
+              }
+            },
+            "expiresAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": [
+            "method",
+            "url",
+            "headers",
+            "expiresAt"
+          ],
+          "description": "A signed single-object upload bound to the exact size (content-length), SHA-256 (x-amz-checksum-sha256) and content type: the store rejects any other bytes. Send exactly these headers."
+        }
+      }
+    },
+    "Backup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backupId",
+        "status",
+        "format",
+        "deviceId",
+        "size",
+        "sha256",
+        "clientBackupId",
+        "keyId",
+        "rejectReason",
+        "createdAt",
+        "finalizedAt",
+        "serverCanDecrypt"
+      ],
+      "description": "Metadata of an opaque backup object. keyId and clientBackupId come from the object's public header; the server cannot decrypt the object.",
+      "properties": {
+        "backupId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "enum": [
+            "PENDING",
+            "READY",
+            "REJECTED",
+            "DELETED"
+          ]
+        },
+        "format": {
+          "const": "CFMEET_BACKUP_XCHACHA20POLY1305_STREAM_V1"
+        },
+        "deviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "clientBackupId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "keyId": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rejectReason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finalizedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "serverCanDecrypt": {
+          "const": false
+        }
+      }
+    },
+    "BackupDownloadGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backupId",
+        "method",
+        "url",
+        "expiresAt",
+        "size",
+        "sha256"
+      ],
+      "properties": {
+        "backupId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "method": {
+          "const": "GET"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "BackupDeletion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backupId",
+        "status"
+      ],
+      "properties": {
+        "backupId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "const": "DELETED"
         }
       }
     }

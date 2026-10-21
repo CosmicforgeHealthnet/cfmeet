@@ -86,6 +86,12 @@ pub async fn apply(
     ctx: &TrustedContext,
     request: ActionRequest,
 ) -> Result<Value> {
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::ModerationActions,
+        ctx.scope.environment_id,
+    )
+    .await?;
     if !KINDS.contains(&request.kind.as_str()) {
         return Err(Error::validation(format!(
             "kind must be one of {}",

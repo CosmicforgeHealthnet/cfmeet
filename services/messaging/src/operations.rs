@@ -44,16 +44,40 @@ pub enum KillSwitch {
     SmsBridge,
     /// The webhook relay worker (relayed events wait PENDING).
     WebhookRelay,
+    /// New PRIVATE_E2EE conversations (MANAGED creation is unaffected; never a downgrade).
+    E2eeConversationCreate,
+    /// MANAGED messaging: new MANAGED conversations, sends and edits.
+    ManagedMessaging,
+    /// New realtime connections and tickets (established ones are revalidated as usual).
+    RealtimeConnect,
+    /// Server-side (MANAGED) search.
+    Search,
+    /// New compliance exports and export download grants.
+    Exports,
+    /// New moderation actions (high-risk administration).
+    ModerationActions,
+    /// Secure backup uploads, finalization and downloads.
+    Backups,
+    /// Key-transparency proof serving.
+    KtProofs,
 }
 
 impl KillSwitch {
-    pub const ALL: [KillSwitch; 6] = [
+    pub const ALL: [KillSwitch; 14] = [
         KillSwitch::MessageSend,
         KillSwitch::ConversationCreate,
         KillSwitch::E2eeOnboarding,
         KillSwitch::AttachmentUpload,
         KillSwitch::SmsBridge,
         KillSwitch::WebhookRelay,
+        KillSwitch::E2eeConversationCreate,
+        KillSwitch::ManagedMessaging,
+        KillSwitch::RealtimeConnect,
+        KillSwitch::Search,
+        KillSwitch::Exports,
+        KillSwitch::ModerationActions,
+        KillSwitch::Backups,
+        KillSwitch::KtProofs,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -64,6 +88,14 @@ impl KillSwitch {
             KillSwitch::AttachmentUpload => "ATTACHMENT_UPLOAD",
             KillSwitch::SmsBridge => "SMS_BRIDGE",
             KillSwitch::WebhookRelay => "WEBHOOK_RELAY",
+            KillSwitch::E2eeConversationCreate => "E2EE_CONVERSATION_CREATE",
+            KillSwitch::ManagedMessaging => "MANAGED_MESSAGING",
+            KillSwitch::RealtimeConnect => "REALTIME_CONNECT",
+            KillSwitch::Search => "SEARCH",
+            KillSwitch::Exports => "EXPORTS",
+            KillSwitch::ModerationActions => "MODERATION_ACTIONS",
+            KillSwitch::Backups => "BACKUPS",
+            KillSwitch::KtProofs => "KT_PROOFS",
         }
     }
 
