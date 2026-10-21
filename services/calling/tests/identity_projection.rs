@@ -209,3 +209,68 @@ async fn principal_changes_at_platform_access_reach_calling_through_the_feed() {
         Err(PrincipalResolutionError::NotFound)
     ));
 }
+
+/// Part E §45 under concurrency: many requests ensuring the SAME never-seen protected
+/// party at once (a burst of callback requests between the same two contacts) all
+/// resolve to one principal — Platform Access's idempotent ensure and the projection's
+/// upsert (arbiter `id`, alongside the scoped-reference uniqueness constraint) never
+/// fail a concurrent first use.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn concurrent_first_use_of_a_public_party_resolves_one_principal() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.consumer("acme", TenantClassification::External).await;
+    let env = c.env(EnvironmentKind::Production).id;
+    let sa = c.sa(EnvironmentKind::Production);
+    for _ in 0..60 {
+        let contact = Uuid::new_v4();
+        let attempts = (0..16).map(|_| {
+            let principals = h.state.principals.clone();
+            let (tenant, application) = (c.tenant.id, c.application.id);
+            tokio::spawn(async move {
+                principals
+                    .ensure_public_party_principal(tenant, application, env, sa, contact)
+                    .await
+                    .map(|p| p.id())
+            })
+        });
+        let results = futures_util::future::join_all(attempts).await;
+        let ids: std::collections::BTreeSet<_> = results
+            .into_iter()
+            .map(|r| r.unwrap().expect("every concurrent ensure resolves"))
+            .collect();
+        assert_eq!(ids.len(), 1, "one principal per contact");
+    }
+}
+
+/// Concurrent FIRST requests of a brand-new credential (its tenant, application,
+/// environment, service account and credential not projected yet) all authenticate.
+/// Regression: the projection upserts arbitrated on `id` only, so concurrent first
+/// inserts of the same row could fail on another unique key (slug, public id, …).
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn concurrent_first_authentications_of_a_new_credential_all_succeed() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let h = std::sync::Arc::new(h);
+    for round in 0..5 {
+        let c = h
+            .consumer(&format!("burst{round}"), TenantClassification::External)
+            .await;
+        let issued = h
+            .issue(
+                c.sa(EnvironmentKind::Production),
+                &[calling::platform::scopes::names::PRINCIPALS_READ],
+            )
+            .await;
+        let secret = issued.secret.expose_once().to_string();
+        let attempts = (0..16).map(|_| {
+            let (h, secret) = (h.clone(), secret.clone());
+            tokio::spawn(async move { h.authenticate(&secret).await.map(|_| ()) })
+        });
+        for r in futures_util::future::join_all(attempts).await {
+            r.unwrap().expect("every concurrent first authentication succeeds");
+        }
+    }
+}
