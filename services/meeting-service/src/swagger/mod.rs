@@ -745,7 +745,47 @@ const SWAGGER_UI_CSP: &str =
      style-src https://cdn.jsdelivr.net 'unsafe-inline'; img-src 'self' data:; \
      connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
-const SWAGGER_INIT: &str = "window.onload=function(){fetch('/api-docs/swagger-config.json').then(function(r){return r.json()}).then(function(c){window.ui=SwaggerUIBundle({dom_id:'#swagger-ui',deepLinking:true,displayRequestDuration:true,filter:true,urls:c.urls,'urls.primaryName':c.primaryName});});};";
+const SWAGGER_INIT: &str = r#"
+window.addEventListener('load', function() {
+  var selector = document.getElementById('swagger-service');
+  var controls = document.getElementById('swagger-controls');
+  function render(url) {
+    window.ui = SwaggerUIBundle({
+      url: url,
+      dom_id: '#swagger-ui',
+      deepLinking: true,
+      displayRequestDuration: true,
+      filter: true,
+      supportedSubmitMethods: [],
+      validatorUrl: null
+    });
+  }
+  fetch('/api-docs/swagger-config.json', {cache:'no-store'})
+    .then(function(response) {
+      if (!response.ok) throw new Error('Swagger config unavailable');
+      return response.json();
+    })
+    .then(function(config) {
+      var docs = Array.isArray(config.urls) ? config.urls.filter(function(d) {
+        return d && typeof d.url === 'string' && d.url.startsWith('/api-docs/')
+          && typeof d.name === 'string';
+      }) : [];
+      if (!docs.length) { render('/api-docs/openapi.json'); return; }
+      docs.forEach(function(d) {
+        var option = document.createElement('option');
+        option.value = d.url;
+        option.textContent = d.name;
+        selector.appendChild(option);
+      });
+      var primary = docs.find(function(d) { return d.name === config.primaryName; }) || docs[0];
+      selector.value = primary.url;
+      selector.addEventListener('change', function() { render(selector.value); });
+      controls.hidden = false;
+      render(primary.url);
+    })
+    .catch(function() { render('/api-docs/openapi.json'); });
+});
+"#;
 
 fn swagger_page() -> String {
     format!(
@@ -758,6 +798,7 @@ fn swagger_page() -> String {
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@{v}/swagger-ui.css" integrity="{css}" crossorigin="anonymous" referrerpolicy="no-referrer" />
 </head>
 <body>
+  <div id="swagger-controls" hidden style="padding:12px 20px;font:14px sans-serif"><label for="swagger-service">API service: </label><select id="swagger-service" aria-label="Select API service"></select></div>
   <div id="swagger-ui"></div>
   <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@{v}/swagger-ui-bundle.js" integrity="{js}" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script>{init}</script>
@@ -829,7 +870,7 @@ pub fn swagger_router(server_addr: &str) -> Router {
             get(move || {
                 let page = page.clone();
                 let csp = csp.clone();
-                async move { ([(CONTENT_SECURITY_POLICY, csp)], Html(page)) }
+                async move { ([(CONTENT_SECURITY_POLICY, csp), (CACHE_CONTROL, "no-store, max-age=0".to_string())], Html(page)) }
             }),
         )
         .route(
@@ -963,6 +1004,11 @@ mod tests {
             "SRI on CSS and JS"
         );
         assert!(page.contains(&format!("swagger-ui-dist@{SWAGGER_UI_VERSION}/")));
+        assert!(page.contains("id=\\"swagger-service\\""));
+        assert!(SWAGGER_INIT.contains("supportedSubmitMethods: []"));
+        assert!(SWAGGER_INIT.contains("url: url"));
+        assert!(SWAGGER_INIT.contains("selector.addEventListener"));
+        assert!(!SWAGGER_INIT.contains("urls:c.urls"));
         let csp = swagger_csp();
         assert!(csp.contains("default-src 'none'") && csp.contains("connect-src 'self'"));
         assert!(!csp.contains("SWAGGER_INIT") && !csp.contains("'unsafe-eval'"));
