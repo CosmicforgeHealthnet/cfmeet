@@ -27,8 +27,9 @@ retention, expiry grace, pin expiry, thread summaries · `9beeb6b` usage meterin
 histograms, incidents · `879ade4` safety code / QR, parser property tests · `6a41e06` signed-read
 expiry on real S3 · `11f6064` restore of objects / SMS / E2EE · `f1fbdb5` successor
 conversations · `44e34d1` roles and invitations · `e0e73a6` privacy controls, relay-revocation
-subscriptions, operations documents · `6877ad6` generic table name · plus the load-suite and
-this record (see the pull request).
+subscriptions, operations documents · `6877ad6` generic table name · `46d9d68` D-12 fix, load tests, this record · `72ab156`
+performance · `1f1e620` final local result · `5bbc129` fmt / feature-gated test helper · `051bba1`
+browser crypto artifact rebuild · plus this CI record.
 
 ## 2. Requirement matrix
 
@@ -105,13 +106,25 @@ re-seal after a key compromise is a documented runbook procedure, not an automat
 | Object storage against MinIO | `s3_live` 2/2 |
 | Calling (Part B stability) | 691 passed, 0 failed, 91 binaries |
 | Contracts validator / bundles | OK (66 contracts, 238 examples, 319 counter-examples) / current |
-| `cargo fmt`, `cargo clippy --all-targets -D warnings` | clean for every changed crate |
+| `cargo fmt`, `cargo clippy --all-targets -D warnings` | clean for every changed crate after `5bbc129` (the first CI run caught D-13 / D-14, which local runs had missed) |
 
-The GitHub Actions run on the pull request is the final CI matrix (see the pull request).
+CI on the pull request (head `051bba1`, 2026-10-22): **75 check runs, 74 success, 0 failed, 1
+skipped** (`Deploy to VPS`, which never runs on a pull request). They cover fmt / clippy /
+boundaries for every service, every PostgreSQL test suite, the Messaging service test with
+PostgreSQL / Redis / MinIO / ClamAV / real Platform Access, the real-process journeys (Meeting ↔
+Messaging ↔ Platform Access; Privacy Relay / SMS Gateway / Calling ↔ Messaging; Calling ↔
+Telephony ↔ Privacy Relay; SMS + voice), real LiveKit, Asterisk + SIPp, enterprise races (5
+repetitions), crypto core, the wasm32 runtime in Chromium, the reproducible browser crypto
+artifact, contracts validation and Swagger rendering, RustSec advisories for all 15 lockfiles,
+image security, SBOM, secret scan, database roles and the service-boundary guard. The first run
+(head `1f1e620`) was red on D-13…D-15. The only non-green status is the third-party `Vercel`
+preview deploy of the web app: the account's daily free-plan deployment quota was exhausted
+(`api-deployments-free-per-day`). That is not a build failure and not a backend check; it is
+listed in §9.
 
 ## 4. Defects found and fixed
 
-Twelve defects (beyond the 35 gaps), each with a regression test or guard:
+Fifteen defects (beyond the 35 gaps), each with a regression test or guard:
 
 | # | Defect | Origin | Fix | Regression proof |
 |---|---|---|---|---|
@@ -127,6 +140,9 @@ Twelve defects (beyond the 35 gaps), each with a regression test or guard:
 | D-10 | `messaging_presence_settings.visibility` VARCHAR(16) too short for its own allowed value `CONVERSATION_MEMBERS` (503) | main | `e0e73a6` (migration 000028) | `engagement::read_receipts_are_configurable_per_user_and_conversation` |
 | D-11 | New table name matched the service-boundary product-word guard | this branch (`b918ea9`) | `6877ad6` | `check_service_boundaries.py` OK |
 | D-12 | First MANAGED sends of an environment resolved the data key on a second pooled connection while holding a transaction; a burst larger than the pool starved it (503) — found by the load suite | this branch (`b511f3d`) | `46d9d68` — `ManagedKeyring::prepare` before every sealing transaction | `managed_keys::a_burst_of_first_sends_never_starves_the_connection_pool` (fails without the fix: 503 after the 30 s pool timeout) |
+| D-13 | rustfmt drift in two test files added on the branch (Calling `identity_projection`, Meeting `tests/common`) — caught by CI | this branch (`5323d63`, `1c54b05`) | `5bbc129` | CI `fmt / check / clippy` (Calling, Meeting) |
+| D-14 | Crypto parser property helper `Rng::mutate` unused without feature `client` (dead code under `-D warnings`) — caught by CI | this branch (`879ade4`) | `5bbc129` — gated on the same feature as its callers | CI `crypto core` (default and `client` clippy) |
+| D-15 | Committed browser crypto artifact not rebuilt after the safety-code module was added to the crypto core — caught by CI | this branch (`879ade4`) | `051bba1` — regenerated with `scripts/messaging/build-web-crypto.sh` (rustc 1.97.0, wasm-bindgen 0.2.129) | CI `rebuild and verify the committed browser crypto artifact` (byte-for-byte) |
 
 ## 5. API inventory and Swagger
 
@@ -200,23 +216,23 @@ no hosted-staging or production-hardware measurement.
 ## 8. Status
 
 **BACKEND SOFTWARE COMPLETE: YES** — every mandatory backend requirement of §§1–166 and
-Appendices G–N is implemented and tested (0 PARTIAL / ABSENT / UNTESTED rows); 35 gaps and 12
-defects found, 47 resolved, 0 open.
+Appendices G–N is implemented and tested (0 PARTIAL / ABSENT / UNTESTED rows); 35 gaps and 15
+defects found, 50 resolved, 0 open; CI on `051bba1` green (74 / 75 success, 1 skipped by design).
 
 **BACKEND INTEGRATION READY: YES** — the backend integrates end to end across real service
 processes (Platform Access, Messaging, Privacy Relay, SMS Gateway with a synthetic carrier,
 Calling webhooks, Meeting Service) and real PostgreSQL / Redis / S3 / clamd, with failure and
 restart journeys green, published contracts in parity with the routes, and operator runbooks.
 
-Both are conditional on the GitHub Actions run of the pull request being green; a red required
-check reverts the status to NO until fixed. Neither status is a production, hosted-staging or
+The GitHub Actions run of the pull request is green on `051bba1`; any later red required check
+reverts the status to NO until fixed. Neither status is a production, hosted-staging or
 E2EE-production claim; release holds are unchanged.
 
 ## 9. Carry-forward register (not backend; never counted as PASS)
 
 | Area | Item |
 |---|---|
-| Frontend | Web messaging client, the web journey of `unified_messaging_e2e` (SKIPPED), Swagger UI rendering in a browser, SRI / bundling |
+| Frontend | Web messaging client, the web journey of `unified_messaging_e2e` (SKIPPED locally; it and the Swagger UI rendering check ran green in CI but are not counted toward backend closure), SRI / bundling; the `Vercel` web preview deploy on `051bba1` (account daily quota exhausted, `api-deployments-free-per-day`) |
 | Mobile | iOS / Android clients, device runtimes of the crypto core, physical-device testing, safety-code / QR presentation |
 | Staging | Hosted staging deployment and capacity certification on staging hardware |
 | Production | Rollout, production E2EE enablement (`MESSAGING_E2EE_DEVICES_ENABLED` stays off outside local / test), measured RTO / RPO, managed-key custody (KMS / HSM) |
