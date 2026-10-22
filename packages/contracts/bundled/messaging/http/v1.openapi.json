@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging API",
-    "version": "1.12.0",
-    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB."
+    "version": "1.13.0",
+    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds."
   },
   "paths": {
     "/health": {
@@ -5267,7 +5267,7 @@
             "customerCredential": []
           }
         ],
-        "description": "Scope messages.send (acting OWNER / ADMIN, NOT_ADMIN otherwise). Pins reference message ids only, so PRIVATE_E2EE content stays opaque. Emits messaging.pin.added.",
+        "description": "Scope messages.send (acting OWNER / ADMIN, NOT_ADMIN otherwise). Pins reference message ids only, so PRIVATE_E2EE content stays opaque. Emits messaging.pin.added. Optional body {expiresAt}: the pin expires then (an expired pin is not listed nor counted; pinning again renews it).",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -5329,6 +5329,16 @@
           },
           "503": {
             "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.PinRequest"
+              }
+            }
           }
         }
       },
@@ -6379,6 +6389,83 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/messaging.common.v1.BackupDownloadGrant"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversationId}/messages/{messageId}/thread": {
+      "get": {
+        "operationId": "getThreadSummary",
+        "security": [
+          {
+            "customerCredential": []
+          },
+          {
+            "clientToken": []
+          }
+        ],
+        "description": "Scope messages.read (members, within their history window). The thread rooted at messageId: reply count, last reply sequence / time and the caller's unread replies (after their read cursor). With threads turned off by policy no reply records a thread root, so the count is 0.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.ThreadSummary"
                 }
               }
             }
@@ -8106,7 +8193,9 @@
           "stateChangedAt",
           "expiresAt",
           "memberCount",
-          "membersTruncated"
+          "membersTruncated",
+          "expiryGraceSeconds",
+          "retentionSeconds"
         ],
         "properties": {
           "conversationId": {
@@ -8273,6 +8362,30 @@
           },
           "membersTruncated": {
             "type": "boolean"
+          },
+          "expiryGraceSeconds": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2592000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "retentionSeconds": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 60,
+                "maximum": 3153600000
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "description": "The canonical Conversation aggregate. PRIVATE_E2EE: MLS 1.0 with the server-assigned 32-byte MLS group id; serverCanReadContent is false. MANAGED: no MLS binding; serverCanReadContent is true.",
@@ -8435,6 +8548,18 @@
           "managedDisclosureAcknowledged": {
             "type": "boolean",
             "description": "Regulated contexts: creating a MANAGED conversation requires acknowledging that the server can read its content (refused otherwise with MANAGED_DISCLOSURE_REQUIRED)."
+          },
+          "expiryGraceSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2592000,
+            "description": "§38: requires an expiring conversation. Past expiresAt the conversation refuses new messages (CONVERSATION_NOT_ACTIVE / EXPIRED) but stays readable and extendable for this many seconds before it becomes EXPIRED."
+          },
+          "retentionSeconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 3153600000,
+            "description": "§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited."
           }
         },
         "description": "A tenant / application / environment is never part of a request: it comes from the authenticated credential."
@@ -10694,13 +10819,25 @@
           },
           "changed": {
             "type": "boolean"
+          },
+          "expiresAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "conversationId",
           "messageId",
           "pinned",
-          "changed"
+          "changed",
+          "expiresAt"
         ]
       },
       "messaging.common.v1.PinList": {
@@ -10726,13 +10863,25 @@
                 "pinnedAt": {
                   "type": "string",
                   "format": "date-time"
+                },
+                "expiresAt": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
                 "messageId",
                 "sequence",
                 "pinnedByPrincipalId",
-                "pinnedAt"
+                "pinnedAt",
+                "expiresAt"
               ]
             }
           }
@@ -10740,6 +10889,18 @@
         "required": [
           "pins"
         ]
+      },
+      "messaging.common.v1.PinRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "§49: optional pin expiry (in the future). An expired pin is no longer listed nor counted toward the limit; pinning again renews it."
+          }
+        },
+        "description": "Optional body of PUT /v1/conversations/{conversationId}/pins/{messageId}; an empty body pins without expiry."
       },
       "messaging.common.v1.PolicyUpdateRequest": {
         "type": "object",
@@ -12208,6 +12369,58 @@
           }
         }
       },
+      "messaging.common.v1.ThreadSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conversationId",
+          "rootMessageId",
+          "replyCount",
+          "lastReplySequence",
+          "lastReplyAt",
+          "unreadReplyCount"
+        ],
+        "properties": {
+          "conversationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "rootMessageId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "replyCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lastReplySequence": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastReplyAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unreadReplyCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Replies from others after the caller's read cursor."
+          }
+        },
+        "description": "§47: a thread's reply count, last reply and the caller's unread replies, counted only inside the caller's history window (active, not hidden)."
+      },
       "messaging.common.v1.ThumbnailGrant": {
         "type": "object",
         "additionalProperties": false,
@@ -12529,6 +12742,12 @@
           "expiresAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "retentionSeconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 3153600000,
+            "description": "§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. Only ever tightens (RETENTION_ONLY_TIGHTENS)."
           }
         },
         "description": "Optimistic concurrency on the aggregate version. EXPIRED is set by the server only. A security profile can never be changed (SECURITY_PROFILE_IMMUTABLE)."

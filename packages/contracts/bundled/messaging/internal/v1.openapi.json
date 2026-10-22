@@ -583,7 +583,9 @@
           "stateChangedAt",
           "expiresAt",
           "memberCount",
-          "membersTruncated"
+          "membersTruncated",
+          "expiryGraceSeconds",
+          "retentionSeconds"
         ],
         "properties": {
           "conversationId": {
@@ -750,6 +752,30 @@
           },
           "membersTruncated": {
             "type": "boolean"
+          },
+          "expiryGraceSeconds": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2592000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "retentionSeconds": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 60,
+                "maximum": 3153600000
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "description": "The canonical Conversation aggregate. PRIVATE_E2EE: MLS 1.0 with the server-assigned 32-byte MLS group id; serverCanReadContent is false. MANAGED: no MLS binding; serverCanReadContent is true.",

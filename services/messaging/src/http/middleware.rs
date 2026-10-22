@@ -114,6 +114,7 @@ const CLIENT_TOKEN_ROUTES: &[(&str, &str)] = &[
     ("DELETE", "/v1/conversations/*/messages/*"),
     ("GET", "/v1/conversations/*/messages/*/revisions"),
     ("GET", "/v1/conversations/*/messages/*/reactions"),
+    ("GET", "/v1/conversations/*/messages/*/thread"),
     ("PUT", "/v1/conversations/*/messages/*/reactions/*"),
     ("DELETE", "/v1/conversations/*/messages/*/reactions/*"),
     ("GET", "/v1/conversations/*/messages/*/sms-transport"),

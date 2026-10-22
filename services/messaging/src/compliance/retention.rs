@@ -171,7 +171,41 @@ pub async fn expire_due(state: &AppState, batch: i64, report: &mut RetentionRepo
             report.expired += expire_class(state, env.environment_id, class, days, batch).await?;
         }
     }
+    report.expired += expire_conversation_overrides(state, batch).await?;
     Ok(())
+}
+
+/// §90: a conversation-specific retention (always stricter than its context's policy,
+/// which the per-class pass above keeps applying) expires its own older messages.
+async fn expire_conversation_overrides(state: &AppState, batch: i64) -> Result<usize> {
+    let st = state.clone();
+    state
+        .db
+        .transaction::<_, usize, Error>(move |txn| {
+            Box::pin(async move {
+                let now = st.now();
+                let due: Vec<MessageRow> = db::all(
+                    txn,
+                    &format!(
+                        "SELECT {MESSAGE_COLUMNS} FROM messaging_messages m JOIN messaging_conversations c ON c.id = m.conversation_id \
+                          WHERE c.retention_seconds IS NOT NULL AND m.lifecycle = 'ACTIVE' \
+                            AND m.created_at < $1 - make_interval(secs => c.retention_seconds) \
+                            AND m.message_kind <> 'MLS_COMMIT' \
+                          ORDER BY m.created_at LIMIT $2 FOR UPDATE OF m SKIP LOCKED"
+                    ),
+                    vec![now.into(), batch.into()],
+                )
+                .await?;
+                let rctx = request_context();
+                for m in &due {
+                    let scope = EventScope { tenant_id: m.tenant_id, application_id: m.application_id, environment_id: m.environment_id };
+                    messages::tombstone(txn, &scope, m, "EXPIRED", "RETENTION_EXPIRED", now, &rctx, now).await?;
+                }
+                Ok(due.len())
+            })
+        })
+        .await
+        .map_err(Error::from)
 }
 
 async fn expire_class(

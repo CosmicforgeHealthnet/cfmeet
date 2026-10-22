@@ -92,6 +92,8 @@ pub async fn resolve(
             counterpart_principal_id: None,
             context: Some(context),
             expires_at: None,
+            expiry_grace_seconds: None,
+            retention_seconds: None,
             expected_policy_version: None,
             managed_disclosure_acknowledged: request.managed_disclosure_acknowledged,
         },
@@ -367,8 +369,18 @@ pub async fn sync_lifecycle(
                             "TRANSITION_NOT_ALLOWED",
                         ));
                     }
-                    service::transition(txn, &ctx, &row, next, Some(&reason), None, now, &rctx)
-                        .await?;
+                    service::transition(
+                        txn,
+                        &ctx,
+                        &row,
+                        next,
+                        Some(&reason),
+                        None,
+                        None,
+                        now,
+                        &rctx,
+                    )
+                    .await?;
                 }
                 Ok(json!({ "applied": true, "lifecycleState": next }))
             })

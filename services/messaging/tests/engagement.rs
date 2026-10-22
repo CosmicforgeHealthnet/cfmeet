@@ -590,3 +590,283 @@ async fn large_group_membership_is_paginated_and_the_view_is_bounded() {
     assert_eq!(view.json["membersTruncated"], true);
     assert_eq!(view.json["members"][0]["role"], "OWNER");
 }
+
+/// §90 / Appendix K (G-14): a conversation-specific retention is only ever stricter than
+/// the context's policy, only ever tightens (the database refuses loosening too), is
+/// audited, and the retention worker expires that conversation's messages while a sibling
+/// conversation under the same policy keeps its own.
+#[tokio::test]
+async fn a_conversation_retention_only_tightens_and_expires_its_own_messages() {
+    use sea_orm::ConnectionTrait;
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (sibling, _) = {
+        let r = h
+            .create_conversation(
+                &c,
+                people[0],
+                json!({ "contextClass": "GROUP", "securityProfile": "MANAGED" }),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        (r.json, ())
+    };
+    h.set_policy(
+        &c,
+        json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED", "retentionDays": 1 } } }),
+    )
+    .await;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let path = format!("/v1/conversations/{cid}");
+    let version = |v: &Value| v["version"].as_i64().unwrap();
+    let current = h.get(&c, None, &path).await;
+    assert_eq!(current.json["retentionSeconds"], Value::Null);
+    let looser = h
+        .patch(
+            &c,
+            None,
+            &path,
+            json!({ "expectedVersion": version(&current.json), "retentionSeconds": 2 * 86_400 }),
+        )
+        .await;
+    assert_eq!(
+        looser.reason(),
+        "RETENTION_LOOSER_THAN_POLICY",
+        "{}",
+        looser.text
+    );
+    let too_short = h
+        .patch(
+            &c,
+            None,
+            &path,
+            json!({ "expectedVersion": version(&current.json), "retentionSeconds": 59 }),
+        )
+        .await;
+    assert_eq!(too_short.code(), "VALIDATION_ERROR", "{}", too_short.text);
+    let set = h
+        .patch(
+            &c,
+            None,
+            &path,
+            json!({ "expectedVersion": version(&current.json), "retentionSeconds": 3600 }),
+        )
+        .await;
+    assert_eq!(set.status, StatusCode::OK, "{}", set.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/Conversation",
+        &set.json,
+    );
+    assert_eq!(set.json["retentionSeconds"], 3600);
+    let loosen = h
+        .patch(
+            &c,
+            None,
+            &path,
+            json!({ "expectedVersion": version(&set.json), "retentionSeconds": 7200 }),
+        )
+        .await;
+    assert_eq!(
+        loosen.reason(),
+        "RETENTION_ONLY_TIGHTENS",
+        "{}",
+        loosen.text
+    );
+    let refused = h
+        .state
+        .db
+        .execute_unprepared(&format!(
+            "UPDATE messaging_conversations SET retention_seconds = NULL WHERE id = '{cid}'"
+        ))
+        .await;
+    assert!(
+        refused.is_err(),
+        "the database refuses removing a retention"
+    );
+    assert_eq!(
+        h.scalar(&format!("SELECT count(*) FROM messaging_audit WHERE action = 'CONVERSATION_RETENTION_SET' AND target_id = '{cid}'")).await,
+        1
+    );
+
+    let mine = h.send_managed(&c, &conv, people[0], "disappears").await;
+    let theirs = h.send_managed(&c, &sibling, people[0], "stays a day").await;
+    assert_eq!(
+        (mine.status, theirs.status),
+        (StatusCode::CREATED, StatusCode::CREATED)
+    );
+    h.clock.advance(chrono::Duration::hours(2));
+    let mut report = messaging::compliance::retention::RetentionReport::default();
+    messaging::compliance::retention::expire_due(&h.state, 100, &mut report)
+        .await
+        .unwrap();
+    assert_eq!(report.expired, 1, "{report:?}");
+    let lifecycle = |id: &Value| {
+        format!(
+            "SELECT count(*) FROM messaging_messages WHERE id = '{}' AND lifecycle = 'ACTIVE'",
+            id.as_str().unwrap()
+        )
+    };
+    assert_eq!(h.scalar(&lifecycle(&mine.json["messageId"])).await, 0);
+    assert_eq!(h.scalar(&lifecycle(&theirs.json["messageId"])).await, 1);
+    // A second pass finds nothing more (idempotent).
+    let mut again = messaging::compliance::retention::RetentionReport::default();
+    messaging::compliance::retention::expire_due(&h.state, 100, &mut again)
+        .await
+        .unwrap();
+    assert_eq!(again.expired, 0);
+    // Creation may set a (stricter) retention directly; a looser one is refused.
+    let r = h
+        .create_conversation(
+            &c,
+            people[0],
+            json!({ "contextClass": "GROUP", "securityProfile": "MANAGED", "retentionSeconds": 600 }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    assert_eq!(r.json["retentionSeconds"], 600);
+    let r = h
+        .create_conversation(
+            &c,
+            people[0],
+            json!({ "contextClass": "GROUP", "securityProfile": "MANAGED", "retentionSeconds": 3 * 86_400 }),
+        )
+        .await;
+    assert_eq!(r.reason(), "RETENTION_LOOSER_THAN_POLICY", "{}", r.text);
+}
+
+/// §49 (G-08): pins may expire; an expired pin is neither listed nor counted, and pinning
+/// the message again renews it.
+#[tokio::test]
+async fn pins_can_expire_and_be_renewed() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let owner = people[0];
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let m = h.send_managed(&c, &conv, owner, "pin me").await;
+    let mid = m.json["messageId"].as_str().unwrap().to_string();
+    let pin = format!("/v1/conversations/{cid}/pins/{mid}");
+    let list = format!("/v1/conversations/{cid}/pins");
+    let past = h
+        .put(
+            &c,
+            Some(owner),
+            &pin,
+            json!({ "expiresAt": (h.now() - chrono::Duration::minutes(1)).to_rfc3339() }),
+        )
+        .await;
+    assert_eq!(past.code(), "VALIDATION_ERROR", "{}", past.text);
+    let unknown = h.put(&c, Some(owner), &pin, json!({ "until": "x" })).await;
+    assert_eq!(unknown.code(), "VALIDATION_ERROR", "{}", unknown.text);
+    let at = h.now() + chrono::Duration::hours(1);
+    let r = h
+        .put(
+            &c,
+            Some(owner),
+            &pin,
+            json!({ "expiresAt": at.to_rfc3339() }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    conforms("messaging/common/v1.schema.json#/$defs/PinChange", &r.json);
+    assert_eq!(r.json["changed"], true);
+    let l = h.get(&c, Some(people[1]), &list).await;
+    conforms("messaging/common/v1.schema.json#/$defs/PinList", &l.json);
+    assert_eq!(l.json["pins"].as_array().unwrap().len(), 1);
+    assert!(l.json["pins"][0]["expiresAt"].is_string());
+    h.clock.advance(chrono::Duration::hours(2));
+    assert_eq!(
+        h.get(&c, Some(people[1]), &list).await.json["pins"],
+        json!([]),
+        "an expired pin is not listed"
+    );
+    let renewed = h.put(&c, Some(owner), &pin, json!({})).await;
+    assert_eq!(renewed.status, StatusCode::OK, "{}", renewed.text);
+    assert_eq!(renewed.json["changed"], true);
+    assert_eq!(renewed.json["expiresAt"], Value::Null);
+    let l = h.get(&c, Some(people[1]), &list).await;
+    assert_eq!(l.json["pins"].as_array().unwrap().len(), 1);
+    assert_eq!(l.json["pins"][0]["expiresAt"], Value::Null);
+    // Re-pinning an unexpiring pin is a no-op.
+    assert_eq!(
+        h.put(&c, Some(owner), &pin, json!({})).await.json["changed"],
+        false
+    );
+}
+
+/// §47 (G-07): a thread summary — reply count, last reply and the caller's unread replies
+/// (from their read cursor) — inside the caller's history window only.
+#[tokio::test]
+async fn thread_summaries_count_replies_and_unread_replies() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (owner, member) = (people[0], people[1]);
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let root = h.send_managed(&c, &conv, owner, "agenda?").await;
+    let root_id = root.json["messageId"].as_str().unwrap().to_string();
+    let path = format!("/v1/conversations/{cid}/messages");
+    let summary = format!("{path}/{root_id}/thread");
+    let empty = h.get(&c, Some(owner), &summary).await;
+    assert_eq!(empty.status, StatusCode::OK, "{}", empty.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/ThreadSummary",
+        &empty.json,
+    );
+    assert_eq!(
+        (
+            empty.json["replyCount"].as_i64(),
+            empty.json["lastReplySequence"].clone()
+        ),
+        (Some(0), Value::Null)
+    );
+    let mut last = 0;
+    for (who, text) in [(member, "one"), (member, "two"), (owner, "three")] {
+        let r = h
+            .post(&c, Some(who), &path, json!({ "clientMessageId": Uuid::new_v4(), "text": text, "replyToMessageId": root_id }))
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        last = r.json["sequence"].as_i64().unwrap();
+    }
+    // A message outside the thread does not count.
+    h.send_managed(&c, &conv, member, "unrelated").await;
+    let s = h.get(&c, Some(owner), &summary).await;
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/ThreadSummary",
+        &s.json,
+    );
+    assert_eq!(s.json["replyCount"], 3, "{}", s.text);
+    assert_eq!(s.json["lastReplySequence"], last);
+    assert_eq!(s.json["unreadReplyCount"], 2, "the member's two replies");
+    let r = h
+        .put(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{cid}/read-cursor"),
+            json!({ "sequence": last }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(
+        h.get(&c, Some(owner), &summary).await.json["unreadReplyCount"],
+        0
+    );
+    // Non-members and unknown roots see nothing.
+    let outsider = h.principal(&c);
+    assert_eq!(
+        h.get(&c, Some(outsider), &summary).await.status,
+        StatusCode::NOT_FOUND
+    );
+    let unknown = format!("{path}/{}/thread", Uuid::new_v4());
+    assert_eq!(
+        h.get(&c, Some(owner), &unknown).await.status,
+        StatusCode::NOT_FOUND
+    );
+}

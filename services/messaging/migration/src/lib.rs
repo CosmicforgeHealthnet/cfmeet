@@ -33,6 +33,7 @@ mod m20261122_000020_message_revisions;
 mod m20261123_000021_delivery_cursors;
 mod m20261124_000022_backups_and_switches;
 mod m20261125_000023_managed_envelope_keys;
+mod m20261126_000024_conversation_retention_grace_pins;
 
 /// Name of the table recording which Messaging migrations have been applied.
 pub const MIGRATION_TABLE: &str = "messaging_seaql_migrations";
@@ -66,6 +67,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261123_000021_delivery_cursors::Migration),
             Box::new(m20261124_000022_backups_and_switches::Migration),
             Box::new(m20261125_000023_managed_envelope_keys::Migration),
+            Box::new(m20261126_000024_conversation_retention_grace_pins::Migration),
         ]
     }
 

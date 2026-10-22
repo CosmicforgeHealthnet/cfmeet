@@ -1099,3 +1099,126 @@ async fn message_sequences_are_unique_and_gap_free_under_concurrency() {
             .is_err()
     );
 }
+
+/// §38 (G-04): a transactional conversation past `expiresAt` refuses new messages but
+/// stays readable (and extendable) for its grace period; then it becomes EXPIRED.
+#[tokio::test]
+async fn an_expiry_grace_period_keeps_the_conversation_readable_then_expires_it() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL);
+    let (alice, _) = h.pair(&c).await;
+    let r = h
+        .put_policy(
+            &c,
+            0,
+            json!({ "contexts": { "TRANSACTION": { "maxLifetimeSeconds": 3600,
+            "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } } }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let r = h
+        .create(
+            &c,
+            alice,
+            json!({ "contextClass": "GROUP", "expiryGraceSeconds": 60 }),
+            &key(),
+        )
+        .await;
+    assert_eq!(
+        r.code(),
+        "VALIDATION_ERROR",
+        "a grace needs an expiring conversation: {}",
+        r.text
+    );
+    let r = h
+        .create(
+            &c,
+            alice,
+            json!({ "contextClass": "TRANSACTION", "expiryGraceSeconds": 2_592_001 }),
+            &key(),
+        )
+        .await;
+    assert_eq!(r.code(), "VALIDATION_ERROR", "{}", r.text);
+    let t = h
+        .create(
+            &c,
+            alice,
+            json!({ "contextClass": "TRANSACTION", "expiryGraceSeconds": 600 }),
+            &key(),
+        )
+        .await;
+    assert_eq!(t.status, StatusCode::CREATED, "{}", t.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/Conversation",
+        &t.json,
+    );
+    assert_eq!(t.json["expiryGraceSeconds"], 600);
+    let tid = t.json["conversationId"].as_str().unwrap().to_string();
+    let msgs = format!("/v1/conversations/{tid}/messages");
+    let send = |text: &'static str| {
+        let h = &h;
+        let c = &c;
+        let msgs = msgs.clone();
+        async move {
+            h.send(
+                Method::POST,
+                Some(&c.token),
+                Some(alice),
+                &msgs,
+                Some(json!({ "clientMessageId": Uuid::new_v4(), "text": text })),
+                &[],
+            )
+            .await
+        }
+    };
+    assert_eq!(send("before").await.status, StatusCode::CREATED);
+
+    // Past expiresAt, inside the grace: sends refused, reads allowed, still ACTIVE.
+    h.clock.advance(chrono::Duration::seconds(3600 + 30));
+    let refused = send("during grace").await;
+    assert_eq!(
+        (refused.code(), refused.reason()),
+        ("CONVERSATION_NOT_ACTIVE", "EXPIRED"),
+        "{}",
+        refused.text
+    );
+    let read = h.get(&c, Some(alice), &msgs).await;
+    assert_eq!(read.status, StatusCode::OK, "{}", read.text);
+    assert!(read.text.contains("before"));
+    assert_eq!(
+        messaging::conversations::service::expire_due(&h.state, 100)
+            .await
+            .unwrap(),
+        0,
+        "the worker waits for the grace to pass"
+    );
+    let view = h.get(&c, None, &format!("/v1/conversations/{tid}")).await;
+    assert_eq!(view.json["lifecycleState"], "ACTIVE");
+
+    // The grace lets the owner extend the conversation; sends resume.
+    let extended = h
+        .patch_conv(
+            &c,
+            None,
+            &t.json["conversationId"],
+            json!({ "expectedVersion": view.json["version"],
+            "expiresAt": (h.now() + chrono::Duration::minutes(10)).to_rfc3339() }),
+        )
+        .await;
+    assert_eq!(extended.status, StatusCode::OK, "{}", extended.text);
+    assert_eq!(send("after extension").await.status, StatusCode::CREATED);
+
+    // After the new expiry plus the grace, the worker expires it.
+    h.clock
+        .advance(chrono::Duration::minutes(10 + 10) + chrono::Duration::seconds(1));
+    assert_eq!(
+        messaging::conversations::service::expire_due(&h.state, 100)
+            .await
+            .unwrap(),
+        1
+    );
+    let view = h.get(&c, None, &format!("/v1/conversations/{tid}")).await;
+    assert_eq!(view.json["lifecycleState"], "EXPIRED");
+}

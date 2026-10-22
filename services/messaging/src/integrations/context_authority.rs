@@ -233,7 +233,7 @@ async fn apply_to_conversations<C: ConnectionTrait>(
             LifecycleState::Locked => "CONTEXT_SUSPENDED",
             _ => "CONTEXT_REVOKED",
         };
-        service::transition(txn, ctx, &row, next, Some(why), None, now, rctx).await?;
+        service::transition(txn, ctx, &row, next, Some(why), None, None, now, rctx).await?;
         affected += 1;
     }
     Ok(affected)
