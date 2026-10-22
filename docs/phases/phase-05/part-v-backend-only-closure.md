@@ -125,7 +125,7 @@ Twelve defects (beyond the 35 gaps), each with a regression test or guard:
 | D-9 | Contract example lacked `memberCount` / `membersTruncated` | this branch (`1db049b`) | `d54466f` | contracts validator |
 | D-10 | `messaging_presence_settings.visibility` VARCHAR(16) too short for its own allowed value `CONVERSATION_MEMBERS` (503) | main | `e0e73a6` (migration 000028) | `engagement::read_receipts_are_configurable_per_user_and_conversation` |
 | D-11 | New table name matched the service-boundary product-word guard | this branch (`b918ea9`) | `6877ad6` | `check_service_boundaries.py` OK |
-| D-12 | First MANAGED sends of an environment resolved the data key on a second pooled connection while holding a transaction; a burst larger than the pool starved it (503) — found by the load suite | this branch (`b511f3d`) | `ManagedKeyring::prepare` before every sealing transaction (see the pull request) | `managed_keys::a_burst_of_first_sends_never_starves_the_connection_pool` (fails without the fix: 503 after the 30 s pool timeout) |
+| D-12 | First MANAGED sends of an environment resolved the data key on a second pooled connection while holding a transaction; a burst larger than the pool starved it (503) — found by the load suite | this branch (`b511f3d`) | `46d9d68` — `ManagedKeyring::prepare` before every sealing transaction | `managed_keys::a_burst_of_first_sends_never_starves_the_connection_pool` (fails without the fix: 503 after the 30 s pool timeout) |
 
 ## 5. API inventory and Swagger
 
@@ -162,7 +162,39 @@ Details: `evidence/part-v-closure-security-checks-2026-10-22.txt`.
 
 ## 7. Performance (development host, no thresholds)
 
-PERFORMANCE_SECTION
+Raw output: `evidence/load-measurements-2026-10-22.txt` (11 / 11 load tests passed, release
+build, one test at a time). Host: 4 vCPU Intel Xeon @ 2.10 GHz, 15 GiB RAM; PostgreSQL 16.15,
+Redis 7.0.15, MinIO and clamd on the same host. Every test asserts correctness only (every
+message accepted, delivered once, in order; every file READY / CLEAN and byte-identical);
+**no performance threshold is asserted or claimed**.
+
+| Scenario | Volume | Throughput | Latency p50 / p95 / p99 (ms) |
+|---|---|---|---|
+| MANAGED sends, one conversation, 20 senders | 1 000 | 132.9 msg/s | 146.3 / 183.5 / 251.0 |
+| MANAGED sends, 20 independent conversations | 1 000 | 171.4 msg/s | 113.7 / 134.0 / 183.0 |
+| PRIVATE_E2EE sends with real OpenMLS client encryption | 500 | 75.2 msg/s | 12.9 / 16.6 / 20.6 (incl. client encryption) |
+| Realtime fan-out, 50 receivers | 100 msgs, 5 000 deliveries | — | 33.7 / 52.8 / 65.4 (send → receive) |
+| Realtime large-group fan-out, 250 receivers | 40 msgs, 10 000 deliveries | 3 763 deliveries/s | 110.3 / 129.8 / 134.0 |
+| Multi-device fan-out, 10 principals × 4 devices (new) | 50 msgs, 2 000 / 2 000 deliveries | — | 34.1 / 45.2 / 86.4 |
+| Reconnection storm, 200 clients, 20 missed messages each | 200 | — | reconnect 1 536 / 2 071 / 2 109; caught up 1 886 / 2 322 / 2 364 |
+| Outbox publishers (4, leases / SKIP LOCKED) | 5 000 events | 2 753 events/s | — (each event once) |
+| MANAGED search over 5 000 indexed messages | 60 queries | — | 9.9 / 12.3 / 12.5 |
+| Attachment pipeline, in-memory store, CLEAN stub, 256 KiB, concurrency 16 | 200 | 44.0 uploads/s (11.0 MiB/s verified) | finalize 75.6 / 101.8 / 165.2; end to end 344.5 / 461.5 / 615.8 |
+| Attachment pipeline, REAL MinIO + REAL clamd, 256 KiB, concurrency 8 (new) | 100 | 37.0 uploads/s | signed upload 8.2 / 14.8 / 23.3; finalize (read + verify + scan) 59.9 / 86.2 / 98.0; signed download 5.9 / 12.9 / 25.2; end to end 199.6 / 293.6 / 416.8 |
+
+Compared with the 2026-10-20 run on the same host (`evidence/load-measurements-2026-10-20.txt`,
+main code): single-conversation MANAGED sends 179.5 → 132.9 msg/s and E2EE sends 104.2 → 75.2
+msg/s, while independent-conversation sends improved 63.2 → 171.4 msg/s (p99 2 590 → 183 ms);
+fan-out, outbox and search are within a similar range. The first run of this suite on the
+branch FAILED (managed sends, search, in-memory attachments: 503) and exposed defect D-12; the
+numbers above are after its fix. The per-send changes on this branch (envelope encryption with
+per-environment keys, abuse accounting, events, metrics) were not profiled individually, so the
+single-conversation difference is reported, not attributed.
+
+Limitations: one shared development host (clients, services and databases compete for 4
+vCPUs); in-process HTTP for most tests; clamd runs the real engine with only the EICAR
+signature (production signature databases are larger); MinIO is local (no network latency);
+no hosted-staging or production-hardware measurement.
 
 ## 8. Status
 
